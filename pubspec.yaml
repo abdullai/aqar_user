@@ -11,11 +11,20 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # =========================
   # Provider
+  # =========================
   provider: ^6.0.5
 
+  # =========================
   # Images Picker
+  # =========================
   image_picker: ^1.0.7
+
+  # =========================
+  # Internet Connectivity
+  # =========================
+  connectivity_plus: ^6.0.5
 
   # =========================
   # Fast Login (Biometrics + Secure Storage + Hash)
@@ -50,7 +59,7 @@ dependencies:
   # =========================
   # File / Media
   # =========================
-  file_picker: ^8.3.7
+  file_picker: ^10.3.10
   image: ^4.1.7
 
   # =========================
@@ -70,6 +79,11 @@ dependencies:
   google_maps_flutter_web: ^0.5.10
 
   # =========================
+  # GPS / Location
+  # =========================
+  geolocator: ^11.0.0
+
+  # =========================
   # Sharing
   # =========================
   share_plus: ^10.0.2
@@ -84,6 +98,15 @@ dependencies:
   # Screen Security (Android + iOS)
   # =========================
   no_screenshot: ^0.2.0
+
+  # =========================
+  # Firebase & Notifications
+  # =========================
+  # ملاحظة: تم دمج وتحديث الإصدارات لتتوافق مع آخر عملية تثبيت قمت بها
+  firebase_core: ^3.10.1
+  firebase_messaging: ^15.2.1
+  flutter_local_notifications: ^17.2.3
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -100,3 +123,5 @@ flutter:
     - assets/splashscreen.png
     - assets/Black Saudi Riyal.png
     - assets/White Saudi riyal.png
+    - assets/sounds/otp.wav
+    - assets/sounds/otp.mp3

@@ -1,72 +1,111 @@
-﻿// lib/screens/gate_screen.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 
-import '../services/fast_login_service.dart';
+import '../core/session/app_session.dart';
 
-import 'fast_login_screen.dart';
-import 'user_dashboard.dart';
+// ✅ Internet guard
+import '../services/connectivity_guard.dart';
+import '../shared/widgets/no_internet_dialog.dart';
 
-class GateScreen extends StatefulWidget {
+class GateScreen extends StatelessWidget {
   const GateScreen({super.key});
 
-  @override
-  State<GateScreen> createState() => _GateScreenState();
-}
+  // Gate غالباً عربي – اربطه بـ langNotifier لاحقاً إن رغبت
+  bool get _isAr => true;
 
-class _GateScreenState extends State<GateScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _decide();
-  }
-
-  Future<void> _decide() async {
-    final sb = Supabase.instance.client;
-
-    // 1) إذا فيه جلسة Supabase فعلية => إما AppLock (FastLogin) أو دخول مباشر للداشبورد
-    final hasSession = sb.auth.currentSession != null && sb.auth.currentUser != null;
-
-    if (!mounted) return;
-
-    if (hasSession) {
-      // FastLogin عندك هو "قفل" على نفس الجلسة (ليس تسجيل دخول بدون جلسة)
-      final hasFastLock = await FastLoginService.hasAnyLockEnabled();
-
-      if (!mounted) return;
-
-      if (hasFastLock) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const FastLoginScreen()),
-        );
-        return;
-      }
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const UserDashboard(
-            key: ValueKey('dashboard'),
-            lang: 'ar',
-          ),
-        ),
-      );
-      return;
+  /// فحص الإنترنت + تنبيه
+  Future<bool> _ensureInternet(BuildContext context) async {
+    final ok = await ConnectivityGuard.hasInternet();
+    if (!ok && context.mounted) {
+      await showNoInternetDialog(context, isAr: _isAr);
     }
-
-    // 2) لا توجد جلسة => Guest Mode
-    // (لا تفتح FastLogin بدون جلسة لأنه عندك يعتمد على session أصلاً)
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => const UserDashboard(
-          key: ValueKey('dashboard'),
-          lang: 'ar',
-        ),
-      ),
-    );
+    return ok;
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_isAr ? 'بوابة الدخول' : 'Entry Gate'),
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // =========================
+                // دخول كمستخدم
+                // =========================
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      // ❌ لا انتقال بدون إنترنت
+                      final ok = await _ensureInternet(context);
+                      if (!ok) return;
+
+                      Navigator.of(context).pushNamed('/login');
+                    },
+                    child: Text(_isAr ? 'تسجيل الدخول' : 'Login'),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // =========================
+                // دخول كضيف
+                // =========================
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () async {
+                      // ❌ لا دخول كضيف بدون إنترنت
+                      // (لأن الداشبورد يعتمد على بيانات عامة)
+                      final ok = await _ensureInternet(context);
+                      if (!ok) return;
+
+                      final session = context.read<AppSession>();
+                      await session.setGuest();
+
+                      if (!context.mounted) return;
+
+                      // العودة لنقطة البداية المنطقية
+                      Navigator.of(context).pushNamedAndRemoveUntil(
+                        '/',
+                        (r) => false,
+                      );
+                    },
+                    child: Text(_isAr ? 'الدخول كضيف' : 'Continue as guest'),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                Text(
+                  _isAr
+                      ? 'ملاحظة: بعض الميزات (إضافة إعلان / رقم المعلن / الحجز / الدردشة) تتطلب تسجيل الدخول.'
+                      : 'Note: Some features require login.',
+                  textAlign: TextAlign.center,
+                ),
+
+                if (kIsWeb) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _isAr
+                        ? 'على الويب قد يتم نقلك لشاشة الاختيار (مستخدم/ضيف) حسب إعدادات البداية.'
+                        : 'On web, you may be routed to the entry choice screen depending on start rules.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

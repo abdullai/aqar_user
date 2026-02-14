@@ -1,4 +1,3 @@
-﻿// lib/screens/reset_password_screen.dart
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:aqar_user/main.dart'; // themeModeNotifier + langNotifier + recoveryFlowNotifier
 import 'package:aqar_user/services/auth_service.dart';
+import '../services/connectivity_guard.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -36,15 +36,17 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
   bool _hasRecoverySession = false;
 
-  // small UX
   bool _obscure1 = true;
   bool _obscure2 = true;
 
   // to log security events after password change
   String? _recoveryUsername;
 
-  // ✅ NEW: Listen to auth changes to auto-switch UI when recovery session becomes active
   StreamSubscription<AuthState>? _authSub;
+
+  // ✅ Internet guard
+  bool _offline = false;
+  bool _retryingNet = false;
 
   bool get _isAr => langNotifier.value != 'en';
   ThemeMode get _currentTheme => themeModeNotifier.value;
@@ -52,8 +54,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
   Color get _pageBg =>
       _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
-  Color get _textPrimary =>
-      _isLight ? const Color(0xFF0B1220) : Colors.white;
+  Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
   Color get _fieldFill => _isLight ? Colors.white : const Color(0xFF0F1425);
@@ -73,8 +74,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     // ✅ نحن داخل Recovery flow طالما فتحنا هذه الصفحة
     recoveryFlowNotifier.value = true;
 
-    // ✅ NEW: Subscribe early so when web session gets activated from URL
-    // the screen automatically flips to "new password" without manual refresh.
+    // ✅ Subscribe so when web session gets activated from URL
     final sb = Supabase.instance.client;
     _authSub = sb.auth.onAuthStateChange.listen((data) async {
       final event = data.event;
@@ -90,9 +90,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         }
       }
 
-      // إذا تم تسجيل الخروج أثناء هذه الشاشة (زر العودة أو غيره)
       if (event == AuthChangeEvent.signedOut) {
-        // لا نفعل redirect هنا، main.dart listener يتعامل مع ذلك
         _hasRecoverySession = false;
         if (!mounted) return;
         setState(() {});
@@ -100,21 +98,23 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // ✅ 1) Web: فعل Session من الرابط
+      // ✅ 1) Web: activate session from URL (recovery link)
       await _bootstrapRecoveryFromUrlIfWeb();
 
-      // ✅ 2) ثم حدث حالة الجلسة محلياً
+      // ✅ 2) update session state
       await _syncRecoverySessionState();
 
-      // ✅ 3) اقرأ username المخزن (لاستخدامه في log_security_event بعد تغيير كلمة المرور)
+      // ✅ 3) read stored username
       await _loadRecoveryUsername();
 
       if (!mounted) return;
+
       if (_hasRecoverySession) {
         _p1Focus.requestFocus();
       } else {
         _usernameFocus.requestFocus();
       }
+
       setState(() {});
     });
 
@@ -139,8 +139,97 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     _p2.dispose();
     _p1Focus.dispose();
     _p2Focus.dispose();
+
     super.dispose();
   }
+
+  // =========================
+  // Internet guard
+  // =========================
+
+  Future<bool> _hasInternet() async {
+    try {
+      return await ConnectivityGuard.hasInternet();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _ensureInternetOrShow() async {
+    final ok = await _hasInternet();
+    if (!mounted) return false;
+
+    if (!ok) {
+      setState(() => _offline = true);
+      _toast(_isAr ? 'لا يوجد اتصال بالإنترنت.' : 'No internet connection.');
+      return false;
+    }
+
+    if (_offline) setState(() => _offline = false);
+    return true;
+  }
+
+  Future<void> _retryInternet() async {
+    if (_retryingNet) return;
+
+    setState(() => _retryingNet = true);
+    final ok = await _hasInternet();
+    if (!mounted) return;
+
+    setState(() {
+      _offline = !ok;
+      _retryingNet = false;
+    });
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _offlineOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.6),
+        alignment: Alignment.center,
+        child: Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.wifi_off_rounded, size: 48),
+                const SizedBox(height: 8),
+                Text(_isAr ? 'لا يوجد إنترنت' : 'No internet'),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: _retryingNet ? null : _retryInternet,
+                  child: _retryingNet
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(_isAr ? 'إعادة المحاولة' : 'Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =========================
+  // Storage + security log
+  // =========================
 
   Future<void> _loadRecoveryUsername() async {
     try {
@@ -178,17 +267,25 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
     try {
       final sb = Supabase.instance.client;
-      await sb.rpc(
-        'log_security_event',
-        params: {
-          'p_username': u,
-          'p_action': action,
-          'p_success': success,
-          'p_details': details,
-        },
-      );
-    } catch (_) {}
+      await sb
+          .rpc(
+            'log_security_event',
+            params: {
+              'p_username': u,
+              'p_action': action,
+              'p_success': success, // ✅ bool
+              'p_details': (details ?? '').toString(), // ✅ لا null
+            },
+          )
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {
+      // تجاهل حتى لا تتعطل الشاشة
+    }
   }
+
+  // =========================
+  // Recovery session state
+  // =========================
 
   Future<void> _syncRecoverySessionState() async {
     final sb = Supabase.instance.client;
@@ -199,15 +296,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     if (!kIsWeb) return;
 
     final sb = Supabase.instance.client;
-
-    // إذا فيه Session أصلاً ما نحتاج
     if (sb.auth.currentSession != null) return;
 
     try {
       final uri = Uri.base;
-
-      // ✅ تحويل بيانات الرابط إلى Session في Flutter Web
-      // هذا سيؤدي لاحقاً لإطلاق AuthChangeEvent.passwordRecovery
       await sb.auth.getSessionFromUrl(uri);
     } catch (e) {
       if (kDebugMode) {
@@ -219,7 +311,13 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
   bool _looksLikeUsername10(String s) => RegExp(r'^\d{10}$').hasMatch(s);
 
+  // =========================
+  // Actions
+  // =========================
+
   Future<void> _requestResetByUsername() async {
+    if (!await _ensureInternetOrShow()) return;
+
     setState(() {
       _busy = true;
       _err = null;
@@ -242,12 +340,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     try {
       final lang = langNotifier.value == 'en' ? 'en' : 'ar';
 
-      // ✅ خزّن username لاستعماله لاحقاً في log_security_event بعد تغيير كلمة المرور
       await _saveRecoveryUsername(normalized);
 
-      // ✅ هذا يستدعي داخل AuthService:
-      // - get_status_by_username (ضمن منطقك العام)
-      // - log_security_event (password_recovery_sent / password_recovery_failed)
       final res = await AuthService.sendResetPasswordEmail(
         username: normalized,
         lang: lang,
@@ -282,6 +376,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   }
 
   Future<void> _saveNewPassword() async {
+    if (!await _ensureInternetOrShow()) return;
+
     setState(() {
       _busy = true;
       _err = null;
@@ -330,10 +426,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         return;
       }
 
-      // ✅ تحديث كلمة المرور ضمن Recovery session
       await sb.auth.updateUser(UserAttributes(password: a));
 
-      // ✅ تسجيل أمني: نجاح تغيير كلمة المرور
       await _logSecurity(
         action: 'password_changed_via_recovery',
         success: true,
@@ -348,14 +442,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             : 'Password changed successfully. You can sign in now.';
       });
 
-      // ✅ بعد تغيير كلمة المرور -> تسجيل الخروج ثم العودة لتسجيل الدخول
       await Future.delayed(const Duration(milliseconds: 500));
       await sb.auth.signOut();
 
-      // ✅ انتهى مسار الاستعادة
       recoveryFlowNotifier.value = false;
-
-      // ✅ امسح username المخزن لمسار الاستعادة
       await _clearRecoveryUsername();
 
       if (!mounted) return;
@@ -385,6 +475,56 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     }
   }
 
+  // =========================
+  // UI helpers
+  // =========================
+
+  double _hintFontSize(BuildContext context) {
+    final w = MediaQuery.of(context).size.width;
+    final base = 14.0;
+    final f = w / 390.0;
+    return (base * f).clamp(11.0, 14.0);
+  }
+
+  InputDecoration _dec(
+    BuildContext context, {
+    required String hint,
+    required IconData icon,
+    Widget? suffix,
+    bool hideCounter = true,
+  }) {
+    final hintSize = _hintFontSize(context);
+    return InputDecoration(
+      hintText: hint,
+      hintMaxLines: 1,
+      hintStyle: TextStyle(
+        color: _hintColor,
+        fontWeight: FontWeight.w800,
+        fontSize: hintSize,
+        overflow: TextOverflow.ellipsis,
+      ),
+      counterText: hideCounter ? '' : null,
+      prefixIcon: Icon(icon, color: _iconColor, size: 22),
+      suffixIcon: suffix,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: _fieldBorder, width: 1.5),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: _bankColor, width: 2.0),
+      ),
+      fillColor: _fieldFill,
+      filled: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    );
+  }
+
+  // =========================
+  // Build
+  // =========================
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -395,20 +535,28 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           return Scaffold(
             backgroundColor: _pageBg,
             body: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, c) {
-                  final w = c.maxWidth;
-                  final h = c.maxHeight;
-                  final allowScroll = h < 760;
-                  final maxWidth = (w >= 700) ? 560.0 : 600.0;
+              child: Stack(
+                children: [
+                  LayoutBuilder(
+                    builder: (context, c) {
+                      final w = c.maxWidth;
+                      final h = c.maxHeight;
+                      final allowScroll = h < 760;
+                      final maxWidth = (w >= 700) ? 560.0 : 600.0;
 
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: _card(maxWidth: maxWidth, allowScroll: allowScroll),
-                    ),
-                  );
-                },
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: _card(
+                            maxWidth: maxWidth,
+                            allowScroll: allowScroll,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  if (_offline) _offlineOverlay(),
+                ],
               ),
             ),
           );
@@ -488,7 +636,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           _buildNewPasswordField(
             controller: _p1,
             focusNode: _p1Focus,
-            label: _isAr ? 'كلمة المرور الجديدة' : 'New password',
+            label: _isAr
+                ? 'كلمة المرور الجديدة (8 أحرف+)'
+                : 'New password (8+ chars)',
             obscure: _obscure1,
             onToggle: () => setState(() => _obscure1 = !_obscure1),
             textInputAction: TextInputAction.next,
@@ -523,9 +673,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onPressed: _busy
+            onPressed: (_busy || _offline)
                 ? null
-                : (_hasRecoverySession ? _saveNewPassword : _requestResetByUsername),
+                : (_hasRecoverySession
+                    ? _saveNewPassword
+                    : _requestResetByUsername),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               child: _busy
@@ -554,7 +706,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                   : Text(
                       _hasRecoverySession
                           ? (_isAr ? 'حفظ كلمة المرور' : 'Save password')
-                          : (_isAr ? 'إرسال رابط الاستعادة' : 'Send recovery link'),
+                          : (_isAr
+                              ? 'إرسال رابط الاستعادة'
+                              : 'Send recovery link'),
                       key: const ValueKey('text'),
                       style: const TextStyle(
                         fontSize: 16,
@@ -569,16 +723,19 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             TextButton(
-              onPressed: _busy
+              onPressed: (_busy || _offline)
                   ? null
                   : () async {
-                      // خروج احترازي لو كان في Recovery Session
                       final sb = Supabase.instance.client;
                       await sb.auth.signOut();
                       recoveryFlowNotifier.value = false;
                       await _clearRecoveryUsername();
                       if (!mounted) return;
-                      Navigator.pushNamedAndRemoveUntil(context, '/', (r) => false);
+                      Navigator.pushNamedAndRemoveUntil(
+                        context,
+                        '/',
+                        (r) => false,
+                      );
                     },
               child: Text(
                 _isAr ? 'العودة لتسجيل الدخول' : 'Back to sign in',
@@ -591,7 +748,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             ),
             if (!_hasRecoverySession)
               TextButton(
-                onPressed: _busy
+                onPressed: (_busy || _offline)
                     ? null
                     : () async {
                         setState(() {
@@ -603,9 +760,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                         await _loadRecoveryUsername();
                         if (!mounted) return;
                         setState(() {});
-                        if (_hasRecoverySession) {
-                          _p1Focus.requestFocus();
-                        }
+                        if (_hasRecoverySession) _p1Focus.requestFocus();
                       },
                 child: Text(
                   _isAr ? 'تحديث' : 'Refresh',
@@ -727,6 +882,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           Expanded(
             child: Text(
               text,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: textColor,
                 fontWeight: FontWeight.w800,
@@ -756,28 +913,13 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         fontWeight: FontWeight.w900,
         fontSize: 15,
       ),
-      decoration: InputDecoration(
-        hintText:
-            _isAr ? 'رقم الهوية/الإقامة (10 أرقام)' : 'Saudi ID/Iqama (10 digits)',
-        hintStyle: TextStyle(
-          color: _hintColor,
-          fontWeight: FontWeight.w800,
-          fontSize: 14,
-        ),
-        counterText: '',
-        prefixIcon: Icon(Icons.badge_outlined, color: _iconColor, size: 22),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: _fieldBorder, width: 1.5),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _bankColor, width: 2.0),
-        ),
-        fillColor: _fieldFill,
-        filled: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      decoration: _dec(
+        context,
+        hint: _isAr
+            ? 'رقم الهوية/الإقامة (10 أرقام)'
+            : 'Saudi ID/Iqama (10 digits)',
+        icon: Icons.badge_outlined,
+        hideCounter: true,
       ),
     );
   }
@@ -805,15 +947,11 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         fontWeight: FontWeight.w900,
         fontSize: 15,
       ),
-      decoration: InputDecoration(
-        hintText: label,
-        hintStyle: TextStyle(
-          color: _hintColor,
-          fontWeight: FontWeight.w800,
-          fontSize: 14,
-        ),
-        prefixIcon: Icon(Icons.lock_outline, color: _iconColor, size: 22),
-        suffixIcon: IconButton(
+      decoration: _dec(
+        context,
+        hint: label,
+        icon: Icons.lock_outline,
+        suffix: IconButton(
           onPressed: onToggle,
           icon: Icon(
             obscure ? Icons.visibility : Icons.visibility_off,
@@ -823,18 +961,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           tooltip:
               obscure ? (_isAr ? 'إظهار' : 'Show') : (_isAr ? 'إخفاء' : 'Hide'),
         ),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: _fieldBorder, width: 1.5),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _bankColor, width: 2.0),
-        ),
-        fillColor: _fieldFill,
-        filled: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     );
   }

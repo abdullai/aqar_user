@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -119,7 +119,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(widget.isAr ? 'تعذر فتح الدردشة' : 'Failed to open chat'),
+          content:
+              Text(widget.isAr ? 'تعذر فتح الدردشة' : 'Failed to open chat'),
         ),
       );
     } finally {
@@ -185,7 +186,7 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
 
     if (widget.property.images.isEmpty) {
       return Container(
-        color: cs.surfaceVariant.withOpacity(0.6),
+        color: cs.surfaceContainerHighest.withOpacity(0.6),
         child: Center(
           child: Icon(Icons.image_not_supported_outlined,
               size: 60, color: cs.onSurfaceVariant),
@@ -209,7 +210,7 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
       },
       errorBuilder: (context, error, stackTrace) {
         return Container(
-          color: cs.surfaceVariant.withOpacity(0.6),
+          color: cs.surfaceContainerHighest.withOpacity(0.6),
           child: Center(
             child: Icon(Icons.broken_image_outlined,
                 size: 60, color: cs.onSurfaceVariant),
@@ -257,8 +258,7 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
                       widget.isFavorite
                           ? Icons.favorite
                           : Icons.favorite_border,
-                      color:
-                          widget.isFavorite ? Colors.red : Colors.white,
+                      color: widget.isFavorite ? Colors.red : Colors.white,
                     ),
                     onPressed: _isGuest
                         ? _snackLoginRequired
@@ -276,7 +276,6 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
                     children: [
                       _buildOwnerCard(),
                       const SizedBox(height: 12),
-
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton.icon(
@@ -298,11 +297,9 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12)),
                           ),
-                          onPressed:
-                              _openingChat ? null : _openChatWithOwner,
+                          onPressed: _openingChat ? null : _openChatWithOwner,
                         ),
                       ),
-
                       const SizedBox(height: 16),
                       _buildInfoRow(
                         icon: Icons.location_on_outlined,
@@ -320,9 +317,8 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
                       ),
                       const SizedBox(height: 16),
                       _buildSection(
-                        title: widget.isAr
-                            ? 'تفاصيل العقار'
-                            : 'Property Details',
+                        title:
+                            widget.isAr ? 'تفاصيل العقار' : 'Property Details',
                         child: Wrap(
                           spacing: 8,
                           runSpacing: 8,
@@ -342,8 +338,7 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
                             _buildDetailChip(
                               icon: Icons.remove_red_eye_outlined,
                               label: widget.property.views.toString(),
-                              subtitle:
-                                  widget.isAr ? 'المشاهدات' : 'Views',
+                              subtitle: widget.isAr ? 'المشاهدات' : 'Views',
                             ),
                             if (widget.property.isAuction)
                               _buildDetailChip(
@@ -409,8 +404,7 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
                         fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 4),
                 Text(widget.isAr ? 'المعلن' : 'Property Owner',
-                    style:
-                        TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
+                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 14)),
               ],
             ),
           ),
@@ -419,8 +413,8 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
             decoration: BoxDecoration(
               color: const Color(0xFF0F766E).withOpacity(0.10),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                  color: const Color(0xFF0F766E).withOpacity(0.30)),
+              border:
+                  Border.all(color: const Color(0xFF0F766E).withOpacity(0.30)),
             ),
             child: Row(
               children: [
@@ -443,9 +437,7 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
   }
 
   Widget _buildInfoRow(
-      {required IconData icon,
-      required String title,
-      required String value}) {
+      {required IconData icon, required String title, required String value}) {
     final cs = Theme.of(context).colorScheme;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -584,14 +576,12 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
         Text(title,
             style: TextStyle(
                 fontSize: isTotal ? 16 : 14,
-                fontWeight:
-                    isHighlighted ? FontWeight.bold : FontWeight.normal,
+                fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
                 color: color)),
         Text('${_formatNumber(amount)} $_currencySymbol',
             style: TextStyle(
                 fontSize: isTotal ? 18 : 14,
-                fontWeight:
-                    isHighlighted ? FontWeight.bold : FontWeight.normal,
+                fontWeight: isHighlighted ? FontWeight.bold : FontWeight.normal,
                 color: color)),
       ],
     );
@@ -650,13 +640,14 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+          Text(label,
+              style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
           const SizedBox(height: 4),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: cs.surfaceVariant.withOpacity(0.35),
+              color: cs.surfaceContainerHighest.withOpacity(0.35),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
             ),
@@ -680,8 +671,8 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
               backgroundColor: const Color(0xFF0F766E),
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: () => _copyToClipboard(_shareText,
                 successMessage:
@@ -697,12 +688,13 @@ ${ownerName.isNotEmpty ? '👤 ${widget.isAr ? 'المعلن:' : 'Owner:'} $owne
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF0F766E),
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               side: const BorderSide(color: Color(0xFF0F766E)),
             ),
             onPressed: () => _copyToClipboard(widget.property.description,
-                successMessage: widget.isAr ? 'تم نسخ الوصف' : 'Description copied'),
+                successMessage:
+                    widget.isAr ? 'تم نسخ الوصف' : 'Description copied'),
           ),
         ),
       ],

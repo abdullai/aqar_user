@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:aqar_user/services/auth_service.dart';
 
 class ForgotScreen extends StatefulWidget {
@@ -59,7 +59,6 @@ class _ForgotScreenState extends State<ForgotScreen> {
               ),
             ),
             const SizedBox(height: 30),
-
             TextField(
               controller: usernameController,
               keyboardType: TextInputType.number,
@@ -84,7 +83,6 @@ class _ForgotScreenState extends State<ForgotScreen> {
               },
             ),
             const SizedBox(height: 20),
-
             SizedBox(
               width: double.infinity,
               height: 50,
@@ -114,14 +112,11 @@ class _ForgotScreenState extends State<ForgotScreen> {
                       ),
               ),
             ),
-
             const SizedBox(height: 10),
-
             TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('العودة لتسجيل الدخول'),
             ),
-
             const SizedBox(height: 20),
             if (msg.isNotEmpty)
               Container(
@@ -130,7 +125,8 @@ class _ForgotScreenState extends State<ForgotScreen> {
                   color: isError ? Colors.red.shade50 : Colors.green.shade50,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isError ? Colors.red.shade100 : Colors.green.shade100,
+                    color:
+                        isError ? Colors.red.shade100 : Colors.green.shade100,
                   ),
                 ),
                 child: Row(
@@ -159,7 +155,8 @@ class _ForgotScreenState extends State<ForgotScreen> {
   }
 
   Future<void> _handleSendLink() async {
-    final username = AuthService.normalizeNumbers(usernameController.text).trim();
+    final username =
+        AuthService.normalizeNumbers(usernameController.text).trim();
 
     if (username.isEmpty) {
       setState(() {

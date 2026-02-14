@@ -1,8 +1,7 @@
-﻿// lib/services/reservations_service.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ReservationItem {
-  /// ملاحظة: هذا "id" في التطبيق = reservation_id في قاعدة البيانات
+  /// ✅ id في التطبيق = id في قاعدة البيانات (جدول reservations)
   final String id;
   final String propertyId;
   final String status;
@@ -14,10 +13,10 @@ class ReservationItem {
   final double extraFeeAmount; // 2.5%
   final double totalAmount;
 
-  /// ✅ الاسم الأول + الأخير (أو fallback) للحاجز
+  /// اسم الحاجز (اختياري – للمعلن)
   final String? reserverName;
 
-  /// ✅ ربط اختياري بمحادثة مرتبطة بالحجز/العقار
+  /// ✅ conversation المرتبطة بالحجز/العقار
   final String? conversationId;
 
   ReservationItem({
@@ -39,6 +38,10 @@ class ReservationItem {
 class ReservationsService {
   static final SupabaseClient _sb = Supabase.instance.client;
 
+  // =========================
+  // Utils
+  // =========================
+
   static double _toDouble(dynamic v) {
     if (v == null) return 0.0;
     if (v is num) return v.toDouble();
@@ -46,20 +49,18 @@ class ReservationsService {
   }
 
   static String _s(dynamic v) => (v ?? '').toString().trim();
-  static bool _isPostgresUniqueViolation(PostgrestException e) => e.code == '23505';
+
+  static bool _isPostgresUniqueViolation(PostgrestException e) =>
+      e.code == '23505';
 
   // ===========================================================================
-  // 1) إنشاء الحجز + (اختياري) إنشاء/إرجاع محادثة العقار
+  // 1) إنشاء الحجز + (اختياري) إنشاء/ربط محادثة العقار
   // ===========================================================================
 
   /// ✅ إنشاء حجز 72 ساعة
-  /// يرجع true إذا تم الحجز، و false إذا الإعلان محجوز مسبقاً (unique index).
   ///
-  /// مهم: نرسل فقط base_price (والباقي يحسبه Trigger في DB)
-  ///
-  /// ✅ ربط الدردشة:
-  /// - createConversation=true => ينشئ/يجلب conversation(kind='property') لهذا المستخدم + property
-  /// - ثم يحدّث reservation_id داخل conversations إن كان فارغاً (اختياري)
+  /// - لا يكسر الحجز لو فشلت الدردشة
+  /// - DB Trigger يحسب الرسوم
   static Future<bool> createReservation({
     required String userId,
     required String propertyId,
@@ -70,6 +71,8 @@ class ReservationsService {
     try {
       final expiresAt = DateTime.now().add(const Duration(hours: 72));
 
+      // ✅ مهم: جدول reservations عندك اسمه id وليس reservation_id
+      // ✅ مهم: أعمدة الرسوم NOT NULL عندك، لازم نرسلها (Trigger يعمل Guard وقد يعيد حسابها)
       final inserted = await _sb
           .from('reservations')
           .insert({
@@ -77,15 +80,19 @@ class ReservationsService {
             'property_id': propertyId,
             'status': 'pending',
             'expires_at': expiresAt.toUtc().toIso8601String(),
-            'base_price': basePrice, // ✅ فقط
+            'base_price': basePrice,
+            // قيم مبدئية لتفادي 400 بسبب NOT NULL (الـ Trigger يمكنه إعادة ضبطها)
+            'platform_fee_amount': 0,
+            'extra_fee_amount': 0,
+            'total_amount': 0,
           })
-          .select('reservation_id')
+          .select('id')
           .single();
 
-      final reservationId = _s(inserted['reservation_id']);
+      final reservationId = _s(inserted['id']);
 
       if (createConversation && reservationId.isNotEmpty) {
-        // best-effort: لا نكسر الحجز لو فشل الربط
+        // best-effort: لا نكسر الحجز لو فشلت الدردشة
         try {
           await getOrCreatePropertyConversation(
             propertyId: propertyId,
@@ -104,34 +111,36 @@ class ReservationsService {
     }
   }
 
-  /// ✅ إلغاء حجز (لسلة المستخدم)
+  /// ✅ إلغاء الحجز (للمستخدم)
   static Future<void> cancelReservation(String reservationId) async {
-    await _sb
-        .from('reservations')
-        .update({'status': 'cancelled'})
-        .eq('reservation_id', reservationId);
+    // ✅ جدول reservations عندك: المفتاح id
+    await _sb.from('reservations').update({'status': 'cancelled'}).eq(
+          'id',
+          reservationId,
+        );
   }
 
   // ===========================================================================
-  // 2) محادثات العقار (conversations)
+  // 2) محادثات العقار (متوافقة مع ChatPage الجديد)
   // ===========================================================================
 
-  /// ✅ يجلب أو ينشئ conversation(kind='property') للمستخدم الحالي (auth.uid)
+  /// ✅ يجلب أو ينشئ conversation(kind='property')
   ///
-  /// - يعتمد على uniq_conv_property_user لمنع التكرار
-  /// - يربط reservation_id إذا مررته (تحديث للمحادثة) إن كان فارغاً
-  /// - يحدد counterparty_id تلقائياً من properties.owner_id
-  ///
-  /// يرجع conversationId
+  /// التوافق مع ChatPage:
+  /// - user_id = المستخدم الحالي
+  /// - counterparty_id = owner_id
+  /// - نفس المحادثة تعاد دائماً (بدون تكرار)
   static Future<String> getOrCreatePropertyConversation({
     required String propertyId,
     String? reservationId,
     String? title,
   }) async {
     final uid = _sb.auth.currentUser?.id ?? '';
-    if (uid.isEmpty) throw Exception('Auth required');
+    if (uid.isEmpty) {
+      throw Exception('Auth required');
+    }
 
-    // 1) owner_id + title fallback
+    // 1) جلب مالك العقار + عنوان افتراضي
     final prop = await _sb
         .from('properties')
         .select('owner_id, title')
@@ -141,37 +150,49 @@ class ReservationsService {
     final ownerId = _s(prop['owner_id']);
     final propTitle = _s(prop['title']);
 
-    if (ownerId.isEmpty) throw Exception('Property owner not found');
-    if (ownerId == uid) throw Exception('Cannot chat with yourself');
+    if (ownerId.isEmpty) {
+      throw Exception('Property owner not found');
+    }
+    if (ownerId == uid) {
+      throw Exception('Cannot chat with yourself');
+    }
 
-    // 2) find existing
+    // 2) البحث عن محادثة موجودة
     final existing = await _sb
         .from('conversations')
         .select('id, reservation_id')
         .eq('kind', 'property')
         .eq('property_id', propertyId)
-        .eq('user_id', uid)
+        .or(
+          'and(user_id.eq.$uid,counterparty_id.eq.$ownerId),and(user_id.eq.$ownerId,counterparty_id.eq.$uid)',
+        )
+        .order('created_at', ascending: false)
         .limit(1)
         .maybeSingle();
 
     if (existing != null) {
       final cid = _s(existing['id']);
-      if (cid.isEmpty) throw Exception('Invalid conversation row');
+      if (cid.isEmpty) {
+        throw Exception('Invalid conversation row');
+      }
 
-      // attach reservation_id if missing
+      // ربط reservation_id إن كان فارغاً
       final curRes = _s(existing['reservation_id']);
       final wantedRes = (reservationId ?? '').trim();
+
       if (curRes.isEmpty && wantedRes.isNotEmpty) {
         await _sb.from('conversations').update({
           'reservation_id': wantedRes,
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }).eq('id', cid);
       }
+
       return cid;
     }
 
-    // 3) create
+    // 3) إنشاء محادثة جديدة
     final wantedRes = (reservationId ?? '').trim();
+
     final inserted = await _sb
         .from('conversations')
         .insert({
@@ -191,24 +212,23 @@ class ReservationsService {
   }
 
   // ===========================================================================
-  // 3) تحميل السلة / تحميل حجوزات عقاراتي + conversation_id لكل عنصر
+  // 3) السلة (حجوزاتي) + conversationId لكل عنصر
   // ===========================================================================
 
-  /// ✅ سلة المستخدم (حجوزاتي)
+  /// ✅ سلة المستخدم
   static Future<List<ReservationItem>> loadMyCart(String userId) async {
     final res = await _sb
         .from('reservations')
         .select(
-          'reservation_id, property_id, status, expires_at, base_price, platform_fee_amount, extra_fee_amount, total_amount',
+          'id, property_id, status, expires_at, base_price, platform_fee_amount, extra_fee_amount, total_amount',
         )
         .eq('user_id', userId)
-        .inFilter('status', ['active', 'pending'])
+        .inFilter('status', ['pending', 'paid']) // ✅ حسب CHECK constraint عندك
         .order('created_at', ascending: false);
 
     final rows = (res as List).cast<Map<String, dynamic>>();
     if (rows.isEmpty) return const [];
 
-    // map property_id -> conversation id (for this user)
     final propIds = rows
         .map((r) => _s(r['property_id']))
         .where((s) => s.isNotEmpty)
@@ -223,7 +243,7 @@ class ReservationsService {
     return rows.map<ReservationItem>((r) {
       final pid = _s(r['property_id']);
       return ReservationItem(
-        id: _s(r['reservation_id']),
+        id: _s(r['id']),
         propertyId: pid,
         status: _s(r['status']),
         expiresAt: DateTime.parse(_s(r['expires_at'])).toLocal(),
@@ -236,33 +256,38 @@ class ReservationsService {
     }).toList();
   }
 
-  /// ✅ حجوزات على إعلاناتي (للمعلن)
+  // ===========================================================================
+  // 4) حجوزات على إعلاناتي (للمعلن) + ربط الدردشة
+  // ===========================================================================
+
   static Future<List<ReservationItem>> loadOnMyProperties({
     String lang = 'ar',
   }) async {
+    // ملاحظة: لو عندك RLS تمنع المعلن من رؤية كل reservations بدون فلترة،
+    // لازم تعتمد على View/RPC. هذا الكود يفترض أنه مسموح.
     final res = await _sb.from('reservations').select('''
-          reservation_id,
-          property_id,
-          user_id,
-          status,
-          expires_at,
-          base_price,
-          platform_fee_amount,
-          extra_fee_amount,
-          total_amount,
-          users_profiles(
-            full_name,
-            name,
-            username,
-            email,
-            full_name_ar,
-            full_name_en,
-            first_name_ar,
-            fourth_name_ar,
-            first_name_en,
-            fourth_name_en
-          )
-        ''').order('created_at', ascending: false);
+      id,
+      property_id,
+      user_id,
+      status,
+      expires_at,
+      base_price,
+      platform_fee_amount,
+      extra_fee_amount,
+      total_amount,
+      users_profiles(
+        full_name,
+        name,
+        username,
+        email,
+        full_name_ar,
+        full_name_en,
+        first_name_ar,
+        fourth_name_ar,
+        first_name_en,
+        fourth_name_en
+      )
+    ''').order('created_at', ascending: false);
 
     final rows = (res as List).cast<Map<String, dynamic>>();
     if (rows.isEmpty) return const [];
@@ -273,40 +298,34 @@ class ReservationsService {
       if (u == null) return null;
 
       if (lang == 'ar') {
-        final fl = '${pick(u['first_name_ar'])} ${pick(u['fourth_name_ar'])}'.trim();
+        final fl =
+            '${pick(u['first_name_ar'])} ${pick(u['fourth_name_ar'])}'.trim();
         if (fl.isNotEmpty) return fl;
-
         final ar = pick(u['full_name_ar']);
         if (ar.isNotEmpty) return ar;
       } else {
-        final fl = '${pick(u['first_name_en'])} ${pick(u['fourth_name_en'])}'.trim();
+        final fl =
+            '${pick(u['first_name_en'])} ${pick(u['fourth_name_en'])}'.trim();
         if (fl.isNotEmpty) return fl;
-
         final en = pick(u['full_name_en']);
         if (en.isNotEmpty) return en;
       }
 
-      final full = pick(u['full_name']);
-      if (full.isNotEmpty) return full;
-
-      final name = pick(u['name']);
-      if (name.isNotEmpty) return name;
-
-      final username = pick(u['username']);
-      if (username.isNotEmpty) return username;
-
-      final email = pick(u['email']);
-      if (email.isNotEmpty) return email;
-
+      for (final k in ['full_name', 'name', 'username', 'email']) {
+        final v = pick(u[k]);
+        if (v.isNotEmpty) return v;
+      }
       return null;
     }
 
-    // conversation map for (property_id, reserver_user_id)
-    final keys = <String>{}; // "$propertyId|$userId"
+    // key = "$propertyId|$userId"
+    final keys = <String>{};
     for (final r in rows) {
       final pid = _s(r['property_id']);
       final uid = _s(r['user_id']);
-      if (pid.isNotEmpty && uid.isNotEmpty) keys.add('$pid|$uid');
+      if (pid.isNotEmpty && uid.isNotEmpty) {
+        keys.add('$pid|$uid');
+      }
     }
 
     final convPairsMap = await _fetchConversationIdsForPairs(keys.toList());
@@ -320,7 +339,7 @@ class ReservationsService {
       final convId = convPairsMap['$pid|$reserverId'];
 
       return ReservationItem(
-        id: _s(r['reservation_id']),
+        id: _s(r['id']),
         propertyId: pid,
         status: _s(r['status']),
         expiresAt: DateTime.parse(_s(r['expires_at'])).toLocal(),
@@ -335,7 +354,7 @@ class ReservationsService {
   }
 
   // ===========================================================================
-  // 4) Helpers
+  // 5) Helpers (ربط الحجوزات بالمحادثات)
   // ===========================================================================
 
   static Future<Map<String, String>> _fetchConversationIdsForUserProperties({
@@ -353,16 +372,21 @@ class ReservationsService {
 
     final rows = (data as List).cast<Map>();
     final out = <String, String>{};
+
     for (final r in rows) {
       final pid = _s(r['property_id']);
       final cid = _s(r['id']);
-      if (pid.isNotEmpty && cid.isNotEmpty) out[pid] = cid;
+      if (pid.isNotEmpty && cid.isNotEmpty) {
+        out[pid] = cid;
+      }
     }
     return out;
   }
 
   /// keys: "$propertyId|$userId"
-  static Future<Map<String, String>> _fetchConversationIdsForPairs(List<String> keys) async {
+  static Future<Map<String, String>> _fetchConversationIdsForPairs(
+    List<String> keys,
+  ) async {
     if (keys.isEmpty) return {};
 
     final propIds = <String>{};

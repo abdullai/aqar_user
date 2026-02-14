@@ -1,0 +1,3 @@
+-----BEGIN PRIVATE KEY-----
+...كل الأسطر...
+-----END PRIVATE KEY-----

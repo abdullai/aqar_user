@@ -1,4 +1,4 @@
-﻿// lib/models/ad_item.dart
+// lib/models/ad_item.dart
 
 /// نموذج إعلان/عقار موحّد لاستخدامه في القائمة (Dashboard) وفي التفاصيل.
 ///
@@ -121,7 +121,8 @@ class AdItem {
   /// - else imageUrl
   /// - else assetImage (تتعامل معها الواجهة)
   String? bestCoverUrl() {
-    if (images.isNotEmpty) return images.first.trim().isEmpty ? null : images.first.trim();
+    if (images.isNotEmpty)
+      return images.first.trim().isEmpty ? null : images.first.trim();
     final u = imageUrl?.trim();
     if (u != null && u.isNotEmpty) return u;
     return null; // إذا null فالواجهة تستخدم assetImage
@@ -165,13 +166,13 @@ class AdItem {
 
   factory AdItem.fromJson(Map<String, dynamic> j) {
     // old parsing helpers
-    String? _trimOrNull(dynamic v) {
+    String? trimOrNull(dynamic v) {
       final s = (v as String?)?.trim();
       if (s == null || s.isEmpty) return null;
       return s;
     }
 
-    double? _toDoubleOrNull(dynamic v) {
+    double? toDoubleOrNull(dynamic v) {
       if (v == null) return null;
       if (v is num) return v.toDouble();
       final s = v.toString().trim();
@@ -179,7 +180,7 @@ class AdItem {
       return double.tryParse(s);
     }
 
-    num? _toNumOrNull(dynamic v) {
+    num? toNumOrNull(dynamic v) {
       if (v == null) return null;
       if (v is num) return v;
       final s = v.toString().trim();
@@ -187,7 +188,7 @@ class AdItem {
       return num.tryParse(s);
     }
 
-    DateTime? _toDateTimeOrNull(dynamic v) {
+    DateTime? toDateTimeOrNull(dynamic v) {
       if (v == null) return null;
       if (v is DateTime) return v;
       final s = v.toString().trim();
@@ -195,12 +196,12 @@ class AdItem {
       return DateTime.tryParse(s);
     }
 
-    List<String> _toStringList(dynamic v) {
+    List<String> toStringList(dynamic v) {
       if (v == null) return const [];
       if (v is List) {
         return v
             .map((e) => e?.toString().trim())
-            .where((e) => e != null && e!.isNotEmpty)
+            .where((e) => e != null && e.isNotEmpty)
             .map((e) => e!)
             .toList();
       }
@@ -215,26 +216,27 @@ class AdItem {
       subtitleAr: (j['subtitleAr'] ?? '').toString(),
       subtitleEn: (j['subtitleEn'] ?? '').toString(),
       assetImage: (j['assetImage'] ?? '').toString(),
-      imageUrl: _trimOrNull(j['imageUrl']),
-      linkUrl: _trimOrNull(j['linkUrl']),
+      imageUrl: trimOrNull(j['imageUrl']),
+      linkUrl: trimOrNull(j['linkUrl']),
       enabled: (j['enabled'] ?? true) as bool,
 
       // الجديد
-      propertyId: _trimOrNull(j['propertyId']),
-      cityAr: _trimOrNull(j['cityAr']),
-      cityEn: _trimOrNull(j['cityEn']),
-      districtAr: _trimOrNull(j['districtAr']),
-      districtEn: _trimOrNull(j['districtEn']),
-      areaSqm: _toDoubleOrNull(j['areaSqm'] ?? j['area'] ?? j['sqm']),
-      price: _toNumOrNull(j['price']),
+      propertyId: trimOrNull(j['propertyId']),
+      cityAr: trimOrNull(j['cityAr']),
+      cityEn: trimOrNull(j['cityEn']),
+      districtAr: trimOrNull(j['districtAr']),
+      districtEn: trimOrNull(j['districtEn']),
+      areaSqm: toDoubleOrNull(j['areaSqm'] ?? j['area'] ?? j['sqm']),
+      price: toNumOrNull(j['price']),
       currency: (j['currency'] ?? 'SAR').toString(),
       status: (j['status'] ?? 'unknown').toString(),
-      licenseNumber: _trimOrNull(j['licenseNumber'] ?? j['license_number']),
+      licenseNumber: trimOrNull(j['licenseNumber'] ?? j['license_number']),
       isVerified: (j['isVerified'] ?? j['is_verified'] ?? false) as bool,
-      verifiedAt: _toDateTimeOrNull(j['verifiedAt'] ?? j['verified_at']),
-      images: _toStringList(j['images']),
-      statusSource: (j['statusSource'] ?? j['status_source'] ?? 'internal').toString(),
-      statusNote: _trimOrNull(j['statusNote'] ?? j['status_note']),
+      verifiedAt: toDateTimeOrNull(j['verifiedAt'] ?? j['verified_at']),
+      images: toStringList(j['images']),
+      statusSource:
+          (j['statusSource'] ?? j['status_source'] ?? 'internal').toString(),
+      statusNote: trimOrNull(j['statusNote'] ?? j['status_note']),
     );
   }
 }

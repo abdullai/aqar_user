@@ -1,4 +1,4 @@
-﻿// lib/screens/settings_page.dart
+// lib/screens/settings_page.dart
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
@@ -67,7 +67,8 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'),
+          content:
+              Text(_isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'),
         ),
       );
     } finally {
@@ -81,7 +82,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'ميزة PIN متاحة على الجوال فقط' : 'PIN is available on mobile only'),
+          content: Text(_isAr
+              ? 'ميزة PIN متاحة على الجوال فقط'
+              : 'PIN is available on mobile only'),
         ),
       );
       return;
@@ -112,7 +115,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     keyboardType: TextInputType.number,
                     maxLength: 6,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w900, fontSize: 18),
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(6),
@@ -131,7 +135,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     keyboardType: TextInputType.number,
                     maxLength: 6,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w900, fontSize: 18),
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
                       LengthLimitingTextInputFormatter(6),
@@ -158,7 +163,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     ScaffoldMessenger.of(ctx).showSnackBar(
                       SnackBar(
                         behavior: SnackBarBehavior.floating,
-                        content: Text(_isAr ? 'تأكد من PIN (6 أرقام) والتطابق' : 'Ensure 6-digit PIN and match'),
+                        content: Text(_isAr
+                            ? 'تأكد من PIN (6 أرقام) والتطابق'
+                            : 'Ensure 6-digit PIN and match'),
                       ),
                     );
                     return;
@@ -214,7 +221,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'ميزة البصمة/الوجه متاحة على الجوال فقط' : 'Biometrics are available on mobile only'),
+          content: Text(_isAr
+              ? 'ميزة البصمة/الوجه متاحة على الجوال فقط'
+              : 'Biometrics are available on mobile only'),
         ),
       );
       return;
@@ -229,7 +238,9 @@ class _SettingsPageState extends State<SettingsPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               behavior: SnackBarBehavior.floating,
-              content: Text(_isAr ? 'البصمة/الوجه غير مدعوم على هذا الجهاز' : 'Biometrics not supported on this device'),
+              content: Text(_isAr
+                  ? 'البصمة/الوجه غير مدعوم على هذا الجهاز'
+                  : 'Biometrics not supported on this device'),
             ),
           );
           return;
@@ -245,7 +256,8 @@ class _SettingsPageState extends State<SettingsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
-            content: Text(_isAr ? 'تم تفعيل البصمة/الوجه' : 'Biometrics enabled'),
+            content:
+                Text(_isAr ? 'تم تفعيل البصمة/الوجه' : 'Biometrics enabled'),
           ),
         );
       } else {
@@ -256,7 +268,8 @@ class _SettingsPageState extends State<SettingsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
-            content: Text(_isAr ? 'تم إيقاف البصمة/الوجه' : 'Biometrics disabled'),
+            content:
+                Text(_isAr ? 'تم إيقاف البصمة/الوجه' : 'Biometrics disabled'),
           ),
         );
       }
@@ -265,7 +278,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'حدث خطأ أثناء حفظ البصمة' : 'Error while saving biometrics'),
+          content: Text(_isAr
+              ? 'حدث خطأ أثناء حفظ البصمة'
+              : 'Error while saving biometrics'),
         ),
       );
     } finally {
@@ -278,7 +293,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'ميزة PIN متاحة على الجوال فقط' : 'PIN is available on mobile only'),
+          content: Text(_isAr
+              ? 'ميزة PIN متاحة على الجوال فقط'
+              : 'PIN is available on mobile only'),
         ),
       );
       return;
@@ -326,7 +343,8 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'تم إيقاف الدخول السريع' : 'Quick Login disabled'),
+          content:
+              Text(_isAr ? 'تم إيقاف الدخول السريع' : 'Quick Login disabled'),
         ),
       );
     } catch (_) {
@@ -334,7 +352,9 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'فشل إيقاف الدخول السريع' : 'Failed to disable Quick Login'),
+          content: Text(_isAr
+              ? 'فشل إيقاف الدخول السريع'
+              : 'Failed to disable Quick Login'),
         ),
       );
     } finally {
@@ -364,10 +384,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 ButtonSegment(value: 'en', label: Text('English')),
               ],
               selected: {_lang},
-              onSelectionChanged: _busy ? null : (s) => setState(() => _lang = s.first),
+              onSelectionChanged:
+                  _busy ? null : (s) => setState(() => _lang = s.first),
             ),
             const SizedBox(height: 28),
-
             Text(_isAr ? 'الثيم' : 'Theme',
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 10),
@@ -378,14 +398,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 ButtonSegment(value: ThemeMode.system, label: Text('System')),
               ],
               selected: {_mode},
-              onSelectionChanged: _busy ? null : (s) => setState(() => _mode = s.first),
+              onSelectionChanged:
+                  _busy ? null : (s) => setState(() => _mode = s.first),
             ),
             const SizedBox(height: 28),
-
-            Text(_isAr ? 'الدخول السريع (قفل التطبيق)' : 'Quick Login (App Lock)',
+            Text(
+                _isAr
+                    ? 'الدخول السريع (قفل التطبيق)'
+                    : 'Quick Login (App Lock)',
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-
             if (mobileOnlyNote)
               Container(
                 padding: const EdgeInsets.all(12),
@@ -399,37 +421,40 @@ class _SettingsPageState extends State<SettingsPage> {
                       : 'Quick Login (PIN/Biometrics) is available on mobile devices only.',
                 ),
               ),
-
             const SizedBox(height: 8),
-
             SwitchListTile(
               value: _bioEnabled,
               onChanged: (_busy || !_isMobile) ? null : _toggleBio,
               title: Text(_isAr ? 'تفعيل بصمة/FaceID' : 'Enable Biometrics'),
-              subtitle: Text(_isAr ? 'يتطلب دعم الجهاز وإذن البصمة' : 'Requires device support and permission'),
+              subtitle: Text(_isAr
+                  ? 'يتطلب دعم الجهاز وإذن البصمة'
+                  : 'Requires device support and permission'),
             ),
             SwitchListTile(
               value: _pinEnabled,
               onChanged: (_busy || !_isMobile) ? null : _togglePin,
-              title: Text(_isAr ? 'تفعيل PIN (6 أرقام)' : 'Enable PIN (6 digits)'),
-              subtitle: Text(_isAr ? 'مفيد للأجهزة بدون بصمة' : 'Useful if no biometrics'),
+              title:
+                  Text(_isAr ? 'تفعيل PIN (6 أرقام)' : 'Enable PIN (6 digits)'),
+              subtitle: Text(
+                  _isAr ? 'مفيد للأجهزة بدون بصمة' : 'Useful if no biometrics'),
             ),
             if (_pinEnabled)
               ListTile(
                 leading: const Icon(Icons.password),
                 title: Text(_isAr ? 'تغيير PIN' : 'Change PIN'),
-                onTap: (_busy || !_isMobile) ? null : () => _setPinFlow(isChange: true),
+                onTap: (_busy || !_isMobile)
+                    ? null
+                    : () => _setPinFlow(isChange: true),
               ),
-
             const SizedBox(height: 10),
             FilledButton.icon(
               onPressed: (_busy || !_isMobile) ? null : _disableAllFastLogin,
               icon: const Icon(Icons.lock_reset),
-              label: Text(_isAr ? 'إيقاف الدخول السريع نهائياً' : 'Disable Quick Login'),
+              label: Text(_isAr
+                  ? 'إيقاف الدخول السريع نهائياً'
+                  : 'Disable Quick Login'),
             ),
-
             const SizedBox(height: 28),
-
             FilledButton.icon(
               onPressed: _busy ? null : _saveBase,
               icon: const Icon(Icons.save),

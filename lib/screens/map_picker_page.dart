@@ -1,4 +1,4 @@
-﻿// lib/screens/map_picker_page.dart
+// lib/screens/map_picker_page.dart
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
@@ -27,7 +27,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
   @override
   void initState() {
     super.initState();
-    _selected = widget.initial ?? const LatLng(24.7136, 46.6753); // الرياض افتراضي
+    _selected =
+        widget.initial ?? const LatLng(24.7136, 46.6753); // الرياض افتراضي
     _marker = Marker(markerId: const MarkerId('picked'), position: _selected);
   }
 
@@ -59,7 +60,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
       textDirection: isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(isAr ? 'تحديد الموقع من الخريطة' : 'Pick location on map'),
+          title:
+              Text(isAr ? 'تحديد الموقع من الخريطة' : 'Pick location on map'),
           actions: [
             IconButton(
               tooltip: isAr ? 'اعتماد' : 'Confirm',
@@ -71,7 +73,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
         body: Stack(
           children: [
             GoogleMap(
-              initialCameraPosition: CameraPosition(target: _selected, zoom: 13),
+              initialCameraPosition:
+                  CameraPosition(target: _selected, zoom: 13),
               onMapCreated: (c) => _ctrl = c,
               onTap: _onTap,
               markers: _marker != null ? {_marker!} : {},
@@ -91,16 +94,27 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(16),
-                        color: Theme.of(context).colorScheme.surface.withOpacity(0.92),
-                        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.6)),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surface
+                            .withOpacity(0.92),
+                        border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant
+                                .withOpacity(0.6)),
                         boxShadow: [
                           BoxShadow(
                             blurRadius: 18,
                             offset: const Offset(0, 10),
-                            color: Theme.of(context).colorScheme.shadow.withOpacity(0.15),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .shadow
+                                .withOpacity(0.15),
                           ),
                         ],
                       ),
@@ -113,7 +127,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
                               isAr
                                   ? 'Lat: ${_selected.latitude.toStringAsFixed(6)}  |  Lng: ${_selected.longitude.toStringAsFixed(6)}'
                                   : 'Lat: ${_selected.latitude.toStringAsFixed(6)}  |  Lng: ${_selected.longitude.toStringAsFixed(6)}',
-                              style: const TextStyle(fontWeight: FontWeight.w800),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -127,7 +142,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
                       height: 52,
                       child: ElevatedButton.icon(
                         icon: const Icon(Icons.check),
-                        label: Text(isAr ? 'اعتماد الموقع' : 'Confirm location'),
+                        label:
+                            Text(isAr ? 'اعتماد الموقع' : 'Confirm location'),
                         onPressed: _confirm,
                       ),
                     ),

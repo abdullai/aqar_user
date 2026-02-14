@@ -1,4 +1,4 @@
-﻿// lib/services/fast_login_service.dart
+// lib/services/fast_login_service.dart
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -20,7 +20,8 @@ class FastLoginService {
   static const _kPinEnabled = 'fast_pin_enabled';
   static const _kPinHash = 'fast_pin_hash';
   static const _kBioEnabled = 'fast_bio_enabled';
-  static const _kPromptState = 'fast_prompt_state'; // never / later / done / (null)
+  static const _kPromptState =
+      'fast_prompt_state'; // never / later / done / (null)
 
   static const _kCtxUid = 'fast_ctx_uid';
   static const _kCtxDisplayName = 'fast_ctx_display_name';
@@ -139,7 +140,9 @@ class FastLoginService {
       if (!can) return false;
 
       final ok = await _auth.authenticate(
-        localizedReason: isAr ? 'تأكيد الهوية لتسجيل الدخول' : 'Confirm your identity to sign in',
+        localizedReason: isAr
+            ? 'تأكيد الهوية لتسجيل الدخول'
+            : 'Confirm your identity to sign in',
         options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
@@ -268,6 +271,7 @@ class FastLoginService {
     final name = await getDisplayName();
     final nid = await getUsernameNationalId();
     // ignore: avoid_print
-    print('FastLogin: uid=$uid name=$name nid=$nid pin=$pin bio=$bio prompt=$st');
+    print(
+        'FastLogin: uid=$uid name=$name nid=$nid pin=$pin bio=$bio prompt=$st');
   }
 }

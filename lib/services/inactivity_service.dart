@@ -1,4 +1,6 @@
-﻿import 'dart:async';
+// lib/services/inactivity_service.dart
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -22,12 +24,18 @@ class InactivityService {
   int _remainingSec = 0;
   bool _dialogOpen = false;
 
+  // ✅ Guards to prevent repeated lock/signOut loops
+  bool _locking = false;
+  bool _signOutRunning = false;
+
   void start() => _resetIdleTimer();
 
   void stop() {
     _idleTimer?.cancel();
     _countdownTimer?.cancel();
     _dialogOpen = false;
+    _locking = false;
+    _signOutRunning = false;
   }
 
   /// استدعِها عند أي تفاعل من المستخدم
@@ -41,27 +49,32 @@ class InactivityService {
 
   /// قفل فوري (يُستخدم عند خروج التطبيق للخلفية)
   Future<void> lockNow() async {
-    _countdownTimer?.cancel();
-    _idleTimer?.cancel();
-    _closeDialogIfAny();
-    _dialogOpen = false;
+    if (_locking) return;
+    _locking = true;
 
-    // لا نقفل أثناء Recovery (حتى لا نكسر reset password)
-    if (recoveryFlowNotifier.value == true) return;
+    try {
+      _countdownTimer?.cancel();
+      _idleTimer?.cancel();
+      _closeDialogIfAny();
+      _dialogOpen = false;
 
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      _forceToLogin();
-      return;
-    }
+      // لا نقفل أثناء Recovery
+      if (recoveryFlowNotifier.value == true) return;
 
-    final hasLock = await FastLoginService.hasAnyLockEnabled();
-    if (hasLock) {
-      _forceToFastLogin();
-    } else {
-      // إذا لا يوجد App-Lock، الأفضل عدم عمل signOut تلقائي هنا
-      // فقط أعد تشغيل المؤقت
-      _resetIdleTimer();
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) {
+        _forceToLogin();
+        return;
+      }
+
+      final hasLock = await FastLoginService.hasAnyLockEnabled();
+      if (hasLock) {
+        _forceToFastLogin();
+      } else {
+        _resetIdleTimer();
+      }
+    } finally {
+      _locking = false;
     }
   }
 
@@ -72,7 +85,10 @@ class InactivityService {
 
   String _routeName() {
     final ctx = navigatorKey.currentContext;
-    return ModalRoute.of(ctx ?? navigatorKey.currentState!.context)?.settings.name ?? '';
+    return ModalRoute.of(ctx ?? navigatorKey.currentState!.context)
+            ?.settings
+            .name ??
+        '';
   }
 
   bool _isOnLoginOrFastLoginOrReset() {
@@ -80,10 +96,7 @@ class InactivityService {
     return name == '/' || name == '/fastLogin' || name == '/resetPassword';
   }
 
-  String _t({
-    required String ar,
-    required String en,
-  }) {
+  String _t({required String ar, required String en}) {
     return (langNotifier.value == 'ar') ? ar : en;
   }
 
@@ -91,21 +104,17 @@ class InactivityService {
     final nav = navigatorKey.currentState;
     if (nav == null) return;
 
-    // لا نعرض تحذير على login/fastLogin/resetPassword
     if (_isOnLoginOrFastLoginOrReset()) {
       _resetIdleTimer();
       return;
     }
 
-    // لا نعرض أثناء Recovery
     if (recoveryFlowNotifier.value == true) {
       _resetIdleTimer();
       return;
     }
 
     final session = Supabase.instance.client.auth.currentSession;
-
-    // لا توجد جلسة → Login
     if (session == null) {
       _forceToLogin();
       return;
@@ -175,32 +184,58 @@ class InactivityService {
   }
 
   Future<void> _lockOrLogout() async {
-    _countdownTimer?.cancel();
-    _idleTimer?.cancel();
-    _closeDialogIfAny();
-    _dialogOpen = false;
+    if (_locking) return;
+    _locking = true;
 
-    // لا نقفل أثناء Recovery
-    if (recoveryFlowNotifier.value == true) {
-      _resetIdleTimer();
-      return;
-    }
+    try {
+      _countdownTimer?.cancel();
+      _idleTimer?.cancel();
+      _closeDialogIfAny();
+      _dialogOpen = false;
 
-    final hasLock = await FastLoginService.hasAnyLockEnabled();
-    if (hasLock) {
-      _forceToFastLogin();
-    } else {
-      // بدون App-Lock: هنا خيارك
-      // (أ) قفل للّوجين (بدون signOut) أو (ب) signOut كامل
-      // اخترت الأكثر أمانًا: signOut كامل
+      if (recoveryFlowNotifier.value == true) {
+        _resetIdleTimer();
+        return;
+      }
+
+      final hasLock = await FastLoginService.hasAnyLockEnabled();
+      if (hasLock) {
+        _forceToFastLogin();
+        return;
+      }
+
+      // ✅ على الويب لا تعمل signOut تلقائي بسبب الخمول
+      if (kIsWeb) {
+        _forceToLogin();
+        return;
+      }
+
       await _logout();
+    } finally {
+      _locking = false;
     }
   }
 
   Future<void> _logout() async {
+    if (_signOutRunning) {
+      _forceToLogin();
+      return;
+    }
+    _signOutRunning = true;
+
     try {
-      await Supabase.instance.client.auth.signOut();
-    } catch (_) {}
+      final sb = Supabase.instance.client;
+
+      // ✅ إذا لا يوجد Session لا تعمل signOut
+      if (sb.auth.currentSession != null) {
+        await sb.auth.signOut();
+      }
+    } catch (_) {
+      // ignore
+    } finally {
+      _signOutRunning = false;
+    }
+
     _forceToLogin();
   }
 

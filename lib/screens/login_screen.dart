@@ -1,22 +1,31 @@
-﻿// lib/screens/login_screen.dart
+// lib/screens/login_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'package:aqar_user/main.dart'; // themeModeNotifier + langNotifier
+import 'package:provider/provider.dart';
+import 'package:aqar_user/main.dart'; // themeModeNotifier + langNotifier + kPrefGuestMode/kPrefEntryMode
 import 'package:aqar_user/models.dart'; // AdItem
 import 'package:aqar_user/services/auth_service.dart';
 import 'package:aqar_user/services/ads_service.dart';
 
 // ✅ L10n
 import 'package:aqar_user/l10n/app_localizations.dart';
+
+// ✅ Session Provider
+import '../core/session/app_session.dart';
+
+// ✅ للرجوع الآمن من OTP إلى Login
+
+// ✅ Internet guard (NEW)
+import '../services/connectivity_guard.dart';
+import '../shared/widgets/no_internet_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -29,24 +38,27 @@ class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   static const Color _bankColor = Color(0xFF0F766E);
 
+  // ✅ سياسة محاولات الدخول (محليًا)
+  static const int _maxAttemptsBeforeLock = 3;
+  static const Duration _lockDuration = Duration(minutes: 5);
+
+  // ✅ مفتاح OTP verified
+  String _otpVerifiedKey(String uid) => 'otp_verified_$uid';
+
   final TextEditingController _usernameController =
-      TextEditingController(); // username = national id (10 digits)
+      TextEditingController(); // 10 digits
   final TextEditingController _passwordController = TextEditingController();
 
   final FocusNode _usernameFocus = FocusNode();
   final FocusNode _passwordFocus = FocusNode();
 
   bool rememberMe = false;
-
-  // ✅ ملاحظة: “الدخول السريع” لم يعد Checkbox.
-  // صار زر/بلاطة (Tile) يفتح شاشة الدخول السريع.
-  // نخزن تفعيل الدخول السريع داخل شاشة الدخول السريع نفسها إن رغبت.
   bool fastLogin = false;
 
   bool obscurePassword = true;
   bool isBusy = false;
 
-  // ✅ CAPTCHA (محلي فقط، إضافي)
+  // CAPTCHA
   bool showCaptcha = false;
   String captchaText = '';
   String userCaptchaInput = '';
@@ -60,20 +72,18 @@ class _LoginScreenState extends State<LoginScreen>
   List<AdItem> _ads = [];
 
   // Remember-me masking
-  String? _storedUsername; // ✅ username الحقيقي 10 أرقام
+  String? _storedUsername;
   bool _maskedPrefillActive = false;
   bool _usernameEdited = false;
 
-  // brute-force محلي (إضافي)
+  // brute-force محلي
   Map<String, int> _failedAttempts = {};
   Map<String, DateTime> _lockoutUntil = {};
 
-  // ✅ DB checks for ✅ icons (وجود username)
+  // DB checks
   Timer? _userCheckDebounce;
   bool _checkingUsername = false;
   bool _usernameExists = false;
-
-  // ✅ show red error icons only after checks
   bool _usernameCheckDone = false;
 
   // Animation
@@ -87,13 +97,11 @@ class _LoginScreenState extends State<LoginScreen>
 
   Color get _pageBg =>
       _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
-  Color get _textPrimary =>
-      _isLight ? const Color(0xFF0B1220) : Colors.white;
+  Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
 
-  Color get _fieldFill =>
-      _isLight ? Colors.white : const Color(0xFF0F1425);
+  Color get _fieldFill => _isLight ? Colors.white : const Color(0xFF0F1425);
   Color get _fieldBorder =>
       _isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
 
@@ -105,12 +113,21 @@ class _LoginScreenState extends State<LoginScreen>
   Color get _errorColor => const Color(0xFFDC2626);
   Color get _successColor => const Color(0xFF059669);
 
-  // ✅ مقياس خطوط للشاشات الصغيرة بدون التفاف (يبقى كما هو على الشاشات الكبيرة)
   bool _isSmallUi(BuildContext context) =>
       MediaQuery.of(context).size.width < 380;
-
   double _font(BuildContext context, double desktop, double mobile) =>
       _isSmallUi(context) ? mobile : desktop;
+
+  // =======================
+  // ✅ Internet guard helper
+  // =======================
+  Future<bool> _ensureInternetOrAlert() async {
+    final ok = await ConnectivityGuard.hasInternet();
+    if (!ok && mounted) {
+      await showNoInternetDialog(context, isAr: _isAr);
+    }
+    return ok;
+  }
 
   @override
   void initState() {
@@ -127,12 +144,12 @@ class _LoginScreenState extends State<LoginScreen>
 
     _generateCaptcha();
     _loadPreferences();
-    _loadAds(); // ✅ مرة واحدة فقط (تم حذف التكرار)
+    _loadAds();
 
-    // ✅ لا تقم بالتنقل تلقائياً من شاشة الدخول عند وجود Session.
-    // التوجيه العام يتم عبر GateScreen فقط لتجنب "تنقل مزدوج" يسبب كراش.
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // ✅ تنبيه مبكر إذا لا يوجد إنترنت (بدون منع فتح الشاشة)
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _ensureInternetOrAlert();
       if (!mounted) return;
       _usernameFocus.requestFocus();
     });
@@ -161,27 +178,6 @@ class _LoginScreenState extends State<LoginScreen>
     });
   }
 
-  // (موجود للاحتياج عندك، حتى لو لم تستخدمه حالياً)
-  bool _isRecoveryLinkNow() {
-    if (!kIsWeb) return false;
-    try {
-      final uri = Uri.base;
-
-      final qType = (uri.queryParameters['type'] ?? '').toLowerCase();
-      if (qType == 'recovery') return true;
-
-      final frag = uri.fragment;
-      if (frag.isNotEmpty) {
-        final params = Uri.splitQueryString(frag);
-        final fType = (params['type'] ?? '').toLowerCase();
-        if (fType == 'recovery') return true;
-      }
-      return false;
-    } catch (_) {
-      return false;
-    }
-  }
-
   @override
   void dispose() {
     _userCheckDebounce?.cancel();
@@ -195,6 +191,49 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
+  // =======================
+  // Session hygiene helpers
+  // =======================
+
+  Future<void> _ensureNotGuestMode() async {
+    // ✅ متوافق مع StartRouter/main.dart
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kPrefGuestMode, false);
+      await prefs.setString(kPrefEntryMode, 'user');
+
+      // تنظيف أي مفاتيح قديمة (اختياري)
+      await prefs.remove('is_guest');
+      await prefs.remove('guest');
+    } catch (_) {}
+  }
+
+  Future<void> _setGuestModePrefs() async {
+    // ✅ متوافق مع StartRouter/main.dart
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(kPrefGuestMode, true);
+      await prefs.setString(kPrefEntryMode, 'guest');
+
+      // تنظيف أي مفاتيح قديمة (اختياري)
+      await prefs.setBool('is_guest', true);
+      await prefs.setBool('guest', true);
+    } catch (_) {}
+  }
+
+  Future<void> _clearOtpVerifiedForCurrentSession() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_otpVerifiedKey(uid));
+    } catch (_) {}
+  }
+
+  // =======================
+  // Existing helpers
+  // =======================
+
   void _resetDbFlags() {
     _checkingUsername = false;
     _usernameExists = false;
@@ -202,20 +241,6 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   bool _looksLikeUsername10Digits(String s) => RegExp(r'^\d{10}$').hasMatch(s);
-
-  /// ✅ فحص وجود username عبر نفس مسار الأمان (RPC get_email_by_national_id خلف AuthService.getEmailByUsername)
-  Future<String?> _requestOtpDev(String username) async {
-    try {
-      final sb = Supabase.instance.client;
-      final res =
-          await sb.rpc('request_otp_dev', params: {'p_username': username});
-      final code = (res ?? '').toString().trim();
-      if (code.isEmpty) return null;
-      return code;
-    } catch (_) {
-      return null;
-    }
-  }
 
   Future<bool> _usernameExistsRpc(String username) async {
     final email = await AuthService.getEmailByUsername(username);
@@ -266,7 +291,7 @@ class _LoginScreenState extends State<LoginScreen>
     rememberMe = prefs.getBool('rememberMe') ?? false;
     fastLogin = prefs.getBool('fastLogin') ?? false;
 
-    // ✅ language + theme
+    // language + theme
     final savedLang = prefs.getString('language') ?? langNotifier.value;
     langNotifier.value = (savedLang == 'en') ? 'en' : 'ar';
 
@@ -276,7 +301,7 @@ class _LoginScreenState extends State<LoginScreen>
       orElse: () => ThemeMode.system,
     );
 
-    // ✅ brute-force stored
+    // brute-force stored
     final attemptsJson = prefs.getString('failedAttempts') ?? '{}';
     final lockoutJson = prefs.getString('lockoutUntil') ?? '{}';
     try {
@@ -288,21 +313,20 @@ class _LoginScreenState extends State<LoginScreen>
       _lockoutUntil = {};
     }
 
-    // ✅ remember username masked (stored as real username; shown masked)
+    // remember username masked
     if (rememberMe) {
       final u = (prefs.getString('username') ?? '').trim();
       _storedUsername = u.isEmpty ? null : u;
       if ((_storedUsername ?? '').isNotEmpty) _applyMaskedUsernamePrefill();
     }
 
-    // ✅ never keep password
+    // never keep password
     if (prefs.containsKey('password')) {
       await prefs.remove('password');
     }
 
     if (!mounted) return;
     setState(() {});
-
     _checkUsernameExistsDebounced();
   }
 
@@ -325,7 +349,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     final real = (_getRealUsername() ?? '').trim();
     if (_looksLikeUsername10Digits(real)) {
-      await prefs.setString('username', real); // ✅ نخزن الحقيقي
+      await prefs.setString('username', real);
       _storedUsername = real;
     }
 
@@ -389,6 +413,12 @@ class _LoginScreenState extends State<LoginScreen>
     userCaptchaInput = '';
   }
 
+  int _remainingAttempts(String username) {
+    final used = (_failedAttempts[username] ?? 0);
+    final rem = _maxAttemptsBeforeLock - used;
+    return rem < 0 ? 0 : rem;
+  }
+
   Future<bool> _isAccountLockedLocal(String username) async {
     final now = DateTime.now();
     final lockoutTime = _lockoutUntil[username];
@@ -400,8 +430,8 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() {
         loginError = true;
         loginErrorText = _isAr
-            ? 'الحساب مؤقتاً مغلق. حاول بعد $minutesLeft دقيقة و $secondsLeft ثانية'
-            : 'Account temporarily locked. Try again in $minutesLeft minutes $secondsLeft seconds';
+            ? 'الحساب مقفل مؤقتاً. حاول بعد $minutesLeft دقيقة و $secondsLeft ثانية.'
+            : 'Account temporarily locked. Try again in $minutesLeft minutes $secondsLeft seconds.';
       });
       return true;
     }
@@ -412,14 +442,24 @@ class _LoginScreenState extends State<LoginScreen>
     final attempts = (_failedAttempts[username] ?? 0) + 1;
     _failedAttempts[username] = attempts;
 
-    if (attempts >= 3) {
-      _lockoutUntil[username] = DateTime.now().add(const Duration(minutes: 5));
+    final rem = _remainingAttempts(username);
+
+    if (attempts >= _maxAttemptsBeforeLock) {
+      _lockoutUntil[username] = DateTime.now().add(_lockDuration);
       setState(() {
         showCaptcha = true;
         _generateCaptcha();
       });
     }
+
     await _savePreferences();
+
+    setState(() {
+      loginError = true;
+      loginErrorText = _isAr
+          ? 'بيانات الدخول غير صحيحة. المحاولات المتبقية: $rem'
+          : 'Invalid credentials. Attempts left: $rem';
+    });
   }
 
   Future<void> _resetFailedAttemptsLocal(String username) async {
@@ -428,13 +468,14 @@ class _LoginScreenState extends State<LoginScreen>
     await _savePreferences();
   }
 
-  // ✅ فتح شاشة الدخول السريع (بدلاً من Checkbox)
+  // ✅ فتح شاشة الدخول السريع
   Future<void> _openQuickLogin() async {
-    final t = AppLocalizations.of(context)!;
+    final okNet = await _ensureInternetOrAlert();
+    if (!okNet) return;
+
     final u = (_getRealUsername() ?? '').trim();
     final normalized = _normalizeNumbers(u).trim();
 
-    // شرط: لازم يكون المستخدم "مسجل" (أي username موجود بالنظام)
     if (!_looksLikeUsername10Digits(normalized)) {
       setState(() {
         loginError = true;
@@ -456,18 +497,21 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    // ✅ انتقل لشاشة الدخول السريع
-    // ملاحظة: هذه الشاشة يجب أن تنفذ دخول (PIN/Face/Fingerprint) ثم تذهب مباشرة للـ Dashboard
-    // بدون المرور على OTP.
-    Navigator.pushNamed(
-      context,
-      '/quickLogin',
-      arguments: {'username': normalized},
-    );
+    await _ensureNotGuestMode();
+
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, '/fastLogin');
   }
 
+  // =======================
+  // ✅ LOGIN (User)
+  // =======================
+
   Future<void> _login() async {
-    if (isBusy) return; // ✅ منع الضغط المزدوج
+    if (isBusy) return;
+
+    final okNet = await _ensureInternetOrAlert();
+    if (!okNet) return;
 
     final t = AppLocalizations.of(context)!;
 
@@ -482,6 +526,9 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
+    // ✅ مهم: أي دخول مستخدم يلغي وضع الضيف حسب مفاتيح StartRouter
+    await _ensureNotGuestMode();
+
     final u = _normalizeNumbers(username).trim();
     if (!_looksLikeUsername10Digits(u)) {
       setState(() {
@@ -494,7 +541,6 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    // ✅ قفل محلي (إضافي) فقط
     if (await _isAccountLockedLocal(u)) return;
 
     if (showCaptcha) {
@@ -510,7 +556,6 @@ class _LoginScreenState extends State<LoginScreen>
       }
     }
 
-    // ✅ تحميل واحد فقط: نبقي isBusy=true طوال العملية وحتى التنقل
     setState(() {
       isBusy = true;
       loginError = false;
@@ -519,7 +564,6 @@ class _LoginScreenState extends State<LoginScreen>
 
     final lang = langNotifier.value == 'en' ? 'en' : 'ar';
 
-    // ✅ 1) تسجيل الدخول بكلمة المرور عبر AuthService
     final result = await AuthService.login(
       username: u,
       password: password,
@@ -529,7 +573,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
 
     if (!result.ok) {
-      // ✅ لو الحساب مقفل (من DB status) نظهر رسالة واضحة
       if (result.locked) {
         setState(() {
           isBusy = false;
@@ -543,24 +586,18 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
+      setState(() => isBusy = false);
       await _updateFailedAttemptsLocal(u);
-      setState(() {
-        isBusy = false;
-        loginError = true;
-        loginErrorText = result.message.isEmpty
-            ? (_isAr ? 'فشل تسجيل الدخول' : 'Login failed')
-            : result.message;
-      });
       return;
     }
 
     final uid = Supabase.instance.client.auth.currentUser?.id;
-    if (uid == null) {
+    if (uid == null || uid.isEmpty) {
       setState(() {
         isBusy = false;
         loginError = true;
         loginErrorText = _isAr
-            ? 'تم التحقق لكن لم يتم إنشاء جلسة دخول (Session).'
+            ? 'تم التحقق لكن لم يتم إنشاء جلسة دخول.'
             : 'Verified but no session created.';
       });
       return;
@@ -575,56 +612,82 @@ class _LoginScreenState extends State<LoginScreen>
 
     TextInput.finishAutofillContext(shouldSave: true);
 
-    // ✅ 2) فحص الجهاز المعروف عبر RPC
+    // ✅ أمان: بداية مسار OTP => امسح otp_verified
+    await _clearOtpVerifiedForCurrentSession();
+
     final known = await AuthService.isDeviceKnown(u);
 
-    // ✅ 3) لو fastLogin + جهاز معروف -> دخول مباشر (بدون OTP)
-    // هذا المسار يحقق شرطك: (الدخول السريع/الوجه/البصمة) لا يمر على التحقق
+    // ✅ fast-login + known => دخول مباشر
     if (fastLogin && known) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_otpVerifiedKey(uid), true);
+
+        // ✅ تأكيد وضع المستخدم (StartRouter)
+        await prefs.setBool(kPrefGuestMode, false);
+        await prefs.setString(kPrefEntryMode, 'user');
+      } catch (_) {}
+
+      await context.read<AppSession>().setUser(uid);
+
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/userDashboard');
+      setState(() => isBusy = false);
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/userDashboard',
+        (r) => false,
+      );
       return;
     }
 
-    // ✅ 4) خلاف ذلك -> طلب OTP عبر RPC
-    final otpOk = await AuthService.requestOtp(u);
+    // ✅ deviceId (يمرر إلى Verify)
+    final deviceId = '${DateTime.now().millisecondsSinceEpoch}_$u';
 
-    String? devCode;
-    bool ok = otpOk;
-
-    if (!ok && kDebugMode) {
-      devCode = await _requestOtpDev(u);
-      ok = devCode != null && devCode!.isNotEmpty;
+    // ✅ request_inapp_otp ONLY (لا request_otp)
+    bool otpOk = false;
+    try {
+      await Supabase.instance.client.rpc(
+        'request_inapp_otp',
+        params: {'p_username': u},
+      );
+      otpOk = true;
+    } catch (_) {
+      otpOk = false;
     }
 
-    if (!ok) {
-      if (!mounted) return;
+    if (!otpOk) {
       setState(() {
         isBusy = false;
         loginError = true;
         loginErrorText = _isAr
-            ? 'تعذر إرسال رمز التحقق (OTP). حاول مرة أخرى.'
+            ? 'تعذر إرسال رمز التحقق. حاول مرة أخرى.'
             : 'Failed to send OTP. Please try again.';
       });
       return;
     }
 
-    // ✅ 5) انتقل لشاشة التحقق OTP
-    // (التسجيل/الربط للجهاز بعد نجاح OTP يتم داخل verify_screen)
     final args = {
       'next': '/userDashboard',
+      'nextArgs': <String, dynamic>{},
       'username': u,
-      'registerDeviceOnSuccess': !known,
-      if (devCode != null) 'code': devCode,
+      'deviceId': deviceId, // ✅ pass deviceId
+      'registerDeviceOnSuccess': !known, // ✅ register only if not known
+      'backToLogin': true,
     };
 
     if (!mounted) return;
+    setState(() => isBusy = false);
+
     Navigator.pushReplacementNamed(
       context,
       '/verify',
       arguments: args,
     );
   }
+
+  // =======================
+  // UI
+  // =======================
 
   @override
   Widget build(BuildContext context) {
@@ -709,7 +772,6 @@ class _LoginScreenState extends State<LoginScreen>
       mainAxisSize: MainAxisSize.min,
       children: [
         _topBarUnified(t: t),
-
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -728,7 +790,6 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ],
         ),
-
         const SizedBox(height: 6),
         ScaleTransition(
           scale: _pulse,
@@ -742,9 +803,7 @@ class _LoginScreenState extends State<LoginScreen>
                 Icon(Icons.apartment_rounded, size: 96, color: _textPrimary),
           ),
         ),
-
         const SizedBox(height: 8),
-
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: FittedBox(
@@ -763,9 +822,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ),
-
         const SizedBox(height: 8),
-
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: FittedBox(
@@ -782,7 +839,6 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ),
-
         const SizedBox(height: 16),
         AutofillGroup(
           child: Column(
@@ -793,12 +849,10 @@ class _LoginScreenState extends State<LoginScreen>
             ],
           ),
         ),
-
         if (showCaptcha) ...[
           const SizedBox(height: 16),
           _buildCaptchaSection(t: t),
         ],
-
         const SizedBox(height: 10),
         Row(
           children: [
@@ -840,18 +894,18 @@ class _LoginScreenState extends State<LoginScreen>
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-
-            // ✅ بديل Checkbox الدخول السريع:
-            // بلاطة صغيرة قابلة للنقر تفتح شاشة الدخول السريع
             const SizedBox(width: 10),
             _quickLoginTile(t: t),
           ],
         ),
-
         Align(
           alignment: AlignmentDirectional.centerStart,
           child: TextButton(
-            onPressed: () => Navigator.pushNamed(context, '/resetPassword'),
+            onPressed: () async {
+              final okNet = await _ensureInternetOrAlert();
+              if (!okNet) return;
+              Navigator.pushNamed(context, '/resetPassword');
+            },
             child: FittedBox(
               fit: BoxFit.scaleDown,
               alignment: AlignmentDirectional.centerStart,
@@ -867,7 +921,6 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ),
-
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 180),
           child: loginError
@@ -903,7 +956,6 @@ class _LoginScreenState extends State<LoginScreen>
                 )
               : const SizedBox.shrink(key: ValueKey('noerr')),
         ),
-
         SizedBox(
           width: double.infinity,
           height: 52,
@@ -947,7 +999,6 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
         ),
-
         const SizedBox(height: 8),
         TextButton(
           onPressed: () {
@@ -956,11 +1007,9 @@ class _LoginScreenState extends State<LoginScreen>
             } catch (_) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(
-                    _isAr
-                        ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
-                        : 'Register screen is not enabled yet',
-                  ),
+                  content: Text(_isAr
+                      ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
+                      : 'Register screen is not enabled yet'),
                 ),
               );
             }
@@ -974,6 +1023,47 @@ class _LoginScreenState extends State<LoginScreen>
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // ✅ زر واضح: الدخول كضيف (متوافق مع AppSession + StartRouter)
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: _bankColor.withOpacity(0.55)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: isBusy
+                ? null
+                : () async {
+                    final okNet = await _ensureInternetOrAlert();
+                    if (!okNet) return;
+
+                    try {
+                      await Supabase.instance.client.auth.signOut();
+                    } catch (_) {}
+
+                    await context.read<AppSession>().setGuest();
+
+                    // ✅ مهم: احفظ وضع الضيف لمطابقة StartRouter
+                    await _setGuestModePrefs();
+
+                    if (!mounted) return;
+                    Navigator.pushNamedAndRemoveUntil(
+                      context,
+                      '/',
+                      (r) => false,
+                    );
+                  },
+            icon: const Icon(Icons.person_outline),
+            label: Text(
+              _isAr ? 'الدخول كضيف' : 'Continue as guest',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
           ),
         ),
       ],
@@ -1041,12 +1131,10 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ✅ شريط علوي صغير جداً: مربعين دائماً في سطر واحد
   Widget _topBarUnified({required AppLocalizations t}) {
     return LayoutBuilder(
       builder: (context, c) {
         final langShort = (langNotifier.value == 'en') ? 'EN' : 'AR';
-
         final themeShort = _currentTheme == ThemeMode.light
             ? '☀'
             : (_currentTheme == ThemeMode.dark ? '🌙' : 'AUTO');
@@ -1134,7 +1222,8 @@ class _LoginScreenState extends State<LoginScreen>
       barrierDismissible: true,
       builder: (ctx) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           backgroundColor: Colors.transparent,
           child: ValueListenableBuilder<String>(
             valueListenable: langNotifier,
@@ -1167,8 +1256,9 @@ class _LoginScreenState extends State<LoginScreen>
                       children: [
                         _sheetHeader(
                           title: t.language,
-                          subtitle:
-                              _isAr ? 'اختر لغة التطبيق' : 'Choose app language',
+                          subtitle: _isAr
+                              ? 'اختر لغة التطبيق'
+                              : 'Choose app language',
                         ),
                         const SizedBox(height: 12),
                         _radioTile(
@@ -1209,7 +1299,8 @@ class _LoginScreenState extends State<LoginScreen>
       barrierDismissible: true,
       builder: (ctx) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           backgroundColor: Colors.transparent,
           child: ValueListenableBuilder<ThemeMode>(
             valueListenable: themeModeNotifier,
@@ -1409,9 +1500,13 @@ class _LoginScreenState extends State<LoginScreen>
       suffix = SizedBox(
         width: 44,
         height: 44,
-        child: Center(child: Icon(Icons.verified_rounded, color: _successColor)),
+        child:
+            Center(child: Icon(Icons.verified_rounded, color: _successColor)),
       );
-    } else if (_usernameCheckDone && is10 && !_usernameExists && raw.isNotEmpty) {
+    } else if (_usernameCheckDone &&
+        is10 &&
+        !_usernameExists &&
+        raw.isNotEmpty) {
       suffix = SizedBox(
         width: 44,
         height: 44,
@@ -1448,12 +1543,13 @@ class _LoginScreenState extends State<LoginScreen>
           fontSize: _font(context, 14, 12.0),
         ),
         counterText: '',
-        isDense: false,
         contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 16, 14, 16),
         prefixIcon: Icon(Icons.badge_outlined, color: _iconColor),
-        prefixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+        prefixIconConstraints:
+            const BoxConstraints(minWidth: 46, minHeight: 46),
         suffixIcon: suffix,
-        suffixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+        suffixIconConstraints:
+            const BoxConstraints(minWidth: 46, minHeight: 46),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -1500,10 +1596,10 @@ class _LoginScreenState extends State<LoginScreen>
           fontWeight: FontWeight.w800,
           fontSize: _font(context, 14, 12.0),
         ),
-        isDense: false,
         contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 16, 14, 16),
         prefixIcon: Icon(Icons.lock_outline, color: _iconColor),
-        prefixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+        prefixIconConstraints:
+            const BoxConstraints(minWidth: 46, minHeight: 46),
         suffixIcon: IconButton(
           icon: Icon(
             obscurePassword ? Icons.visibility : Icons.visibility_off,
@@ -1514,7 +1610,8 @@ class _LoginScreenState extends State<LoginScreen>
               ? (_isAr ? 'إظهار' : 'Show')
               : (_isAr ? 'إخفاء' : 'Hide'),
         ),
-        suffixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+        suffixIconConstraints:
+            const BoxConstraints(minWidth: 46, minHeight: 46),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -1584,11 +1681,13 @@ class _LoginScreenState extends State<LoginScreen>
               children: [
                 for (int i = 0; i < captchaText.length; i++)
                   Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                    margin:
+                        const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color:
-                          _isLight ? const Color(0xFFF3F4F6) : const Color(0xFF374151),
+                      color: _isLight
+                          ? const Color(0xFFF3F4F6)
+                          : const Color(0xFF374151),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -1616,9 +1715,12 @@ class _LoginScreenState extends State<LoginScreen>
             ),
             decoration: InputDecoration(
               hintText: _isAr ? 'أدخل الأحرف أعلاه' : 'Enter characters above',
-              hintStyle: TextStyle(color: _hintColor, fontWeight: FontWeight.w800),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              hintStyle:
+                  TextStyle(color: _hintColor, fontWeight: FontWeight.w800),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding:
+                  const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             ),
           ),
           const SizedBox(height: 8),
@@ -1630,7 +1732,8 @@ class _LoginScreenState extends State<LoginScreen>
                 icon: Icon(Icons.refresh, size: 16, color: _iconColor),
                 label: Text(
                   _isAr ? 'تحديث الرمز' : 'Refresh',
-                  style: TextStyle(color: _iconColor, fontWeight: FontWeight.w900),
+                  style:
+                      TextStyle(color: _iconColor, fontWeight: FontWeight.w900),
                 ),
               ),
               TextButton.icon(
@@ -1638,7 +1741,8 @@ class _LoginScreenState extends State<LoginScreen>
                 icon: Icon(Icons.close, size: 16, color: _errorColor),
                 label: Text(
                   _isAr ? 'تخطي' : 'Skip',
-                  style: TextStyle(color: _errorColor, fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                      color: _errorColor, fontWeight: FontWeight.w900),
                 ),
               ),
             ],
@@ -1677,7 +1781,8 @@ class _LoginScreenState extends State<LoginScreen>
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 860),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
                 child: Row(
                   children: [
                     Expanded(
@@ -1778,7 +1883,9 @@ class _LoginScreenState extends State<LoginScreen>
             borderRadius: BorderRadius.circular(99),
             color: active
                 ? _bankColor
-                : (_isLight ? const Color(0xFFBFD0FF) : const Color(0xFF2B3A6B)),
+                : (_isLight
+                    ? const Color(0xFFBFD0FF)
+                    : const Color(0xFF2B3A6B)),
           ),
         );
       }),
@@ -1820,7 +1927,8 @@ class _PhoneMockup extends StatelessWidget {
     final screen = isLight ? Colors.white : const Color(0xFF0F1425);
 
     final titleColor = isLight ? const Color(0xFF0B1220) : Colors.white;
-    final subColor = isLight ? const Color(0xFF4A5568) : const Color(0xFFCBD5E1);
+    final subColor =
+        isLight ? const Color(0xFF4A5568) : const Color(0xFFCBD5E1);
 
     return Center(
       child: AspectRatio(
@@ -1849,8 +1957,9 @@ class _PhoneMockup extends StatelessWidget {
                     width: 110,
                     height: 16,
                     decoration: BoxDecoration(
-                      color:
-                          isLight ? const Color(0xFFE5E7EB) : const Color(0xFF1F2A44),
+                      color: isLight
+                          ? const Color(0xFFE5E7EB)
+                          : const Color(0xFF1F2A44),
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),

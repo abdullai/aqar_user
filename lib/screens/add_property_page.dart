@@ -1,5 +1,3 @@
-﻿import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -105,13 +103,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
     // ✅ حماية: لا تسمح بفتح صفحة الإضافة إلا لصاحب الجلسة
     final uid = _sb.auth.currentUser?.id ?? '';
-    if (uid.isEmpty || (widget.userId.trim().isNotEmpty && widget.userId.trim() != uid)) {
+    if (uid.isEmpty ||
+        (widget.userId.trim().isNotEmpty && widget.userId.trim() != uid)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
-            content: Text(_isAr ? 'غير مصرح لك بفتح هذه الصفحة' : 'Not allowed to open this page'),
+            content: Text(_isAr
+                ? 'غير مصرح لك بفتح هذه الصفحة'
+                : 'Not allowed to open this page'),
           ),
         );
         Navigator.pop(context);
@@ -150,7 +151,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   // تطبيع الأرقام العربية والفارسية
   static String normalizeNumbers(String input) {
     const arabicIndic = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-    const easternArabicIndic = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+    const easternArabicIndic = [
+      '۰',
+      '۱',
+      '۲',
+      '۳',
+      '۴',
+      '۵',
+      '۶',
+      '۷',
+      '۸',
+      '۹'
+    ];
 
     var out = input;
     for (int i = 0; i < 10; i++) {
@@ -167,7 +179,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   String _resolveOwnerId() {
     final user = _sb.auth.currentUser;
-    return widget.userId.trim().isNotEmpty ? widget.userId.trim() : (user?.id ?? '');
+    return widget.userId.trim().isNotEmpty
+        ? widget.userId.trim()
+        : (user?.id ?? '');
   }
 
   // ✅ تعديل مهم: منع التكرار + mounted checks + لا تغيّر state بعد dispose
@@ -216,7 +230,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'فشل اختيار الصور: $e' : 'Image pick failed: $e'),
+          content:
+              Text(_isAr ? 'فشل اختيار الصور: $e' : 'Image pick failed: $e'),
         ),
       );
     }
@@ -233,8 +248,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   // اختيار الخريطة
   Future<void> _openMapPicker() async {
-    final initial =
-        (_lat != null && _lng != null) ? LatLng(_lat!, _lng!) : const LatLng(24.7136, 46.6753);
+    final initial = (_lat != null && _lng != null)
+        ? LatLng(_lat!, _lng!)
+        : const LatLng(24.7136, 46.6753);
 
     final res = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
@@ -251,8 +267,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final lng = res['lng'];
 
     setState(() {
-      _lat = (lat is num) ? lat.toDouble() : double.tryParse(lat?.toString() ?? '');
-      _lng = (lng is num) ? lng.toDouble() : double.tryParse(lng?.toString() ?? '');
+      _lat = (lat is num)
+          ? lat.toDouble()
+          : double.tryParse(lat?.toString() ?? '');
+      _lng = (lng is num)
+          ? lng.toDouble()
+          : double.tryParse(lng?.toString() ?? '');
       _error = null;
     });
   }
@@ -265,7 +285,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
       final up = await _sb
           .from('users_profiles')
-          .select('first_name_ar, fourth_name_ar, first_name_en, fourth_name_en, username, email')
+          .select(
+              'first_name_ar, fourth_name_ar, first_name_en, fourth_name_en, username, email')
           .eq('user_id', ownerId)
           .maybeSingle();
 
@@ -295,7 +316,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             .maybeSingle();
 
         if (p != null) {
-          final name = (p['full_name'] ?? p['name'] ?? p['username'] ?? p['email'])?.toString();
+          final name =
+              (p['full_name'] ?? p['name'] ?? p['username'] ?? p['email'])
+                  ?.toString();
           if (name != null && name.trim().isNotEmpty) {
             _ownerFirstName = name.trim();
           }
@@ -314,7 +337,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
       setState(() => _phoneLoading = true);
 
-      final p = await _sb.from('profiles').select('phone').eq('id', ownerId).maybeSingle();
+      final p = await _sb
+          .from('profiles')
+          .select('phone')
+          .eq('id', ownerId)
+          .maybeSingle();
       final ph = (p?['phone'])?.toString().trim();
 
       if (!mounted) return;
@@ -375,14 +402,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: cs.surface,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
           title: Text(
             _isAr ? 'تم إضافة الإعلان' : 'Listing added',
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           content: Text(
-            _isAr ? 'هل تريد إضافة إعلان آخر؟' : 'Do you want to add another listing?',
-            style: TextStyle(color: cs.onSurfaceVariant, fontWeight: FontWeight.w700),
+            _isAr
+                ? 'هل تريد إضافة إعلان آخر؟'
+                : 'Do you want to add another listing?',
+            style: TextStyle(
+                color: cs.onSurfaceVariant, fontWeight: FontWeight.w700),
           ),
           actions: [
             TextButton(
@@ -502,14 +533,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'latitude': (_useMapCoords ? _lat : null),
       'longitude': (_useMapCoords ? _lng : null),
       'video_url': _videoUrl.text.trim().isEmpty ? null : _videoUrl.text.trim(),
-      'virtual_tour_url': _virtualTourUrl.text.trim().isEmpty ? null : _virtualTourUrl.text.trim(),
+      'virtual_tour_url': _virtualTourUrl.text.trim().isEmpty
+          ? null
+          : _virtualTourUrl.text.trim(),
       'availability_date': _availabilityDate == null
           ? null
-          : DateTime(_availabilityDate!.year, _availabilityDate!.month, _availabilityDate!.day)
+          : DateTime(_availabilityDate!.year, _availabilityDate!.month,
+                  _availabilityDate!.day)
               .toIso8601String()
               .substring(0, 10),
       'amenities': _amenitiesPayloadOrNull(),
-      'address_line': _mergeAddressWithLocationIfNeeded(hasLocationColumn: hasLocationColumn),
+      'address_line': _mergeAddressWithLocationIfNeeded(
+          hasLocationColumn: hasLocationColumn),
     };
 
     if (hasLocationColumn) {
@@ -552,7 +587,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
     final user = _sb.auth.currentUser;
     if (user == null) {
-      setState(() => _error = _isAr ? 'يجب تسجيل الدخول أولاً' : 'You must sign in first');
+      setState(() =>
+          _error = _isAr ? 'يجب تسجيل الدخول أولاً' : 'You must sign in first');
       return;
     }
 
@@ -567,17 +603,22 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (!ok) return;
 
     if (_images.isEmpty) {
-      setState(() => _error = _isAr ? 'اختر صورة واحدة على الأقل' : 'Pick at least one image');
+      setState(() => _error =
+          _isAr ? 'اختر صورة واحدة على الأقل' : 'Pick at least one image');
       return;
     }
 
     if (_useMapCoords && (_lat == null || _lng == null)) {
-      setState(() => _error = _isAr ? 'الإحداثيات إلزامية عند تفعيل خيار الخريطة' : 'Coordinates are required when map option is enabled');
+      setState(() => _error = _isAr
+          ? 'الإحداثيات إلزامية عند تفعيل خيار الخريطة'
+          : 'Coordinates are required when map option is enabled');
       return;
     }
 
     if (_usePhone && normalizeNumbers(_phone.text).trim().isEmpty) {
-      setState(() => _error = _isAr ? 'رقم التواصل إلزامي عند تفعيل الخيار' : 'Phone is required when enabled');
+      setState(() => _error = _isAr
+          ? 'رقم التواصل إلزامي عند تفعيل الخيار'
+          : 'Phone is required when enabled');
       return;
     }
 
@@ -585,11 +626,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
     try {
       bool hasLocationColumn = true;
-      Map<String, dynamic> payload = _buildPayload(ownerId: ownerId, hasLocationColumn: hasLocationColumn);
+      Map<String, dynamic> payload =
+          _buildPayload(ownerId: ownerId, hasLocationColumn: hasLocationColumn);
 
       Map<String, dynamic> inserted;
       try {
-        inserted = await _sb.from('properties').insert(payload).select('id').single();
+        inserted =
+            await _sb.from('properties').insert(payload).select('id').single();
       } catch (e) {
         final msg = e.toString().toLowerCase();
 
@@ -599,13 +642,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
         if (msg.contains('location') && msg.contains('does not exist')) {
           hasLocationColumn = false;
-          payload = _buildPayload(ownerId: ownerId, hasLocationColumn: hasLocationColumn);
+          payload = _buildPayload(
+              ownerId: ownerId, hasLocationColumn: hasLocationColumn);
           if (msg.contains('contact_phone') && msg.contains('does not exist')) {
             payload.remove('contact_phone');
           }
         }
 
-        inserted = await _sb.from('properties').insert(payload).select('id').single();
+        inserted =
+            await _sb.from('properties').insert(payload).select('id').single();
       }
 
       final propertyId = inserted['id'] as String;
@@ -634,7 +679,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         await bucket.uploadBinary(
           path,
           bytesToUpload,
-          fileOptions: const FileOptions(upsert: false, contentType: 'image/jpeg'),
+          fileOptions:
+              const FileOptions(upsert: false, contentType: 'image/jpeg'),
         );
 
         imagesToInsert.add({
@@ -665,7 +711,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       initialDate: _availabilityDate ?? now,
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 10),
-      helpText: _isAr ? 'تاريخ التوفر (اختياري)' : 'Availability date (optional)',
+      helpText:
+          _isAr ? 'تاريخ التوفر (اختياري)' : 'Availability date (optional)',
       cancelText: _isAr ? 'إلغاء' : 'Cancel',
       confirmText: _isAr ? 'اختيار' : 'Select',
     );
@@ -700,7 +747,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             IconButton(
               tooltip: _isAr ? 'اختيار صور' : 'Pick images',
               icon: _picking
-                  ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.photo_library_outlined),
               onPressed: (_saving || _picking) ? null : _pickImages,
             ),
@@ -721,7 +771,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                       ownerId: widget.userId,
                     ),
                     const SizedBox(height: 12),
-
                     _ImagesCard(
                       isAr: _isAr,
                       images: _images,
@@ -731,7 +780,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                       onMove: _moveImage,
                     ),
                     const SizedBox(height: 12),
-
                     _CoordsCard(
                       isAr: _isAr,
                       saving: _saving,
@@ -750,7 +798,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                       onPick: _openMapPicker,
                     ),
                     const SizedBox(height: 12),
-
                     _PhoneCard(
                       isAr: _isAr,
                       saving: _saving,
@@ -760,7 +807,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                       onToggle: _togglePhone,
                     ),
                     const SizedBox(height: 12),
-
                     _FormCard(
                       isAr: _isAr,
                       formKey: _formKey,
@@ -776,7 +822,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                       currency: _currency,
                       negotiable: _negotiable,
                       onCurrencyChanged: (v) => setState(() => _currency = v),
-                      onNegotiableChanged: (v) => setState(() => _negotiable = v),
+                      onNegotiableChanged: (v) =>
+                          setState(() => _negotiable = v),
                       isAuction: _isAuction,
                       currentBid: _currentBid,
                       onAuctionChanged: (v) {
@@ -794,41 +841,44 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                       totalFloors: _totalFloors,
                       onBedroomsChanged: (v) => setState(() => _bedrooms = v),
                       onBathroomsChanged: (v) => setState(() => _bathrooms = v),
-                      onParkingChanged: (v) => setState(() => _parkingSpots = v),
+                      onParkingChanged: (v) =>
+                          setState(() => _parkingSpots = v),
                       onFurnishedChanged: (v) => setState(() => _furnished = v),
                       onYearBuiltChanged: (v) => setState(() => _yearBuilt = v),
                       onFloorChanged: (v) => setState(() => _floor = v),
-                      onTotalFloorsChanged: (v) => setState(() => _totalFloors = v),
+                      onTotalFloorsChanged: (v) =>
+                          setState(() => _totalFloors = v),
                       amenities: _amenities,
-                      onAmenityToggle: (k, v) => setState(() => _amenities[k] = v),
+                      onAmenityToggle: (k, v) =>
+                          setState(() => _amenities[k] = v),
                       videoUrl: _videoUrl,
                       virtualTourUrl: _virtualTourUrl,
                       availabilityDate: _availabilityDate,
                       onPickAvailability: _pickAvailabilityDate,
-                      onClearAvailability: () => setState(() => _availabilityDate = null),
+                      onClearAvailability: () =>
+                          setState(() => _availabilityDate = null),
                       addressLine: _addressLine,
                     ),
                     const SizedBox(height: 12),
-
                     if (_error != null) _ErrorBox(text: _error!, isAr: _isAr),
                     const SizedBox(height: 12),
-
                     _SubmitBar(
                       isAr: _isAr,
                       saving: _saving,
                       enabled: _canSubmit && !_picking,
                       onSubmit: _submit,
                     ),
-
                     const SizedBox(height: 18),
-
                     if (kIsWeb)
                       Text(
                         _isAr
                             ? 'ملاحظة: على الويب، اختر صورك من الجهاز وسيتم رفعها إلى التخزين.'
                             : 'Note: On web, images are picked from your device and uploaded to storage.',
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: cs.onSurfaceVariant),
                       ),
                   ],
                 ),
@@ -885,7 +935,8 @@ class _HeaderCard extends StatelessWidget {
               color: const Color(0xFF0F766E).withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.add_home_work_outlined, color: Color(0xFF0F766E)),
+            child: const Icon(Icons.add_home_work_outlined,
+                color: Color(0xFF0F766E)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -894,7 +945,8 @@ class _HeaderCard extends StatelessWidget {
               children: [
                 Text(
                   isAr ? 'انشر إعلانك' : 'Publish your listing',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w900),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -949,7 +1001,8 @@ class _ImagesCard extends StatelessWidget {
             children: [
               Text(
                 isAr ? 'الصور (إلزامي)' : 'Images (required)',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
               const Spacer(),
               FilledButton.icon(
@@ -992,15 +1045,20 @@ class _ImagesCard extends StatelessWidget {
                     total: images.length,
                     isAr: isAr,
                     onRemove: saving ? null : () => onRemove(i),
-                    onMoveLeft: saving || i == 0 ? null : () => onMove(i, i - 1),
-                    onMoveRight: saving || i == images.length - 1 ? null : () => onMove(i, i + 1),
+                    onMoveLeft:
+                        saving || i == 0 ? null : () => onMove(i, i - 1),
+                    onMoveRight: saving || i == images.length - 1
+                        ? null
+                        : () => onMove(i, i + 1),
                   );
                 }),
               ),
             ),
           const SizedBox(height: 8),
           Text(
-            isAr ? 'رتّب الصور: الصورة الأولى هي الغلاف.' : 'Reorder: first image is the cover.',
+            isAr
+                ? 'رتّب الصور: الصورة الأولى هي الغلاف.'
+                : 'Reorder: first image is the cover.',
             style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
           ),
         ],
@@ -1051,7 +1109,8 @@ class _ImageThumb extends StatelessWidget {
                 top: 8,
                 left: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.7),
                     borderRadius: BorderRadius.circular(20),
@@ -1140,7 +1199,8 @@ class _CoordsCard extends StatelessWidget {
             children: [
               Text(
                 isAr ? 'الإحداثيات من الخريطة' : 'Map coordinates',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
               const Spacer(),
               Switch(
@@ -1195,7 +1255,9 @@ class _CoordsCard extends StatelessWidget {
           if (enabled && !has) ...[
             const SizedBox(height: 8),
             Text(
-              isAr ? 'ملاحظة: عند تفعيل هذا الخيار يجب اختيار الإحداثيات قبل النشر.' : 'Note: when enabled, you must pick coordinates before publishing.',
+              isAr
+                  ? 'ملاحظة: عند تفعيل هذا الخيار يجب اختيار الإحداثيات قبل النشر.'
+                  : 'Note: when enabled, you must pick coordinates before publishing.',
               style: TextStyle(
                 color: cs.error,
                 fontWeight: FontWeight.w700,
@@ -1244,7 +1306,8 @@ class _PhoneCard extends StatelessWidget {
             children: [
               Text(
                 isAr ? 'رقم التواصل' : 'Contact phone',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
               ),
               const Spacer(),
               if (loading)
@@ -1266,23 +1329,28 @@ class _PhoneCard extends StatelessWidget {
             enabled: enabled && !saving,
             keyboardType: TextInputType.phone,
             decoration: InputDecoration(
-              labelText: isAr ? 'رقم الجوال (من الحساب)' : 'Phone (from profile)',
+              labelText:
+                  isAr ? 'رقم الجوال (من الحساب)' : 'Phone (from profile)',
               hintText: isAr ? 'يُعبّأ تلقائياً' : 'Auto-filled',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
               suffixIcon: enabled ? const Icon(Icons.lock_outline) : null,
             ),
             validator: (v) {
               if (!enabled) return null;
               final s = _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
-              if (s.isEmpty) return isAr ? 'رقم التواصل مطلوب' : 'Phone is required';
+              if (s.isEmpty)
+                return isAr ? 'رقم التواصل مطلوب' : 'Phone is required';
               return null;
             },
           ),
           if (enabled) ...[
             const SizedBox(height: 8),
             Text(
-              isAr ? 'الرقم يُجلب من الحساب ولا يمكن تعديله هنا.' : 'This phone is fetched from your profile and cannot be edited here.',
+              isAr
+                  ? 'الرقم يُجلب من الحساب ولا يمكن تعديله هنا.'
+                  : 'This phone is fetched from your profile and cannot be edited here.',
               style: TextStyle(
                 color: cs.onSurfaceVariant,
                 fontWeight: FontWeight.w700,
@@ -1430,8 +1498,12 @@ class _SubmitBar extends StatelessWidget {
           Expanded(
             child: Text(
               isAr
-                  ? (enabled ? 'جاهز للنشر' : 'أكمل الحقول وأضف صورًا (وإحداثيات/هاتف إن فُعّلت)')
-                  : (enabled ? 'Ready to publish' : 'Complete fields + images (and coords/phone if enabled)'),
+                  ? (enabled
+                      ? 'جاهز للنشر'
+                      : 'أكمل الحقول وأضف صورًا (وإحداثيات/هاتف إن فُعّلت)')
+                  : (enabled
+                      ? 'Ready to publish'
+                      : 'Complete fields + images (and coords/phone if enabled)'),
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: enabled ? cs.onSurface : cs.onSurfaceVariant,
@@ -1442,7 +1514,10 @@ class _SubmitBar extends StatelessWidget {
           ElevatedButton.icon(
             onPressed: enabled ? onSubmit : null,
             icon: saving
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.publish_outlined),
             label: Text(isAr ? 'نشر الإعلان' : 'Publish'),
             style: ElevatedButton.styleFrom(

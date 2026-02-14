@@ -1,4 +1,4 @@
-﻿// lib/screens/edit_property_page.dart
+// lib/screens/edit_property_page.dart
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -58,11 +58,14 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     super.initState();
 
     _titleController = TextEditingController(text: widget.property.title);
-    _descriptionController = TextEditingController(text: widget.property.description);
+    _descriptionController =
+        TextEditingController(text: widget.property.description);
     _selectedType = widget.property.type;
 
-    _priceController = TextEditingController(text: widget.property.price.toString());
-    _areaController = TextEditingController(text: widget.property.area.toString());
+    _priceController =
+        TextEditingController(text: widget.property.price.toString());
+    _areaController =
+        TextEditingController(text: widget.property.area.toString());
 
     _loadImages();
   }
@@ -126,7 +129,9 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     if (_saving || _picking) return;
 
     if (_isGuest) {
-      _showSnack(_isAr ? 'يجب تسجيل الدخول لتعديل الصور' : 'You must log in to edit images');
+      _showSnack(_isAr
+          ? 'يجب تسجيل الدخول لتعديل الصور'
+          : 'You must log in to edit images');
       return;
     }
 
@@ -192,12 +197,15 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     if (_saving) return;
 
     if (_isGuest) {
-      _showSnack(_isAr ? 'يجب تسجيل الدخول للتعديل' : 'You must log in to edit');
+      _showSnack(
+          _isAr ? 'يجب تسجيل الدخول للتعديل' : 'You must log in to edit');
       return;
     }
 
     if (_uid != widget.property.ownerId) {
-      _showSnack(_isAr ? 'لا تملك صلاحية تعديل هذا الإعلان' : 'You are not allowed to edit this listing');
+      _showSnack(_isAr
+          ? 'لا تملك صلاحية تعديل هذا الإعلان'
+          : 'You are not allowed to edit this listing');
       return;
     }
 
@@ -205,7 +213,9 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     if (!ok) return;
 
     if (_items.isEmpty) {
-      _showSnack(_isAr ? 'يجب وجود صورة واحدة على الأقل' : 'At least one image is required');
+      _showSnack(_isAr
+          ? 'يجب وجود صورة واحدة على الأقل'
+          : 'At least one image is required');
       return;
     }
 
@@ -233,7 +243,10 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
 
       // 2) حذف الصور المحذوفة من DB
       if (_deletedExistingRowIds.isNotEmpty) {
-        await _sb.from('property_images').delete().inFilter('id', _deletedExistingRowIds.toList());
+        await _sb
+            .from('property_images')
+            .delete()
+            .inFilter('id', _deletedExistingRowIds.toList());
       }
 
       // 3) حذف ملفات storage للصور المحذوفة (اختياري لكنه الأفضل)
@@ -262,7 +275,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
         await bucket.uploadBinary(
           path,
           bytesToUpload,
-          fileOptions: const FileOptions(upsert: false, contentType: 'image/jpeg'),
+          fileOptions:
+              const FileOptions(upsert: false, contentType: 'image/jpeg'),
         );
 
         // أدخل صف جديد في property_images وأعد rowId
@@ -331,7 +345,10 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
           actions: [
             IconButton(
               icon: _saving
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.save),
               onPressed: _saving ? null : _save,
             ),
@@ -351,7 +368,9 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                       ),
                       child: Text(
                         _error!,
-                        style: TextStyle(color: cs.onErrorContainer, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                            color: cs.onErrorContainer,
+                            fontWeight: FontWeight.w700),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -363,10 +382,13 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                       decoration: BoxDecoration(
                         color: cs.surfaceContainerHighest.withOpacity(0.6),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
+                        border: Border.all(
+                            color: cs.outlineVariant.withOpacity(0.6)),
                       ),
                       child: Text(
-                        _isAr ? 'أنت الآن زائر. سجّل الدخول لتعديل الإعلان.' : 'You are a guest. Log in to edit the listing.',
+                        _isAr
+                            ? 'أنت الآن زائر. سجّل الدخول لتعديل الإعلان.'
+                            : 'You are a guest. Log in to edit the listing.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               fontWeight: FontWeight.w800,
                               color: cs.onSurfaceVariant,
@@ -389,15 +411,20 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           validator: (v) {
                             final s = (v ?? '').trim();
-                            if (s.isEmpty) return _isAr ? 'العنوان مطلوب' : 'Title is required';
-                            if (s.length < 3) return _isAr ? 'العنوان قصير' : 'Title is too short';
+                            if (s.isEmpty)
+                              return _isAr
+                                  ? 'العنوان مطلوب'
+                                  : 'Title is required';
+                            if (s.length < 3)
+                              return _isAr
+                                  ? 'العنوان قصير'
+                                  : 'Title is too short';
                             return null;
                           },
                         ),
                         const SizedBox(height: 12),
-
                         DropdownButtonFormField<PropertyType>(
-                          value: _selectedType,
+                          initialValue: _selectedType,
                           decoration: InputDecoration(
                             labelText: _isAr ? 'نوع العقار' : 'Type',
                             border: const OutlineInputBorder(),
@@ -405,7 +432,9 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           items: PropertyType.values.map((type) {
                             return DropdownMenuItem<PropertyType>(
                               value: type,
-                              child: Text(_isAr ? _getArabicTypeName(type) : type.toString().split('.').last),
+                              child: Text(_isAr
+                                  ? _getArabicTypeName(type)
+                                  : type.toString().split('.').last),
                             );
                           }).toList(),
                           onChanged: (_saving || _isGuest)
@@ -416,7 +445,6 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 },
                         ),
                         const SizedBox(height: 12),
-
                         TextFormField(
                           controller: _priceController,
                           enabled: !_saving && !_isGuest,
@@ -427,12 +455,12 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           validator: (v) {
                             final n = _parseNum(v ?? '');
-                            if (n <= 0) return _isAr ? 'السعر غير صحيح' : 'Invalid price';
+                            if (n <= 0)
+                              return _isAr ? 'السعر غير صحيح' : 'Invalid price';
                             return null;
                           },
                         ),
                         const SizedBox(height: 12),
-
                         TextFormField(
                           controller: _areaController,
                           enabled: !_saving && !_isGuest,
@@ -443,12 +471,14 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           validator: (v) {
                             final n = _parseNum(v ?? '');
-                            if (n <= 0) return _isAr ? 'المساحة غير صحيحة' : 'Invalid area';
+                            if (n <= 0)
+                              return _isAr
+                                  ? 'المساحة غير صحيحة'
+                                  : 'Invalid area';
                             return null;
                           },
                         ),
                         const SizedBox(height: 12),
-
                         TextFormField(
                           controller: _descriptionController,
                           enabled: !_saving && !_isGuest,
@@ -459,8 +489,14 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           validator: (v) {
                             final s = (v ?? '').trim();
-                            if (s.isEmpty) return _isAr ? 'الوصف مطلوب' : 'Description is required';
-                            if (s.length < 10) return _isAr ? 'الوصف قصير' : 'Description is too short';
+                            if (s.isEmpty)
+                              return _isAr
+                                  ? 'الوصف مطلوب'
+                                  : 'Description is required';
+                            if (s.length < 10)
+                              return _isAr
+                                  ? 'الوصف قصير'
+                                  : 'Description is too short';
                             return null;
                           },
                         ),
@@ -476,7 +512,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                     decoration: BoxDecoration(
                       color: cs.surface,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
+                      border:
+                          Border.all(color: cs.outlineVariant.withOpacity(0.6)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -486,29 +523,38 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             Expanded(
                               child: Text(
                                 _isAr ? 'صور الإعلان' : 'Listing images',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
                             ),
                             ElevatedButton.icon(
                               // ✅ تعديل: تعطيل الزر أثناء _picking أيضًا
-                              onPressed: (_saving || _isGuest || _picking) ? null : _pickImages,
+                              onPressed: (_saving || _isGuest || _picking)
+                                  ? null
+                                  : _pickImages,
                               icon: _picking
                                   ? const SizedBox(
                                       width: 18,
                                       height: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
                                     )
-                                  : const Icon(Icons.add_photo_alternate_outlined),
+                                  : const Icon(
+                                      Icons.add_photo_alternate_outlined),
                               label: Text(_isAr ? 'إضافة صور' : 'Add images'),
                             ),
                           ],
                         ),
                         const SizedBox(height: 10),
-
                         if (_items.isEmpty)
                           Text(
                             _isAr ? 'لا توجد صور' : 'No images',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
                                   color: cs.onSurfaceVariant,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -527,7 +573,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                   fit: BoxFit.cover,
                                 );
                               } else {
-                                img = Image.memory(it.bytes!, fit: BoxFit.cover);
+                                img =
+                                    Image.memory(it.bytes!, fit: BoxFit.cover);
                               }
 
                               return _ImageTile(
@@ -535,8 +582,11 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 image: img,
                                 disabled: _saving || _isGuest || _picking,
                                 onRemove: () => _removeAt(i),
-                                onMoveLeft: i == 0 ? null : () => _move(i, i - 1),
-                                onMoveRight: i == _items.length - 1 ? null : () => _move(i, i + 1),
+                                onMoveLeft:
+                                    i == 0 ? null : () => _move(i, i - 1),
+                                onMoveRight: i == _items.length - 1
+                                    ? null
+                                    : () => _move(i, i + 1),
                               );
                             }),
                           ),
@@ -550,9 +600,13 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                   SizedBox(
                     height: 48,
                     child: FilledButton.icon(
-                      onPressed: (_saving || _isGuest || _picking) ? null : _save,
+                      onPressed:
+                          (_saving || _isGuest || _picking) ? null : _save,
                       icon: _saving
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.save_outlined),
                       label: Text(_isAr ? 'حفظ التعديلات' : 'Save changes'),
                     ),
@@ -609,7 +663,10 @@ class _ImageTile extends StatelessWidget {
             ),
             child: Text(
               '#${index + 1}',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w900),
+              style: Theme.of(context)
+                  .textTheme
+                  .labelMedium
+                  ?.copyWith(fontWeight: FontWeight.w900),
             ),
           ),
         ),
@@ -673,11 +730,13 @@ class _EditImageItem {
     this.bytes,
   });
 
-  factory _EditImageItem.existing({required String rowId, required String path}) {
+  factory _EditImageItem.existing(
+      {required String rowId, required String path}) {
     return _EditImageItem._(isExisting: true, rowId: rowId, path: path);
   }
 
-  factory _EditImageItem.newOne({required String name, required Uint8List bytes}) {
+  factory _EditImageItem.newOne(
+      {required String name, required Uint8List bytes}) {
     return _EditImageItem._(isExisting: false, name: name, bytes: bytes);
   }
 

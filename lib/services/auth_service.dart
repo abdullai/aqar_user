@@ -1,4 +1,7 @@
-﻿import 'dart:io';
+// lib/services/auth_service.dart
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
@@ -27,8 +30,8 @@ class AuthService {
 
   /// تحويل الأرقام العربية/الفارسية إلى 0-9
   static String normalizeNumbers(String input) {
-    const a = ['٠','١','٢','٣','٤','٥','٦','٧','٨','٩'];
-    const e = ['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
+    const a = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+    const e = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
     var out = input;
     for (int i = 0; i < 10; i++) {
       out = out.replaceAll(a[i], i.toString());
@@ -42,22 +45,33 @@ class AuthService {
     return RegExp(r'^\d{10}$').hasMatch(s);
   }
 
+  /// ✅ يعمل على Web بدون dart:io
   static Future<String> _deviceFingerprint() async {
     final info = DeviceInfoPlugin();
+
     try {
-      if (Platform.isAndroid) {
-        final a = await info.androidInfo;
-        return 'android:${a.id}:${a.model}:${a.brand}';
+      if (kIsWeb) {
+        final w = await info.webBrowserInfo;
+        final vendor = (w.vendor ?? 'unknown').toString();
+        final userAgent = (w.userAgent ?? 'unknown').toString();
+        return 'web:$vendor:$userAgent';
       }
-      if (Platform.isIOS) {
-        final i = await info.iosInfo;
-        return 'ios:${i.identifierForVendor}:${i.model}';
-      }
-      if (Platform.isWindows) {
-        final w = await info.windowsInfo;
-        return 'win:${w.deviceId}:${w.computerName}';
+
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+          final a = await info.androidInfo;
+          return 'android:${a.id}:${a.model}:${a.brand}';
+        case TargetPlatform.iOS:
+          final i = await info.iosInfo;
+          return 'ios:${i.identifierForVendor}:${i.model}';
+        case TargetPlatform.windows:
+          final w = await info.windowsInfo;
+          return 'win:${w.deviceId}:${w.computerName}';
+        default:
+          break;
       }
     } catch (_) {}
+
     return 'unknown-device';
   }
 
@@ -67,17 +81,23 @@ class AuthService {
     required bool success,
     String? details,
   }) async {
+    // ✅ لا ترسل null لأي باراميتر
+    final u = username.trim().isEmpty ? 'guest' : username.trim();
+    final d = (details ?? '').toString();
+
     try {
       await _sb.rpc(
         'log_security_event',
         params: {
-          'p_username': username,
+          'p_username': u,
           'p_action': action,
           'p_success': success,
-          'p_details': details,
+          'p_details': d,
         },
       );
-    } catch (_) {}
+    } catch (_) {
+      // تجاهل الأخطاء حتى لا تعلق الواجهات
+    }
   }
 
   /* ============================================================
@@ -102,9 +122,9 @@ class AuthService {
 
   static bool _isLockedStatus(String? status) {
     return status == 'locked' ||
-           status == 'disabled' ||
-           status == 'suspended' ||
-           status == 'banned';
+        status == 'disabled' ||
+        status == 'suspended' ||
+        status == 'banned';
   }
 
   /* ============================================================
@@ -129,23 +149,24 @@ class AuthService {
   }
 
   /* ============================================================
-   * OTP
+   * OTP  (✅ UNIFIED: in-app)
    * ============================================================ */
 
-  /// RPC: request_otp
+  /// ✅ RPC: request_inapp_otp(p_username)
   static Future<bool> requestOtp(String username) async {
     final u = normalizeNumbers(username).trim();
     if (!_isValidUsername(u)) return false;
 
     try {
       await _sb.rpc(
-        'request_otp',
+        'request_inapp_otp',
         params: {'p_username': u},
       );
       await _logSecurity(
         username: u,
         action: 'otp_requested',
         success: true,
+        details: '',
       );
       return true;
     } catch (e) {
@@ -165,14 +186,16 @@ class AuthService {
 
   static Future<bool> isDeviceKnown(String username) async {
     final u = normalizeNumbers(username).trim();
-    final fp = await _deviceFingerprint();
+    if (!_isValidUsername(u)) return false;
+
+    final deviceId = await _deviceFingerprint();
 
     try {
       final res = await _sb.rpc(
         'is_device_known',
         params: {
           'p_username': u,
-          'p_device_fingerprint': fp,
+          'p_device_id': deviceId,
         },
       );
       return res == true;
@@ -183,20 +206,23 @@ class AuthService {
 
   static Future<void> registerDevice(String username) async {
     final u = normalizeNumbers(username).trim();
-    final fp = await _deviceFingerprint();
+    if (!_isValidUsername(u)) return;
+
+    final deviceId = await _deviceFingerprint();
 
     try {
       await _sb.rpc(
         'register_device',
         params: {
           'p_username': u,
-          'p_device_fingerprint': fp,
+          'p_device_id': deviceId,
         },
       );
       await _logSecurity(
         username: u,
         action: 'device_registered',
         success: true,
+        details: '',
       );
     } catch (e) {
       await _logSecurity(
@@ -252,17 +278,12 @@ class AuthService {
       return LoginResult(
         ok: false,
         locked: false,
-        message: isAr
-            ? 'لا يوجد حساب مرتبط'
-            : 'No account found',
+        message: isAr ? 'لا يوجد حساب مرتبط' : 'No account found',
       );
     }
 
     try {
-      await _sb.auth.signInWithPassword(
-        email: email,
-        password: password,
-      );
+      await _sb.auth.signInWithPassword(email: email, password: password);
     } on AuthException catch (e) {
       await _logSecurity(
         username: u,
@@ -273,9 +294,7 @@ class AuthService {
       return LoginResult(
         ok: false,
         locked: false,
-        message: isAr
-            ? 'كلمة المرور غير صحيحة'
-            : 'Wrong password',
+        message: isAr ? 'كلمة المرور غير صحيحة' : 'Wrong password',
       );
     }
 
@@ -283,13 +302,10 @@ class AuthService {
       username: u,
       action: 'login_password_ok',
       success: true,
+      details: '',
     );
 
-    return LoginResult(
-      ok: true,
-      locked: false,
-      message: '',
-    );
+    return const LoginResult(ok: true, locked: false, message: '');
   }
 
   /* ============================================================
@@ -308,9 +324,7 @@ class AuthService {
       return LoginResult(
         ok: false,
         locked: false,
-        message: isAr
-            ? 'رقم الهوية غير صحيح'
-            : 'Invalid username',
+        message: isAr ? 'رقم الهوية غير صحيح' : 'Invalid username',
       );
     }
 
@@ -319,22 +333,18 @@ class AuthService {
       return LoginResult(
         ok: false,
         locked: false,
-        message: isAr
-            ? 'لا يوجد حساب'
-            : 'No account found',
+        message: isAr ? 'لا يوجد حساب' : 'No account found',
       );
     }
 
     try {
-      await _sb.auth.resetPasswordForEmail(
-        email,
-        redirectTo: redirectTo,
-      );
+      await _sb.auth.resetPasswordForEmail(email, redirectTo: redirectTo);
 
       await _logSecurity(
         username: u,
         action: 'password_recovery_sent',
         success: true,
+        details: '',
       );
 
       return LoginResult(
@@ -354,9 +364,7 @@ class AuthService {
       return LoginResult(
         ok: false,
         locked: false,
-        message: isAr
-            ? 'فشل الإرسال'
-            : 'Failed to send email',
+        message: isAr ? 'فشل الإرسال' : 'Failed to send email',
       );
     }
   }

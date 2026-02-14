@@ -1,4 +1,4 @@
-﻿// lib/screens/fast_login_screen.dart
+// lib/screens/fast_login_screen.dart
 import 'dart:io' show Platform;
 import 'dart:math' as math;
 
@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart';
 import '../services/fast_login_service.dart';
+import '../services/connectivity_guard.dart'; // ✅ NEW
 
 class FastLoginScreen extends StatefulWidget {
   const FastLoginScreen({super.key});
@@ -26,6 +27,10 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   bool _err = false;
   bool _showBio = false;
   bool _canBio = false;
+
+  // ✅ NEW: offline guard
+  bool _offline = false;
+  bool _retryingNet = false;
 
   // ✅ we keep internal digits typed (always in correct order),
   // and only reverse the *visual* direction in dots row.
@@ -57,7 +62,13 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       return;
     }
 
-    _initBiometricsAndMaybeAutoAuth();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _refreshInternetState();
+      if (!mounted) return;
+      if (!_offline) {
+        await _initBiometricsAndMaybeAutoAuth();
+      }
+    });
   }
 
   @override
@@ -65,6 +76,177 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     _shakeCtrl.dispose();
     super.dispose();
   }
+
+  // =========================
+  // ✅ Internet guard
+  // =========================
+
+  Future<bool> _hasInternet() async {
+    try {
+      return await ConnectivityGuard.hasInternet();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(msg),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _refreshInternetState() async {
+    final ok = await _hasInternet();
+    if (!mounted) return;
+    setState(() => _offline = !ok);
+  }
+
+  Future<bool> _ensureInternetOrShow() async {
+    final ok = await _hasInternet();
+    if (!mounted) return false;
+
+    if (!ok) {
+      if (!_offline) setState(() => _offline = true);
+      _toast(_isAr
+          ? 'لا يوجد اتصال بالإنترنت. فعّل الإنترنت ثم أعد المحاولة.'
+          : 'No internet connection. Enable internet then retry.');
+      return false;
+    }
+
+    if (_offline) setState(() => _offline = false);
+    return true;
+  }
+
+  Future<void> _retryInternet() async {
+    if (_retryingNet) return;
+    setState(() => _retryingNet = true);
+
+    try {
+      final ok = await _hasInternet();
+      if (!mounted) return;
+
+      if (!ok) {
+        setState(() {
+          _offline = true;
+          _retryingNet = false;
+        });
+        _toast(_isAr ? 'ما زال لا يوجد إنترنت.' : 'Still offline.');
+        return;
+      }
+
+      setState(() {
+        _offline = false;
+        _retryingNet = false;
+      });
+
+      await _initBiometricsAndMaybeAutoAuth();
+    } finally {
+      if (mounted) setState(() => _retryingNet = false);
+    }
+  }
+
+  Widget _offlineOverlay({required bool isLight}) {
+    final onBg = _onBg(isLight);
+    final sub = _sub(isLight);
+    final surface = isLight ? Colors.white : const Color(0xFF10121A);
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        ignoring: false,
+        child: Container(
+          color: (isLight ? Colors.white : Colors.black).withOpacity(0.55),
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Card(
+              elevation: 18,
+              color: surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.wifi_off_rounded, size: 54, color: onBg),
+                    const SizedBox(height: 10),
+                    Text(
+                      _isAr
+                          ? 'لا يوجد اتصال بالإنترنت'
+                          : 'No internet connection',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                        color: onBg,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _isAr
+                          ? 'لن يمكنك الدخول السريع بدون إنترنت.'
+                          : 'Quick login requires internet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: sub,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _brand,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        onPressed: _retryingNet ? null : _retryInternet,
+                        icon: _retryingNet
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.refresh_rounded),
+                        label: Text(_isAr ? 'إعادة المحاولة' : 'Retry'),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => _switchAccount(clearFastLock: false),
+                      child: Text(
+                          _isAr ? 'العودة لتسجيل الدخول' : 'Back to login'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =========================
+  // ✅ Biometrics init
+  // =========================
 
   Future<void> _initBiometricsAndMaybeAutoAuth() async {
     if (!_isMobile) {
@@ -89,6 +271,10 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       if (_showBio) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
+
+          // ✅ لا تحاول البصمة بدون إنترنت
+          if (!await _ensureInternetOrShow()) return;
+
           await _tryBiometric();
         });
       }
@@ -107,6 +293,9 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   }
 
   Future<void> _tryBiometric() async {
+    // ✅ لا تحاول بدون إنترنت
+    if (!await _ensureInternetOrShow()) return;
+
     if (_busy) return;
 
     setState(() {
@@ -127,7 +316,10 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     }
   }
 
-  void _pressDigit(String d) {
+  void _pressDigit(String d) async {
+    // ✅ لا تقبل إدخال بدون إنترنت
+    if (!await _ensureInternetOrShow()) return;
+
     if (_busy) return;
     if (_pin.length >= _pinLen) return;
 
@@ -156,6 +348,9 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   }
 
   Future<void> _submitPin() async {
+    // ✅ لا submit بدون إنترنت
+    if (!await _ensureInternetOrShow()) return;
+
     if (_busy) return;
 
     final pin = FastLoginService.normalizeDigits(_pin);
@@ -263,7 +458,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   }
 
   IconData _bioIcon() {
-    // default fingerprint; if you want face icon on iOS you can switch later
     return Icons.fingerprint;
   }
 
@@ -285,7 +479,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     final sub = _sub(isLight);
 
     // ✅ Keypad MUST be LTR for correct 1-2-3 layout
-    // ✅ But we want the *reading* of PIN dots RTL for all languages
     final keypad = Directionality(
       textDirection: TextDirection.ltr,
       child: LayoutBuilder(
@@ -304,8 +497,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                 child: Text(v, style: font),
               );
 
-          // ✅ Place biometric key to the RIGHT of 0 (i.e. bottom-right),
-          // and backspace to the LEFT of 0 (bottom-left).
           Widget bioKey() {
             if (!_showBio) return const SizedBox.shrink();
             return _keyButton(
@@ -323,9 +514,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                 child: Icon(Icons.backspace, color: onBg),
               );
 
-          // GridView.count fills children left-to-right row wise.
-          // So last row: [left, middle, right]
-          // We want: left=backspace, middle=0, right=bio
           return GridView.count(
             crossAxisCount: 3,
             shrinkWrap: true,
@@ -405,7 +593,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       },
     );
 
-    // ✅ Dots row should be RTL for ALL languages (visual right->left fill)
     final dotsRow = AnimatedBuilder(
       animation: _shakeCtrl,
       builder: (context, child) {
@@ -422,8 +609,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
               children: List.generate(
                 _pinLen,
                 (i) => _dot(
-                  // When Row is RTL, index 0 is rightmost.
-                  // Fill from right to left by comparing with _pin length.
                   filled: i < _pin.length,
                   isLight: isLight,
                   size: dotSize,
@@ -495,52 +680,59 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       child: Scaffold(
         backgroundColor: bg,
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 520),
-                child: Card(
-                  elevation: 2,
-                  color: isLight ? Colors.white : const Color(0xFF10121A),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.all(cardPad),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        header,
-                        const SizedBox(height: 16),
-                        dotsRow,
-                        const SizedBox(height: 8),
-                        keypad,
-                        busyBar,
-                        actionsRow,
-                        const SizedBox(height: 6),
-                        Text(
-                          _showBio
-                              ? (_isAr
-                                  ? 'يمكنك أيضًا استخدام البصمة/الوجه'
-                                  : 'You can also use biometrics')
-                              : (_isAr
-                                  ? (_canBio
-                                      ? 'البصمة/الوجه متاحة من الإعدادات'
-                                      : 'الدخول عبر PIN فقط')
-                                  : (_canBio
-                                      ? 'Biometrics are available in settings'
-                                      : 'PIN-only unlock')),
-                          style: TextStyle(color: sub, fontSize: 12),
-                          textAlign: TextAlign.center,
+          child: Stack(
+            children: [
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Card(
+                      elevation: 2,
+                      color: isLight ? Colors.white : const Color(0xFF10121A),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Padding(
+                        padding: EdgeInsets.all(cardPad),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            header,
+                            const SizedBox(height: 16),
+                            dotsRow,
+                            const SizedBox(height: 8),
+                            keypad,
+                            busyBar,
+                            actionsRow,
+                            const SizedBox(height: 6),
+                            Text(
+                              _showBio
+                                  ? (_isAr
+                                      ? 'يمكنك أيضًا استخدام البصمة/الوجه'
+                                      : 'You can also use biometrics')
+                                  : (_isAr
+                                      ? (_canBio
+                                          ? 'البصمة/الوجه متاحة من الإعدادات'
+                                          : 'الدخول عبر PIN فقط')
+                                      : (_canBio
+                                          ? 'Biometrics are available in settings'
+                                          : 'PIN-only unlock')),
+                              style: TextStyle(color: sub, fontSize: 12),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 6),
+                          ],
                         ),
-                        const SizedBox(height: 6),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
+
+              // ✅ Offline overlay
+              if (_offline) _offlineOverlay(isLight: isLight),
+            ],
           ),
         ),
       ),
