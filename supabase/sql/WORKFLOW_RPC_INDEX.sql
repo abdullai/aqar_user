@@ -1,0 +1,37 @@
+-- =============================================================================
+-- فهرس مرجعي لدوال سير التسويق / الطلبات / التصاريح (لربط الواجهة بـ Supabase).
+-- لا يُنفَّذ كمهاجرة تلقائياً — للمراجعة اليدوية مع ملفات 202604*.sql.
+-- =============================================================================
+--
+-- عروض المالك / المسوّق:
+--   public.owner_decline_listing_offer(p_offer_id uuid, p_reason text, p_decline_kind text default 'reject')
+--   public.report_rega_license_mismatch(p_request_id uuid) — بلاغات عدم مطابقة REGA؛ 20260418120000
+--   public.owner_select_offer / RPCs في marketing_flow_service (قبول عرض)
+--   public.submit_listing_offer / marketer_submit_offer (تقديم عرض)
+--
+-- إعادة طرح / حظر / انتهاء مهلة:
+--   public.relist_property_for_marketing (في MarketingFlowService.relistListingRequestForMarketing)
+--   public.cron_expire_permit_pending_72h() — جدولة عبر pg_cron (انتهاء 72 ساعة تصريح)
+--   public.cron_expire_pending_offers_72h() — إن وُجدت في نفس الحزمة
+--   تفاصيل: 20260451_owner_decline_cap_relist_ban_permit_reopen.sql
+--
+-- عقود:
+--   public.send_listing_contract_to_owner
+--   public.create_listing_contract_from_offer
+--   دوال إرجاع/إلغاء العقد — انظر marketing_flow_service + ملفات 20260406_workflow_ban_permit_publish_notify.sql
+--
+-- تصاريح:
+--   public.submit_permits
+--   public.issue_listing_permit (إن وُجدت باسم مشابه في المشروع)
+--
+-- للتحقق العام من عقد عبر الويب: يلزم سياسة SELECT مناسبة على listing_contracts أو RPC
+-- SECURITY DEFINER للقراءة العامة المحدودة — غير مضمّن في العميل حتى الآن.
+--
+-- أمان الجلسات والأجهزة (20260418210000_user_devices_two_slot_session_hints.sql):
+--   public.bump_user_session_epoch(p_city text default null, p_device_label text default null)
+--   public.register_user_device_slot(p_device text, p_city text default null)
+--   public.reconcile_user_device_slot(p_device text)
+--   public.clear_user_devices_except_current(p_device text)
+--   public.is_device_known(p_username text, p_device_id text) — 20260420000000
+--   public.register_device(p_username text, p_device_id text) — 20260420000000
+-- =============================================================================

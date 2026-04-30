@@ -1,19 +1,20 @@
+// lib/core/session/app_session.dart
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../shared/widgets/no_internet_dialog.dart';
+import '../../services/connectivity_guard.dart';
+import '../config/app_config.dart';
 
 class AppSession extends ChangeNotifier {
   // =========================
-  // Unified Keys (match main.dart)
+  // Unified Keys ([AppConfig])
   // =========================
-  static const String kPrefGuestMode = 'guest_mode'; // bool
-  static const String kPrefEntryMode = 'entry_mode'; // 'guest' | 'user'
+  static const String kPrefGuestMode = AppConfig.prefGuestModeKey;
+  static const String kPrefEntryMode = AppConfig.prefEntryModeKey;
   static String otpVerifiedKey(String uid) => 'otp_verified_$uid';
 
   // =========================
@@ -29,10 +30,12 @@ class AppSession extends ChangeNotifier {
   // =========================
   bool hasInternet = true;
 
+  /// أثناء ضغط المستخدم «إعادة المحاولة» على طبقة عدم الاتصال.
+  bool networkCheckBusy = false;
+
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _connSub;
-
-  bool _noInternetDialogOpen = false;
+  Timer? _offlinePollTimer;
 
   // token لإبطال نتائج العمليات لو انقطع النت أثناء التنفيذ
   int _netGuardToken = 0;
@@ -64,6 +67,9 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// إعادة قراءة وضع الضيف/المستخدم من التخزين بعد تغيير المفاتيح يدويًا (مثل قبل تسجيل الدخول).
+  Future<void> reloadFromPrefs() => _load();
+
   Future<void> setGuest() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -91,6 +97,23 @@ class AppSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// بعد تسجيل الدخول/التحقق: استعلامات خفيفة لتسريع أول ظهور للرئيسية (بدون UI).
+  void schedulePostAuthHomeWarmup() {
+    final uid = userId;
+    if (isGuest || uid == null || uid.isEmpty) return;
+    unawaited(_warmHomeFeedsAfterAuth());
+  }
+
+  Future<void> _warmHomeFeedsAfterAuth() async {
+    try {
+      final sb = Supabase.instance.client;
+      await Future.wait([
+        sb.from('properties').select('id').limit(1),
+        sb.from('market_property_requests').select('id').limit(1),
+      ]);
+    } catch (_) {}
+  }
+
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -109,10 +132,6 @@ class AppSession extends ChangeNotifier {
   }
 
   Future<void> _signOutLocalSafely() async {
-    if (kIsWeb) {
-      // لا شيء على الويب
-      return;
-    }
     try {
       await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
     } catch (_) {}
@@ -133,33 +152,79 @@ class AppSession extends ChangeNotifier {
   // Connectivity
   // =========================
   Future<void> _startConnectivityListener() async {
-    // ✅ على الويب: لا نستخدم connectivity_plus
-    if (kIsWeb) {
-      hasInternet = true;
+    try {
+      await _refreshReachabilityInternal();
+    } catch (_) {
+      hasInternet = false;
+      _netGuardToken++;
       notifyListeners();
-      return;
+      _scheduleOfflinePolling();
     }
-
-    final first = await _connectivity.checkConnectivity();
-    _applyConnectivity(first);
 
     _connSub?.cancel();
-    _connSub = _connectivity.onConnectivityChanged.listen(_applyConnectivity);
+    try {
+      _connSub = _connectivity.onConnectivityChanged.listen((results) {
+        unawaited(_onConnectivityPluginChanged(results));
+      });
+    } catch (_) {
+      _scheduleOfflinePolling();
+    }
   }
 
-  void _applyConnectivity(List<ConnectivityResult> results) {
-    final offline = results.contains(ConnectivityResult.none);
-    final nextHasInternet = !offline;
-
-    if (hasInternet == nextHasInternet) return;
-
-    hasInternet = nextHasInternet;
-
-    if (!hasInternet) {
-      _netGuardToken++;
+  Future<void> _onConnectivityPluginChanged(
+    List<ConnectivityResult> results,
+  ) async {
+    if (results.isNotEmpty && results.contains(ConnectivityResult.none)) {
+      if (hasInternet) {
+        hasInternet = false;
+        _netGuardToken++;
+        notifyListeners();
+      }
+      _scheduleOfflinePolling();
+      return;
     }
+    await _refreshReachabilityInternal();
+  }
 
-    notifyListeners();
+  void _scheduleOfflinePolling() {
+    if (_offlinePollTimer != null) return;
+    _offlinePollTimer = Timer.periodic(const Duration(seconds: 14), (_) {
+      unawaited(_refreshReachabilityInternal());
+    });
+  }
+
+  Future<void> _refreshReachabilityInternal() async {
+    final ok = await ConnectivityGuard.hasReachableInternet();
+    final prev = hasInternet;
+    hasInternet = ok;
+    if (!ok) {
+      if (prev) {
+        _netGuardToken++;
+      }
+      _scheduleOfflinePolling();
+    } else {
+      _offlinePollTimer?.cancel();
+      _offlinePollTimer = null;
+    }
+    if (prev != ok) {
+      notifyListeners();
+    }
+  }
+
+  /// إعادة فحص الشبكة. [userInitiated] يعرض حالة تحميل على زر «إعادة المحاولة».
+  Future<void> refreshConnectivity({bool userInitiated = false}) async {
+    if (userInitiated) {
+      networkCheckBusy = true;
+      notifyListeners();
+    }
+    try {
+      await _refreshReachabilityInternal();
+    } finally {
+      if (userInitiated) {
+        networkCheckBusy = false;
+        notifyListeners();
+      }
+    }
   }
 
   // =========================
@@ -168,17 +233,10 @@ class AppSession extends ChangeNotifier {
   Future<T?> runNetworkGuarded<T>({
     required BuildContext context,
     required Future<T> Function() action,
-    bool showDialogOnNoInternet = true,
+    bool showDialogOnNoInternet = false,
     bool isAr = true,
   }) async {
-    if (kIsWeb) {
-      return await action();
-    }
-
     if (!hasInternet) {
-      if (showDialogOnNoInternet) {
-        await _showNoInternetOnce(context, isAr: isAr);
-      }
       return null;
     }
 
@@ -187,34 +245,22 @@ class AppSession extends ChangeNotifier {
     try {
       final result = await action();
 
+      // ✅ FIX: لا تستخدم context بعد await إلا إذا مازال mounted
+      if (!context.mounted) return null;
+
       if (startToken != _netGuardToken || !hasInternet) {
         return null;
       }
 
       return result;
     } catch (e) {
-      if (!hasInternet && showDialogOnNoInternet) {
-        await _showNoInternetOnce(context, isAr: isAr);
+      // ✅ FIX
+      if (!context.mounted) return null;
+
+      if (!hasInternet) {
         return null;
       }
       rethrow;
-    }
-  }
-
-  Future<void> _showNoInternetOnce(
-    BuildContext context, {
-    required bool isAr,
-  }) async {
-    if (_noInternetDialogOpen) return;
-    _noInternetDialogOpen = true;
-    try {
-      await showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => NoInternetDialog(isAr: isAr),
-      );
-    } finally {
-      _noInternetDialogOpen = false;
     }
   }
 
@@ -223,6 +269,7 @@ class AppSession extends ChangeNotifier {
   // =========================
   @override
   void dispose() {
+    _offlinePollTimer?.cancel();
     _connSub?.cancel();
     super.dispose();
   }

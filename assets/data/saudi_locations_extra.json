@@ -1,0 +1,69 @@
+[
+  {"city_ar":"الخرج","city_en":"Al Kharj","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة الخرج","governorate_en":"Al Kharj Governorate","lat":24.1554,"lng":47.3122},
+  {"city_ar":"الدوادمي","city_en":"Al Duwadimi","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة الدوادمي","governorate_en":"Al Duwadimi Governorate","lat":24.5071,"lng":44.3922},
+  {"city_ar":"شقراء","city_en":"Shaqra","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة شقراء","governorate_en":"Shaqra Governorate","lat":25.2511,"lng":45.2517},
+  {"city_ar":"المجمعة","city_en":"Al Majmaah","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة المجمعة","governorate_en":"Al Majmaah Governorate","lat":25.9042,"lng":45.3469},
+  {"city_ar":"الزلفي","city_en":"Al Zulfi","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة الزلفي","governorate_en":"Al Zulfi Governorate","lat":26.2995,"lng":44.8154},
+  {"city_ar":"وادي الدواسر","city_en":"Wadi Al Dawasir","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة وادي الدواسر","governorate_en":"Wadi Al Dawasir Governorate","lat":20.4667,"lng":44.8000},
+  {"city_ar":"عفيف","city_en":"Afif","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة عفيف","governorate_en":"Afif Governorate","lat":23.9053,"lng":42.9172},
+  {"city_ar":"الغاط","city_en":"Al Ghat","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة الغاط","governorate_en":"Al Ghat Governorate","lat":26.0833,"lng":44.9667},
+  {"city_ar":"حريملاء","city_en":"Huraymila","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة حريملاء","governorate_en":"Huraymila Governorate","lat":25.1333,"lng":46.1167},
+  {"city_ar":"الدرعية","city_en":"Diriyah","region_ar":"منطقة الرياض","region_en":"Riyadh Region","governorate_ar":"محافظة الدرعية","governorate_en":"Diriyah Governorate","lat":24.7333,"lng":46.5833},
+
+  {"city_ar":"رابغ","city_en":"Rabigh","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة رابغ","governorate_en":"Rabigh Governorate","lat":22.7986,"lng":39.0341},
+  {"city_ar":"الليث","city_en":"Al Lith","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة الليث","governorate_en":"Al Lith Governorate","lat":20.1493,"lng":40.2764},
+  {"city_ar":"القنفذة","city_en":"Al Qunfudhah","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة القنفذة","governorate_en":"Al Qunfudhah Governorate","lat":19.1264,"lng":41.0789},
+  {"city_ar":"الجموم","city_en":"Al Jumum","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة الجموم","governorate_en":"Al Jumum Governorate","lat":21.6167,"lng":39.7000},
+  {"city_ar":"خليص","city_en":"Khulays","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة خليص","governorate_en":"Khulays Governorate","lat":22.3000,"lng":39.3000},
+  {"city_ar":"تربة","city_en":"Turbah","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة تربة","governorate_en":"Turbah Governorate","lat":21.2000,"lng":40.6000},
+  {"city_ar":"رنية","city_en":"Ranyah","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة رنية","governorate_en":"Ranyah Governorate","lat":21.2500,"lng":42.8667},
+  {"city_ar":"الكامل","city_en":"Al Kamil","region_ar":"منطقة مكة","region_en":"Makkah Region","governorate_ar":"محافظة الكامل","governorate_en":"Al Kamil Governorate","lat":22.2167,"lng":39.8500},
+
+  {"city_ar":"ينبع","city_en":"Yanbu","region_ar":"المدينة المنورة","region_en":"Madinah Region","governorate_ar":"محافظة ينبع","governorate_en":"Yanbu Governorate","lat":24.0889,"lng":38.0618},
+  {"city_ar":"العلا","city_en":"Al Ula","region_ar":"المدينة المنورة","region_en":"Madinah Region","governorate_ar":"محافظة العلا","governorate_en":"Al Ula Governorate","lat":26.6085,"lng":37.9233},
+  {"city_ar":"المهد","city_en":"Mahd Al Dhahab","region_ar":"المدينة المنورة","region_en":"Madinah Region","governorate_ar":"محافظة المهد","governorate_en":"Mahd Al Dhahab Governorate","lat":23.5000,"lng":40.8500},
+  {"city_ar":"بدر","city_en":"Badr","region_ar":"المدينة المنورة","region_en":"Madinah Region","governorate_ar":"محافظة بدر","governorate_en":"Badr Governorate","lat":23.7833,"lng":38.7833},
+  {"city_ar":"خيبر","city_en":"Khaybar","region_ar":"المدينة المنورة","region_en":"Madinah Region","governorate_ar":"محافظة خيبر","governorate_en":"Khaybar Governorate","lat":25.6833,"lng":39.3000},
+
+  {"city_ar":"الأحساء","city_en":"Al Ahsa","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة الأحساء","governorate_en":"Al Ahsa Governorate","lat":25.3832,"lng":49.5877},
+  {"city_ar":"القطيف","city_en":"Qatif","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة القطيف","governorate_en":"Qatif Governorate","lat":26.5196,"lng":50.0115},
+  {"city_ar":"بقيق","city_en":"Buqayq","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة بقيق","governorate_en":"Buqayq Governorate","lat":25.9333,"lng":49.6167},
+  {"city_ar":"النعيرية","city_en":"Nairyah","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة النعيرية","governorate_en":"Nairyah Governorate","lat":27.4667,"lng":48.4833},
+  {"city_ar":"رأس تنورة","city_en":"Ras Tanura","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة رأس تنورة","governorate_en":"Ras Tanura Governorate","lat":26.6500,"lng":50.1667},
+  {"city_ar":"حفر الباطن","city_en":"Hafar Al Batin","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة حفر الباطن","governorate_en":"Hafar Al Batin Governorate","lat":28.4342,"lng":45.9706},
+  {"city_ar":"الخفجي","city_en":"Al Khafji","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","governorate_ar":"محافظة الخفجي","governorate_en":"Al Khafji Governorate","lat":28.4392,"lng":48.4913},
+
+  {"city_ar":"محايل","city_en":"Muhayil","region_ar":"عسير","region_en":"Asir Region","governorate_ar":"محافظة محايل","governorate_en":"Muhayil Governorate","lat":18.5500,"lng":42.0000},
+  {"city_ar":"النماص","city_en":"Al Namas","region_ar":"عسير","region_en":"Asir Region","governorate_ar":"محافظة النماص","governorate_en":"Al Namas Governorate","lat":19.1500,"lng":42.1167},
+  {"city_ar":"سراة عبيدة","city_en":"Sarat Abidah","region_ar":"عسير","region_en":"Asir Region","governorate_ar":"محافظة سراة عبيدة","governorate_en":"Sarat Abidah Governorate","lat":19.1000,"lng":43.6500},
+  {"city_ar":"ظهران الجنوب","city_en":"Dhahran Al Janub","region_ar":"عسير","region_en":"Asir Region","governorate_ar":"محافظة ظهران الجنوب","governorate_en":"Dhahran Al Janub Governorate","lat":17.4833,"lng":43.2000},
+
+  {"city_ar":"البكيرية","city_en":"Al Bukayriyah","region_ar":"القصيم","region_en":"Qassim Region","governorate_ar":"محافظة البكيرية","governorate_en":"Al Bukayriyah Governorate","lat":26.1500,"lng":43.6500},
+  {"city_ar":"الرس","city_en":"Ar Rass","region_ar":"القصيم","region_en":"Qassim Region","governorate_ar":"محافظة الرس","governorate_en":"Ar Rass Governorate","lat":25.8694,"lng":43.4973},
+  {"city_ar":"المذنب","city_en":"Al Mithnab","region_ar":"القصيم","region_en":"Qassim Region","governorate_ar":"محافظة المذنب","governorate_en":"Al Mithnab Governorate","lat":25.8667,"lng":44.2167},
+  {"city_ar":"رياض الخبراء","city_en":"Riyadh Al Khabra","region_ar":"القصيم","region_en":"Qassim Region","governorate_ar":"محافظة رياض الخبراء","governorate_en":"Riyadh Al Khabra Governorate","lat":26.0500,"lng":43.2500},
+
+  {"city_ar":"ضباء","city_en":"Duba","region_ar":"تبوك","region_en":"Tabuk Region","governorate_ar":"محافظة ضباء","governorate_en":"Duba Governorate","lat":27.3500,"lng":35.7000},
+  {"city_ar":"أملج","city_en":"Umluj","region_ar":"تبوك","region_en":"Tabuk Region","governorate_ar":"محافظة أملج","governorate_en":"Umluj Governorate","lat":25.0167,"lng":37.2667},
+  {"city_ar":"الوجه","city_en":"Al Wajh","region_ar":"تبوك","region_en":"Tabuk Region","governorate_ar":"محافظة الوجه","governorate_en":"Al Wajh Governorate","lat":26.2333,"lng":36.4667},
+
+  {"city_ar":"بقعاء","city_en":"Baqaa","region_ar":"حائل","region_en":"Hail Region","governorate_ar":"محافظة بقعاء","governorate_en":"Baqaa Governorate","lat":28.3333,"lng":43.3333},
+  {"city_ar":"الشنان","city_en":"Al Shinan","region_ar":"حائل","region_en":"Hail Region","governorate_ar":"محافظة الشنان","governorate_en":"Al Shinan Governorate","lat":27.1500,"lng":42.0500},
+
+  {"city_ar":"طبرجل","city_en":"Tubarjal","region_ar":"الجوف","region_en":"Al Jawf Region","governorate_ar":"محافظة طبرجل","governorate_en":"Tubarjal Governorate","lat":30.5000,"lng":38.2167},
+  {"city_ar":"القريات","city_en":"Qurayyat","region_ar":"الجوف","region_en":"Al Jawf Region","governorate_ar":"محافظة القريات","governorate_en":"Qurayyat Governorate","lat":31.3333,"lng":37.3333},
+
+  {"city_ar":"رفحاء","city_en":"Rafha","region_ar":"الحدود الشمالية","region_en":"Northern Borders","governorate_ar":"محافظة رفحاء","governorate_en":"Rafha Governorate","lat":29.6333,"lng":43.5000},
+  {"city_ar":"طريف","city_en":"Turaif","region_ar":"الحدود الشمالية","region_en":"Northern Borders","governorate_ar":"محافظة طريف","governorate_en":"Turaif Governorate","lat":31.6833,"lng":38.6500},
+
+  {"city_ar":"صبيا","city_en":"Sabya","region_ar":"جازان","region_en":"Jazan Region","governorate_ar":"محافظة صبيا","governorate_en":"Sabya Governorate","lat":17.1500,"lng":42.6167},
+  {"city_ar":"أبو عريش","city_en":"Abu Arish","region_ar":"جازان","region_en":"Jazan Region","governorate_ar":"محافظة أبو عريش","governorate_en":"Abu Arish Governorate","lat":16.9667,"lng":42.8333},
+  {"city_ar":"صامطة","city_en":"Samtah","region_ar":"جازان","region_en":"Jazan Region","governorate_ar":"محافظة صامطة","governorate_en":"Samtah Governorate","lat":16.6000,"lng":42.9500},
+  {"city_ar":"فرسان","city_en":"Farasan","region_ar":"جازان","region_en":"Jazan Region","governorate_ar":"محافظة فرسان","governorate_en":"Farasan Governorate","lat":16.7000,"lng":42.1167},
+
+  {"city_ar":"بلجرشي","city_en":"Baljurashi","region_ar":"الباحة","region_en":"Baha Region","governorate_ar":"محافظة بلجرشي","governorate_en":"Baljurashi Governorate","lat":20.0167,"lng":41.4667},
+  {"city_ar":"المندق","city_en":"Al Mandaq","region_ar":"الباحة","region_en":"Baha Region","governorate_ar":"محافظة المندق","governorate_en":"Al Mandaq Governorate","lat":20.2500,"lng":41.2500},
+
+  {"city_ar":"شرورة","city_en":"Sharurah","region_ar":"نجران","region_en":"Najran Region","governorate_ar":"محافظة شرورة","governorate_en":"Sharurah Governorate","lat":17.4833,"lng":43.2000},
+  {"city_ar":"يدمة","city_en":"Yadamah","region_ar":"نجران","region_en":"Najran Region","governorate_ar":"محافظة يدمة","governorate_en":"Yadamah Governorate","lat":17.4500,"lng":44.8333}
+]

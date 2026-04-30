@@ -8,7 +8,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:aqar_user/main.dart'; // themeModeNotifier + langNotifier + recoveryFlowNotifier
 import 'package:aqar_user/services/auth_service.dart';
-import '../services/connectivity_guard.dart';
+import 'package:aqar_user/widgets/app_logo_loading.dart';
+import 'package:aqar_user/widgets/field_group_frame.dart';
+import 'package:aqar_user/l10n/app_localizations.dart';
+
+import '../core/input/password_arabic_script_guard.dart';
+import '../core/input/saudi_input_formatters.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -35,6 +40,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   String? _ok;
 
   bool _hasRecoverySession = false;
+  DateTime? _lastPasswordArabicDialogAt;
 
   bool _obscure1 = true;
   bool _obscure2 = true;
@@ -45,9 +51,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   StreamSubscription<AuthState>? _authSub;
 
   // ✅ Internet guard
-  bool _offline = false;
-  bool _retryingNet = false;
-
   bool get _isAr => langNotifier.value != 'en';
   ThemeMode get _currentTheme => themeModeNotifier.value;
   bool get _isLight => _currentTheme == ThemeMode.light;
@@ -64,6 +67,20 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       _isLight ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
   Color get _iconColor =>
       _isLight ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
+
+  void _schedulePasswordArabicDialog() {
+    final n = DateTime.now();
+    if (_lastPasswordArabicDialogAt != null &&
+        n.difference(_lastPasswordArabicDialogAt!) <
+            const Duration(milliseconds: 900)) {
+      return;
+    }
+    _lastPasswordArabicDialogAt = n;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showPasswordArabicNotAllowedDialog(context, isAr: _isAr);
+    });
+  }
 
   static const String _kRecoveryUsernameKey = 'recovery_username';
 
@@ -147,85 +164,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   // Internet guard
   // =========================
 
-  Future<bool> _hasInternet() async {
-    try {
-      return await ConnectivityGuard.hasInternet();
-    } catch (_) {
-      return false;
-    }
-  }
-
-  Future<bool> _ensureInternetOrShow() async {
-    final ok = await _hasInternet();
-    if (!mounted) return false;
-
-    if (!ok) {
-      setState(() => _offline = true);
-      _toast(_isAr ? 'لا يوجد اتصال بالإنترنت.' : 'No internet connection.');
-      return false;
-    }
-
-    if (_offline) setState(() => _offline = false);
-    return true;
-  }
-
-  Future<void> _retryInternet() async {
-    if (_retryingNet) return;
-
-    setState(() => _retryingNet = true);
-    final ok = await _hasInternet();
-    if (!mounted) return;
-
-    setState(() {
-      _offline = !ok;
-      _retryingNet = false;
-    });
-  }
-
-  void _toast(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  Widget _offlineOverlay() {
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black.withOpacity(0.6),
-        alignment: Alignment.center,
-        child: Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi_off_rounded, size: 48),
-                const SizedBox(height: 8),
-                Text(_isAr ? 'لا يوجد إنترنت' : 'No internet'),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: _retryingNet ? null : _retryInternet,
-                  child: _retryingNet
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(_isAr ? 'إعادة المحاولة' : 'Retry'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  
 
   // =========================
   // Storage + security log
@@ -316,8 +255,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   // =========================
 
   Future<void> _requestResetByUsername() async {
-    if (!await _ensureInternetOrShow()) return;
-
     setState(() {
       _busy = true;
       _err = null;
@@ -376,8 +313,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   }
 
   Future<void> _saveNewPassword() async {
-    if (!await _ensureInternetOrShow()) return;
-
     setState(() {
       _busy = true;
       _err = null;
@@ -548,6 +483,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                         child: Padding(
                           padding: const EdgeInsets.all(18),
                           child: _card(
+                            context,
                             maxWidth: maxWidth,
                             allowScroll: allowScroll,
                           ),
@@ -555,7 +491,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       );
                     },
                   ),
-                  if (_offline) _offlineOverlay(),
                 ],
               ),
             ),
@@ -565,7 +500,12 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     );
   }
 
-  Widget _card({required double maxWidth, required bool allowScroll}) {
+  Widget _card(
+    BuildContext context, {
+    required double maxWidth,
+    required bool allowScroll,
+  }) {
+    final t = AppLocalizations.of(context)!;
     final cardColor = _isLight
         ? Colors.white.withOpacity(0.98)
         : const Color(0xFF171A22).withOpacity(0.98);
@@ -632,31 +572,46 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        if (_hasRecoverySession) ...[
-          _buildNewPasswordField(
-            controller: _p1,
-            focusNode: _p1Focus,
-            label: _isAr
-                ? 'كلمة المرور الجديدة (8 أحرف+)'
-                : 'New password (8+ chars)',
-            obscure: _obscure1,
-            onToggle: () => setState(() => _obscure1 = !_obscure1),
-            textInputAction: TextInputAction.next,
-            onSubmitted: (_) => _p2Focus.requestFocus(),
+        FieldGroupFrame(
+          title: _hasRecoverySession
+              ? (_isAr ? 'كلمة المرور الجديدة' : 'New password')
+              : t.fieldGroupCredentialsTitle,
+          subtitle: _hasRecoverySession
+              ? (_isAr
+                  ? 'اختر كلمة مرور قوية (8 أحرف على الأقل)'
+                  : 'Choose a strong password (8+ characters)')
+              : t.fieldGroupCredentialsSubtitle,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_hasRecoverySession) ...[
+                _buildNewPasswordField(
+                  controller: _p1,
+                  focusNode: _p1Focus,
+                  label: _isAr
+                      ? 'كلمة المرور الجديدة (8 أحرف+)'
+                      : 'New password (8+ chars)',
+                  obscure: _obscure1,
+                  onToggle: () => setState(() => _obscure1 = !_obscure1),
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _p2Focus.requestFocus(),
+                ),
+                const SizedBox(height: 12),
+                _buildNewPasswordField(
+                  controller: _p2,
+                  focusNode: _p2Focus,
+                  label: _isAr ? 'تأكيد كلمة المرور' : 'Confirm password',
+                  obscure: _obscure2,
+                  onToggle: () => setState(() => _obscure2 = !_obscure2),
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => _saveNewPassword(),
+                ),
+              ] else ...[
+                _buildUsernameField(),
+              ],
+            ],
           ),
-          const SizedBox(height: 12),
-          _buildNewPasswordField(
-            controller: _p2,
-            focusNode: _p2Focus,
-            label: _isAr ? 'تأكيد كلمة المرور' : 'Confirm password',
-            obscure: _obscure2,
-            onToggle: () => setState(() => _obscure2 = !_obscure2),
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _saveNewPassword(),
-          ),
-        ] else ...[
-          _buildUsernameField(),
-        ],
+        ),
         const SizedBox(height: 16),
         if (_err != null) _messageBox(text: _err!, isError: true),
         if (_ok != null) _messageBox(text: _ok!, isError: false),
@@ -673,7 +628,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onPressed: (_busy || _offline)
+            onPressed: _busy
                 ? null
                 : (_hasRecoverySession
                     ? _saveNewPassword
@@ -685,13 +640,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       key: const ValueKey('busy'),
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
+                        SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: AppLogoLoading(compact: true, size: 20),
                         ),
                         const SizedBox(width: 12),
                         Text(
@@ -723,7 +675,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             TextButton(
-              onPressed: (_busy || _offline)
+              onPressed: _busy
                   ? null
                   : () async {
                       final sb = Supabase.instance.client;
@@ -748,7 +700,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             ),
             if (!_hasRecoverySession)
               TextButton(
-                onPressed: (_busy || _offline)
+                onPressed: _busy
                     ? null
                     : () async {
                         setState(() {
@@ -902,6 +854,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       focusNode: _usernameFocus,
       keyboardType: TextInputType.number,
       inputFormatters: [
+        ArabicDigitsToLatinFormatter(),
         FilteringTextInputFormatter.digitsOnly,
         LengthLimitingTextInputFormatter(10),
       ],
@@ -942,6 +895,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       onSubmitted: onSubmitted,
       enableSuggestions: false,
       autocorrect: false,
+      inputFormatters: passwordArabicGuardFormatters(
+        onArabicScriptBlocked: _schedulePasswordArabicDialog,
+      ),
       style: TextStyle(
         color: _textPrimary,
         fontWeight: FontWeight.w900,

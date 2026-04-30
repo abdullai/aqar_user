@@ -1,91 +1,100 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict>
-
-	<!-- ========================= -->
-	<!-- App Identity -->
-	<!-- ========================= -->
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-
-	<key>CFBundleDisplayName</key>
-	<string>Aqar User</string>
-
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-
-	<key>CFBundleName</key>
-	<string>aqar_user</string>
-
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-
-	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
-
-	<key>CFBundleSignature</key>
-	<string>????</string>
-
-	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
-
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
-
-	<!-- ========================= -->
-	<!-- UI -->
-	<!-- ========================= -->
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
-
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-
-	<!-- ========================= -->
-	<!-- 🔐 Biometrics (Face ID) -->
-	<!-- ========================= -->
-	<key>NSFaceIDUsageDescription</key>
-	<string>نستخدم Face ID لتسجيل الدخول السريع</string>
-
-	<!-- ========================= -->
-	<!-- 📍 GPS / Location -->
-	<!-- ========================= -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>نحتاج موقعك لعرض العقارات الأقرب إليك</string>
-
-	<!-- ========================= -->
-	<!-- 🔔 Notifications (IMPORTANT) -->
-	<!-- ========================= -->
-	<key>NSUserNotificationUsageDescription</key>
-	<string>نستخدم الإشعارات لإرسال رمز التحقق والتنبيهات المهمة</string>
-
-</dict>
+	<dict>
+		<!-- ========================= -->
+		<!-- App Identity -->
+		<!-- ========================= -->
+		<key>CFBundleDevelopmentRegion</key>
+		<string>$(DEVELOPMENT_LANGUAGE)</string>
+		<key>CFBundleDisplayName</key>
+		<string>Motawoq Real Estate</string>
+		<key>CFBundleExecutable</key>
+		<string>$(EXECUTABLE_NAME)</string>
+		<key>CFBundleIdentifier</key>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<key>CFBundleInfoDictionaryVersion</key>
+		<string>6.0</string>
+		<key>CFBundleName</key>
+		<string>aqar_user</string>
+		<key>CFBundlePackageType</key>
+		<string>APPL</string>
+		<key>CFBundleShortVersionString</key>
+		<string>$(FLUTTER_BUILD_NAME)</string>
+		<key>CFBundleSignature</key>
+		<string>????</string>
+		<key>CFBundleVersion</key>
+		<string>$(FLUTTER_BUILD_NUMBER)</string>
+		<key>LSRequiresIPhoneOS</key>
+		<true/>
+		<!-- ========================= -->
+		<!-- UI -->
+		<!-- ========================= -->
+		<key>UILaunchStoryboardName</key>
+		<string>LaunchScreen</string>
+		<key>UIMainStoryboardFile</key>
+		<string>Main</string>
+		<key>UISupportedInterfaceOrientations</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
+		<key>UISupportedInterfaceOrientations~ipad</key>
+		<array>
+			<string>UIInterfaceOrientationPortrait</string>
+			<string>UIInterfaceOrientationPortraitUpsideDown</string>
+			<string>UIInterfaceOrientationLandscapeLeft</string>
+			<string>UIInterfaceOrientationLandscapeRight</string>
+		</array>
+		<key>CADisableMinimumFrameDurationOnPhone</key>
+		<true/>
+		<key>UIApplicationSupportsIndirectInputEvents</key>
+		<true/>
+		<!-- ========================= -->
+		<!-- 🔐 Biometrics (Face ID) -->
+		<!-- ========================= -->
+		<key>NSFaceIDUsageDescription</key>
+		<string>نستخدم Face ID لتسجيل الدخول السريع</string>
+		<!-- ========================= -->
+		<!-- 📍 GPS / Location -->
+		<!-- ========================= -->
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>نحتاج موقعك لعرض العقارات الأقرب ولمشاركة موقعك في الدردشة عند اختيارك لذلك</string>
+		<!-- ========================= -->
+		<!-- 📷 Camera / Photos (REQUIRED) -->
+		<!-- ========================= -->
+		<key>NSCameraUsageDescription</key>
+		<string>نحتاج إذن الكاميرا لالتقاط صور الإعلان مباشرة.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>نحتاج إذن الصور لإرفاق صور الإعلان والمرفقات في الدردشة من الاستديو.</string>
+		<!-- ========================= -->
+		<!-- 🔔 Notifications / FCM background -->
+		<!-- ========================= -->
+		<key>UIBackgroundModes</key>
+		<array>
+			<string>remote-notification</string>
+		</array>
+		<!-- ========================= -->
+		<!-- 🔔 Notifications -->
+		<!-- ========================= -->
+		<!-- ملاحظة: iOS لا يستخدم NSUserNotificationUsageDescription للإذن.
+		     إذن الإشعارات يتم طلبه برمجيًا عبر FirebaseMessaging.requestPermission(). -->
+		<key>UIStatusBarHidden</key>
+		<false/>
+		<!-- روابط مخصصة: aqar://listing?listing=UUID (يُفضّل لاحقاً إضافة Universal Links لنطاق الويب) -->
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>com.aqaruser.listing</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>aqar</string>
+				</array>
+			</dict>
+		</array>
+	</dict>
 </plist>

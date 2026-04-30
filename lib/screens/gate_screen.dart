@@ -1,12 +1,17 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'package:aqar_user/l10n/app_localizations.dart';
+
 import '../core/session/app_session.dart';
+import '../core/theme/app_appearance_bridge.dart';
+import '../widgets/field_group_frame.dart';
 
 // ✅ Internet guard
 import '../services/connectivity_guard.dart';
-import '../shared/widgets/no_internet_dialog.dart';
 
 class GateScreen extends StatelessWidget {
   const GateScreen({super.key});
@@ -16,15 +21,17 @@ class GateScreen extends StatelessWidget {
 
   /// فحص الإنترنت + تنبيه
   Future<bool> _ensureInternet(BuildContext context) async {
-    final ok = await ConnectivityGuard.hasInternet();
-    if (!ok && context.mounted) {
-      await showNoInternetDialog(context, isAr: _isAr);
-    }
-    return ok;
+    return ConnectivityGuard.hasInternet();
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
+    if (t == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(_isAr ? 'بوابة الدخول' : 'Entry Gate'),
@@ -34,9 +41,11 @@ class GateScreen extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 420),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+            child: FieldGroupFrame(
+              title: t.fieldGroupGateTitle,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                 // =========================
                 // دخول كمستخدم
                 // =========================
@@ -46,6 +55,8 @@ class GateScreen extends StatelessWidget {
                     onPressed: () async {
                       // ❌ لا انتقال بدون إنترنت
                       final ok = await _ensureInternet(context);
+                      if (!context.mounted) return;
+                      ConnectivityGuard.showOfflineSnackIfNeeded(context, ok);
                       if (!ok) return;
 
                       Navigator.of(context).pushNamed('/login');
@@ -66,10 +77,17 @@ class GateScreen extends StatelessWidget {
                       // ❌ لا دخول كضيف بدون إنترنت
                       // (لأن الداشبورد يعتمد على بيانات عامة)
                       final ok = await _ensureInternet(context);
+                      if (!context.mounted) return;
+                      ConnectivityGuard.showOfflineSnackIfNeeded(context, ok);
                       if (!ok) return;
 
                       final session = context.read<AppSession>();
                       await session.setGuest();
+                      if (!context.mounted) return;
+                      unawaited(
+                        syncSessionAppearanceNotifiers?.call() ??
+                            Future.value(),
+                      );
 
                       if (!context.mounted) return;
 
@@ -102,6 +120,7 @@ class GateScreen extends StatelessWidget {
                   ),
                 ],
               ],
+            ),
             ),
           ),
         ),

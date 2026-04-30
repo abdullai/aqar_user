@@ -71,3 +71,7 @@ android/app/release
 # =====================
 .env
 .env.*
+# مفتاح anon للويب — انسخ supabase_config.json.example إلى web/supabase_config.json محلياً
+web/supabase_config.json
+firebase_private_key.txt
+*-firebase-adminsdk*.json

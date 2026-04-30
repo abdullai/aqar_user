@@ -1,5 +1,17 @@
 part of 'user_dashboard.dart';
 
-// === ملف: user_dashboard.state.dart ===
-// ملاحظة: هذا الملف تم تفريغه لأن initState/dispose يجب أن تبقى داخل _UserDashboardState في user_dashboard.ui.dart.
-// يمكنك لاحقا نقل Helpers بسيطة فقط هنا داخل Extensions إذا احتجت.
+// =========================
+// STATE EXTENSIONS
+// =========================
+
+extension UserDashboardStateHelpers on _UserDashboardState {
+  bool get isLoggedIn => _uid.isNotEmpty;
+
+  bool get isGuestUser => _uid.isEmpty;
+
+  bool get hasFavorites => _favoriteIds.isNotEmpty;
+
+  bool get hasCart => _cart.isNotEmpty;
+
+  bool get hasOffers => _offers.isNotEmpty;
+}

@@ -1,16 +1,19 @@
 // lib/screens/entry_choice_screen.dart
+import 'dart:async' show unawaited;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../main.dart'; // langNotifier + kPrefGuestMode/kPrefEntryMode
+import '../main.dart'; // langNotifier + keys
 import '../core/session/app_session.dart';
+import '../core/session/web_session_ttl.dart';
+import '../core/theme/app_appearance_bridge.dart';
 
 // ✅ Internet guard
 import '../services/connectivity_guard.dart';
-import '../shared/widgets/no_internet_dialog.dart';
+import '../widgets/app_logo_loading.dart';
 
 class EntryChoiceScreen extends StatefulWidget {
   const EntryChoiceScreen({super.key});
@@ -30,12 +33,13 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
   bool _loadingProfile = false;
   String? _profileUsername; // national id (10 digits)
   String? _profileFullName;
+  String? _profileError;
 
   SupabaseClient get _sb => Supabase.instance.client;
 
   Map<String, String> _t(String lang) {
     final ar = <String, String>{
-      'app': 'عقار موثوق',
+      'app': 'موثوق العقاري',
       'choose': 'اختر طريقة الدخول',
       'asUser': 'الدخول كمستخدم',
       'asGuest': 'الدخول كضيف',
@@ -43,9 +47,11 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
       'logout': 'تسجيل خروج',
       'signed': 'مسجل دخول',
       'id': 'الهوية/الإقامة',
+      'loadingProfile': 'جاري التحميل...',
+      'errorLoadingProfile': 'خطأ في تحميل البيانات',
     };
     final en = <String, String>{
-      'app': 'Aqar Mowthooq',
+      'app': 'Motawoq Real Estate',
       'choose': 'Choose how to continue',
       'asUser': 'Continue as user',
       'asGuest': 'Continue as guest',
@@ -53,15 +59,14 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
       'logout': 'Sign out',
       'signed': 'Signed in',
       'id': 'ID/Iqama',
+      'loadingProfile': 'Loading...',
+      'errorLoadingProfile': 'Error loading profile',
     };
     return (lang.toLowerCase().startsWith('en')) ? en : ar;
   }
 
   Future<bool> _ensureInternetOrAlert() async {
     final ok = await ConnectivityGuard.hasInternet();
-    if (!ok && mounted) {
-      await showNoInternetDialog(context, isAr: !_isEnglish);
-    }
     return ok;
   }
 
@@ -69,14 +74,12 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
   void initState() {
     super.initState();
 
-    // ✅ safer: run after first frame to avoid init-timing issues
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadProfileIfSignedIn();
     });
   }
 
   Future<void> _loadProfileIfSignedIn() async {
-    // ✅ guard: Supabase must be initialized
     SupabaseClient sb;
     try {
       sb = _sb;
@@ -87,27 +90,39 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     }
 
     final user = sb.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      setState(() {
+        _profileUsername = null;
+        _profileFullName = null;
+        _profileError = null;
+      });
+      return;
+    }
 
     if (_loadingProfile) return;
-    if (mounted) setState(() => _loadingProfile = true);
+    if (mounted) {
+      setState(() {
+        _loadingProfile = true;
+        _profileError = null;
+      });
+    }
 
     try {
       final res = await sb
           .from('users_profiles')
           .select('username, full_name, full_name_ar, full_name_en')
           .eq('user_id', user.id)
-          .limit(1);
+          .limit(1)
+          .maybeSingle();
 
       if (!mounted) return;
 
-      if (res is List && res.isNotEmpty) {
-        final row = res.first as Map<String, dynamic>;
-        final username = (row['username'] ?? '').toString().trim();
+      if (res != null) {
+        final username = (res['username'] ?? '').toString().trim();
 
-        final fullNameAr = (row['full_name_ar'] ?? '').toString().trim();
-        final fullNameEn = (row['full_name_en'] ?? '').toString().trim();
-        final fullName = (row['full_name'] ?? '').toString().trim();
+        final fullNameAr = (res['full_name_ar'] ?? '').toString().trim();
+        final fullNameEn = (res['full_name_en'] ?? '').toString().trim();
+        final fullName = (res['full_name'] ?? '').toString().trim();
 
         final pickedName = (_isEnglish
                 ? (fullNameEn.isNotEmpty ? fullNameEn : fullName)
@@ -117,45 +132,32 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
         setState(() {
           _profileUsername = username.isEmpty ? null : username;
           _profileFullName = pickedName.isEmpty ? null : pickedName;
+          _profileError = null;
+        });
+      } else {
+        setState(() {
+          _profileUsername = null;
+          _profileFullName = null;
+          _profileError = null;
         });
       }
     } catch (e, st) {
-      // ✅ don't ignore during diagnosis
       debugPrint('EntryChoice _loadProfile error: $e');
       debugPrint('$st');
+      if (mounted) {
+        setState(() {
+          _profileError = e.toString();
+        });
+      }
     } finally {
       if (mounted) setState(() => _loadingProfile = false);
     }
   }
 
-  Future<void> _setGuestModePrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(kPrefGuestMode, true);
-      await prefs.setString(kPrefEntryMode, 'guest');
-      await prefs.setBool('is_guest', true);
-      await prefs.setBool('guest', true);
-    } catch (e, st) {
-      debugPrint('EntryChoice _setGuestModePrefs error: $e');
-      debugPrint('$st');
-    }
-  }
-
-  Future<void> _setUserModePrefs() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(kPrefGuestMode, false);
-      await prefs.setString(kPrefEntryMode, 'user');
-      await prefs.remove('is_guest');
-      await prefs.remove('guest');
-    } catch (e, st) {
-      debugPrint('EntryChoice _setUserModePrefs error: $e');
-      debugPrint('$st');
-    }
-  }
-
   Future<void> _goUser() async {
     final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
 
     if (!mounted) return;
@@ -164,32 +166,38 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
 
   Future<void> _goGuest() async {
     final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
 
+    if (!mounted) return;
+    final appSession = context.read<AppSession>();
+
+    // ✅ لا تعمل Supabase signOut هنا (كان يطلق signedOut ويصفر guest prefs)
     try {
-      await _sb.auth.signOut();
+      await appSession.setGuest(); // يضبط prefs + signOut local للموبايل
     } catch (e, st) {
-      debugPrint('EntryChoice signOut (guest) error: $e');
+      debugPrint('EntryChoice setGuest error: $e');
       debugPrint('$st');
     }
-
-    // ✅ Provider safety: handle missing provider without crashing
-    try {
-      await context.read<AppSession>().setGuest();
-    } catch (e, st) {
-      debugPrint('EntryChoice AppSession.setGuest missing provider? $e');
-      debugPrint('$st');
-    }
-
-    await _setGuestModePrefs();
+    unawaited(syncSessionAppearanceNotifiers?.call() ?? Future.value());
 
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false);
+    unawaited(touchWebGuestActivity());
+    Navigator.of(context).pushNamedAndRemoveUntil(
+      '/userDashboard',
+      (r) => false,
+    );
   }
 
   Future<void> _continueAsUser() async {
     final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
+
+    if (!mounted) return;
+    final appSession = context.read<AppSession>();
 
     final s = _sb.auth.currentSession;
     if (s == null) {
@@ -198,15 +206,12 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
       return;
     }
 
-    // ✅ Provider safety: handle missing provider without crashing
     try {
-      await context.read<AppSession>().setUser(s.user.id);
+      await appSession.setUser(s.user.id);
     } catch (e, st) {
-      debugPrint('EntryChoice AppSession.setUser missing provider? $e');
+      debugPrint('EntryChoice setUser error: $e');
       debugPrint('$st');
     }
-
-    await _setUserModePrefs();
 
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/userDashboard', (r) => false);
@@ -214,7 +219,12 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
 
   Future<void> _signOutHere() async {
     final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
+
+    if (!mounted) return;
+    final appSession = context.read<AppSession>();
 
     try {
       await _sb.auth.signOut();
@@ -223,13 +233,18 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
       debugPrint('$st');
     }
 
-    // ✅ Provider safety
     try {
-      await context.read<AppSession>().logout();
+      await appSession.logout();
     } catch (e, st) {
-      debugPrint('EntryChoice AppSession.logout missing provider? $e');
+      debugPrint('EntryChoice logout error: $e');
       debugPrint('$st');
     }
+
+    setState(() {
+      _profileUsername = null;
+      _profileFullName = null;
+      _profileError = null;
+    });
 
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/', (r) => false);
@@ -248,17 +263,6 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     final user = _sb.auth.currentUser;
     final showSignedBox = user != null;
 
-    final w = MediaQuery.of(context).size.width;
-
-    // ====== تحجيم تلقائي للشاشات الصغيرة (بدون تحويلها عمودي) ======
-    // clamp بين 0.82 و 1.0
-    final scale = (w / 430.0).clamp(0.82, 1.0);
-    final tileGap = 12.0 * scale;
-    final outerPad = 18.0 * scale;
-
-    final cardBg = cs.surface.withOpacity(isDark ? 0.82 : 0.92);
-    final border = BorderSide(color: primary.withOpacity(isDark ? 0.22 : 0.18));
-
     return Directionality(
       textDirection: _isEnglish ? TextDirection.ltr : TextDirection.rtl,
       child: Scaffold(
@@ -273,87 +277,181 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
               ),
             ),
             child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 980),
-                child: Padding(
-                  padding: EdgeInsets.all(outerPad),
-                  child: Card(
-                    elevation: 0,
-                    color: cardBg,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      side: border,
-                    ),
-                    child: Padding(
-                      padding: EdgeInsets.all(16 * scale),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _header(
-                            appName: tr['app']!,
-                            subtitle: tr['choose']!,
-                            cs: cs,
-                            isDark: isDark,
-                            scale: scale,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isNarrow = constraints.maxWidth < 600;
+
+                  return SingleChildScrollView(
+                    padding: EdgeInsets.all(isNarrow ? 16.0 : 24.0),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: isNarrow ? double.infinity : 980,
+                      ),
+                      child: Card(
+                        elevation: 0,
+                        color: cs.surface.withOpacity(isDark ? 0.82 : 0.92),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          side: BorderSide(
+                            color: primary.withOpacity(isDark ? 0.22 : 0.18),
                           ),
-                          SizedBox(height: 14 * scale),
-
-                          if (showSignedBox) ...[
-                            _signedBox(
-                              cs: cs,
-                              isDark: isDark,
-                              tr: tr,
-                              onLogout: _signOutHere,
-                              loading: _loadingProfile,
-                              username: _profileUsername,
-                              fullName: _profileFullName,
-                              scale: scale,
-                            ),
-                            SizedBox(height: 14 * scale),
-                          ],
-
-                          // ✅ دائمًا بجانب بعض
-                          Row(
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(isNarrow ? 20.0 : 32.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(
-                                child: _choiceTile(
-                                  scale: scale,
-                                  title: showSignedBox
-                                      ? tr['continueUser']!
-                                      : tr['asUser']!,
-                                  icon: Icons.person_rounded,
-                                  topBadgeIcon: Icons.badge_outlined,
-                                  accent: primary,
-                                  filled: true,
-                                  onTap: showSignedBox
-                                      ? _continueAsUser
-                                      : _goUser,
-                                ),
+                              _header(
+                                appName: tr['app']!,
+                                subtitle: tr['choose']!,
+                                cs: cs,
+                                isDark: isDark,
                               ),
-                              SizedBox(width: tileGap),
-                              Expanded(
-                                child: _choiceTile(
-                                  scale: scale,
-                                  title: tr['asGuest']!,
-                                  icon: Icons.person_outline_rounded,
-                                  topBadgeIcon: Icons.how_to_reg_outlined,
-                                  accent: primary,
-                                  filled: false,
-                                  onTap: _goGuest,
+                              SizedBox(height: isNarrow ? 20 : 24),
+                              if (showSignedBox) ...[
+                                _signedBox(
+                                  cs: cs,
+                                  isDark: isDark,
+                                  tr: tr,
+                                  onLogout: _signOutHere,
+                                  loading: _loadingProfile,
+                                  username: _profileUsername,
+                                  fullName: _profileFullName,
+                                  error: _profileError,
                                 ),
+                                SizedBox(height: isNarrow ? 20 : 24),
+                              ],
+                              Wrap(
+                                spacing: 16,
+                                runSpacing: 16,
+                                alignment: WrapAlignment.center,
+                                children: [
+                                  _buildChoiceTile(
+                                    isNarrow: isNarrow,
+                                    title: showSignedBox
+                                        ? tr['continueUser']!
+                                        : tr['asUser']!,
+                                    icon: Icons.person_rounded,
+                                    topBadgeIcon: Icons.badge_outlined,
+                                    accent: primary,
+                                    filled: true,
+                                    onTap: showSignedBox ? _continueAsUser : _goUser,
+                                  ),
+                                  _buildChoiceTile(
+                                    isNarrow: isNarrow,
+                                    title: tr['asGuest']!,
+                                    icon: Icons.person_outline_rounded,
+                                    topBadgeIcon: Icons.how_to_reg_outlined,
+                                    accent: primary,
+                                    filled: false,
+                                    onTap: _goGuest,
+                                  ),
+                                ],
                               ),
+                              if (kIsWeb) const SizedBox(height: 8),
                             ],
                           ),
-
-                          // ملاحظة صغيرة جدًا على الويب فقط (اختياري) بدون حشو نصوص
-                          if (kIsWeb) SizedBox(height: 8 * scale),
-                        ],
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChoiceTile({
+    required bool isNarrow,
+    required String title,
+    required IconData icon,
+    required IconData topBadgeIcon,
+    required Color accent,
+    required bool filled,
+    required Future<void> Function() onTap,
+  }) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final width = isNarrow ? double.infinity : 280.0;
+
+    return SizedBox(
+      width: width,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: filled ? accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: filled ? accent.withOpacity(0.0) : accent.withOpacity(0.50),
+              width: 1.2,
+            ),
+            boxShadow: filled
+                ? [
+                    BoxShadow(
+                      blurRadius: 18,
+                      color: accent.withOpacity(0.22),
+                      offset: const Offset(0, 12),
+                    )
+                  ]
+                : const [],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: filled
+                      ? Colors.white.withOpacity(0.16)
+                      : accent.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 26,
+                      color: filled ? Colors.white : accent,
+                    ),
+                    Positioned(
+                      right: 6,
+                      top: 6,
+                      child: Icon(
+                        topBadgeIcon,
+                        size: 15,
+                        color: filled ? Colors.white70 : accent.withOpacity(0.9),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w900,
+                    color: filled ? Colors.white : onSurface,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  softWrap: true,
+                ),
+              ),
+              Icon(
+                _isEnglish ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
+                color: filled ? Colors.white : accent,
+                size: 24,
+              ),
+            ],
           ),
         ),
       ),
@@ -365,12 +463,11 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     required String subtitle,
     required ColorScheme cs,
     required bool isDark,
-    required double scale,
   }) {
     return Column(
       children: [
         Container(
-          height: 102 * scale,
+          height: 102,
           alignment: Alignment.center,
           child: Image.asset(
             'assets/logo.png',
@@ -378,8 +475,8 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
             filterQuality: FilterQuality.high,
             errorBuilder: (_, __, ___) {
               return Container(
-                width: 80 * scale,
-                height: 80 * scale,
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
                   color: primary.withOpacity(isDark ? 0.18 : 0.08),
                   borderRadius: BorderRadius.circular(22),
@@ -394,11 +491,11 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
             },
           ),
         ),
-        SizedBox(height: 6 * scale),
+        const SizedBox(height: 6),
         Text(
           appName,
           style: TextStyle(
-            fontSize: 20 * scale,
+            fontSize: 20,
             fontWeight: FontWeight.w900,
             color: cs.onSurface,
             letterSpacing: 0.2,
@@ -407,11 +504,11 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        SizedBox(height: 3 * scale),
+        const SizedBox(height: 3),
         Text(
           subtitle,
           style: TextStyle(
-            fontSize: 12.5 * scale,
+            fontSize: 12.5,
             fontWeight: FontWeight.w800,
             color: cs.onSurfaceVariant,
           ),
@@ -431,7 +528,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     required bool loading,
     required String? username,
     required String? fullName,
-    required double scale,
+    required String? error,
   }) {
     final boxBg = primary.withOpacity(isDark ? 0.14 : 0.10);
     final border = primary.withOpacity(isDark ? 0.28 : 0.20);
@@ -441,7 +538,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(horizontal: 14 * scale, vertical: 12 * scale),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: boxBg,
         borderRadius: BorderRadius.circular(18),
@@ -450,15 +547,15 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
       child: Row(
         children: [
           Container(
-            width: 44 * scale,
-            height: 44 * scale,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
               color: primary.withOpacity(isDark ? 0.20 : 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(Icons.verified_user_rounded, color: primary, size: 22 * scale),
+            child: const Icon(Icons.verified_user_rounded, color: primary, size: 22),
           ),
-          SizedBox(width: 12 * scale),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,145 +565,77 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                     Text(
                       tr['signed']!,
                       style: TextStyle(
-                        fontSize: 12.5 * scale,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w900,
                         color: cs.onSurface,
                       ),
                     ),
                     if (loading) ...[
-                      SizedBox(width: 10 * scale),
+                      const SizedBox(width: 10),
                       SizedBox(
-                        width: 14 * scale,
-                        height: 14 * scale,
-                        child: const CircularProgressIndicator(strokeWidth: 2),
+                        width: 18,
+                        height: 18,
+                        child: AppLogoLoading(compact: true, size: 16),
                       ),
                     ],
                   ],
                 ),
-                SizedBox(height: 4 * scale),
-                if (nameLine.isNotEmpty)
+                const SizedBox(height: 4),
+                if (error != null)
                   Text(
-                    nameLine,
+                    tr['errorLoadingProfile']!,
                     style: TextStyle(
-                      fontSize: 12.5 * scale,
-                      fontWeight: FontWeight.w800,
+                      fontSize: 12.5,
+                      color: cs.error.withValues(alpha: 0.85),
+                    ),
+                  )
+                else if (loading)
+                  Text(
+                    tr['loadingProfile']!,
+                    style: TextStyle(
+                      fontSize: 12.5,
                       color: cs.onSurfaceVariant,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                if (idLine.isNotEmpty) ...[
-                  SizedBox(height: 2 * scale),
-                  Text(
-                    '${tr['id']!}: $idLine',
-                    style: TextStyle(
-                      fontSize: 12 * scale,
-                      color: cs.onSurfaceVariant,
+                  )
+                else ...[
+                  if (nameLine.isNotEmpty)
+                    Text(
+                      nameLine,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: cs.onSurfaceVariant,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  if (idLine.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '${tr['id']!}: $idLine',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: cs.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
+                    ),
+                  ],
                 ],
               ],
             ),
           ),
-          SizedBox(width: 10 * scale),
+          const SizedBox(width: 10),
           TextButton(
             onPressed: onLogout,
             child: Text(
               tr['logout']!,
-              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5 * scale),
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12.5),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _choiceTile({
-    required double scale,
-    required String title,
-    required IconData icon,
-    required IconData topBadgeIcon,
-    required Color accent,
-    required bool filled,
-    required Future<void> Function() onTap,
-  }) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-
-    return InkWell(
-      onTap: () => onTap(),
-      borderRadius: BorderRadius.circular(22),
-      child: Container(
-        padding: EdgeInsets.all(14 * scale),
-        decoration: BoxDecoration(
-          color: filled ? accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: filled ? accent.withOpacity(0.0) : accent.withOpacity(0.50),
-            width: 1.2,
-          ),
-          boxShadow: filled
-              ? [
-                  BoxShadow(
-                    blurRadius: 18,
-                    color: accent.withOpacity(0.22),
-                    offset: const Offset(0, 12),
-                  )
-                ]
-              : const [],
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 50 * scale,
-              height: 50 * scale,
-              decoration: BoxDecoration(
-                color: filled
-                    ? Colors.white.withOpacity(0.16)
-                    : accent.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(
-                    icon,
-                    size: 26 * scale,
-                    color: filled ? Colors.white : accent,
-                  ),
-                  Positioned(
-                    right: 6,
-                    top: 6,
-                    child: Icon(
-                      topBadgeIcon,
-                      size: 15 * scale,
-                      color: filled ? Colors.white70 : accent.withOpacity(0.9),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(width: 12 * scale),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14.5 * scale,
-                  fontWeight: FontWeight.w900,
-                  color: filled ? Colors.white : onSurface,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Icon(
-              _isEnglish ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-              color: filled ? Colors.white : accent,
-              size: 24 * scale,
-            ),
-          ],
-        ),
       ),
     );
   }

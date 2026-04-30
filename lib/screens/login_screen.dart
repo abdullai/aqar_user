@@ -3,29 +3,62 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'package:provider/provider.dart';
-import 'package:aqar_user/main.dart'; // themeModeNotifier + langNotifier + kPrefGuestMode/kPrefEntryMode
-import 'package:aqar_user/models.dart'; // AdItem
-import 'package:aqar_user/services/auth_service.dart';
-import 'package:aqar_user/services/ads_service.dart';
-
-// ✅ L10n
 import 'package:aqar_user/l10n/app_localizations.dart';
+import 'package:aqar_user/main.dart';
+import 'package:aqar_user/models.dart';
+import 'package:aqar_user/services/ads_service.dart';
+import 'package:aqar_user/services/auth_service.dart';
+import 'package:aqar_user/theme.dart';
+import 'package:aqar_user/widgets/app_logo_loading.dart';
+import 'package:aqar_user/widgets/inline_property_video.dart';
+import 'package:aqar_user/widgets/field_group_frame.dart';
 
-// ✅ Session Provider
+import '../core/config/app_config.dart';
+import '../core/input/password_arabic_script_guard.dart';
 import '../core/session/app_session.dart';
-
-// ✅ للرجوع الآمن من OTP إلى Login
-
-// ✅ Internet guard (NEW)
+import '../core/theme/app_appearance_bridge.dart';
+import '../core/session/return_after_auth.dart';
+import '../core/utils/profile_greeting_from_row.dart';
 import '../services/connectivity_guard.dart';
-import '../shared/widgets/no_internet_dialog.dart';
+import '../services/fast_login_service.dart';
+import '../services/profile_compliance_service.dart';
+import '../services/user_install_session_service.dart';
+import '../core/government/nafath_models.dart';
+import '../services/nafath_auth_service.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+/// تمرير داخل بطاقة الدخول بنفس السلوك الذكي العام.
+class _LoginScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Widget buildScrollbar(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) {
+    if (AqarScrollBehavior.isCompactTouchLike(context)) return child;
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final alwaysVisible =
+        AqarScrollBehavior.isLargeScreenScrollbarVisible(context);
+    return Scrollbar(
+      controller: details.controller,
+      thumbVisibility: alwaysVisible,
+      trackVisibility: alwaysVisible,
+      thickness: alwaysVisible ? 8 : 5,
+      radius: const Radius.circular(8),
+      scrollbarOrientation:
+          rtl ? ScrollbarOrientation.right : ScrollbarOrientation.left,
+      child: child,
+    );
+  }
+}
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -35,7 +68,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware {
   static const Color _bankColor = Color(0xFF0F766E);
 
   // ✅ سياسة محاولات الدخول (محليًا)
@@ -45,8 +78,7 @@ class _LoginScreenState extends State<LoginScreen>
   // ✅ مفتاح OTP verified
   String _otpVerifiedKey(String uid) => 'otp_verified_$uid';
 
-  final TextEditingController _usernameController =
-      TextEditingController(); // 10 digits
+  final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   final FocusNode _usernameFocus = FocusNode();
@@ -55,16 +87,19 @@ class _LoginScreenState extends State<LoginScreen>
   bool rememberMe = false;
   bool fastLogin = false;
 
+  /// يظهر زر «الدخول السريع / البصمة» فقط عند وجود قفل فعلي (PIN أو بصمة مفعّلة).
+  bool _showQuickLoginEntry = false;
+
+  bool _routeAwareSubscribed = false;
+
   bool obscurePassword = true;
   bool isBusy = false;
+  bool _nafathBusy = false;
 
   // CAPTCHA
   bool showCaptcha = false;
   String captchaText = '';
   String userCaptchaInput = '';
-
-  bool loginError = false;
-  String loginErrorText = '';
 
   // Ads
   final PageController _adsController = PageController();
@@ -90,6 +125,8 @@ class _LoginScreenState extends State<LoginScreen>
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulse;
 
+  DateTime? _lastPasswordArabicDialogAt;
+
   bool get _isAr => langNotifier.value != 'en';
 
   ThemeMode get _currentTheme => themeModeNotifier.value;
@@ -102,8 +139,9 @@ class _LoginScreenState extends State<LoginScreen>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
 
   Color get _fieldFill => _isLight ? Colors.white : const Color(0xFF0F1425);
-  Color get _fieldBorder =>
-      _isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
+
+  /// مكحّل: أسود في النهاري، أبيض في الليلي (حدود الحقول الموحّدة).
+  Color get _fieldOutline => _isLight ? const Color(0xFF0A0A0A) : Colors.white;
 
   Color get _hintColor =>
       _isLight ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
@@ -115,18 +153,139 @@ class _LoginScreenState extends State<LoginScreen>
 
   bool _isSmallUi(BuildContext context) =>
       MediaQuery.of(context).size.width < 380;
+
   double _font(BuildContext context, double desktop, double mobile) =>
       _isSmallUi(context) ? mobile : desktop;
+
+  void _showLoginError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
+        backgroundColor: const Color(0xFFB91C1C),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
+  void _applyInitialFocus() {
+    if (rememberMe && (_storedUsername ?? '').isNotEmpty) {
+      _passwordFocus.requestFocus();
+    } else {
+      _usernameFocus.requestFocus();
+    }
+  }
+
+  void _schedulePasswordArabicDialog() {
+    final n = DateTime.now();
+    if (_lastPasswordArabicDialogAt != null &&
+        n.difference(_lastPasswordArabicDialogAt!) <
+            const Duration(milliseconds: 900)) {
+      return;
+    }
+    _lastPasswordArabicDialogAt = n;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showPasswordArabicNotAllowedDialog(context, isAr: _isAr);
+    });
+  }
+
+  InputDecoration _loginFieldDecoration({
+    String? labelText,
+    String? hintText,
+    Widget? prefixIcon,
+    Widget? suffixIcon,
+    int hintMaxLines = 1,
+    double? hintFontSize,
+  }) {
+    final radius = BorderRadius.circular(12);
+    final side = BorderSide(color: _fieldOutline, width: 1.6);
+    final sideFocus = BorderSide(color: _fieldOutline, width: 2.2);
+    final hasHint = (hintText ?? '').trim().isNotEmpty;
+    final hasLabel = (labelText ?? '').trim().isNotEmpty;
+    return InputDecoration(
+      labelText: hasLabel ? labelText : null,
+      floatingLabelBehavior:
+          hasLabel ? FloatingLabelBehavior.auto : FloatingLabelBehavior.never,
+      labelStyle: TextStyle(
+        color: _textSecondary,
+        fontWeight: FontWeight.w800,
+        fontSize: _font(context, 13.5, 12.5),
+      ),
+      floatingLabelStyle: TextStyle(
+        color: _bankColor,
+        fontWeight: FontWeight.w900,
+        fontSize: _font(context, 12.5, 11.5),
+      ),
+      hintText: hasHint ? hintText : null,
+      hintMaxLines: hasHint ? hintMaxLines : null,
+      hintStyle: hasHint
+          ? TextStyle(
+              color: _hintColor,
+              fontWeight: FontWeight.w800,
+              fontSize: hintFontSize ?? _font(context, 14, 11.5),
+              height: 1.25,
+            )
+          : null,
+      counterText: '',
+      contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 16, 14, 16),
+      prefixIcon: prefixIcon,
+      prefixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+      suffixIcon: suffixIcon,
+      suffixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+      border: OutlineInputBorder(borderRadius: radius),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: side,
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: sideFocus,
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: side.copyWith(color: _errorColor),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(color: _errorColor, width: 2.2),
+      ),
+      fillColor: _fieldFill,
+      filled: true,
+    );
+  }
 
   // =======================
   // ✅ Internet guard helper
   // =======================
   Future<bool> _ensureInternetOrAlert() async {
     final ok = await ConnectivityGuard.hasInternet();
-    if (!ok && mounted) {
-      await showNoInternetDialog(context, isAr: _isAr);
-    }
     return ok;
+  }
+
+  // =======================
+  // ✅ انتظار الجلسة بعد login
+  // =======================
+  Future<Session?> _waitForSession({int tries = 28}) async {
+    final sb = Supabase.instance.client;
+    for (int i = 0; i < tries; i++) {
+      final s = sb.auth.currentSession;
+      if (s != null) return s;
+      if (i == 2 || i == 10) {
+        try {
+          final res = await sb.auth.refreshSession();
+          if (res.session != null) return res.session;
+        } catch (_) {}
+      }
+      await Future.delayed(const Duration(milliseconds: 120));
+    }
+    return sb.auth.currentSession;
   }
 
   @override
@@ -143,29 +302,37 @@ class _LoginScreenState extends State<LoginScreen>
     _pulseCtrl.repeat(reverse: true);
 
     _generateCaptcha();
-    _loadPreferences();
     _loadAds();
 
-    // ✅ تنبيه مبكر إذا لا يوجد إنترنت (بدون منع فتح الشاشة)
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await _ensureInternetOrAlert();
       if (!mounted) return;
-      _usernameFocus.requestFocus();
+      await _loadPreferences();
+      if (!mounted) return;
+      // على الويب (خصوصاً متصفحات الجوال) طلب التركيز فوراً يتسبب بفتح/إغلاق لوحة المفاتيح.
+      if (!kIsWeb) {
+        _applyInitialFocus();
+      }
     });
 
     _usernameController.addListener(() {
       if (_maskedPrefillActive && !_usernameEdited) return;
 
-      final normalized = _normalizeNumbers(_usernameController.text);
-      if (_usernameController.text != normalized) {
-        _usernameController.text = normalized;
-        _usernameController.selection =
-            TextSelection.collapsed(offset: normalized.length);
+      final original = _usernameController.text;
+      final sanitized = _sanitizeUsernameInput(original);
+
+      if (original != sanitized) {
+        _usernameController.value = TextEditingValue(
+          text: sanitized,
+          selection: TextSelection.collapsed(offset: sanitized.length),
+        );
+        return;
       }
 
       _checkUsernameExistsDebounced();
-      setState(() {});
+      // لا setState هنا على كل حرف: على Flutter Web يعيد بناء الحقول ويقطع التركيز/الكيبورد.
+      // تحديث أيقونة التحقق يأتي من مسار _checkUsernameExistsDebounced و RPC.
     });
 
     _usernameFocus.addListener(() {
@@ -179,9 +346,29 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   @override
-  void dispose() {
-    _userCheckDebounce?.cancel();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_routeAwareSubscribed) return;
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      appRouteObserver.subscribe(this, route);
+      _routeAwareSubscribed = true;
+    }
+  }
 
+  @override
+  void didPopNext() {
+    if (!mounted) return;
+    unawaited(_loadPreferences());
+  }
+
+  @override
+  void dispose() {
+    if (_routeAwareSubscribed) {
+      appRouteObserver.unsubscribe(this);
+      _routeAwareSubscribed = false;
+    }
+    _userCheckDebounce?.cancel();
     _pulseCtrl.dispose();
     _adsController.dispose();
     _usernameController.dispose();
@@ -192,30 +379,71 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   // =======================
+  // ✅ Username normalize helpers
+  // =======================
+  String _normalizeDigitsToEnglish(String input) {
+    if (input.isEmpty) return input;
+
+    const map = {
+      '٠': '0',
+      '١': '1',
+      '٢': '2',
+      '٣': '3',
+      '٤': '4',
+      '٥': '5',
+      '٦': '6',
+      '٧': '7',
+      '٨': '8',
+      '٩': '9',
+      '۰': '0',
+      '۱': '1',
+      '۲': '2',
+      '۳': '3',
+      '۴': '4',
+      '۵': '5',
+      '۶': '6',
+      '۷': '7',
+      '۸': '8',
+      '۹': '9',
+    };
+
+    final buffer = StringBuffer();
+    for (final ch in input.split('')) {
+      buffer.write(map[ch] ?? ch);
+    }
+    return buffer.toString();
+  }
+
+  String _sanitizeUsernameInput(String input) {
+    final english = _normalizeDigitsToEnglish(input);
+    final digitsOnly = english.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digitsOnly.length <= 10) return digitsOnly;
+    return digitsOnly.substring(0, 10);
+  }
+
+  String _normalizeNumbers(String input) {
+    final authNormalized = AuthService.normalizeNumbers(input);
+    return _sanitizeUsernameInput(authNormalized);
+  }
+
+  // =======================
   // Session hygiene helpers
   // =======================
-
   Future<void> _ensureNotGuestMode() async {
-    // ✅ متوافق مع StartRouter/main.dart
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(kPrefGuestMode, false);
-      await prefs.setString(kPrefEntryMode, 'user');
-
-      // تنظيف أي مفاتيح قديمة (اختياري)
+      await prefs.setBool(AppConfig.prefGuestModeKey, false);
+      await prefs.setString(AppConfig.prefEntryModeKey, 'user');
       await prefs.remove('is_guest');
       await prefs.remove('guest');
     } catch (_) {}
   }
 
   Future<void> _setGuestModePrefs() async {
-    // ✅ متوافق مع StartRouter/main.dart
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(kPrefGuestMode, true);
-      await prefs.setString(kPrefEntryMode, 'guest');
-
-      // تنظيف أي مفاتيح قديمة (اختياري)
+      await prefs.setBool(AppConfig.prefGuestModeKey, true);
+      await prefs.setString(AppConfig.prefEntryModeKey, 'guest');
       await prefs.setBool('is_guest', true);
       await prefs.setBool('guest', true);
     } catch (_) {}
@@ -233,7 +461,6 @@ class _LoginScreenState extends State<LoginScreen>
   // =======================
   // Existing helpers
   // =======================
-
   void _resetDbFlags() {
     _checkingUsername = false;
     _usernameExists = false;
@@ -290,18 +517,23 @@ class _LoginScreenState extends State<LoginScreen>
 
     rememberMe = prefs.getBool('rememberMe') ?? false;
     fastLogin = prefs.getBool('fastLogin') ?? false;
+    if (kIsWeb) fastLogin = false;
 
-    // language + theme
-    final savedLang = prefs.getString('language') ?? langNotifier.value;
+    var quick = false;
+    if (!kIsWeb) {
+      try {
+        quick = await FastLoginService.hasAnyLockEnabled();
+      } catch (_) {}
+    }
+
+    final savedLang =
+        prefs.getString(AppConfig.prefLangKey) ?? langNotifier.value;
     langNotifier.value = (savedLang == 'en') ? 'en' : 'ar';
 
-    final savedTheme = prefs.getString('themeMode') ?? ThemeMode.system.name;
-    themeModeNotifier.value = ThemeMode.values.firstWhere(
-      (e) => e.name == savedTheme,
-      orElse: () => ThemeMode.system,
-    );
+    final savedTheme = prefs.getString(AppConfig.prefThemeKey) ?? 'light';
+    themeModeNotifier.value =
+        (savedTheme == 'dark') ? ThemeMode.dark : ThemeMode.light;
 
-    // brute-force stored
     final attemptsJson = prefs.getString('failedAttempts') ?? '{}';
     final lockoutJson = prefs.getString('lockoutUntil') ?? '{}';
     try {
@@ -313,20 +545,23 @@ class _LoginScreenState extends State<LoginScreen>
       _lockoutUntil = {};
     }
 
-    // remember username masked
     if (rememberMe) {
-      final u = (prefs.getString('username') ?? '').trim();
+      final u =
+          _sanitizeUsernameInput((prefs.getString('username') ?? '').trim());
       _storedUsername = u.isEmpty ? null : u;
-      if ((_storedUsername ?? '').isNotEmpty) _applyMaskedUsernamePrefill();
+      if ((_storedUsername ?? '').isNotEmpty) {
+        _applyMaskedUsernamePrefill();
+      }
     }
 
-    // never keep password
     if (prefs.containsKey('password')) {
       await prefs.remove('password');
     }
 
     if (!mounted) return;
-    setState(() {});
+    setState(() {
+      _showQuickLoginEntry = quick;
+    });
     _checkUsernameExistsDebounced();
   }
 
@@ -343,7 +578,9 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!rememberMe) {
       await prefs.remove('username');
-      if (prefs.containsKey('password')) await prefs.remove('password');
+      if (prefs.containsKey('password')) {
+        await prefs.remove('password');
+      }
       return;
     }
 
@@ -353,22 +590,20 @@ class _LoginScreenState extends State<LoginScreen>
       _storedUsername = real;
     }
 
-    if (prefs.containsKey('password')) await prefs.remove('password');
+    if (prefs.containsKey('password')) {
+      await prefs.remove('password');
+    }
   }
 
   Future<void> _setLanguage(String code) async {
-    final prefs = await SharedPreferences.getInstance();
-    langNotifier.value = (code == 'en') ? 'en' : 'ar';
-    await prefs.setString('language', langNotifier.value);
+    await setAppLang(code);
 
     if (!mounted) return;
     setState(() {});
   }
 
   Future<void> _setTheme(ThemeMode mode) async {
-    final prefs = await SharedPreferences.getInstance();
-    themeModeNotifier.value = mode;
-    await prefs.setString('themeMode', mode.name);
+    await setAppTheme(mode);
     if (!mounted) return;
     setState(() {});
   }
@@ -399,10 +634,8 @@ class _LoginScreenState extends State<LoginScreen>
     if (_maskedPrefillActive && !_usernameEdited) {
       return _storedUsername?.trim();
     }
-    return _usernameController.text.trim();
+    return _sanitizeUsernameInput(_usernameController.text.trim());
   }
-
-  String _normalizeNumbers(String input) => AuthService.normalizeNumbers(input);
 
   void _generateCaptcha() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -427,25 +660,25 @@ class _LoginScreenState extends State<LoginScreen>
       final minutesLeft = lockoutTime.difference(now).inMinutes;
       final secondsLeft = lockoutTime.difference(now).inSeconds % 60;
 
-      setState(() {
-        loginError = true;
-        loginErrorText = _isAr
+      _showLoginError(
+        _isAr
             ? 'الحساب مقفل مؤقتاً. حاول بعد $minutesLeft دقيقة و $secondsLeft ثانية.'
-            : 'Account temporarily locked. Try again in $minutesLeft minutes $secondsLeft seconds.';
-      });
+            : 'Account temporarily locked. Try again in $minutesLeft minutes $secondsLeft seconds.',
+      );
       return true;
     }
     return false;
   }
 
   Future<void> _updateFailedAttemptsLocal(String username) async {
-    final attempts = (_failedAttempts[username] ?? 0) + 1;
-    _failedAttempts[username] = attempts;
+    final key = username.isEmpty ? 'unknown' : username;
+    final attempts = (_failedAttempts[key] ?? 0) + 1;
+    _failedAttempts[key] = attempts;
 
-    final rem = _remainingAttempts(username);
+    final rem = _remainingAttempts(key);
 
     if (attempts >= _maxAttemptsBeforeLock) {
-      _lockoutUntil[username] = DateTime.now().add(_lockDuration);
+      _lockoutUntil[key] = DateTime.now().add(_lockDuration);
       setState(() {
         showCaptcha = true;
         _generateCaptcha();
@@ -454,12 +687,11 @@ class _LoginScreenState extends State<LoginScreen>
 
     await _savePreferences();
 
-    setState(() {
-      loginError = true;
-      loginErrorText = _isAr
+    _showLoginError(
+      _isAr
           ? 'بيانات الدخول غير صحيحة. المحاولات المتبقية: $rem'
-          : 'Invalid credentials. Attempts left: $rem';
-    });
+          : 'Invalid credentials. Attempts left: $rem',
+    );
   }
 
   Future<void> _resetFailedAttemptsLocal(String username) async {
@@ -470,34 +702,35 @@ class _LoginScreenState extends State<LoginScreen>
 
   // ✅ فتح شاشة الدخول السريع
   Future<void> _openQuickLogin() async {
+    if (kIsWeb) return;
     final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
 
     final u = (_getRealUsername() ?? '').trim();
     final normalized = _normalizeNumbers(u).trim();
 
     if (!_looksLikeUsername10Digits(normalized)) {
-      setState(() {
-        loginError = true;
-        loginErrorText = _isAr
-            ? 'اكتب رقم الهوية/الإقامة (10 أرقام) أولاً'
-            : 'Enter ID/Iqama (10 digits) first';
-      });
+      final loc = AppLocalizations.of(context);
+      if (loc == null) return;
+      _showLoginError(loc.loginEnterIdentifierFirst);
       return;
     }
 
     final exists = await _usernameExistsRpc(normalized);
+    if (!mounted) return;
     if (!exists) {
-      setState(() {
-        loginError = true;
-        loginErrorText = _isAr
-            ? 'لا يوجد حساب مرتبط بهذه الهوية/الإقامة'
-            : 'No account linked to this ID/Iqama';
-      });
+      final loc = AppLocalizations.of(context);
+      if (loc == null) return;
+      _showLoginError(loc.loginNoAccountLinkedIdentifier);
       return;
     }
 
     await _ensureNotGuestMode();
+    if (mounted) {
+      await context.read<AppSession>().reloadFromPrefs();
+    }
 
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/fastLogin');
@@ -506,61 +739,55 @@ class _LoginScreenState extends State<LoginScreen>
   // =======================
   // ✅ LOGIN (User)
   // =======================
-
   Future<void> _login() async {
-    if (isBusy) return;
+    if (isBusy || _nafathBusy) return;
 
     final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
 
-    final t = AppLocalizations.of(context)!;
+    final t = AppLocalizations.of(context);
+    if (t == null) return;
 
     final username = (_getRealUsername() ?? '').trim();
     final password = _passwordController.text;
 
     if (username.isEmpty || password.isEmpty) {
-      setState(() {
-        loginError = true;
-        loginErrorText = t.allFieldsRequired;
-      });
+      _showLoginError(t.allFieldsRequired);
       return;
     }
 
-    // ✅ مهم: أي دخول مستخدم يلغي وضع الضيف حسب مفاتيح StartRouter
     await _ensureNotGuestMode();
+    if (mounted) {
+      await context.read<AppSession>().reloadFromPrefs();
+    }
 
     final u = _normalizeNumbers(username).trim();
+
     if (!_looksLikeUsername10Digits(u)) {
-      setState(() {
-        loginError = true;
-        loginErrorText = _isAr
-            ? 'رقم الهوية/الإقامة يجب أن يكون 10 أرقام'
-            : 'ID/Iqama must be 10 digits';
-      });
+      _showLoginError(t.loginIdentifierMustBe10);
       await _updateFailedAttemptsLocal(u);
       return;
     }
 
     if (await _isAccountLockedLocal(u)) return;
+    if (!mounted) return;
 
     if (showCaptcha) {
       if (userCaptchaInput.trim().toUpperCase() != captchaText) {
-        setState(() {
-          loginError = true;
-          loginErrorText =
-              _isAr ? 'رمز التحقق غير صحيح' : 'Incorrect CAPTCHA code';
-          _generateCaptcha();
-        });
+        _showLoginError(
+            _isAr ? 'رمز التحقق غير صحيح' : 'Incorrect CAPTCHA code');
+        setState(() => _generateCaptcha());
         await _updateFailedAttemptsLocal(u);
+        if (!mounted) return;
         return;
       }
     }
 
-    setState(() {
-      isBusy = true;
-      loginError = false;
-      loginErrorText = '';
-    });
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    setState(() => isBusy = true);
 
     final lang = langNotifier.value == 'en' ? 'en' : 'ar';
 
@@ -574,15 +801,14 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!result.ok) {
       if (result.locked) {
-        setState(() {
-          isBusy = false;
-          loginError = true;
-          loginErrorText = result.message.isEmpty
+        setState(() => isBusy = false);
+        _showLoginError(
+          result.message.isEmpty
               ? (_isAr
                   ? 'الحساب مقفل، استخدم استعادة كلمة المرور.'
                   : 'Account is locked. Use password recovery.')
-              : result.message;
-        });
+              : result.message,
+        );
         return;
       }
 
@@ -591,15 +817,16 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    final uid = Supabase.instance.client.auth.currentUser?.id;
+    final session = await _waitForSession();
+    final uid = session?.user.id;
+
     if (uid == null || uid.isEmpty) {
-      setState(() {
-        isBusy = false;
-        loginError = true;
-        loginErrorText = _isAr
+      setState(() => isBusy = false);
+      _showLoginError(
+        _isAr
             ? 'تم التحقق لكن لم يتم إنشاء جلسة دخول.'
-            : 'Verified but no session created.';
-      });
+            : 'Verified but no session created.',
+      );
       return;
     }
 
@@ -611,71 +838,92 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     TextInput.finishAutofillContext(shouldSave: true);
-
-    // ✅ أمان: بداية مسار OTP => امسح otp_verified
     await _clearOtpVerifiedForCurrentSession();
 
-    final known = await AuthService.isDeviceKnown(u);
+    final known = await UserInstallSessionService.isCurrentInstallRegistered();
+    if (!mounted) return;
 
-    // ✅ fast-login + known => دخول مباشر
-    if (fastLogin && known) {
+    if (!kIsWeb && fastLogin && known) {
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_otpVerifiedKey(uid), true);
-
-        // ✅ تأكيد وضع المستخدم (StartRouter)
-        await prefs.setBool(kPrefGuestMode, false);
-        await prefs.setString(kPrefEntryMode, 'user');
+        await prefs.setBool(AppConfig.prefGuestModeKey, false);
+        await prefs.setString(AppConfig.prefEntryModeKey, 'user');
       } catch (_) {}
 
+      if (!mounted) return;
       await context.read<AppSession>().setUser(uid);
 
       if (!mounted) return;
       setState(() => isBusy = false);
-      Navigator.pushNamedAndRemoveUntil(
-        context,
+
+      if (!mounted) return;
+      await ReturnAfterAuth.navigatePostAuthOrDefault(
+        Navigator.of(context),
         '/userDashboard',
-        (r) => false,
       );
       return;
     }
 
-    // ✅ deviceId (يمرر إلى Verify)
     final deviceId = '${DateTime.now().millisecondsSinceEpoch}_$u';
 
-    // ✅ request_inapp_otp ONLY (لا request_otp)
+    // لا ننتظر users_profiles هنا: الاستعلام قد يتأخر أو يُرجع 500 (RLS) ويعيق الانتقال لشاشة الرمز.
+    // شاشة التحقق تجلب الملف وتطبّق بديل metadata من الجلسة.
+    unawaited(
+      ProfileComplianceService.tryUploadPendingSignupSignature(
+        Supabase.instance.client,
+      ),
+    );
+
     bool otpOk = false;
     try {
-      await Supabase.instance.client.rpc(
-        'request_inapp_otp',
-        params: {'p_username': u},
-      );
-      otpOk = true;
+      otpOk = await AuthService.requestOtp(u);
     } catch (_) {
       otpOk = false;
     }
 
     if (!otpOk) {
-      setState(() {
-        isBusy = false;
-        loginError = true;
-        loginErrorText = _isAr
+      setState(() => isBusy = false);
+      _showLoginError(
+        _isAr
             ? 'تعذر إرسال رمز التحقق. حاول مرة أخرى.'
-            : 'Failed to send OTP. Please try again.';
-      });
+            : 'Failed to send OTP. Please try again.',
+      );
       return;
     }
 
-    final args = {
+    String? prefetchFullName;
+    DateTime? prefetchLastLogin;
+    final au = Supabase.instance.client.auth.currentUser;
+    if (au != null) {
+      final mn =
+          ProfileGreetingFromRow.displayNameFromAuthMetadata(au.userMetadata);
+      if (mn != null && mn.isNotEmpty) {
+        prefetchFullName = mn;
+      }
+      if (au.lastSignInAt != null) {
+        prefetchLastLogin =
+            ProfileGreetingFromRow.lastSignInFromAuthString(au.lastSignInAt);
+      }
+    }
+
+    final args = <String, dynamic>{
       'next': '/userDashboard',
       'nextArgs': <String, dynamic>{},
       'username': u,
-      'deviceId': deviceId, // ✅ pass deviceId
-      'registerDeviceOnSuccess': !known, // ✅ register only if not known
+      'deviceId': deviceId,
+      'registerDeviceOnSuccess': !known,
       'backToLogin': true,
     };
+    if (prefetchFullName != null && prefetchFullName.trim().isNotEmpty) {
+      args['fullName'] = prefetchFullName.trim();
+    }
+    if (prefetchLastLogin != null) {
+      args['lastLogin'] = prefetchLastLogin;
+    }
 
     if (!mounted) return;
+
     setState(() => isBusy = false);
 
     Navigator.pushReplacementNamed(
@@ -685,10 +933,190 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
+  Future<void> _startNafathLogin() async {
+    if (isBusy || _nafathBusy) return;
+
+    final okNet = await _ensureInternetOrAlert();
+    if (!mounted) return;
+    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
+    if (!okNet) return;
+
+    final username = (_getRealUsername() ?? '').trim();
+    final nationalId =
+        _normalizeNumbers(username).replaceAll(RegExp(r'\D'), '');
+    if (!_looksLikeUsername10Digits(nationalId)) {
+      _showLoginError(
+        _isAr
+            ? 'أدخل رقم الهوية أو الإقامة من 10 أرقام قبل الدخول عبر نفاذ.'
+            : 'Enter your 10-digit ID before using Nafath.',
+      );
+      return;
+    }
+
+    setState(() => _nafathBusy = true);
+    try {
+      final r = await NafathAuthService(Supabase.instance.client)
+          .startLogin(locale: _isAr ? 'ar' : 'en', nationalId: nationalId);
+      if (!mounted) return;
+
+      switch (r.mode) {
+        case NafathSessionMode.redirect:
+          final u = r.authorizationUrl?.trim() ?? '';
+          if (u.isEmpty) {
+            _showNafathResult(r);
+            return;
+          }
+          final uri = Uri.tryParse(u);
+          if (uri == null ||
+              !(uri.hasScheme &&
+                  (uri.scheme == 'https' || uri.scheme == 'http'))) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _isAr ? 'رابط نفاذ غير صالح' : 'Invalid Nafath URL',
+                ),
+              ),
+            );
+            return;
+          }
+          final launched = await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          if (!launched && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  _isAr
+                      ? 'تعذر فتح المتصفح. جرّب لاحقاً.'
+                      : 'Could not open browser.',
+                ),
+              ),
+            );
+          }
+          return;
+        case NafathSessionMode.notConfigured:
+        case NafathSessionMode.error:
+          _showNafathResult(r);
+          return;
+        case NafathSessionMode.polling:
+          await _showAndPollNafath(r);
+          return;
+      }
+    } finally {
+      if (mounted) setState(() => _nafathBusy = false);
+    }
+  }
+
+  Future<void> _showAndPollNafath(NafathSessionResult initial) async {
+    final requestId = (initial.requestId ?? '').trim();
+    final random = (initial.random ?? '').trim();
+    if (requestId.isEmpty) {
+      _showNafathResult(initial);
+      return;
+    }
+
+    _showNafathResult(initial);
+    if (random.isNotEmpty) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: Text(_isAr ? 'تحقق نفاذ' : 'Nafath verification'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _isAr
+                    ? 'افتح تطبيق نفاذ واختر الرقم التالي:'
+                    : 'Open Nafath app and choose this number:',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 14),
+              SelectableText(
+                random,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _isAr
+                    ? 'سيتم إكمال الدخول تلقائياً بعد الموافقة.'
+                    : 'Sign-in will continue automatically after approval.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final svc = NafathAuthService(Supabase.instance.client);
+    for (var i = 0; i < 30 && mounted; i++) {
+      await Future<void>.delayed(const Duration(seconds: 3));
+      final r = await svc.pollStatus(requestId);
+      if (!mounted) return;
+      if (r.mode == NafathSessionMode.polling) continue;
+      if (r.mode == NafathSessionMode.redirect) {
+        final u = (r.authorizationUrl ?? '').trim();
+        final uri = Uri.tryParse(u);
+        if (uri != null && uri.hasScheme) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      }
+      _showNafathResult(r);
+      return;
+    }
+
+    if (!mounted) return;
+    _showLoginError(
+      _isAr
+          ? 'لم يصل تأكيد نفاذ بعد. حاول مرة أخرى.'
+          : 'Nafath confirmation was not received yet. Try again.',
+    );
+  }
+
+  void _showNafathResult(NafathSessionResult r) {
+    final msg = _isAr
+        ? (r.messageAr ?? r.messageEn ?? r.rawError ?? '')
+        : (r.messageEn ?? r.messageAr ?? r.rawError ?? '');
+    final hasTechnicalSetupMessage =
+        msg.contains('NAFATH_INTEGRATION_ENABLED') ||
+            msg.contains('handler is not implemented') ||
+            msg.contains('منطق الربط لم يُكمَل');
+    final text = hasTechnicalSetupMessage
+        ? (_isAr
+            ? 'خدمة الدخول عبر نفاذ قيد التفعيل حالياً. الرجاء استخدام تسجيل الدخول برقم الهوية وكلمة المرور.'
+            : 'Nafath sign-in is being activated. Please use ID/password sign-in for now.')
+        : msg.isEmpty
+            ? (_isAr
+                ? 'تعذر إكمال طلب نفاذ.'
+                : 'Could not complete Nafath request.')
+            : msg;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(text),
+        duration: const Duration(seconds: 8),
+      ),
+    );
+  }
+
   // =======================
   // UI
   // =======================
-
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
@@ -700,13 +1128,14 @@ class _LoginScreenState extends State<LoginScreen>
         builder: (context, _, __) {
           return Scaffold(
             backgroundColor: _pageBg,
+            resizeToAvoidBottomInset: true,
             body: SafeArea(
               child: LayoutBuilder(
                 builder: (context, c) {
                   final w = c.maxWidth;
-                  final h = c.maxHeight;
 
-                  final allowVerticalScroll = h < 760;
+                  // تمرير عمودي دائماً يحسّن الجوال + الويب مع لوحة المفاتيح.
+                  final allowVerticalScroll = true;
                   final showAdsSide = w >= 980;
 
                   if (showAdsSide) {
@@ -734,13 +1163,20 @@ class _LoginScreenState extends State<LoginScreen>
                     );
                   }
 
-                  return Center(
+                  final tightWeb = kIsWeb && w < 560;
+                  final padH = tightWeb ? 8.0 : 18.0;
+                  final padV = tightWeb ? 6.0 : 18.0;
+                  final cardMax =
+                      tightWeb ? (w - padH * 2).clamp(260.0, 900.0) : 600.0;
+
+                  return Align(
+                    alignment: Alignment.topCenter,
                     child: Padding(
-                      padding: const EdgeInsets.all(18),
+                      padding: EdgeInsets.fromLTRB(padH, padV, padH, padV),
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 600),
+                        constraints: BoxConstraints(maxWidth: cardMax),
                         child: _loginCard(
-                          maxWidth: 600,
+                          maxWidth: cardMax,
                           borderRadius: 18,
                           t: t,
                           allowVerticalScroll: allowVerticalScroll,
@@ -790,20 +1226,30 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ],
         ),
-        const SizedBox(height: 6),
-        ScaleTransition(
-          scale: _pulse,
-          child: Image.asset(
-            'assets/logo.png',
-            height: 150,
-            width: 150,
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.high,
-            errorBuilder: (_, __, ___) =>
-                Icon(Icons.apartment_rounded, size: 96, color: _textPrimary),
-          ),
+        const SizedBox(height: 4),
+        LayoutBuilder(
+          builder: (context, lc) {
+            final narrow = lc.maxWidth < 420;
+            final logoDim =
+                kIsWeb ? (narrow ? 132.0 : 120.0) : (narrow ? 120.0 : 112.0);
+            return ScaleTransition(
+              scale: _pulse,
+              child: Image.asset(
+                'assets/logo.png',
+                height: logoDim,
+                width: logoDim,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (_, __, ___) => Icon(
+                  Icons.apartment_rounded,
+                  size: logoDim * 0.65,
+                  color: _textPrimary,
+                ),
+              ),
+            );
+          },
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: FittedBox(
@@ -840,13 +1286,18 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ),
         const SizedBox(height: 16),
-        AutofillGroup(
-          child: Column(
-            children: [
-              _buildUsernameField(t: t),
-              const SizedBox(height: 10),
-              _buildPasswordField(t: t),
-            ],
+        FieldGroupFrame(
+          title: t.fieldGroupCredentialsTitle,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          child: AutofillGroup(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildUsernameField(t: t),
+                const SizedBox(height: 10),
+                _buildPasswordField(t: t),
+              ],
+            ),
           ),
         ),
         if (showCaptcha) ...[
@@ -854,107 +1305,178 @@ class _LoginScreenState extends State<LoginScreen>
           _buildCaptchaSection(t: t),
         ],
         const SizedBox(height: 10),
-        Row(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Checkbox(
-              value: rememberMe,
-              onChanged: (v) async {
-                final newVal = v ?? false;
-                setState(() => rememberMe = newVal);
-
-                if (!newVal) {
-                  _maskedPrefillActive = false;
-                  _storedUsername = null;
-                  _usernameEdited = false;
-                  _usernameController.clear();
-                  _resetDbFlags();
-                  await _savePreferences();
-                  return;
-                }
-
-                final curU = (_getRealUsername() ?? '').trim();
-                _storedUsername = curU.isEmpty ? null : curU;
-
-                if ((_storedUsername ?? '').isNotEmpty) {
-                  _applyMaskedUsernamePrefill();
-                }
-                await _savePreferences();
-                _checkUsernameExistsDebounced();
-              },
-            ),
-            Expanded(
-              child: Text(
-                t.rememberMe,
-                style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: _font(context, 13, 12),
-                  fontWeight: FontWeight.w900,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(width: 10),
-            _quickLoginTile(t: t),
-          ],
-        ),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: TextButton(
-            onPressed: () async {
-              final okNet = await _ensureInternetOrAlert();
-              if (!okNet) return;
-              Navigator.pushNamed(context, '/resetPassword');
-            },
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: AlignmentDirectional.centerStart,
-              child: Text(
-                t.forgotUsernameOrPassword,
-                maxLines: 1,
-                overflow: TextOverflow.visible,
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: _font(context, 14, 12.2),
-                ),
-              ),
-            ),
-          ),
-        ),
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: loginError
-              ? Padding(
-                  key: const ValueKey('err'),
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _errorColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _errorColor.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.warning_amber_rounded,
-                            color: _errorColor, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            loginErrorText.isEmpty
-                                ? t.invalidCredentials
-                                : loginErrorText,
-                            style: TextStyle(
-                              color: _errorColor,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: () async {
+                        final okNet = await _ensureInternetOrAlert();
+                        if (!mounted) return;
+                        ConnectivityGuard.showOfflineSnackIfNeeded(
+                            context, okNet);
+                        if (!okNet) return;
+                        Navigator.pushNamed(context, '/resetPassword');
+                      },
+                      child: Text(
+                        t.forgotUsernameOrPassword,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.start,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: _font(context, 13.5, 12),
+                          color: _bankColor,
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                )
-              : const SizedBox.shrink(key: ValueKey('noerr')),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Checkbox(
+                      value: rememberMe,
+                      onChanged: (v) async {
+                        final newVal = v ?? false;
+                        setState(() => rememberMe = newVal);
+
+                        if (!newVal) {
+                          _maskedPrefillActive = false;
+                          _storedUsername = null;
+                          _usernameEdited = false;
+                          _usernameController.clear();
+                          _resetDbFlags();
+                          await _savePreferences();
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) _usernameFocus.requestFocus();
+                          });
+                          return;
+                        }
+
+                        final curU = (_getRealUsername() ?? '').trim();
+                        _storedUsername = curU.isEmpty ? null : curU;
+
+                        if ((_storedUsername ?? '').isNotEmpty) {
+                          _applyMaskedUsernamePrefill();
+                        }
+                        await _savePreferences();
+                        _checkUsernameExistsDebounced();
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _passwordFocus.requestFocus();
+                        });
+                      },
+                    ),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: _isSmallUi(context) ? 140 : 160,
+                      ),
+                      child: Text(
+                        t.rememberMe,
+                        style: TextStyle(
+                          color: _textPrimary,
+                          fontSize: _font(context, 13, 12),
+                          fontWeight: FontWeight.w900,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (!kIsWeb && _showQuickLoginEntry) ...[
+              const SizedBox(height: 10),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: isBusy ? null : _openQuickLogin,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Ink(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      gradient: LinearGradient(
+                        begin: AlignmentDirectional.topStart,
+                        end: AlignmentDirectional.bottomEnd,
+                        colors: [
+                          _bankColor.withValues(alpha: 0.14),
+                          _bankColor.withValues(alpha: 0.04),
+                        ],
+                      ),
+                      border: Border.all(
+                        color: _bankColor.withValues(alpha: 0.35),
+                        width: 1.2,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _bankColor.withValues(alpha: 0.16),
+                            ),
+                            child: Icon(
+                              Icons.fingerprint_rounded,
+                              color: _bankColor,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  t.quickLogin,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: _font(context, 15, 14),
+                                    color: _textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  t.quickLoginSubtitle,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: _font(context, 12, 11),
+                                    color: _textSecondary,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: _textSecondary.withValues(alpha: 0.85),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
         SizedBox(
           width: double.infinity,
@@ -968,7 +1490,7 @@ class _LoginScreenState extends State<LoginScreen>
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onPressed: isBusy ? null : _login,
+            onPressed: (isBusy || _nafathBusy) ? null : _login,
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
               child: isBusy
@@ -976,10 +1498,10 @@ class _LoginScreenState extends State<LoginScreen>
                       key: const ValueKey('loading'),
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                        SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: AppLogoLoading(compact: true, size: 20),
                         ),
                         const SizedBox(width: 10),
                         Text(
@@ -1000,34 +1522,79 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ),
         const SizedBox(height: 8),
-        TextButton(
-          onPressed: () {
-            try {
-              Navigator.pushNamed(context, '/passwordSetup');
-            } catch (_) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(_isAr
-                      ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
-                      : 'Register screen is not enabled yet'),
-                ),
-              );
-            }
-          },
-          child: Text(
-            _isAr ? 'إنشاء حساب جديد' : 'Create new account',
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              color: _bankColor,
-              fontSize: _font(context, 14, 12.5),
+        SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _bankColor,
+              side: BorderSide(color: _fieldOutline, width: 1.8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            onPressed: (isBusy || _nafathBusy)
+                ? null
+                : () {
+                    try {
+                      Navigator.pushNamed(context, '/passwordSetup');
+                    } catch (_) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            _isAr
+                                ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
+                                : 'Register screen is not enabled yet',
+                          ),
+                        ),
+                      );
+                    }
+                  },
+            child: Text(
+              _isAr ? 'إنشاء حساب جديد' : 'Create new account',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: _font(context, 15, 13.5),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ),
         const SizedBox(height: 10),
-
-        // ✅ زر واضح: الدخول كضيف (متوافق مع AppSession + StartRouter)
+        SizedBox(
+          width: double.infinity,
+          height: 48,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _bankColor,
+              side: BorderSide(color: _bankColor.withValues(alpha: 0.55)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: (isBusy || _nafathBusy) ? null : _startNafathLogin,
+            icon: _nafathBusy
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: AppLogoLoading(compact: true, size: 18),
+                  )
+                : Icon(Icons.verified_user_outlined, color: _bankColor),
+            label: Text(
+              _nafathBusy
+                  ? (_isAr ? 'جاري الاتصال…' : 'Connecting…')
+                  : (_isAr ? 'الدخول عبر نفاذ' : 'Sign in with Nafath'),
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: _font(context, 15, 13.5),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
         SizedBox(
           width: double.infinity,
           height: 46,
@@ -1035,27 +1602,29 @@ class _LoginScreenState extends State<LoginScreen>
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: _bankColor.withOpacity(0.55)),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            onPressed: isBusy
+            onPressed: (isBusy || _nafathBusy)
                 ? null
                 : () async {
                     final okNet = await _ensureInternetOrAlert();
+                    if (!mounted) return;
+                    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
                     if (!okNet) return;
 
-                    try {
-                      await Supabase.instance.client.auth.signOut();
-                    } catch (_) {}
-
                     await context.read<AppSession>().setGuest();
-
-                    // ✅ مهم: احفظ وضع الضيف لمطابقة StartRouter
+                    if (!mounted) return;
                     await _setGuestModePrefs();
+                    if (!mounted) return;
+                    unawaited(
+                      syncSessionAppearanceNotifiers?.call() ?? Future.value(),
+                    );
 
                     if (!mounted) return;
                     Navigator.pushNamedAndRemoveUntil(
                       context,
-                      '/',
+                      '/userDashboard',
                       (r) => false,
                     );
                   },
@@ -1072,9 +1641,15 @@ class _LoginScreenState extends State<LoginScreen>
     final child = Padding(
       padding: const EdgeInsets.all(18),
       child: allowVerticalScroll
-          ? SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              child: content,
+          ? ScrollConfiguration(
+              behavior: _LoginScrollBehavior(),
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                physics: const ClampingScrollPhysics(),
+                clipBehavior: Clip.hardEdge,
+                child: content,
+              ),
             )
           : content,
     );
@@ -1093,51 +1668,11 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _quickLoginTile({required AppLocalizations t}) {
-    final bg = _isLight ? Colors.white : const Color(0xFF0F1425);
-    final border = _isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
-
-    return InkWell(
-      onTap: isBusy ? null : _openQuickLogin,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        height: 40,
-        padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 10, 6),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.fingerprint_rounded, color: _bankColor, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              t.quickLogin,
-              style: TextStyle(
-                color: _textPrimary,
-                fontSize: _font(context, 12.8, 11.6),
-                fontWeight: FontWeight.w900,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded, color: _iconColor, size: 18),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _topBarUnified({required AppLocalizations t}) {
     return LayoutBuilder(
       builder: (context, c) {
         final langShort = (langNotifier.value == 'en') ? 'EN' : 'AR';
-        final themeShort = _currentTheme == ThemeMode.light
-            ? '☀'
-            : (_currentTheme == ThemeMode.dark ? '🌙' : 'AUTO');
+        final themeShort = _currentTheme == ThemeMode.light ? '☀' : '🌙';
 
         return Row(
           children: [
@@ -1168,7 +1703,7 @@ class _LoginScreenState extends State<LoginScreen>
     required VoidCallback onTap,
   }) {
     final bg = _isLight ? Colors.white : const Color(0xFF0F1425);
-    final border = _isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
+    final border = _fieldOutline;
 
     return InkWell(
       onTap: onTap,
@@ -1267,7 +1802,7 @@ class _LoginScreenState extends State<LoginScreen>
                           selected: langNotifier.value != 'en',
                           onTap: () async {
                             await _setLanguage('ar');
-                            if (mounted) Navigator.pop(ctx);
+                            if (ctx.mounted) Navigator.pop(ctx);
                           },
                         ),
                         const SizedBox(height: 8),
@@ -1277,7 +1812,7 @@ class _LoginScreenState extends State<LoginScreen>
                           selected: langNotifier.value == 'en',
                           onTap: () async {
                             await _setLanguage('en');
-                            if (mounted) Navigator.pop(ctx);
+                            if (ctx.mounted) Navigator.pop(ctx);
                           },
                         ),
                         const SizedBox(height: 6),
@@ -1344,7 +1879,7 @@ class _LoginScreenState extends State<LoginScreen>
                           selected: themeModeNotifier.value == ThemeMode.light,
                           onTap: () async {
                             await _setTheme(ThemeMode.light);
-                            if (mounted) Navigator.pop(ctx);
+                            if (ctx.mounted) Navigator.pop(ctx);
                           },
                         ),
                         const SizedBox(height: 8),
@@ -1354,17 +1889,7 @@ class _LoginScreenState extends State<LoginScreen>
                           selected: themeModeNotifier.value == ThemeMode.dark,
                           onTap: () async {
                             await _setTheme(ThemeMode.dark);
-                            if (mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        _radioTile(
-                          title: t.themeSystem,
-                          subtitle: _isAr ? 'تلقائي' : 'System',
-                          selected: themeModeNotifier.value == ThemeMode.system,
-                          onTap: () async {
-                            await _setTheme(ThemeMode.system);
-                            if (mounted) Navigator.pop(ctx);
+                            if (ctx.mounted) Navigator.pop(ctx);
                           },
                         ),
                         const SizedBox(height: 6),
@@ -1410,7 +1935,7 @@ class _LoginScreenState extends State<LoginScreen>
           onPressed: () => Navigator.pop(context),
           icon: Icon(Icons.close_rounded, color: _iconColor),
           tooltip: _isAr ? 'إغلاق' : 'Close',
-        )
+        ),
       ],
     );
   }
@@ -1477,22 +2002,22 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ✅ حقل الهوية
+  // ✅ حقل الهوية / الإقامة
   Widget _buildUsernameField({required AppLocalizations t}) {
-    final raw = _usernameController.text.trim();
+    final raw = _getRealUsername()?.trim() ?? '';
     final normalized = _normalizeNumbers(raw).trim();
     final is10 = _looksLikeUsername10Digits(normalized);
 
     Widget? suffix;
     if (_checkingUsername) {
-      suffix = const SizedBox(
+      suffix = SizedBox(
         width: 44,
         height: 44,
         child: Center(
           child: SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
+            width: 22,
+            height: 22,
+            child: AppLogoLoading(compact: true, size: 20),
           ),
         ),
       );
@@ -1500,8 +2025,9 @@ class _LoginScreenState extends State<LoginScreen>
       suffix = SizedBox(
         width: 44,
         height: 44,
-        child:
-            Center(child: Icon(Icons.verified_rounded, color: _successColor)),
+        child: Center(
+          child: Icon(Icons.verified_rounded, color: _successColor),
+        ),
       );
     } else if (_usernameCheckDone &&
         is10 &&
@@ -1510,120 +2036,98 @@ class _LoginScreenState extends State<LoginScreen>
       suffix = SizedBox(
         width: 44,
         height: 44,
-        child: Center(child: Icon(Icons.error_outline, color: _errorColor)),
+        child: Center(
+          child: Icon(Icons.error_outline, color: _errorColor),
+        ),
       );
     }
 
-    return TextField(
-      controller: _usernameController,
-      focusNode: _usernameFocus,
-      keyboardType: TextInputType.number,
-      textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
-      textAlign: _isAr ? TextAlign.right : TextAlign.left,
-      inputFormatters: [
-        FilteringTextInputFormatter.digitsOnly,
-        LengthLimitingTextInputFormatter(10),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _usernameController,
+          focusNode: _usernameFocus,
+          keyboardType: TextInputType.number,
+          textDirection: TextDirection.ltr,
+          textAlign: _isAr ? TextAlign.right : TextAlign.left,
+          inputFormatters: [
+            const _EnglishDigitsOnlyFormatter(),
+            LengthLimitingTextInputFormatter(10),
+          ],
+          maxLength: 10,
+          textInputAction: TextInputAction.next,
+          onSubmitted: (_) => _passwordFocus.requestFocus(),
+          autofillHints: const [AutofillHints.username],
+          style: TextStyle(
+            color: _textPrimary,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+          ),
+          decoration: _loginFieldDecoration(
+            labelText: t.loginIdentifierFieldLabel,
+            hintText: null,
+            prefixIcon: Icon(Icons.badge_outlined, color: _iconColor),
+            suffixIcon: suffix,
+          ),
+          onTap: () {
+            if (_maskedPrefillActive && !_usernameEdited) {
+              _usernameEdited = true;
+              _usernameController.clear();
+              _resetDbFlags();
+              setState(() {});
+            }
+          },
+        ),
       ],
-      maxLength: 10,
-      textInputAction: TextInputAction.next,
-      onSubmitted: (_) => _passwordFocus.requestFocus(),
-      autofillHints: const [AutofillHints.username],
-      style: TextStyle(
-        color: _textPrimary,
-        fontWeight: FontWeight.w900,
-        fontSize: 16,
-      ),
-      decoration: InputDecoration(
-        hintText: _isAr
-            ? 'رقم الهوية/الإقامة (10 أرقام)'
-            : 'Saudi ID/Iqama (10 digits)',
-        hintStyle: TextStyle(
-          color: _hintColor,
-          fontWeight: FontWeight.w800,
-          fontSize: _font(context, 14, 12.0),
-        ),
-        counterText: '',
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 16, 14, 16),
-        prefixIcon: Icon(Icons.badge_outlined, color: _iconColor),
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 46, minHeight: 46),
-        suffixIcon: suffix,
-        suffixIconConstraints:
-            const BoxConstraints(minWidth: 46, minHeight: 46),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: _fieldBorder),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _bankColor, width: 1.6),
-        ),
-        fillColor: _fieldFill,
-        filled: true,
-      ),
-      onTap: () {
-        if (_maskedPrefillActive && !_usernameEdited) {
-          _usernameEdited = true;
-          _usernameController.clear();
-          _resetDbFlags();
-          setState(() {});
-        }
-      },
     );
   }
 
   // ✅ كلمة المرور
   Widget _buildPasswordField({required AppLocalizations t}) {
-    return TextField(
-      controller: _passwordController,
-      focusNode: _passwordFocus,
-      obscureText: obscurePassword,
-      textInputAction: TextInputAction.done,
-      onSubmitted: (_) => _login(),
-      autofillHints: const [AutofillHints.password],
-      enableSuggestions: false,
-      autocorrect: false,
-      style: TextStyle(
-        color: _textPrimary,
-        fontWeight: FontWeight.w900,
-        fontSize: 16,
-      ),
-      decoration: InputDecoration(
-        hintText: t.passwordHint,
-        hintStyle: TextStyle(
-          color: _hintColor,
-          fontWeight: FontWeight.w800,
-          fontSize: _font(context, 14, 12.0),
-        ),
-        contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 16, 14, 16),
-        prefixIcon: Icon(Icons.lock_outline, color: _iconColor),
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 46, minHeight: 46),
-        suffixIcon: IconButton(
-          icon: Icon(
-            obscurePassword ? Icons.visibility : Icons.visibility_off,
-            color: _iconColor,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _passwordController,
+          focusNode: _passwordFocus,
+          obscureText: obscurePassword,
+          keyboardType:
+              kIsWeb ? TextInputType.text : TextInputType.visiblePassword,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _login(),
+          autofillHints: const [AutofillHints.password],
+          enableSuggestions: false,
+          autocorrect: false,
+          inputFormatters: passwordArabicGuardFormatters(
+            onArabicScriptBlocked: _schedulePasswordArabicDialog,
           ),
-          onPressed: () => setState(() => obscurePassword = !obscurePassword),
-          tooltip: obscurePassword
-              ? (_isAr ? 'إظهار' : 'Show')
-              : (_isAr ? 'إخفاء' : 'Hide'),
+          style: TextStyle(
+            color: _textPrimary,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+          ),
+          decoration: _loginFieldDecoration(
+            labelText: t.loginPasswordFieldShortLabel,
+            hintText: null,
+            hintFontSize: 16,
+            prefixIcon: Icon(Icons.lock_outline, color: _iconColor),
+            suffixIcon: ExcludeFocus(
+              child: IconButton(
+                icon: Icon(
+                  obscurePassword ? Icons.visibility : Icons.visibility_off,
+                  color: _iconColor,
+                ),
+                onPressed: () =>
+                    setState(() => obscurePassword = !obscurePassword),
+                tooltip: obscurePassword
+                    ? (_isAr ? 'إظهار' : 'Show')
+                    : (_isAr ? 'إخفاء' : 'Hide'),
+              ),
+            ),
+          ),
         ),
-        suffixIconConstraints:
-            const BoxConstraints(minWidth: 46, minHeight: 46),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: _fieldBorder),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: _bankColor, width: 1.6),
-        ),
-        fillColor: _fieldFill,
-        filled: true,
-      ),
+      ],
     );
   }
 
@@ -1674,7 +2178,7 @@ class _LoginScreenState extends State<LoginScreen>
             decoration: BoxDecoration(
               color: _isLight ? Colors.white : const Color(0xFF1F2937),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _fieldBorder),
+              border: Border.all(color: _fieldOutline),
             ),
             child: Wrap(
               alignment: WrapAlignment.center,
@@ -1715,8 +2219,10 @@ class _LoginScreenState extends State<LoginScreen>
             ),
             decoration: InputDecoration(
               hintText: _isAr ? 'أدخل الأحرف أعلاه' : 'Enter characters above',
-              hintStyle:
-                  TextStyle(color: _hintColor, fontWeight: FontWeight.w800),
+              hintStyle: TextStyle(
+                color: _hintColor,
+                fontWeight: FontWeight.w800,
+              ),
               border:
                   OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               contentPadding:
@@ -1732,8 +2238,10 @@ class _LoginScreenState extends State<LoginScreen>
                 icon: Icon(Icons.refresh, size: 16, color: _iconColor),
                 label: Text(
                   _isAr ? 'تحديث الرمز' : 'Refresh',
-                  style:
-                      TextStyle(color: _iconColor, fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                    color: _iconColor,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
               TextButton.icon(
@@ -1742,7 +2250,9 @@ class _LoginScreenState extends State<LoginScreen>
                 label: Text(
                   _isAr ? 'تخطي' : 'Skip',
                   style: TextStyle(
-                      color: _errorColor, fontWeight: FontWeight.w900),
+                    color: _errorColor,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
             ],
@@ -1861,6 +2371,10 @@ class _LoginScreenState extends State<LoginScreen>
             title: title,
             subtitle: subtitle,
             imageAsset: item.assetImage,
+            imageNetworkUrl: item.imageUrl,
+            videoUrl: item.bestVideoUrl(),
+            isAr: _isAr,
+            adId: item.id,
           );
         },
       ),
@@ -1904,6 +2418,464 @@ class _LoginScreenState extends State<LoginScreen>
   }
 }
 
+int? _loginSideBrandVariant(String? adId) {
+  switch (adId) {
+    case 'mawthuq-demo-license':
+      return 0;
+    case 'mawthuq-demo-inbox':
+      return 1;
+    case 'mawthuq-demo-explore':
+      return 2;
+    default:
+      return null;
+  }
+}
+
+/// رسوم لوحة الدخول (ويب/شاشة عريضة) عندما تكون إعلانات الـ fallback لموثوق.
+class _MawthuqLoginSideIllustration extends StatelessWidget {
+  final int variant;
+  final bool isLight;
+  final bool isAr;
+
+  const _MawthuqLoginSideIllustration({
+    required this.variant,
+    required this.isLight,
+    required this.isAr,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    switch (variant) {
+      case 0:
+        return _license();
+      case 1:
+        return _inbox();
+      case 2:
+        return _explore();
+      default:
+        return const SizedBox.expand();
+    }
+  }
+
+  Widget _license() {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF0A4D68),
+            Color(0xFF0F766E),
+            Color(0xFF134E4A),
+          ],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: -24,
+            bottom: -24,
+            child: Icon(
+              Icons.shield_rounded,
+              size: 100,
+              color: Colors.white.withOpacity(0.06),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Align(
+                  alignment: isAr ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.22),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.verified_rounded,
+                            size: 14, color: Colors.white),
+                        const SizedBox(width: 4),
+                        Text(
+                          isAr ? 'موثوق' : 'Verified',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        blurRadius: 12,
+                        color: Colors.black.withOpacity(0.12),
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.badge_outlined,
+                              size: 18, color: Color(0xFF0F766E)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              isAr
+                                  ? 'رخصة إعلان عقاري'
+                                  : 'Licensed property ad',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 11,
+                                color: Color(0xFF0B1220),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      _skeletonLine(0.95, const Color(0xFFE2E8F0)),
+                      const SizedBox(height: 5),
+                      _skeletonLine(0.75, const Color(0xFFEDF2F7)),
+                      const SizedBox(height: 5),
+                      _skeletonLine(0.55, const Color(0xFFF1F5F9)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text(
+                            isAr ? 'حالة الرخصة' : 'Licence status',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F766E).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              isAr ? 'سارية' : 'Active',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF0F766E),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _skeletonLine(double widthFactor, Color color) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        return Container(
+          height: 5,
+          width: c.maxWidth * widthFactor,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(3),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _inbox() {
+    final bgTop = isLight ? const Color(0xFFE8F0FF) : const Color(0xFF152038);
+    final bgBot = isLight ? const Color(0xFFDCE8FF) : const Color(0xFF1A2744);
+    final textMain =
+        isLight ? const Color(0xFF0B1220) : const Color(0xFFE2E8F0);
+    final textDim =
+        isLight ? const Color(0xFF475569) : const Color(0xFF94A3B8);
+
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [bgTop, bgBot],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: isAr ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isLight ? Colors.white : const Color(0xFF243B5C),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      blurRadius: 8,
+                      color: Colors.black.withOpacity(0.06),
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  isAr
+                      ? 'السلام عليكم، نجهّز لكم جولة داخل المنصة.'
+                      : 'Hi—we can tour the listing here.',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    height: 1.35,
+                    color: textMain,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: isAr ? Alignment.centerLeft : Alignment.centerRight,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F766E),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock_rounded, size: 13, color: Colors.white.withOpacity(0.95)),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        isAr
+                            ? 'ممتاز—بقينا داخل قنوات موثّقة.'
+                            : 'Perfect—staying on trusted channels.',
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          height: 1.35,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Spacer(),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.forum_rounded, size: 14, color: _PhoneMockup._bankColor),
+                const SizedBox(width: 6),
+                Text(
+                  isAr ? 'محادثات دون مغادرة التطبيق' : 'In-app messaging',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: textDim,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _explore() {
+    final cardBg = isLight ? Colors.white : const Color(0xFF1B2640);
+    final border =
+        isLight ? const Color(0xFFE2E8F0) : const Color(0xFF2D3F66);
+
+    Widget miniCard() {
+      return Expanded(
+        child: Container(
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          const Color(0xFF0F766E).withOpacity(0.35),
+                          const Color(0xFF0A4D68).withOpacity(0.5),
+                        ],
+                      ),
+                    ),
+                    child: Align(
+                      alignment:
+                          isAr ? Alignment.topRight : Alignment.topLeft,
+                      child: Container(
+                        margin: const EdgeInsets.all(4),
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.92),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.verified_rounded,
+                          size: 12,
+                          color: Color(0xFF0F766E),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      height: 4,
+                      width: 36,
+                      decoration: BoxDecoration(
+                        color: isLight
+                            ? const Color(0xFFCBD5E1)
+                            : const Color(0xFF3D5277),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Container(
+                      height: 4,
+                      width: 22,
+                      decoration: BoxDecoration(
+                        color: isLight
+                            ? const Color(0xFFE2E8F0)
+                            : const Color(0xFF344563),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isLight ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: const BoxDecoration(
+              color: Color(0xFF0F766E),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.apartment_rounded,
+                    size: 16, color: Colors.white),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    isAr ? 'عروض بمعايير أوضح' : 'Clearer listing signals',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 11,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        miniCard(),
+                        const SizedBox(width: 6),
+                        miniCard(),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        miniCard(),
+                        const SizedBox(width: 6),
+                        miniCard(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PhoneMockup extends StatelessWidget {
   static const Color _bankColor = Color(0xFF0F766E);
 
@@ -1911,13 +2883,106 @@ class _PhoneMockup extends StatelessWidget {
   final String title;
   final String subtitle;
   final String imageAsset;
+  final String? imageNetworkUrl;
+  final String? videoUrl;
+  final bool isAr;
+  final String? adId;
 
   const _PhoneMockup({
     required this.theme,
     required this.title,
     required this.subtitle,
     required this.imageAsset,
+    this.imageNetworkUrl,
+    this.videoUrl,
+    this.isAr = true,
+    this.adId,
   });
+
+  Widget _mediaArea(Color titleColor, bool isLight) {
+    final brandV = _loginSideBrandVariant(adId);
+    if (brandV != null) {
+      return _MawthuqLoginSideIllustration(
+        variant: brandV,
+        isLight: isLight,
+        isAr: isAr,
+      );
+    }
+
+    final v = (videoUrl ?? '').trim();
+    if (v.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: FittedBox(
+          fit: BoxFit.cover,
+          clipBehavior: Clip.hardEdge,
+          child: SizedBox(
+            width: 800,
+            height: 450,
+            child: InlinePropertyVideoPlayer(
+              videoUrl: v,
+              isAr: isAr,
+            ),
+          ),
+        ),
+      );
+    }
+    final net = (imageNetworkUrl ?? '').trim();
+    if (net.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: CachedNetworkImage(
+          imageUrl: net,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorWidget: (_, __, ___) => Container(
+            color: isLight ? const Color(0xFFEFF3FF) : const Color(0xFF101A33),
+            child: Center(
+              child: Icon(
+                Icons.image_outlined,
+                size: 36,
+                color: titleColor,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    if (imageAsset.trim().isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Image.asset(
+          imageAsset,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.high,
+          errorBuilder: (_, __, ___) => Container(
+            color: isLight ? const Color(0xFFEFF3FF) : const Color(0xFF101A33),
+            child: Center(
+              child: Icon(
+                Icons.image_outlined,
+                size: 36,
+                color: titleColor,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: isLight ? const Color(0xFFEFF3FF) : const Color(0xFF101A33),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.perm_media_outlined,
+          size: 36,
+          color: titleColor,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1994,23 +3059,7 @@ class _PhoneMockup extends StatelessWidget {
                           ),
                           const SizedBox(height: 12),
                           Expanded(
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: Image.asset(
-                                imageAsset,
-                                fit: BoxFit.cover,
-                                filterQuality: FilterQuality.high,
-                                errorBuilder: (_, __, ___) => Container(
-                                  color: isLight
-                                      ? const Color(0xFFEFF3FF)
-                                      : const Color(0xFF101A33),
-                                  child: Center(
-                                    child: Icon(Icons.image_outlined,
-                                        size: 36, color: titleColor),
-                                  ),
-                                ),
-                              ),
-                            ),
+                            child: _mediaArea(titleColor, isLight),
                           ),
                           const SizedBox(height: 12),
                           Row(
@@ -2048,6 +3097,59 @@ class _PhoneMockup extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _EnglishDigitsOnlyFormatter extends TextInputFormatter {
+  const _EnglishDigitsOnlyFormatter();
+
+  static const Map<String, String> _digitMap = {
+    '٠': '0',
+    '١': '1',
+    '٢': '2',
+    '٣': '3',
+    '٤': '4',
+    '٥': '5',
+    '٦': '6',
+    '٧': '7',
+    '٨': '8',
+    '٩': '9',
+    '۰': '0',
+    '۱': '1',
+    '۲': '2',
+    '۳': '3',
+    '۴': '4',
+    '۵': '5',
+    '۶': '6',
+    '۷': '7',
+    '۸': '8',
+    '۹': '9',
+  };
+
+  String _normalize(String input) {
+    if (input.isEmpty) return input;
+
+    final buffer = StringBuffer();
+    for (final ch in input.split('')) {
+      final mapped = _digitMap[ch] ?? ch;
+      if (RegExp(r'[0-9]').hasMatch(mapped)) {
+        buffer.write(mapped);
+      }
+    }
+    return buffer.toString();
+  }
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final normalized = _normalize(newValue.text);
+    return TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+      composing: TextRange.empty,
     );
   }
 }

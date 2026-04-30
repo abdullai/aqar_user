@@ -1,127 +1,137 @@
 name: aqar_user
-description: تطبيق توثيق العقار
+description: تطبيق موثوق العقاري
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
-  sdk: '>=2.18.0 <4.0.0'
+  sdk: ">=3.2.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
 
-  # =========================
-  # Provider
-  # =========================
-  provider: ^6.0.5
+  # State
+  provider: ^6.1.2
 
-  # =========================
-  # Images Picker
-  # =========================
-  image_picker: ^1.0.7
+  # Images / Files
+  image_picker: ^1.1.2
+  file_picker: ^10.3.10
+  image: ^4.2.0
+  cached_network_image: ^3.3.1
 
-  # =========================
-  # Internet Connectivity
-  # =========================
-  connectivity_plus: ^6.0.5
+  # Internet
+  connectivity_plus: ^6.1.5
+  http: ^1.2.1
+  pdf: ^3.11.1
+  webview_flutter: ^4.8.0
 
-  # =========================
-  # Fast Login (Biometrics + Secure Storage + Hash)
-  # =========================
-  local_auth: ^2.2.0
-  flutter_secure_storage: ^9.2.2
+  # Secure / Fast login
+  local_auth: ^2.3.0
+  flutter_secure_storage: ^9.2.4
   crypto: ^3.0.3
 
-  # =========================
-  # Localization (L10n)
-  # =========================
+  # Localization
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
 
-  # =========================
-  # UI / Utils
-  # =========================
+  # Core
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.2.3
 
-  # =========================
   # Supabase
-  # =========================
   supabase_flutter: ^2.12.0
+  flutter_dotenv: ^5.2.1
 
-  # =========================
-  # Env
-  # =========================
-  flutter_dotenv: ^5.1.0
-
-  # =========================
-  # File / Media
-  # =========================
-  file_picker: ^10.3.10
-  image: ^4.1.7
-
-  # =========================
-  # Device info
-  # =========================
-  device_info_plus: ^10.1.0
-
-  # =========================
-  # Utilities
-  # =========================
+  # Device
+  device_info_plus: ^10.1.2
   uuid: ^4.5.2
+  share_plus: ^10.1.4
+  app_links: ^6.3.3
+  url_launcher: ^6.3.1
+  flutter_linkify: ^6.0.0
 
-  # =========================
-  # Maps
-  # =========================
+  # Maps / Location
   google_maps_flutter: ^2.6.1
-  google_maps_flutter_web: ^0.5.10
+  google_maps_flutter_web: ^0.5.14+3
+  geolocator: ^11.1.0
+  google_api_availability: ^5.0.0
 
-  # =========================
-  # GPS / Location
-  # =========================
-  geolocator: ^11.0.0
+  # Loading skeletons
+  shimmer: ^3.0.0
 
-  # =========================
-  # Sharing
-  # =========================
-  share_plus: ^10.0.2
-
-  # =========================
   # OTP
-  # =========================
   sms_autofill: ^2.4.1
   pin_code_fields: ^8.0.1
+  audioplayers: ^6.5.1
 
-  # =========================
-  # Screen Security (Android + iOS)
-  # =========================
+  # Firebase
+  firebase_core: ^3.15.2
+  firebase_messaging: ^15.2.10
+  flutter_local_notifications: ^17.2.4
+
+  # Permissions
+  permission_handler: ^11.4.0
+  app_settings: ^5.2.0
+
+  # Screen security (Android / iOS فقط)
   no_screenshot: ^0.2.0
 
-  # =========================
-  # Firebase & Notifications
-  # =========================
-  # ملاحظة: تم دمج وتحديث الإصدارات لتتوافق مع آخر عملية تثبيت قمت بها
-  firebase_core: ^3.10.1
-  firebase_messaging: ^15.2.1
-  flutter_local_notifications: ^17.2.3
-  audioplayers: ^6.1.0
+  # Video
+  video_player: ^2.9.2
+  chewie: ^1.8.5
+
+  # توقيع بالإصبع (عقود / ملف المستخدم)
+  signature: ^6.3.0
+
+  # لوحة مراقبة المؤسسة — رسوم بيانية
+  fl_chart: ^0.69.2
+  translator: ^1.0.4+1
+  hijri: ^3.0.0
+  flutter_svg: ^2.2.4
+
+  # خط عربي موحّد (تحميل من Google Fonts) — يتجنّب مسار assets/assets/ المعطوب على الويب عند ربط خط من pubspec.
+  google_fonts: ^6.2.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^6.0.0
+
+  flutter_lints: ^3.0.2
+  flutter_native_splash: ^2.4.4
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   generate: true
   uses-material-design: true
 
   assets:
-    - .env
+    - assets/env/default.env
+    # Optional local secrets (copy env.sample → .env); uncomment when the file exists:
+    # - .env
     - assets/logo.png
+    - assets/logoe.png
     - assets/splashscreen.png
-    - assets/Black Saudi Riyal.png
-    - assets/White Saudi riyal.png
-    - assets/sounds/otp.wav
-    - assets/sounds/otp.mp3
+    - assets/sounds/in_app_chime.wav
+    - assets/sounds/otp_chime.wav
+    - assets/sounds/chat_incoming.wav
+    - assets/data/saudi_locations.json
+    - assets/data/saudi_locations_extra.json
+    - assets/data/saudi_districts.json
+    - assets/currency/saudi_riyal_symbol.svg
+    # خط PDF فقط (اسم ملف محايد — لا يُعرَّف في fonts: لتفادي FontManifest + مسار assets/assets على الويب).
+    - assets/fonts/arabic_pdf_regular.ttf
+
+flutter_native_splash:
+  color: "#0F766E"
+  image: assets/splashscreen.png
+  android: true
+  ios: true
+  web: false
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: assets/logoe.png
+  min_sdk_android: 21

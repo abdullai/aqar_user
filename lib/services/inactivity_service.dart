@@ -1,11 +1,18 @@
 // lib/services/inactivity_service.dart
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../main.dart'; // langNotifier + recoveryFlowNotifier
+import '../l10n/app_localizations.dart';
+import '../main.dart' show recoveryFlowNotifier;
+import '../core/session/return_after_auth.dart';
+import '../core/config/app_config.dart';
+import '../core/session/web_session_ttl.dart';
 import '../services/fast_login_service.dart';
 
 class InactivityService {
@@ -13,26 +20,82 @@ class InactivityService {
     required this.navigatorKey,
     this.idleBeforePrompt = const Duration(minutes: 5),
     this.promptCountdown = const Duration(minutes: 1),
+    this.useIdleBlurOverlay = false,
   });
 
   final GlobalKey<NavigatorState> navigatorKey;
   final Duration idleBeforePrompt;
   final Duration promptCountdown;
 
+  /// Web / desktop: full-screen blur instead of a floating dialog sheet.
+  final bool useIdleBlurOverlay;
+
+  static const String kPrefLastActivityAtMs = 'inactivity_last_activity_ms';
+
   Timer? _idleTimer;
   Timer? _countdownTimer;
-  int _remainingSec = 0;
+  ValueNotifier<int>? _promptSecVN;
+  bool _promptContinueIntent = false;
   bool _dialogOpen = false;
 
-  // ✅ Guards to prevent repeated lock/signOut loops
+  int _lastActivityMs = 0;
+  int _lastPersistWallMs = 0;
+
+  // ✅ Guards to prevent repeated loops
   bool _locking = false;
   bool _signOutRunning = false;
 
-  void start() => _resetIdleTimer();
+  void start() {
+    _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
+    unawaited(_persistLastActivityMs());
+    _resetIdleTimer();
+  }
+
+  /// استدعِها عند إخفاء التطبيق/التبويب لتثبيت آخر نشاط (للفحص عند العودة).
+  void onAppPaused() {
+    unawaited(_persistLastActivityMs());
+  }
+
+  /// عند العودة من الخلفية: إن تجاوز المستخدم مدة الخمول دون تفاعل يُقفل أو يُطلب الدخول.
+  Future<void> onAppResumedAfterBackground() async {
+    if (_isOnLoginOrFastLoginOrReset()) return;
+    if (recoveryFlowNotifier.value == true) return;
+
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return;
+
+    _idleTimer?.cancel();
+    _idleTimer = null;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getInt(kPrefLastActivityAtMs);
+      if (stored != null && stored > 0) {
+        _lastActivityMs = stored;
+      }
+    } catch (_) {}
+
+    final last = DateTime.fromMillisecondsSinceEpoch(_lastActivityMs);
+    final elapsed = DateTime.now().difference(last);
+    final totalIdle = idleBeforePrompt + promptCountdown;
+
+    if (elapsed >= idleBeforePrompt) {
+      final remaining =
+          elapsed >= totalIdle ? promptCountdown : totalIdle - elapsed;
+      final sec = remaining.inSeconds.clamp(1, promptCountdown.inSeconds);
+      await _showPrompt(remainingSeconds: sec);
+      return;
+    }
+    _resetIdleTimer();
+  }
 
   void stop() {
     _idleTimer?.cancel();
     _countdownTimer?.cancel();
+    _countdownTimer = null;
+    _promptSecVN?.dispose();
+    _promptSecVN = null;
+    _closeDialogIfAny();
     _dialogOpen = false;
     _locking = false;
     _signOutRunning = false;
@@ -40,11 +103,41 @@ class InactivityService {
 
   /// استدعِها عند أي تفاعل من المستخدم
   void userActivity() {
-    if (_dialogOpen) {
-      _closeDialogIfAny();
-      _dialogOpen = false;
+    _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
+    _maybeThrottlePersistActivity();
+
+    if (_dialogOpen) return;
+    if (kIsWeb) {
+      unawaited(touchWebSessionActivity());
+      unawaited(_touchWebGuestActivityIfGuest());
     }
     _resetIdleTimer();
+  }
+
+  void _maybeThrottlePersistActivity() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastPersistWallMs < 5000) return;
+    _lastPersistWallMs = now;
+    unawaited(_persistLastActivityMs());
+  }
+
+  Future<void> _touchWebGuestActivityIfGuest() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final guest = p.getBool(AppConfig.prefGuestModeKey) ?? false;
+      final entry =
+          (p.getString(AppConfig.prefEntryModeKey) ?? '').trim().toLowerCase();
+      if (guest || entry == 'guest') {
+        await touchWebGuestActivity();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistLastActivityMs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(kPrefLastActivityAtMs, _lastActivityMs);
+    } catch (_) {}
   }
 
   /// قفل فوري (يُستخدم عند خروج التطبيق للخلفية)
@@ -54,7 +147,10 @@ class InactivityService {
 
     try {
       _countdownTimer?.cancel();
+      _countdownTimer = null;
       _idleTimer?.cancel();
+      _promptSecVN?.dispose();
+      _promptSecVN = null;
       _closeDialogIfAny();
       _dialogOpen = false;
 
@@ -62,17 +158,21 @@ class InactivityService {
       if (recoveryFlowNotifier.value == true) return;
 
       final session = Supabase.instance.client.auth.currentSession;
+
+      // ✅ إذا لا يوجد Session: غالباً ضيف -> لا تعمل redirect
       if (session == null) {
-        _forceToLogin();
+        _resetIdleTimer();
         return;
       }
 
+      // ✅ إذا يوجد قفل (بصمة/Pin) -> FastLogin
       final hasLock = await FastLoginService.hasAnyLockEnabled();
       if (hasLock) {
-        _forceToFastLogin();
-      } else {
-        _resetIdleTimer();
+        await _forceToFastLogin();
+        return;
       }
+
+      await _logoutThenLogin();
     } finally {
       _locking = false;
     }
@@ -80,29 +180,36 @@ class InactivityService {
 
   void _resetIdleTimer() {
     _idleTimer?.cancel();
-    _idleTimer = Timer(idleBeforePrompt, _showPrompt);
+    _idleTimer = Timer(idleBeforePrompt, () => _showPrompt());
   }
 
   String _routeName() {
     final ctx = navigatorKey.currentContext;
-    return ModalRoute.of(ctx ?? navigatorKey.currentState!.context)
-            ?.settings
-            .name ??
-        '';
+    final stateCtx = navigatorKey.currentState?.context;
+    return ModalRoute.of(ctx ?? stateCtx!)?.settings.name ?? '';
   }
 
   bool _isOnLoginOrFastLoginOrReset() {
     final name = _routeName();
-    return name == '/' || name == '/fastLogin' || name == '/resetPassword';
+    return name == '/' ||
+        name == '/fastLogin' ||
+        name == '/resetPassword' ||
+        name == '/login' ||
+        name == '/entryChoice' ||
+        name == '/gate';
   }
 
-  String _t({required String ar, required String en}) {
-    return (langNotifier.value == 'ar') ? ar : en;
+  String _formatNowLine(BuildContext context) {
+    final loc = Localizations.localeOf(context);
+    return DateFormat.yMMMd(loc.toLanguageTag())
+        .add_Hms()
+        .format(DateTime.now());
   }
 
-  Future<void> _showPrompt() async {
+  Future<void> _showPrompt({int? remainingSeconds}) async {
     final nav = navigatorKey.currentState;
     if (nav == null) return;
+    if (_dialogOpen) return;
 
     if (_isOnLoginOrFastLoginOrReset()) {
       _resetIdleTimer();
@@ -115,64 +222,158 @@ class InactivityService {
     }
 
     final session = Supabase.instance.client.auth.currentSession;
+
     if (session == null) {
-      _forceToLogin();
+      _resetIdleTimer();
       return;
     }
 
+    final hasLock = await FastLoginService.hasAnyLockEnabled();
+
+    final dialogContext = navigatorKey.currentContext;
+    if (dialogContext == null || !dialogContext.mounted) {
+      _resetIdleTimer();
+      return;
+    }
+
+    final initialSec =
+        (remainingSeconds ?? promptCountdown.inSeconds).clamp(1, 3600);
+
     _dialogOpen = true;
-    _remainingSec = promptCountdown.inSeconds;
+    _promptContinueIntent = false;
+    _promptSecVN?.dispose();
+    _promptSecVN = ValueNotifier<int>(initialSec);
+    final vn = _promptSecVN!;
 
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _remainingSec--;
-      if (_remainingSec <= 0) {
+      if (vn.value <= 1) {
         _countdownTimer?.cancel();
-        _lockOrLogout();
+        _countdownTimer = null;
+        unawaited(_lockOrGoLogin());
+        return;
       }
+      vn.value = vn.value - 1;
     });
 
-    final ctx = navigatorKey.currentContext;
-    if (ctx == null) return;
+    final timeLine = _formatNowLine(dialogContext);
 
-    showDialog(
-      context: ctx,
-      barrierDismissible: false,
-      builder: (_) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            Timer(const Duration(milliseconds: 300), () {
-              if (ModalRoute.of(context)?.isCurrent ?? false) setState(() {});
-            });
-
-            return AlertDialog(
-              title: Text(_t(
-                ar: 'تم اكتشاف عدم نشاط',
-                en: 'Inactivity detected',
-              )),
-              content: Text(_t(
-                ar: 'هل تريد الاستمرار؟ سيتم قفل التطبيق خلال $_remainingSec ثانية.',
-                en: 'Do you want to continue? The app will lock in $_remainingSec seconds.',
-              )),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    _closeDialogIfAny();
-                    _dialogOpen = false;
-                    _resetIdleTimer();
-                  },
-                  child: Text(_t(ar: 'استمرار', en: 'Continue')),
-                ),
-                TextButton(
-                  onPressed: () => _lockOrLogout(),
-                  child: Text(_t(ar: 'قفل الآن', en: 'Lock now')),
-                ),
-              ],
-            );
+    Future<void> present(Widget Function(BuildContext dialogCtx) page) {
+      if (useIdleBlurOverlay) {
+        return showGeneralDialog<void>(
+          context: dialogContext,
+          barrierDismissible: false,
+          barrierLabel: '',
+          barrierColor: Colors.transparent,
+          useRootNavigator: true,
+          transitionDuration: const Duration(milliseconds: 220),
+          pageBuilder: (dialogCtx, _, __) {
+            return page(dialogCtx);
           },
         );
+      }
+      return showDialog<void>(
+        context: dialogContext,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: page,
+      );
+    }
+
+    present(
+      (dialogCtx) {
+        final l10n = AppLocalizations.of(dialogCtx);
+        final cs = Theme.of(dialogCtx).colorScheme;
+        final tt = Theme.of(dialogCtx).textTheme;
+
+        Widget dialogBody() {
+          return ValueListenableBuilder<int>(
+            valueListenable: vn,
+            builder: (context, sec, _) {
+              return AlertDialog(
+                title: Text(l10n?.securityInactivityTitle ?? 'Inactivity'),
+                content: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          l10n != null
+                              ? l10n.securityInactivityTime(timeLine)
+                              : 'Time: $timeLine',
+                          style: tt.labelLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          hasLock
+                              ? (l10n?.securityInactivityBodyLock(sec) ??
+                                  'Unlock in $sec s')
+                              : (l10n?.securityInactivityBodySignOut(sec) ??
+                                  'Sign out in $sec s'),
+                          textAlign: TextAlign.start,
+                          style: tt.bodyMedium?.copyWith(color: cs.onSurface),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actionsAlignment: MainAxisAlignment.spaceBetween,
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      _promptContinueIntent = true;
+                      _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
+                      unawaited(_persistLastActivityMs());
+                      Navigator.of(dialogCtx, rootNavigator: true).pop();
+                    },
+                    child: Text(l10n?.securityContinue ?? 'Continue'),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      _promptContinueIntent = false;
+                      Navigator.of(dialogCtx, rootNavigator: true).pop();
+                      unawaited(_lockOrGoLogin());
+                    },
+                    child: Text(l10n?.securitySignOutFromPrompt ?? 'Sign out'),
+                  ),
+                ],
+              );
+            },
+          );
+        }
+
+        if (!useIdleBlurOverlay) {
+          return dialogBody();
+        }
+
+        return SafeArea(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Material(
+              color: Colors.black.withValues(alpha: 0.38),
+              child: Center(
+                child: dialogBody(),
+              ),
+            ),
+          ),
+        );
       },
-    );
+    ).whenComplete(() {
+      _countdownTimer?.cancel();
+      _countdownTimer = null;
+      _promptSecVN?.dispose();
+      _promptSecVN = null;
+      _dialogOpen = false;
+      if (_promptContinueIntent) {
+        _promptContinueIntent = false;
+        _resetIdleTimer();
+      }
+    });
   }
 
   void _closeDialogIfAny() {
@@ -183,12 +384,13 @@ class InactivityService {
     }
   }
 
-  Future<void> _lockOrLogout() async {
+  Future<void> _lockOrGoLogin() async {
     if (_locking) return;
     _locking = true;
 
     try {
       _countdownTimer?.cancel();
+      _countdownTimer = null;
       _idleTimer?.cancel();
       _closeDialogIfAny();
       _dialogOpen = false;
@@ -198,37 +400,40 @@ class InactivityService {
         return;
       }
 
+      final session = Supabase.instance.client.auth.currentSession;
+
+      if (session == null) {
+        _resetIdleTimer();
+        return;
+      }
+
       final hasLock = await FastLoginService.hasAnyLockEnabled();
       if (hasLock) {
-        _forceToFastLogin();
+        await _forceToFastLogin();
         return;
       }
 
-      // ✅ على الويب لا تعمل signOut تلقائي بسبب الخمول
-      if (kIsWeb) {
-        _forceToLogin();
-        return;
-      }
-
-      await _logout();
+      await _logoutThenLogin();
     } finally {
       _locking = false;
     }
   }
 
-  Future<void> _logout() async {
-    if (_signOutRunning) {
-      _forceToLogin();
-      return;
-    }
-    _signOutRunning = true;
+  Future<void> _logoutThenLogin() async {
+    await ReturnAfterAuth.saveFromNavigatorKey(navigatorKey);
 
+    if (_signOutRunning) return;
+    _signOutRunning = true;
     try {
       final sb = Supabase.instance.client;
-
-      // ✅ إذا لا يوجد Session لا تعمل signOut
       if (sb.auth.currentSession != null) {
-        await sb.auth.signOut();
+        try {
+          await sb.auth.signOut(
+            scope: kIsWeb ? SignOutScope.local : SignOutScope.global,
+          );
+        } catch (_) {
+          await sb.auth.signOut(scope: SignOutScope.local);
+        }
       }
     } catch (_) {
       // ignore
@@ -236,16 +441,23 @@ class InactivityService {
       _signOutRunning = false;
     }
 
-    _forceToLogin();
+    final nav = navigatorKey.currentState;
+    if (nav == null) return;
+    final current = _routeName();
+    if (current == '/login' || current == '/') return;
+    nav.pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
-  void _forceToLogin() {
-    final nav = navigatorKey.currentState;
-    nav?.pushNamedAndRemoveUntil('/', (r) => false);
-  }
+  Future<void> _forceToFastLogin() async {
+    await ReturnAfterAuth.saveFromNavigatorKey(navigatorKey);
 
-  void _forceToFastLogin() {
     final nav = navigatorKey.currentState;
-    nav?.pushNamedAndRemoveUntil('/fastLogin', (r) => false);
+    if (nav == null) return;
+
+    final current = _routeName();
+    if (current == '/fastLogin') return;
+
+    FastLoginService.clearRuntimeUnlock();
+    nav.pushNamedAndRemoveUntil('/fastLogin', (r) => false);
   }
 }

@@ -1,0 +1,5 @@
+{
+  "_comment": "انسخ إلى supabase_config.json. SUPABASE_ANON_KEY = مفتاح Publishable كامل (sb_publishable_…) أو JWT anon (eyJ…) من Project Settings → API Keys. لا تستخدم sb_secret_.",
+  "SUPABASE_URL": "https://czfvqhepsqkgsrfnknwm.supabase.co",
+  "SUPABASE_ANON_KEY": ""
+}

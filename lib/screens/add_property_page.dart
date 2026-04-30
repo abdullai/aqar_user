@@ -1,51 +1,173 @@
+// lib/screens/add_property_page.dart
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/permissions/runtime_permission_helper.dart';
+import '../l10n/app_localizations.dart';
+import '../main.dart' show suspendAutoLock;
+import '../services/marketing_flow_service.dart';
+import '../services/org_activity_service.dart';
+import '../services/saudi_districts_service.dart';
+import '../services/saudi_locations_service.dart';
+import '../services/watermark_service.dart';
+import '../utils/video_duration_check.dart';
+import '../widgets/app_logo_loading.dart';
+import '../widgets/field_group_frame.dart';
+import '../widgets/deed_date_calendar_dialog.dart';
+import '../widgets/property_type_hierarchy_picker.dart';
+import '../widgets/year_built_picker_field.dart';
+import '../widgets/searchable_select_field.dart';
+import '../core/input/input_normalizers.dart';
+import '../core/input/saudi_input_formatters.dart';
+import '../core/listing/listing_area_unit.dart';
+import '../core/listing/property_type_catalog.dart';
+import '../core/utils/app_money.dart';
+import '../core/utils/listing_date_display.dart';
+import '../services/fal_license_service.dart';
+import 'listing_request_status_page.dart';
 import 'map_picker_page.dart';
-import 'package:aqar_user/services/watermark_service.dart';
+import 'rega_ad_license_import_page.dart';
+
+/// مصدر رخصة الإعلان (الخطوة الأولى من المعالج).
+enum _AdLicenseSource { unset, inApp, external, none }
 
 class AddPropertyPage extends StatefulWidget {
   final String userId;
   final String lang;
 
+  /// بيانات مستخرجة من بوابة الهيئة بعد التحقق من فال (للمسوّقين/المنشآت).
+  final Map<String, dynamic>? initialRegaPayload;
+
   const AddPropertyPage({
     super.key,
     required this.userId,
     required this.lang,
+    this.initialRegaPayload,
   });
 
   @override
   State<AddPropertyPage> createState() => _AddPropertyPageState();
 }
 
-class _AddPropertyPageState extends State<AddPropertyPage> {
-  final _sb = Supabase.instance.client;
-  final _formKey = GlobalKey<FormState>();
+enum _PickSource { files, gallery, camera }
 
-  // ✅ حماية + منع القفزات الغير متوقعة
+const String _kManualOptionValue = '__manual__';
+
+/// شرائح النموذج داخل معالج الخطوات (كل شريحة لها [Form] مستقل للتحقق).
+enum AddPropertyFormSlice {
+  classification,
+  location,
+  pricing,
+  details,
+}
+
+String _formSliceTitle(AddPropertyFormSlice s, bool isAr) {
+  switch (s) {
+    case AddPropertyFormSlice.classification:
+      return isAr ? 'التصنيف' : 'Classification';
+    case AddPropertyFormSlice.location:
+      return isAr ? 'الموقع' : 'Location';
+    case AddPropertyFormSlice.pricing:
+      return isAr ? 'الصك والتسعير' : 'Deed & pricing';
+    case AddPropertyFormSlice.details:
+      return isAr ? 'تفاصيل العقار' : 'Property details';
+  }
+}
+
+String _formSliceHint(AddPropertyFormSlice s, bool isAr) {
+  switch (s) {
+    case AddPropertyFormSlice.classification:
+      return isAr ? 'النوع، الاستخدام، الغرض.' : 'Type, usage, purpose.';
+    case AddPropertyFormSlice.location:
+      return isAr
+          ? 'منطقة، محافظة، مدينة، حي (يُكمَل تلقائياً بعد الخريطة إن وُجدت).'
+          : 'Region, governorate, city, district (prefilled after map if used).';
+    case AddPropertyFormSlice.pricing:
+      return isAr
+          ? 'حسب الغرض: صك/عنوان/وصف/مساحة/سعر.'
+          : 'Per purpose: deed, title, description, area, price.';
+    case AddPropertyFormSlice.details:
+      return isAr
+          ? 'غرف، مرافق، … حسب النوع.'
+          : 'Rooms, amenities, … as needed.';
+  }
+}
+
+Color _purposeAccentColor(String code) {
+  switch (code) {
+    case 'sale':
+      return const Color(0xFF0F766E);
+    case 'rent':
+    case 'daily_rent':
+    case 'monthly_rent':
+    case 'yearly_rent':
+      return const Color(0xFF2563EB);
+    case 'auction':
+      return const Color(0xFFEA580C);
+    case 'investment':
+      return const Color(0xFF7C3AED);
+    default:
+      return Colors.blueGrey;
+  }
+}
+
+class _AddPropertyPageState extends State<AddPropertyPage> {
+  static const int _kMaxVideoSeconds = 120;
+  static const int _kMaxVideoBytes = 50 * 1024 * 1024;
+
+  final _sb = Supabase.instance.client;
+  final _formKeyClassification = GlobalKey<FormState>();
+  final _formKeyLocation = GlobalKey<FormState>();
+  final _formKeyPricing = GlobalKey<FormState>();
+  final _formKeyDetails = GlobalKey<FormState>();
+  final _formKeyCoords = GlobalKey<FormState>();
+  final ScrollController _scrollCtrl = ScrollController();
+  final GlobalKey _listingMediaKey = GlobalKey();
+  final GlobalKey _coordsKey = GlobalKey();
+  final GlobalKey _regaCardKey = GlobalKey();
+  final GlobalKey _formCardKey = GlobalKey();
+
   bool _picking = false;
 
   // الحقول الأساسية
   final _title = TextEditingController();
   final _desc = TextEditingController();
-  final _location = TextEditingController();
+  final _region = TextEditingController();
+  final _governorate = TextEditingController();
   final _city = TextEditingController();
+  final _location = TextEditingController();
+  final _addressLine = TextEditingController();
+  final _buildingNumber = TextEditingController();
+  final _deedNumber = TextEditingController();
+  final _deedIssuer = TextEditingController();
   final _area = TextEditingController();
   final _price = TextEditingController();
 
-  // حقول إضافية
+  // العملة والتفاوض والمزاد
   String _currency = 'SAR';
   bool _negotiable = false;
+  bool _isAuction = false;
+  final _currentBid = TextEditingController();
 
+  // نوع العرض (بيع/إيجار/مزاد/استثمار)
+  String _purpose = 'sale';
+
+  // حقول إضافية عامة
   int? _bedrooms;
   int? _bathrooms;
   int? _parkingSpots;
   bool _furnished = false;
-
   int? _yearBuilt;
   int? _floor;
   int? _totalFloors;
@@ -53,9 +175,57 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   final _videoUrl = TextEditingController();
   final _virtualTourUrl = TextEditingController();
   DateTime? _availabilityDate;
-  final _addressLine = TextEditingController();
+  DateTime? _deedDate;
+  bool _uploadingVideo = false;
 
-  // المرافق
+  // حقول خاصة بالشقة
+  int? _livingRooms;
+  int? _kitchens;
+  bool _hasElevator = false;
+  bool _independentEntrance = false;
+  bool _hasCentralAc = false;
+  bool _hasSplitAc = false;
+
+  // حقول خاصة بالفيلا
+  int? _majlisCount;
+  int? _annexCount;
+  bool _hasGarden = false;
+  bool _hasPool = false;
+  bool _hasCourtyard = false;
+  bool _carEntrance = false;
+  bool _internalStair = false;
+  bool _separateApartment = false;
+  bool _hasDriverRoom = false;
+  bool _hasMaidRoom = false;
+  bool _hasStorageRoom = false;
+
+  // حقول خاصة بالبناء/المستودع/المشروع
+  int? _floorsCount;
+  int? _unitsCount;
+  double? _plotArea;
+  bool _hasLoadingDock = false;
+  bool _hasCrane = false;
+  String? _projectType;
+
+  // حقول خاصة بالأرض
+  String? _landUse;
+  String? _facade;
+  int? _streetCount;
+  final _streetWidth1 = TextEditingController();
+  final _streetWidth2 = TextEditingController();
+  final _streetWidth3 = TextEditingController();
+  final _streetWidth4 = TextEditingController();
+  bool _isCornerLand = false;
+  final _planNumber = TextEditingController();
+  final _parcelNumber = TextEditingController();
+
+  /// حدود القطعة (اختياري) — يُخزَّن ضمن `listing_guidance`.
+  final _boundaryNorth = TextEditingController();
+  final _boundarySouth = TextEditingController();
+  final _boundaryEast = TextEditingController();
+  final _boundaryWest = TextEditingController();
+
+  // المرافق الموسعة
   final Map<String, bool> _amenities = {
     'pool': false,
     'gym': false,
@@ -66,42 +236,171 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     'ac': false,
     'parking': false,
     'wifi': false,
+    'maid_room': false,
+    'driver_room': false,
+    'storage': false,
+    'roof': false,
+    'kitchen': false,
+    'majlis': false,
+    'yard': false,
   };
 
-  bool _isAuction = false;
-  final _currentBid = TextEditingController();
-
-  // نوع العقار
+  // نوع العقار الموسع
   String _type = 'villa';
 
   bool _saving = false;
   String? _error;
 
+  /// 0: رخصة/هيئة — 1: تصنيف — 2: خريطة — 3: موقع — 4: صك/تسعير — 5: تفاصيل — 6: وسائط
+  int _wizardStep = 0;
+  static const int _kWizardLastStep = 6;
+
+  /// يُدمَج في عمود `rega_payload` عند الحفظ.
+  Map<String, dynamic> _regaPayloadForInsert = {};
+
+  // المالك الفرد يستطيع إنشاء إعلان أولي دون رخصة فال؛ المسوق يدخل عبر بوابة الهيئة.
+  _AdLicenseSource _adLicenseSource = _AdLicenseSource.none;
+
+  /// إلزامي: هل على العقار التزامات (قيد/اشتراط)؟
+  bool? _propertyHasObligations;
+
+  final _obligationsDetail = TextEditingController();
+  final _extendedUsageNotes = TextEditingController();
+
+  /// مسار تخزين PDF رخصة الإعلان (عند اختيار رخصة خارج التطبيق).
+  String? _licensePdfStoragePath;
+  bool _uploadingLicensePdf = false;
+
+  /// وحدة إدخال المساحة في النموذج (يُحوَّل للم² عند الحفظ).
+  ListingAreaUnit _areaUnit = ListingAreaUnit.m2;
+
+  /// اسم العرض لمسوّق موثّق (سطر «نشر بواسطة»).
+  String? _marketerPublishName;
+
+  /// رقم رخصة فال/الوساطة (10 أرقام) للتحقق عبر الهيئة.
+  final _regaFalLicenseNo = TextEditingController();
+  Timer? _regaDebounce;
+  bool _regaChecking = false;
+  String? _regaVerifyBanner;
+  bool? _regaVerifyOk;
+
   // الصور
   final List<_PickedImage> _images = [];
 
+  /// عند وجود فيديو + صور: ما يُعرض أولاً في المعرض (فيديو أو أول صورة بعد الترتيب).
+  bool _coverHeroIsVideo = true;
+
+  /// مناسب لسكني / تجاري (يمكن اختيار واحد أو كليهما).
+  bool _usageResidential = false;
+  bool _usageCommercial = false;
+
   // الإحداثيات
-  bool _useMapCoords = false;
+  bool _useMapCoords = true;
   double? _lat;
   double? _lng;
-
-  // هاتف المالك
-  bool _usePhone = false;
-  final _phone = TextEditingController();
-  String? _ownerPhone;
-  bool _phoneLoading = false;
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
 
   // اسم المالك
   String? _ownerFirstName;
   String? _ownerLastName;
 
+  // بيانات المناطق/المدن
+  bool _locationsLoading = false;
+  final List<String> _regionOptions = [];
+  final Map<String, List<String>> _governoratesByRegion = {};
+  final Map<String, List<String>> _citiesByGovernorate = {};
+  bool _regionManual = false;
+  bool _governorateManual = false;
+  bool _cityManual = false;
+  String? _selectedRegion;
+  String? _selectedGovernorate;
+  String? _selectedCity;
+
+  Map<String, List<String>> _districtsByCity = {};
+  bool _districtManual = false;
+  String? _selectedDistrict;
+
   bool get _isAr => widget.lang == 'ar';
+
+  List<String> get _currentDistrictOptions {
+    final city = (_selectedCity ?? _city.text).trim();
+    if (city.isEmpty) return const [];
+    final list = _districtsByCity[city];
+    if (list != null && list.isNotEmpty) return list;
+    return const [];
+  }
+
+  List<String> get _currentGovernorateOptions {
+    final key = (_selectedRegion ?? '').trim();
+    if (key.isEmpty) return const [];
+    return _governoratesByRegion[key] ?? const [];
+  }
+
+  List<String> get _currentCityOptions {
+    final key = (_selectedGovernorate ?? '').trim();
+    if (key.isEmpty) return const [];
+    return _citiesByGovernorate[key] ?? const [];
+  }
+
+  bool get _isLand => PropertyTypeCatalog.isLandLikeEffective(_type);
+
+  bool get _isApartmentLike => PropertyTypeCatalog.isApartmentLike(_type);
+
+  bool get _isVillaLike => PropertyTypeCatalog.isVillaLike(_type);
+
+  bool get _isBuilding =>
+      _type == 'building' ||
+      _type == 'commercial_building' ||
+      _type == 'apartment_building';
+  bool get _isWarehouse => _type == 'warehouse';
+  bool get _isProject => _type == 'project';
+  bool get _isOther => _type == 'other';
+
+  /// بيع / مزاد / استثمار يتطلب بيانات الصك
+  bool get _requiresDeed =>
+      const {'sale', 'auction', 'investment'}.contains(_purpose);
+
+  bool get _showBuildingNumber =>
+      PropertyTypeCatalog.showsBuildingNumber(_type);
+
+  /// توافق الحفظ مع النوع المخصص والمجموعة.
+  bool get _roomStatsForSave =>
+      PropertyTypeCatalog.showsResidentialRoomBedCountsEffective(_type) &&
+      !_isProject;
+
+  bool get _showResidentialBedBath =>
+      PropertyTypeCatalog.showsResidentialRoomBedCountsEffective(_type) &&
+      !_isProject;
+
+  bool get _showParkingYearRow =>
+      PropertyTypeCatalog.showsParkingYearRowEffective(_type);
+
+  bool get _showFurnishedRow =>
+      PropertyTypeCatalog.showsFurnishedRowEffective(_type);
+
+  bool get _showFloorFieldsRow =>
+      PropertyTypeCatalog.showsFloorFieldsEffective(_type);
+
+  bool get _showFloorFields =>
+      PropertyTypeCatalog.showsFloorFieldsEffective(_type);
+
+  static String normalizeDeedNumber(String raw) =>
+      raw.replaceAll(RegExp(r'\s+'), '').trim();
+
+  final List<Map<String, String>> _purposeTypes = [
+    {'code': 'sale', 'ar': 'بيع', 'en': 'Sale'},
+    {'code': 'rent', 'ar': 'إيجار', 'en': 'Rent'},
+    {'code': 'daily_rent', 'ar': 'إيجار يومي', 'en': 'Daily Rent'},
+    {'code': 'monthly_rent', 'ar': 'إيجار شهري', 'en': 'Monthly Rent'},
+    {'code': 'yearly_rent', 'ar': 'إيجار سنوي', 'en': 'Yearly Rent'},
+    {'code': 'auction', 'ar': 'مزاد', 'en': 'Auction'},
+    {'code': 'investment', 'ar': 'استثمار', 'en': 'Investment'},
+  ];
 
   @override
   void initState() {
     super.initState();
-
-    // ✅ حماية: لا تسمح بفتح صفحة الإضافة إلا لصاحب الجلسة
     final uid = _sb.auth.currentUser?.id ?? '';
     if (uid.isEmpty ||
         (widget.userId.trim().isNotEmpty && widget.userId.trim() != uid)) {
@@ -110,45 +409,664 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             behavior: SnackBarBehavior.floating,
-            content: Text(_isAr
-                ? 'غير مصرح لك بفتح هذه الصفحة'
-                : 'Not allowed to open this page'),
+            content: Text(
+              _isAr
+                  ? 'غير مصرح لك بفتح هذه الصفحة'
+                  : 'Not allowed to open this page',
+            ),
           ),
         );
         Navigator.pop(context);
       });
       return;
     }
-
+    _loadSaudiLocations();
     _loadOwnerName();
-    _preloadOwnerPhone();
+    _restoreTempCoords();
+    _wireAddPropertyNumericListeners();
+    _price.addListener(_onPriceOrAreaChanged);
+    _area.addListener(_onPriceOrAreaChanged);
+    _regaFalLicenseNo.addListener(_scheduleRegaLicenseVerify);
+    _applyInitialRegaPayload();
+  }
+
+  void _applyInitialRegaPayload() {
+    final m = widget.initialRegaPayload;
+    if (m == null || m.isEmpty) return;
+    _adLicenseSource = _AdLicenseSource.inApp;
+    _regaPayloadForInsert = Map<String, dynamic>.from(m);
+
+    final pu = (m['rega_unit_price'] ?? '').toString();
+    if (pu.isNotEmpty) {
+      final cleaned = pu.replaceAll(',', '').replaceAll('٬', '').trim();
+      final match = RegExp(r'[\d.]+').firstMatch(cleaned);
+      if (match != null) _price.text = match.group(0) ?? '';
+    }
+
+    final deed = (m['deed_or_benefit_doc_number'] ?? '').toString().trim();
+    if (deed.isNotEmpty) _deedNumber.text = deed;
+
+    final pr = (m['rega_ad_purpose'] ?? '').toString();
+    if (pr.isNotEmpty) {
+      _purpose = _purposeFromRegaArabic(pr);
+    }
+
+    final titleHint =
+        (m['marketer_entity_display_name'] ?? '').toString().trim();
+    if (titleHint.isNotEmpty && _title.text.trim().isEmpty) {
+      _title.text = titleHint;
+    }
+
+    final areaSqm = (m['rega_area_sqm'] ?? '').toString().trim();
+    if (areaSqm.isNotEmpty) {
+      final am = RegExp(r'[\d.]+')
+          .firstMatch(areaSqm.replaceAll(',', '').replaceAll('٬', ''));
+      if (am != null) _area.text = am.group(0) ?? '';
+    }
+
+    final rooms = (m['rega_rooms'] ?? '').toString().trim();
+    if (rooms.isNotEmpty) {
+      final rm = int.tryParse(
+        RegExp(r'\d+').firstMatch(rooms)?.group(0) ?? '',
+      );
+      if (rm != null) _bedrooms = rm;
+    }
+
+    final city = (m['rega_city'] ?? '').toString().trim();
+    if (city.isNotEmpty) _city.text = city;
+
+    final reg = (m['rega_region'] ?? '').toString().trim();
+    if (reg.isNotEmpty) _region.text = reg;
+
+    final district = (m['rega_district'] ?? '').toString().trim();
+    if (district.isNotEmpty) {
+      _location.text = district;
+    }
+
+    final street = (m['rega_street'] ?? '').toString().trim();
+    if (street.isNotEmpty) {
+      _addressLine.text = street;
+    }
+  }
+
+  String _purposeFromRegaArabic(String raw) {
+    final t = raw.trim().toLowerCase();
+    if (t.contains('بيع') || t.contains('sale')) return 'sale';
+    if (t.contains('مزاد')) return 'auction';
+    if (t.contains('استثمار')) return 'investment';
+    if (t.contains('يومي') || t.contains('daily')) return 'daily_rent';
+    if (t.contains('شهري') || t.contains('monthly')) return 'monthly_rent';
+    if (t.contains('سنوي') || t.contains('yearly')) return 'yearly_rent';
+    if (t.contains('إيجار') || t.contains('rent')) return 'rent';
+    return _purpose;
+  }
+
+  void _onPriceOrAreaChanged() {
+    if (mounted) setState(() {});
+  }
+
+  double? _areaValueInSquareMeters() {
+    final raw = double.tryParse(
+      normalizeNumbers(_area.text).trim().replaceAll(',', ''),
+    );
+    return _areaUnit.toSquareMeters(raw);
+  }
+
+  double? _computedPricePerSqm() {
+    final p = double.tryParse(
+      normalizeNumbers(_price.text).trim().replaceAll(',', ''),
+    );
+    final a = _areaValueInSquareMeters();
+    if (p == null || p <= 0 || a == null || a <= 0) return null;
+    return AppMoney.roundPricePerSqm(p / a);
+  }
+
+  void _scheduleRegaLicenseVerify() {
+    _regaDebounce?.cancel();
+    _regaDebounce = Timer(const Duration(milliseconds: 700), () async {
+      final digits = _regaFalLicenseNo.text.replaceAll(RegExp(r'\D'), '');
+      if (digits.length != 10) {
+        if (mounted) {
+          setState(() {
+            _regaVerifyBanner = null;
+            _regaVerifyOk = null;
+          });
+        }
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _regaChecking = true;
+          _regaVerifyBanner = _isAr
+              ? 'جاري التحقق من الهيئة العامة للعقار أو الجهات المعنية عن رقم الترخيص…'
+              : 'Verifying license with REGA and related authorities…';
+        });
+      }
+      final res = await FalLicenseService(_sb).verify(digits);
+      if (!mounted) return;
+      setState(() {
+        _regaChecking = false;
+        _regaVerifyOk = res.valid;
+        _regaVerifyBanner = res.valid
+            ? (res.licenseStatusText ??
+                (_isAr ? 'تم التحقق: رخصة سارية' : 'Verified: active license'))
+            : (res.errorMessage ?? res.status);
+      });
+      if (res.valid) {
+        _regaPayloadForInsert = {
+          ..._regaPayloadForInsert,
+          'fal_license_verify': {
+            'status': res.status,
+            'license_no': res.licenseNo,
+            'broker_name': res.brokerName,
+            'end_date': res.endDateIso,
+          },
+        };
+      }
+    });
+  }
+
+  Future<void> _openRegaImportPage() async {
+    final m = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => RegaAdLicenseImportPage(isAr: _isAr),
+      ),
+    );
+    if (!mounted || m == null) return;
+    setState(() {
+      _regaPayloadForInsert = {..._regaPayloadForInsert, ...m};
+      final n = (m['rega_ad_license_number'] ?? '').toString().trim();
+      if (n.isNotEmpty) {
+        _regaFalLicenseNo.text = n;
+      }
+    });
+  }
+
+  void _wireAddPropertyNumericListeners() {
+    void warnNonNumericChars(String normalized) {
+      if (RegExp(r'[a-zA-Z\u0600-\u06FF]').hasMatch(normalized)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              _isAr ? 'أدخل أرقامًا فقط' : 'Digits only',
+            ),
+          ),
+        );
+      }
+    }
+
+    void wireDigits(TextEditingController c) {
+      c.addListener(() {
+        final raw = normalizeAsciiDigits(c.text);
+        warnNonNumericChars(raw);
+        final n = digitsOnly(raw);
+        if (c.text != n) {
+          c.value = TextEditingValue(
+            text: n,
+            selection: TextSelection.collapsed(offset: n.length),
+          );
+        }
+      });
+    }
+
+    void wireDecimal(TextEditingController c) {
+      c.addListener(() {
+        var t = normalizeAsciiDigits(c.text);
+        warnNonNumericChars(t);
+        t = t.replaceAll(RegExp(r'[^0-9.]'), '');
+        final dot = t.indexOf('.');
+        if (dot >= 0) {
+          t = t.substring(0, dot + 1) +
+              t.substring(dot + 1).replaceAll('.', '');
+        }
+        if (c.text != t) {
+          c.value = TextEditingValue(
+            text: t,
+            selection: TextSelection.collapsed(offset: t.length),
+          );
+        }
+      });
+    }
+
+    wireDecimal(_price);
+    wireDecimal(_area);
+    wireDecimal(_currentBid);
+    wireDigits(_buildingNumber);
+    wireDigits(_deedNumber);
+    wireDecimal(_streetWidth1);
+    wireDecimal(_streetWidth2);
+    wireDecimal(_streetWidth3);
+    wireDecimal(_streetWidth4);
+    wireDigits(_planNumber);
+    wireDigits(_parcelNumber);
+    wireDecimal(_latCtrl);
+    wireDecimal(_lngCtrl);
   }
 
   @override
   void dispose() {
     _title.dispose();
     _desc.dispose();
-    _location.dispose();
+    _region.dispose();
+    _governorate.dispose();
     _city.dispose();
+    _location.dispose();
+    _addressLine.dispose();
+    _buildingNumber.dispose();
+    _deedNumber.dispose();
+    _deedIssuer.dispose();
+    _obligationsDetail.dispose();
+    _extendedUsageNotes.dispose();
+    _regaDebounce?.cancel();
+    _regaFalLicenseNo.removeListener(_scheduleRegaLicenseVerify);
+    _regaFalLicenseNo.dispose();
+    _price.removeListener(_onPriceOrAreaChanged);
+    _area.removeListener(_onPriceOrAreaChanged);
     _area.dispose();
     _price.dispose();
     _currentBid.dispose();
-    _phone.dispose();
     _videoUrl.dispose();
     _virtualTourUrl.dispose();
-    _addressLine.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
+    _streetWidth1.dispose();
+    _streetWidth2.dispose();
+    _streetWidth3.dispose();
+    _streetWidth4.dispose();
+    _planNumber.dispose();
+    _parcelNumber.dispose();
+    _boundaryNorth.dispose();
+    _boundarySouth.dispose();
+    _boundaryEast.dispose();
+    _boundaryWest.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
+  void _scrollToKey(GlobalKey key) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeInOutCubic,
+        alignment: 0.06,
+      );
+    });
+  }
+
+  bool get _requiresExternalLicenseBundle =>
+      _adLicenseSource == _AdLicenseSource.external;
+
   bool get _canSubmit {
     if (_saving) return false;
-    if (_images.isEmpty) return false;
-    if (_useMapCoords && (_lat == null || _lng == null)) return false;
-    if (_usePhone && normalizeNumbers(_phone.text).trim().isEmpty) return false;
+    if (_uploadingVideo) return false;
+    if (_uploadingLicensePdf) return false;
+    if (_adLicenseSource == _AdLicenseSource.unset) return false;
+    if (_propertyHasObligations == null) return false;
+    if (_propertyHasObligations == true &&
+        _obligationsDetail.text.trim().length < 3) {
+      return false;
+    }
+    final hasMedia = _images.isNotEmpty || _videoUrl.text.trim().isNotEmpty;
+    if (!hasMedia) return false;
+    if (_requiresExternalLicenseBundle) {
+      if (_images.isEmpty) return false;
+      if (_videoUrl.text.trim().isEmpty) return false;
+      if ((_licensePdfStoragePath ?? '').trim().isEmpty) return false;
+    }
+    if (_useMapCoords) {
+      final lat = _parseNullableDouble(_latCtrl.text);
+      final lng = _parseNullableDouble(_lngCtrl.text);
+      if (lat == null || lng == null) return false;
+    }
+    if (!_usageResidential && !_usageCommercial) return false;
+    if (_isLand && _streetCount != null && _streetCount! > 0) {
+      final widths = _buildStreetWidths();
+      if (widths.length < _streetCount!) return false;
+    }
+    if (_isAuction) {
+      final bid = _parseDouble(_currentBid.text);
+      if (bid <= 0) return false;
+    }
+    if (_requiresDeed) {
+      if (normalizeDeedNumber(_deedNumber.text).isEmpty) return false;
+      if (_deedDate == null) return false;
+      if (_deedIssuer.text.trim().isEmpty) return false;
+    }
     return true;
   }
 
-  // تطبيع الأرقام العربية والفارسية
+  String _wizardScreenTitle(bool isAr) {
+    switch (_wizardStep) {
+      case 0:
+        return isAr ? 'الهيئة ورخصة الإعلان' : 'REGA & ad license';
+      case 1:
+        return isAr ? 'التصنيف' : 'Classification';
+      case 2:
+        return isAr ? 'الخريطة' : 'Map';
+      case 3:
+        return isAr ? 'الموقع' : 'Location';
+      case 4:
+        return isAr ? 'الصك والتسعير' : 'Deed & pricing';
+      case 5:
+        return isAr ? 'تفاصيل العقار' : 'Property details';
+      case 6:
+        return isAr ? 'الوسائط والنشر' : 'Media & publish';
+      default:
+        return isAr ? 'إضافة إعلان' : 'Add listing';
+    }
+  }
+
+  bool _validateWizardStep(int step) {
+    switch (step) {
+      case 0:
+        if (_adLicenseSource == _AdLicenseSource.unset) {
+          final msg =
+              _isAr ? 'اختر مصدر رخصة الإعلان' : 'Choose ad license source';
+          setState(() => _error = msg);
+          _scrollToKey(_regaCardKey);
+          return false;
+        }
+        if (_propertyHasObligations == null) {
+          final msg = _isAr
+              ? 'حدد وجود التزامات على العقار'
+              : 'Indicate if the property has obligations';
+          setState(() => _error = msg);
+          _scrollToKey(_regaCardKey);
+          return false;
+        }
+        if (_propertyHasObligations == true &&
+            _obligationsDetail.text.trim().length < 3) {
+          final msg = _isAr
+              ? 'وضّح التزامات العقار (3 أحرف على الأقل)'
+              : 'Describe obligations (min. 3 characters)';
+          setState(() => _error = msg);
+          _scrollToKey(_regaCardKey);
+          return false;
+        }
+        return true;
+      case 1:
+        if (!_usageResidential && !_usageCommercial) {
+          final msg = _isAr
+              ? 'حدد الاستخدام (سكني / تجاري)'
+              : 'Select usage (residential / commercial)';
+          setState(() => _error = msg);
+          return false;
+        }
+        if (!(_formKeyClassification.currentState?.validate() ?? false)) {
+          return false;
+        }
+        return true;
+      case 2:
+        if (!_useMapCoords) return true;
+        final lat = _parseNullableDouble(_latCtrl.text);
+        final lng = _parseNullableDouble(_lngCtrl.text);
+        if (lat == null || lng == null) {
+          final msg = _isAr
+              ? 'حدد النقطة على الخريطة أو عطّل الخيار'
+              : 'Pick a map point or turn off map';
+          setState(() => _error = msg);
+          _scrollToKey(_coordsKey);
+          return false;
+        }
+        return _formKeyCoords.currentState?.validate() ?? false;
+      case 3:
+        return _formKeyLocation.currentState?.validate() ?? false;
+      case 4:
+        return _formKeyPricing.currentState?.validate() ?? false;
+      case 5:
+        if (_isLand && _streetCount != null && _streetCount! > 0) {
+          final widths = _buildStreetWidths();
+          if (widths.length < _streetCount!) {
+            final msg = _isAr ? 'أدخل عرض كل شارع' : 'Enter each street width';
+            setState(() => _error = msg);
+            return false;
+          }
+        }
+        return _formKeyDetails.currentState?.validate() ?? false;
+      case 6:
+        if (_requiresExternalLicenseBundle) {
+          if (_images.isEmpty) {
+            final msg = _isAr
+                ? 'أضف صور العقار (رخصة خارجية)'
+                : 'Add property photos (external license)';
+            setState(() => _error = msg);
+            _scrollToKey(_listingMediaKey);
+            return false;
+          }
+          if (_videoUrl.text.trim().isEmpty) {
+            final msg = _isAr
+                ? 'أضف فيديو (رخصة خارجية)'
+                : 'Add video (external license)';
+            setState(() => _error = msg);
+            _scrollToKey(_listingMediaKey);
+            return false;
+          }
+          if ((_licensePdfStoragePath ?? '').trim().isEmpty) {
+            final msg = _isAr ? 'أرفع PDF الرخصة' : 'Upload license PDF';
+            setState(() => _error = msg);
+            _scrollToKey(_listingMediaKey);
+            return false;
+          }
+          return true;
+        }
+        if (_images.isEmpty && _videoUrl.text.trim().isEmpty) {
+          final msg = _isAr ? 'أضف فيديو أو صورة' : 'Add a video or photo';
+          setState(() => _error = msg);
+          _scrollToKey(_listingMediaKey);
+          return false;
+        }
+        return true;
+      default:
+        return true;
+    }
+  }
+
+  void _wizardPrev() {
+    if (_wizardStep <= 0) return;
+    setState(() {
+      _wizardStep--;
+      _error = null;
+    });
+  }
+
+  void _wizardNext() {
+    if (!_validateWizardStep(_wizardStep)) return;
+    if (_wizardStep < _kWizardLastStep) {
+      setState(() {
+        _wizardStep++;
+        _error = null;
+      });
+    }
+  }
+
+  Widget _buildPropertyFormSlice(
+    AddPropertyFormSlice slice,
+    GlobalKey<FormState> formKey,
+  ) {
+    return _FormCard(
+      isAr: _isAr,
+      formKey: formKey,
+      saving: _saving || _picking || _uploadingVideo || _uploadingLicensePdf,
+      slice: slice,
+      locationsLoading: _locationsLoading,
+      regionController: _region,
+      governorateController: _governorate,
+      cityController: _city,
+      locationController: _location,
+      addressLineController: _addressLine,
+      regionManual: _regionManual,
+      governorateManual: _governorateManual,
+      cityManual: _cityManual,
+      selectedRegion: _selectedRegion,
+      selectedGovernorate: _selectedGovernorate,
+      selectedCity: _selectedCity,
+      regionOptions: _regionOptions,
+      governorateOptions: _currentGovernorateOptions,
+      cityOptions: _currentCityOptions,
+      onRegionSelected: _selectRegionValue,
+      onGovernorateSelected: _selectGovernorateValue,
+      onCitySelected: _selectCityValue,
+      onRegionManualChanged: (v) => setState(() {
+        _regionManual = v;
+        if (v) _selectedRegion = null;
+      }),
+      onGovernorateManualChanged: (v) => setState(() {
+        _governorateManual = v;
+        if (v) _selectedGovernorate = null;
+      }),
+      onCityManualChanged: (v) => setState(() {
+        _cityManual = v;
+        if (v) _selectedCity = null;
+      }),
+      type: _type,
+      purpose: _purpose,
+      purposeTypes: _purposeTypes,
+      onTypeChanged: (v) => setState(() {
+        final wasLand = _isLand;
+        _type = v;
+        if (wasLand && !_isLand) _clearLandOnlyFormFields();
+      }),
+      onPurposeChanged: (v) => setState(() => _purpose = v),
+      usageResidential: _usageResidential,
+      usageCommercial: _usageCommercial,
+      onUsageResidentialChanged: (v) => setState(() => _usageResidential = v),
+      onUsageCommercialChanged: (v) => setState(() => _usageCommercial = v),
+      title: _title,
+      desc: _desc,
+      area: _area,
+      price: _price,
+      areaUnit: _areaUnit,
+      onAreaUnitChanged: (u) => setState(() => _areaUnit = u),
+      computedPricePerSqm: _computedPricePerSqm(),
+      currency: _currency,
+      negotiable: _negotiable,
+      onCurrencyChanged: (v) => setState(() => _currency = v),
+      onNegotiableChanged: (v) => setState(() => _negotiable = v),
+      isAuction: _isAuction,
+      currentBid: _currentBid,
+      onAuctionChanged: (v) => setState(() {
+        _isAuction = v;
+        if (!v) _currentBid.clear();
+      }),
+      bedrooms: _bedrooms,
+      bathrooms: _bathrooms,
+      parkingSpots: _parkingSpots,
+      furnished: _furnished,
+      yearBuilt: _yearBuilt,
+      floor: _floor,
+      totalFloors: _totalFloors,
+      onBedroomsChanged: (v) => setState(() => _bedrooms = v),
+      onBathroomsChanged: (v) => setState(() => _bathrooms = v),
+      onParkingChanged: (v) => setState(() => _parkingSpots = v),
+      onFurnishedChanged: (v) => setState(() => _furnished = v),
+      onYearBuiltChanged: (v) => setState(() => _yearBuilt = v),
+      onFloorChanged: (v) => setState(() => _floor = v),
+      onTotalFloorsChanged: (v) => setState(() => _totalFloors = v),
+      amenities: _amenities,
+      onAmenityToggle: (k, v) => setState(() => _amenities[k] = v),
+      requiresDeed: _requiresDeed,
+      deedNumber: _deedNumber,
+      deedIssuer: _deedIssuer,
+      deedDate: _deedDate,
+      onPickDeedDate: _pickDeedDate,
+      onClearDeedDate: () => setState(() => _deedDate = null),
+      buildingNumber: _buildingNumber,
+      showBuildingNumber: _showBuildingNumber,
+      virtualTourUrl: _virtualTourUrl,
+      availabilityDate: _availabilityDate,
+      onPickAvailability: _pickAvailabilityDate,
+      onClearAvailability: () => setState(() => _availabilityDate = null),
+      livingRooms: _livingRooms,
+      kitchens: _kitchens,
+      hasElevator: _hasElevator,
+      independentEntrance: _independentEntrance,
+      hasCentralAc: _hasCentralAc,
+      hasSplitAc: _hasSplitAc,
+      onLivingRoomsChanged: (v) => setState(() => _livingRooms = v),
+      onKitchensChanged: (v) => setState(() => _kitchens = v),
+      onHasElevatorChanged: (v) => setState(() => _hasElevator = v),
+      onIndependentEntranceChanged: (v) =>
+          setState(() => _independentEntrance = v),
+      onHasCentralAcChanged: (v) => setState(() => _hasCentralAc = v),
+      onHasSplitAcChanged: (v) => setState(() => _hasSplitAc = v),
+      majlisCount: _majlisCount,
+      annexCount: _annexCount,
+      hasGarden: _hasGarden,
+      hasPool: _hasPool,
+      hasCourtyard: _hasCourtyard,
+      carEntrance: _carEntrance,
+      internalStair: _internalStair,
+      separateApartment: _separateApartment,
+      hasDriverRoom: _hasDriverRoom,
+      hasMaidRoom: _hasMaidRoom,
+      hasStorageRoom: _hasStorageRoom,
+      onMajlisCountChanged: (v) => setState(() => _majlisCount = v),
+      onAnnexCountChanged: (v) => setState(() => _annexCount = v),
+      onHasGardenChanged: (v) => setState(() => _hasGarden = v),
+      onHasPoolChanged: (v) => setState(() => _hasPool = v),
+      onHasCourtyardChanged: (v) => setState(() => _hasCourtyard = v),
+      onCarEntranceChanged: (v) => setState(() => _carEntrance = v),
+      onInternalStairChanged: (v) => setState(() => _internalStair = v),
+      onSeparateApartmentChanged: (v) => setState(() => _separateApartment = v),
+      onHasDriverRoomChanged: (v) => setState(() => _hasDriverRoom = v),
+      onHasMaidRoomChanged: (v) => setState(() => _hasMaidRoom = v),
+      onHasStorageRoomChanged: (v) => setState(() => _hasStorageRoom = v),
+      floorsCount: _floorsCount,
+      unitsCount: _unitsCount,
+      plotArea: _plotArea,
+      hasLoadingDock: _hasLoadingDock,
+      hasCrane: _hasCrane,
+      projectType: _projectType,
+      onFloorsCountChanged: (v) => setState(() => _floorsCount = v),
+      onUnitsCountChanged: (v) => setState(() => _unitsCount = v),
+      onPlotAreaChanged: (v) => setState(() => _plotArea = v),
+      onHasLoadingDockChanged: (v) => setState(() => _hasLoadingDock = v),
+      onHasCraneChanged: (v) => setState(() => _hasCrane = v),
+      onProjectTypeChanged: (v) => setState(() => _projectType = v),
+      landUse: _landUse,
+      facade: _facade,
+      streetCount: _streetCount,
+      streetWidth1: _streetWidth1,
+      streetWidth2: _streetWidth2,
+      streetWidth3: _streetWidth3,
+      streetWidth4: _streetWidth4,
+      isCornerLand: _isCornerLand,
+      planNumber: _planNumber,
+      parcelNumber: _parcelNumber,
+      onLandUseChanged: (v) => setState(() => _landUse = v),
+      onFacadeChanged: (v) => setState(() => _facade = v),
+      onStreetCountChanged: (v) => setState(() => _streetCount = v),
+      onIsCornerLandChanged: (v) => setState(() => _isCornerLand = v),
+      isLand: _isLand,
+      isProject: _isProject,
+      isWarehouse: _isWarehouse,
+      isBuilding: _isBuilding,
+      showResidentialBedBath: _showResidentialBedBath,
+      showParkingYearRow: _showParkingYearRow,
+      showFurnishedRow: _showFurnishedRow,
+      showFloorFieldsRow: _showFloorFieldsRow,
+      districtManual: _districtManual,
+      selectedDistrict: _selectedDistrict,
+      districtOptions: _currentDistrictOptions,
+      onDistrictSelected: _selectDistrictValue,
+      onDistrictManualChanged: (v) => setState(() {
+        _districtManual = v;
+        if (v) _selectedDistrict = null;
+      }),
+      boundaryNorth: _boundaryNorth,
+      boundarySouth: _boundarySouth,
+      boundaryEast: _boundaryEast,
+      boundaryWest: _boundaryWest,
+    );
+  }
+
   static String normalizeNumbers(String input) {
     const arabicIndic = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
     const easternArabicIndic = [
@@ -163,7 +1081,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       '۸',
       '۹'
     ];
-
     var out = input;
     for (int i = 0; i < 10; i++) {
       out = out.replaceAll(arabicIndic[i], i.toString());
@@ -177,6 +1094,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     return double.tryParse(v) ?? 0;
   }
 
+  double? _parseNullableDouble(String s) {
+    final v = normalizeNumbers(s).trim().replaceAll(',', '');
+    if (v.isEmpty) return null;
+    return double.tryParse(v);
+  }
+
   String _resolveOwnerId() {
     final user = _sb.auth.currentUser;
     return widget.userId.trim().isNotEmpty
@@ -184,41 +1107,447 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         : (user?.id ?? '');
   }
 
-  // ✅ تعديل مهم: منع التكرار + mounted checks + لا تغيّر state بعد dispose
-  Future<void> _pickImages() async {
+  Future<void> _loadSaudiLocations() async {
+    setState(() => _locationsLoading = true);
+    try {
+      final all = await SaudiLocationsService.instance.loadAll();
+      _governoratesByRegion.clear();
+      _citiesByGovernorate.clear();
+
+      final regions = <String>{};
+      final governoratesByRegion = <String, Set<String>>{};
+      final citiesByGovernorate = <String, Set<String>>{};
+
+      for (final item in all) {
+        final region = _isAr ? item.regionAr.trim() : item.regionEn.trim();
+        final governorate = _isAr
+            ? (item.governorateAr?.trim() ?? '')
+            : (item.governorateEn?.trim() ?? '');
+        final city = _isAr ? item.cityAr.trim() : item.cityEn.trim();
+
+        if (region.isEmpty || city.isEmpty) continue;
+
+        regions.add(region);
+
+        if (governorate.isNotEmpty) {
+          governoratesByRegion
+              .putIfAbsent(region, () => <String>{})
+              .add(governorate);
+          citiesByGovernorate
+              .putIfAbsent(governorate, () => <String>{})
+              .add(city);
+        } else {
+          governoratesByRegion
+              .putIfAbsent(region, () => <String>{})
+              .add(region);
+          citiesByGovernorate.putIfAbsent(region, () => <String>{}).add(city);
+        }
+      }
+
+      final sortedRegions = regions.toList()..sort();
+      final sortedGovernoratesByRegion = <String, List<String>>{};
+      for (final entry in governoratesByRegion.entries) {
+        final list = entry.value.toList()..sort();
+        sortedGovernoratesByRegion[entry.key] = list;
+      }
+
+      final sortedCitiesByGovernorate = <String, List<String>>{};
+      for (final entry in citiesByGovernorate.entries) {
+        final list = entry.value.toList()..sort();
+        sortedCitiesByGovernorate[entry.key] = list;
+      }
+
+      Map<String, List<String>> distMap = {};
+      try {
+        distMap =
+            await SaudiDistrictsService.instance.loadMergedWithCityAliases();
+      } catch (_) {}
+
+      if (!mounted) return;
+      setState(() {
+        _regionOptions
+          ..clear()
+          ..addAll(sortedRegions);
+        _governoratesByRegion
+          ..clear()
+          ..addAll(sortedGovernoratesByRegion);
+        _citiesByGovernorate
+          ..clear()
+          ..addAll(sortedCitiesByGovernorate);
+        _districtsByCity = distMap;
+        _locationsLoading = false;
+        _syncLocationSelectionsFromControllers();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _locationsLoading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _restoreTempCoords() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'coords_temp_${widget.userId}';
+      final raw = prefs.getString(key);
+      if (raw == null || raw.trim().isEmpty) return;
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final lat = (json['lat'] as num?)?.toDouble();
+      final lng = (json['lng'] as num?)?.toDouble();
+      if (!mounted) return;
+      setState(() {
+        _lat = lat;
+        _lng = lng;
+        if (lat != null) _latCtrl.text = lat.toStringAsFixed(6);
+        if (lng != null) _lngCtrl.text = lng.toStringAsFixed(6);
+        if (lat != null && lng != null) _useMapCoords = true;
+      });
+      if (_lat != null && _lng != null) {
+        await _fillLocationFromNearest();
+      }
+    } catch (_) {}
+  }
+
+  /// REGA / FAL path satisfied — enables verified marketer **direct publish** to home.
+  bool _regaVerificationSatisfied() {
+    if (_regaVerifyOk == true) return true;
+    final fv = _regaPayloadForInsert['fal_license_verify'];
+    if (fv is Map) {
+      final v = fv['valid'];
+      if (v == true) return true;
+    }
+    return false;
+  }
+
+  Future<bool> _isVerifiedMarketer(String userId) async {
+    try {
+      final m = await _sb
+          .from('marketer_profiles')
+          .select('is_verified')
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (m != null) {
+        final v = m['is_verified'];
+        if (v is bool) return v;
+        if (v is num) return v != 0;
+        if (v is String) return v.toLowerCase() == 'true' || v == '1';
+      }
+    } catch (_) {}
+    try {
+      final m = await _sb
+          .from('marketers')
+          .select('is_verified')
+          .eq('user_id', userId)
+          .maybeSingle();
+      final v = m?['is_verified'];
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) return v.toLowerCase() == 'true' || v == '1';
+    } catch (_) {}
+    try {
+      final r =
+          await _sb.rpc('is_marketer_verified', params: {'p_user_id': userId});
+      if (r is bool) return r;
+      if (r is num) return r != 0;
+      if (r is String) return r.toLowerCase() == 'true' || r == '1';
+    } catch (_) {}
+    return false;
+  }
+
+  bool get _hasUploadedVideo => _videoUrl.text.trim().isNotEmpty;
+
+  Future<void> _showPickImagesMenu() async {
+    if (_saving || _picking || _uploadingVideo) return;
+    if (kIsWeb ||
+        !(defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      await _pickImages(source: _PickSource.files);
+      return;
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: Text(_isAr ? 'الاستديو' : 'Gallery'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImages(source: _PickSource.gallery);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_outlined),
+                  title: Text(_isAr ? 'الكاميرا' : 'Camera'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImages(source: _PickSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.folder_open_outlined),
+                  title: Text(_isAr ? 'اختيار من الملفات' : 'Choose files'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImages(source: _PickSource.files);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// صور + فيديو من شريط التطبيق أو كبداية الصفحة.
+  Future<void> _showPickMediaMenu() async {
+    if (_saving || _picking || _uploadingVideo) return;
+    if (!mounted) return;
+
+    if (kIsWeb ||
+        !(defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.photo_library_outlined),
+                    title: Text(_isAr ? 'صور من الملفات' : 'Images from files'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _pickImages(source: _PickSource.files);
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.video_file_outlined),
+                    title: Text(_isAr ? 'فيديو من ملف' : 'Video from file'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      if (_hasUploadedVideo) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            behavior: SnackBarBehavior.floating,
+                            content: Text(
+                              _isAr
+                                  ? 'يمكن إضافة فيديو واحد فقط'
+                                  : 'Only one video allowed',
+                            ),
+                          ),
+                        );
+                      } else {
+                        _pickVideoFromFiles();
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: Text(_isAr ? 'صور من المعرض' : 'Images from gallery'),
+                  subtitle: Text(_isAr ? 'عدة صور' : 'Multiple images'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImages(source: _PickSource.gallery);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_camera_outlined),
+                  title: Text(_isAr ? 'تصوير صورة' : 'Take photo'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImages(source: _PickSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.folder_open_outlined),
+                  title: Text(_isAr ? 'صور من الملفات' : 'Images from files'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _pickImages(source: _PickSource.files);
+                  },
+                ),
+                const Divider(height: 24),
+                ListTile(
+                  leading: const Icon(Icons.video_library_outlined),
+                  title: Text(_isAr ? 'فيديو من المعرض' : 'Video from gallery'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (_hasUploadedVideo) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          behavior: SnackBarBehavior.floating,
+                          content: Text(
+                            _isAr
+                                ? 'يمكن إضافة فيديو واحد فقط'
+                                : 'Only one video allowed',
+                          ),
+                        ),
+                      );
+                    } else {
+                      _pickVideoFromGallery();
+                    }
+                  },
+                ),
+                if (!kIsWeb)
+                  ListTile(
+                    leading: const Icon(Icons.videocam_outlined),
+                    title: Text(_isAr ? 'تسجيل فيديو' : 'Record video'),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      if (_hasUploadedVideo) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            behavior: SnackBarBehavior.floating,
+                            content: Text(
+                              _isAr
+                                  ? 'يمكن إضافة فيديو واحد فقط'
+                                  : 'Only one video allowed',
+                            ),
+                          ),
+                        );
+                      } else {
+                        _pickVideoFromCamera();
+                      }
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.video_file_outlined),
+                  title: Text(_isAr ? 'فيديو من ملف' : 'Video from file'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    if (_hasUploadedVideo) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          behavior: SnackBarBehavior.floating,
+                          content: Text(
+                            _isAr
+                                ? 'يمكن إضافة فيديو واحد فقط'
+                                : 'Only one video allowed',
+                          ),
+                        ),
+                      );
+                    } else {
+                      _pickVideoFromFiles();
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _clearUploadedVideo() => setState(() => _videoUrl.clear());
+
+  Future<void> _pickImages({required _PickSource source}) async {
     if (_saving || _picking) return;
+
+    final nativeMobile = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    final t = AppLocalizations.of(context);
+    if (nativeMobile && t != null) {
+      if (source == _PickSource.gallery) {
+        final ok = await RuntimePermissionHelper.ensurePhotos(context, t: t);
+        if (!ok || !mounted) return;
+      } else if (source == _PickSource.camera) {
+        final ok = await RuntimePermissionHelper.ensureCamera(context, t: t);
+        if (!ok || !mounted) return;
+      }
+    }
 
     setState(() {
       _picking = true;
       _error = null;
     });
-
+    suspendAutoLock.value = true;
     try {
-      final res = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.image,
-        withData: true,
-      );
-
+      final newOnes = <_PickedImage>[];
+      if (source == _PickSource.files ||
+          kIsWeb ||
+          !(defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS)) {
+        final res = await FilePicker.platform.pickFiles(
+          allowMultiple: true,
+          type: FileType.image,
+          withData: true,
+        );
+        if (!mounted) return;
+        if (res != null) {
+          for (final f in res.files) {
+            final b = f.bytes;
+            final n = f.name;
+            if (b != null && n.isNotEmpty) {
+              newOnes.add(_PickedImage(name: n, bytes: b));
+            }
+          }
+        }
+      } else {
+        final picker = ImagePicker();
+        if (source == _PickSource.gallery) {
+          final files = await picker.pickMultiImage(imageQuality: 90);
+          if (!mounted) return;
+          for (final x in files) {
+            final b = await x.readAsBytes();
+            final n = x.name.isNotEmpty
+                ? x.name
+                : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+            newOnes.add(_PickedImage(name: n, bytes: b));
+          }
+        } else if (source == _PickSource.camera) {
+          final x = await picker.pickImage(
+            source: ImageSource.camera,
+            imageQuality: 90,
+          );
+          if (!mounted) return;
+          if (x != null) {
+            final b = await x.readAsBytes();
+            final n = x.name.isNotEmpty
+                ? x.name
+                : 'camera_${DateTime.now().millisecondsSinceEpoch}.jpg';
+            newOnes.add(_PickedImage(name: n, bytes: b));
+          }
+        }
+      }
       if (!mounted) return;
-
-      if (res == null) {
-        setState(() => _picking = false);
-        return;
-      }
-
-      final newOnes = res.files
-          .where((f) => f.bytes != null && f.name.isNotEmpty)
-          .map((f) => _PickedImage(name: f.name, bytes: f.bytes!))
-          .toList();
-
-      if (newOnes.isEmpty) {
-        setState(() => _picking = false);
-        return;
-      }
-
       setState(() {
-        _images.addAll(newOnes);
+        if (newOnes.isNotEmpty) _images.addAll(newOnes);
         _picking = false;
       });
     } catch (e) {
@@ -234,38 +1563,41 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               Text(_isAr ? 'فشل اختيار الصور: $e' : 'Image pick failed: $e'),
         ),
       );
+    } finally {
+      suspendAutoLock.value = false;
     }
   }
 
   void _removeImageAt(int i) => setState(() => _images.removeAt(i));
 
-  void _moveImage(int from, int to) {
-    setState(() {
-      final item = _images.removeAt(from);
-      _images.insert(to, item);
-    });
-  }
+  void _moveImage(int from, int to) => setState(() {
+        final item = _images.removeAt(from);
+        _images.insert(to, item);
+      });
 
-  // اختيار الخريطة
-  Future<void> _openMapPicker() async {
-    final initial = (_lat != null && _lng != null)
-        ? LatLng(_lat!, _lng!)
-        : const LatLng(24.7136, 46.6753);
-
+  Future<void> _openMapPicker({bool kingdomOverview = false}) async {
+    final LatLng? initial =
+        (_lat != null && _lng != null) ? LatLng(_lat!, _lng!) : null;
     final res = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => MapPickerPage(
           initial: initial,
           isAr: _isAr,
+          kingdomOverview: kingdomOverview && initial == null,
+          pinTitle: _title.text.trim().isEmpty
+              ? (_isAr ? 'إعلان عقاري جديد' : 'New property listing')
+              : _title.text.trim(),
+          pinSubtitle: (_selectedCity ?? _city.text).trim(),
+          pinKindLabel: _isAr ? 'إعلان عقاري' : 'Property listing',
+          pinAmountLabel: _price.text.trim().isEmpty
+              ? null
+              : '${_price.text.trim()} ${_currency.toUpperCase() == 'SAR' ? AppMoney.saudiRiyalSignUnicode : _currency}',
         ),
       ),
     );
-
     if (!mounted || res == null) return;
-
     final lat = res['lat'];
     final lng = res['lng'];
-
     setState(() {
       _lat = (lat is num)
           ? lat.toDouble()
@@ -273,23 +1605,119 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _lng = (lng is num)
           ? lng.toDouble()
           : double.tryParse(lng?.toString() ?? '');
+      _latCtrl.text = _lat?.toStringAsFixed(6) ?? '';
+      _lngCtrl.text = _lng?.toStringAsFixed(6) ?? '';
       _error = null;
+    });
+    if (_lat != null && _lng != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'coords_temp_${widget.userId}',
+        jsonEncode({'lat': _lat, 'lng': _lng}),
+      );
+      await _fillLocationFromNearest();
+    }
+  }
+
+  Future<void> _fillLocationFromNearest() async {
+    if (_lat == null || _lng == null) return;
+    final info = await SaudiLocationsService.instance.findNearest(_lat!, _lng!);
+    if (!mounted || info == null) return;
+    setState(() {
+      _regionManual = false;
+      final r = _isAr ? info.regionAr.trim() : info.regionEn.trim();
+      _selectedRegion = r.isEmpty ? null : r;
+      _region.text = r;
+      final rawG =
+          _isAr ? info.governorateAr?.trim() : info.governorateEn?.trim();
+      final g = (rawG != null && rawG.isNotEmpty) ? rawG : r;
+      _governorateManual = false;
+      _selectedGovernorate = g.isEmpty ? null : g;
+      _governorate.text = g;
+      _cityManual = false;
+      final c = _isAr ? info.cityAr.trim() : info.cityEn.trim();
+      _selectedCity = c.isEmpty ? null : c;
+      _city.text = c;
+      _selectedDistrict = null;
+      _districtManual = false;
+      _location.clear();
+      _syncLocationSelectionsFromControllers();
     });
   }
 
-  // تحميل اسم المالك (الاسم الأول والأخير)
+  Future<void> _selectDistrictValue(String? value) async {
+    if (value == null) return;
+    if (value == _kManualOptionValue) {
+      setState(() {
+        _districtManual = true;
+        _selectedDistrict = null;
+        _location.clear();
+      });
+      return;
+    }
+    setState(() {
+      _districtManual = false;
+      _selectedDistrict = value;
+      _location.text = value;
+    });
+  }
+
+  Future<bool> _videoPassesUploadPolicy({
+    String? path,
+    Uint8List? bytes,
+  }) async {
+    if (bytes != null && bytes.length > _kMaxVideoBytes) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(
+              _isAr
+                  ? 'حجم الفيديو يتجاوز الحد المسموح (50 م.ب)'
+                  : 'Video exceeds maximum size (50 MB)',
+            ),
+          ),
+        );
+      }
+      return false;
+    }
+    if (!kIsWeb && path != null && path.isNotEmpty) {
+      final dur = await readVideoDurationFromPath(path);
+      if (dur != null && dur.inSeconds > _kMaxVideoSeconds) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              content: Text(
+                _isAr
+                    ? 'مدة الفيديو يجب ألا تتجاوز دقيقتين'
+                    : 'Video must be at most 2 minutes',
+              ),
+            ),
+          );
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void _onLatChanged(String value) =>
+      setState(() => _lat = _parseNullableDouble(value));
+
+  void _onLngChanged(String value) =>
+      setState(() => _lng = _parseNullableDouble(value));
+
   Future<void> _loadOwnerName() async {
     try {
       final ownerId = _resolveOwnerId();
       if (ownerId.isEmpty) return;
-
       final up = await _sb
           .from('users_profiles')
           .select(
               'first_name_ar, fourth_name_ar, first_name_en, fourth_name_en, username, email')
           .eq('user_id', ownerId)
           .maybeSingle();
-
       if (up != null) {
         if (_isAr) {
           _ownerFirstName = (up['first_name_ar'] as String?)?.trim();
@@ -298,7 +1726,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           _ownerFirstName = (up['first_name_en'] as String?)?.trim();
           _ownerLastName = (up['fourth_name_en'] as String?)?.trim();
         }
-
         if ((_ownerFirstName == null || _ownerFirstName!.isEmpty) &&
             (_ownerLastName == null || _ownerLastName!.isEmpty)) {
           _ownerFirstName = (up['username'] as String?)?.trim();
@@ -307,232 +1734,785 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           }
         }
       }
-
       if (_ownerFirstName == null || _ownerFirstName!.isEmpty) {
-        final p = await _sb
-            .from('profiles')
-            .select('full_name, name, username, email')
-            .eq('id', ownerId)
-            .maybeSingle();
-
+        Map<String, dynamic>? p;
+        try {
+          p = await _sb
+              .from('profiles')
+              .select('full_name, phone')
+              .eq('user_id', ownerId)
+              .maybeSingle();
+        } catch (_) {
+          try {
+            p = await _sb
+                .from('profiles')
+                .select('full_name, phone')
+                .eq('id', ownerId)
+                .maybeSingle();
+          } catch (_) {
+            p = null;
+          }
+        }
         if (p != null) {
-          final name =
-              (p['full_name'] ?? p['name'] ?? p['username'] ?? p['email'])
-                  ?.toString();
+          final name = (p['full_name'] ?? p['phone'])?.toString();
           if (name != null && name.trim().isNotEmpty) {
             _ownerFirstName = name.trim();
           }
         }
       }
 
+      _marketerPublishName = null;
+      final verified = await _isVerifiedMarketer(ownerId);
+      if (verified) {
+        try {
+          final mp = await _sb
+              .from('marketer_profiles')
+              .select('full_name_ar, full_name_en, full_name')
+              .eq('user_id', ownerId)
+              .maybeSingle();
+          if (mp != null) {
+            final n = _isAr
+                ? (mp['full_name_ar'] ?? mp['full_name_en'] ?? mp['full_name'])
+                : (mp['full_name_en'] ?? mp['full_name_ar'] ?? mp['full_name']);
+            final t = n?.toString().trim();
+            if (t != null && t.isNotEmpty) {
+              _marketerPublishName = t;
+            }
+          }
+        } catch (_) {}
+      }
+
       if (mounted) setState(() {});
     } catch (_) {}
   }
 
-  // تحميل هاتف المالك
-  Future<void> _preloadOwnerPhone() async {
-    try {
-      final ownerId = _resolveOwnerId();
-      if (ownerId.isEmpty) return;
+  /// عمود location = الحي فقط (المحافظة في عمود governorate)
+  String _composeLocationForDb() => _location.text.trim();
 
-      setState(() => _phoneLoading = true);
-
-      final p = await _sb
-          .from('profiles')
-          .select('phone')
-          .eq('id', ownerId)
-          .maybeSingle();
-      final ph = (p?['phone'])?.toString().trim();
-
-      if (!mounted) return;
-      setState(() {
-        _ownerPhone = (ph == null || ph.isEmpty) ? null : normalizeNumbers(ph);
-        _phoneLoading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _phoneLoading = false);
+  /// يطابق القيم المخزّنة في الحقول مع عناصر القوائم بعد تحميل JSON (يصلح ظهور قوائم فارغة).
+  void _syncLocationSelectionsFromControllers() {
+    final r = _region.text.trim();
+    if (r.isNotEmpty && _regionOptions.contains(r)) {
+      _regionManual = false;
+      _selectedRegion = r;
+    }
+    final regKey = (_selectedRegion ?? _region.text).trim();
+    if (regKey.isEmpty) return;
+    final govList = _governoratesByRegion[regKey] ?? const [];
+    final g = _governorate.text.trim();
+    if (g.isNotEmpty && govList.contains(g)) {
+      _governorateManual = false;
+      _selectedGovernorate = g;
+    }
+    final govKey = (_selectedGovernorate ?? _governorate.text).trim();
+    if (govKey.isEmpty) return;
+    final cityList = _citiesByGovernorate[govKey] ?? const [];
+    final c = _city.text.trim();
+    if (c.isNotEmpty && cityList.contains(c)) {
+      _cityManual = false;
+      _selectedCity = c;
     }
   }
 
-  Future<void> _togglePhone(bool v) async {
-    if (_saving) return;
-
-    if (!v) {
+  Future<void> _selectRegionValue(String? value) async {
+    if (value == null) return;
+    if (value == _kManualOptionValue) {
       setState(() {
-        _usePhone = false;
-        _phone.clear();
-        _error = null;
+        _regionManual = true;
+        _selectedRegion = null;
+        _region.clear();
+        _selectedGovernorate = null;
+        _governorate.clear();
+        _governorateManual = true;
+        _selectedCity = null;
+        _city.clear();
+        _cityManual = true;
+        _selectedDistrict = null;
+        _districtManual = false;
+        _location.clear();
       });
       return;
     }
-
     setState(() {
-      _usePhone = true;
-      _error = null;
+      _regionManual = false;
+      _selectedRegion = value;
+      _region.text = value;
+      _selectedGovernorate = null;
+      _governorate.clear();
+      _governorateManual = false;
+      _selectedCity = null;
+      _city.clear();
+      _cityManual = false;
+      _selectedDistrict = null;
+      _districtManual = false;
+      _location.clear();
+    });
+    final opts = _governoratesByRegion[value] ?? const [];
+    if (opts.length == 1) {
+      await _selectGovernorateValue(opts.first);
+    }
+  }
+
+  Future<void> _selectGovernorateValue(String? value) async {
+    if (value == null) return;
+    if (value == _kManualOptionValue) {
+      setState(() {
+        _governorateManual = true;
+        _selectedGovernorate = null;
+        _governorate.clear();
+        _selectedCity = null;
+        _city.clear();
+        _cityManual = true;
+        _selectedDistrict = null;
+        _districtManual = false;
+        _location.clear();
+      });
+      return;
+    }
+    setState(() {
+      _governorateManual = false;
+      _selectedGovernorate = value;
+      _governorate.text = value;
+      _selectedCity = null;
+      _city.clear();
+      _cityManual = false;
+      _selectedDistrict = null;
+      _districtManual = false;
+      _location.clear();
+    });
+    final cities = _citiesByGovernorate[value] ?? const [];
+    if (cities.length == 1) {
+      await _selectCityValue(cities.first);
+    }
+  }
+
+  Future<void> _selectCityValue(String? value) async {
+    if (value == null) return;
+    if (value == _kManualOptionValue) {
+      setState(() {
+        _cityManual = true;
+        _selectedCity = null;
+        _city.clear();
+        _selectedDistrict = null;
+        _districtManual = false;
+        _location.clear();
+      });
+      return;
+    }
+    setState(() {
+      _cityManual = false;
+      _selectedCity = value;
+      _city.text = value;
+      _selectedDistrict = null;
+      _districtManual = false;
+      _location.clear();
     });
 
-    if (_ownerPhone == null) {
-      await _preloadOwnerPhone();
-    }
+    final info = await SaudiLocationsService.instance.findByCity(value);
+    if (!mounted || info == null) return;
 
-    if (!mounted) return;
-
-    if (_ownerPhone == null || _ownerPhone!.trim().isEmpty) {
+    final regionValue = _isAr ? info.regionAr.trim() : info.regionEn.trim();
+    if (_region.text.trim().isEmpty && regionValue.isNotEmpty) {
       setState(() {
-        _usePhone = false;
-        _phone.clear();
-        _error = _isAr
-            ? 'لا يوجد رقم جوال محفوظ في الحساب. أضف رقمك في الملف الشخصي أولاً.'
-            : 'No phone is saved in your profile. Please add your phone first.';
+        _regionManual = false;
+        _selectedRegion = regionValue;
+        _region.text = regionValue;
       });
-      return;
     }
 
-    setState(() => _phone.text = _ownerPhone!.trim());
+    final governorateValue =
+        _isAr ? info.governorateAr?.trim() : info.governorateEn?.trim();
+    if (governorateValue != null &&
+        governorateValue.isNotEmpty &&
+        _governorate.text.trim().isEmpty) {
+      setState(() {
+        _governorateManual = false;
+        _selectedGovernorate = governorateValue;
+        _governorate.text = governorateValue;
+      });
+    }
+
+    if (!_useMapCoords) {
+      final lat = info.lat;
+      final lng = info.lng;
+      if (lat != 0.0 || lng != 0.0) {
+        setState(() {
+          _lat = lat;
+          _lng = lng;
+          _latCtrl.text = lat.toStringAsFixed(6);
+          _lngCtrl.text = lng.toStringAsFixed(6);
+        });
+      }
+    }
   }
 
-  // عرض رسالة النجاح
+  Future<void> _tryAutoFillRegionAndCoordsFromCity() async {
+    final cityValue = _city.text.trim();
+    if (cityValue.isEmpty) return;
+    final info = await SaudiLocationsService.instance.findByCity(cityValue);
+    if (!mounted || info == null) return;
+
+    final regionValue = _isAr ? info.regionAr.trim() : info.regionEn.trim();
+    if (_region.text.trim().isEmpty && regionValue.isNotEmpty) {
+      setState(() {
+        _region.text = regionValue;
+        _selectedRegion = regionValue;
+        _regionManual = false;
+      });
+    }
+
+    final governorateValue =
+        _isAr ? info.governorateAr?.trim() : info.governorateEn?.trim();
+    if (governorateValue != null &&
+        governorateValue.isNotEmpty &&
+        _governorate.text.trim().isEmpty) {
+      setState(() {
+        _governorate.text = governorateValue;
+        _selectedGovernorate = governorateValue;
+        _governorateManual = false;
+      });
+    }
+
+    if (!_useMapCoords && (_lat == null || _lng == null)) {
+      setState(() {
+        _lat = info.lat;
+        _lng = info.lng;
+        _latCtrl.text = info.lat.toStringAsFixed(6);
+        _lngCtrl.text = info.lng.toStringAsFixed(6);
+      });
+    }
+  }
+
   Future<void> _showSuccessChoice() async {
     final cs = Theme.of(context).colorScheme;
-
     final choice = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {
         return AlertDialog(
           backgroundColor: cs.surface,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
           title: Text(
             _isAr ? 'تم إضافة الإعلان' : 'Listing added',
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
-          content: Text(
-            _isAr
-                ? 'هل تريد إضافة إعلان آخر؟'
-                : 'Do you want to add another listing?',
-            style: TextStyle(
-                color: cs.onSurfaceVariant, fontWeight: FontWeight.w700),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _isAr
+                    ? 'هل تريد إضافة إعلان آخر؟'
+                    : 'Do you want to add another listing?',
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'back'),
+                      child: Text(
+                        _isAr ? 'الرئيسية' : 'Dashboard',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.pop(ctx, 'again'),
+                      icon: const Icon(Icons.add, size: 20),
+                      label: Text(
+                        _isAr ? 'إعلان آخر' : 'Add another',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'back'),
-              child: Text(_isAr ? 'العودة للرئيسية' : 'Back to dashboard'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, 'again'),
-              icon: const Icon(Icons.add),
-              label: Text(_isAr ? 'إضافة إعلان آخر' : 'Add another'),
-            ),
-          ],
         );
       },
     );
-
     if (!mounted) return;
-
     if (choice == 'again') {
       _resetForm();
       return;
     }
-
     Navigator.pop(context, true);
   }
 
-  // إعادة تعيين النموذج
+  Future<void> _showRequestSuccess({required String requestId}) async {
+    final cs = Theme.of(context).colorScheme;
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: cs.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          title: Text(
+            _isAr ? 'تم إرسال طلب التسويق' : 'Request submitted',
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _isAr
+                    ? 'تم إرسال طلبك وسيتم مراجعته وتعيين مسوق له.'
+                    : 'Your request was sent. It will be reviewed and assigned to a marketer.',
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx, 'home'),
+                      child: Text(
+                        _isAr ? 'رئيسية' : 'Home',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'status'),
+                      child: Text(
+                        _isAr ? 'الحالة' : 'Status',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(ctx, 'again'),
+                      child: Text(
+                        _isAr ? 'طلب آخر' : 'New',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted) return;
+    if (choice == 'again') {
+      _resetForm();
+      return;
+    }
+    if (choice == 'status') {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              ListingRequestStatusPage(requestId: requestId, lang: widget.lang),
+        ),
+      );
+      if (!mounted) return;
+      Navigator.pushNamedAndRemoveUntil(
+          context, '/userDashboard', (r) => false);
+      return;
+    }
+    Navigator.pushNamedAndRemoveUntil(context, '/userDashboard', (r) => false);
+  }
+
   void _resetForm() {
     setState(() {
       _title.clear();
       _desc.clear();
-      _location.clear();
+      _region.clear();
+      _governorate.clear();
       _city.clear();
+      _location.clear();
+      _addressLine.clear();
+      _buildingNumber.clear();
+      _deedNumber.clear();
+      _deedIssuer.clear();
+      _deedDate = null;
+      _selectedRegion = null;
+      _selectedGovernorate = null;
+      _selectedCity = null;
+      _regionManual = false;
+      _governorateManual = false;
+      _cityManual = false;
       _area.clear();
       _price.clear();
       _currentBid.clear();
-      _isAuction = false;
       _type = 'villa';
-
+      _purpose = 'sale';
+      _isAuction = false;
       _images.clear();
-
       _useMapCoords = false;
       _lat = null;
       _lng = null;
-
-      _usePhone = false;
-      _phone.clear();
-
+      _latCtrl.clear();
+      _lngCtrl.clear();
+      _usageResidential = false;
+      _usageCommercial = false;
       _currency = 'SAR';
       _negotiable = false;
-
       _bedrooms = null;
       _bathrooms = null;
       _parkingSpots = null;
       _furnished = false;
-
       _yearBuilt = null;
       _floor = null;
       _totalFloors = null;
-
       _videoUrl.clear();
       _virtualTourUrl.clear();
       _availabilityDate = null;
-      _addressLine.clear();
-
+      _livingRooms = null;
+      _kitchens = null;
+      _hasElevator = false;
+      _independentEntrance = false;
+      _hasCentralAc = false;
+      _hasSplitAc = false;
+      _majlisCount = null;
+      _annexCount = null;
+      _hasGarden = false;
+      _hasPool = false;
+      _hasCourtyard = false;
+      _carEntrance = false;
+      _internalStair = false;
+      _separateApartment = false;
+      _hasDriverRoom = false;
+      _hasMaidRoom = false;
+      _hasStorageRoom = false;
+      _floorsCount = null;
+      _unitsCount = null;
+      _plotArea = null;
+      _hasLoadingDock = false;
+      _hasCrane = false;
+      _projectType = null;
+      _landUse = null;
+      _facade = null;
+      _streetCount = null;
+      _streetWidth1.clear();
+      _streetWidth2.clear();
+      _streetWidth3.clear();
+      _streetWidth4.clear();
+      _isCornerLand = false;
+      _planNumber.clear();
+      _parcelNumber.clear();
+      _boundaryNorth.clear();
+      _boundarySouth.clear();
+      _boundaryEast.clear();
+      _boundaryWest.clear();
+      _selectedDistrict = null;
+      _districtManual = false;
       for (final k in _amenities.keys) {
         _amenities[k] = false;
       }
-
+      _adLicenseSource = _AdLicenseSource.none;
+      _propertyHasObligations = null;
+      _obligationsDetail.clear();
+      _extendedUsageNotes.clear();
+      _licensePdfStoragePath = null;
+      _uploadingLicensePdf = false;
+      _areaUnit = ListingAreaUnit.m2;
+      _regaFalLicenseNo.clear();
+      _regaChecking = false;
+      _regaVerifyBanner = null;
+      _regaVerifyOk = null;
       _error = null;
+      _wizardStep = 0;
     });
   }
 
   Map<String, dynamic>? _amenitiesPayloadOrNull() {
     final selected = <String, bool>{};
     _amenities.forEach((k, v) {
-      if (v) selected[k] = true;
+      if (v) {
+        if (_isLand) {
+          const landAmenities = ['security', 'parking', 'wifi'];
+          if (landAmenities.contains(k)) selected[k] = true;
+        } else {
+          selected[k] = true;
+        }
+      }
     });
     return selected.isEmpty ? null : selected;
   }
 
-  // دمج العنوان مع الموقع
-  String? _mergeAddressWithLocationIfNeeded({required bool hasLocationColumn}) {
-    final loc = _location.text.trim();
-    final addr = _addressLine.text.trim();
-
-    if (hasLocationColumn) {
-      return addr.isEmpty ? null : addr;
+  List<double> _buildStreetWidths() {
+    final raw = [
+      _streetWidth1.text,
+      _streetWidth2.text,
+      _streetWidth3.text,
+      _streetWidth4.text,
+    ];
+    final out = <double>[];
+    for (final item in raw) {
+      final d = _parseNullableDouble(item);
+      if (d != null && d > 0) out.add(d);
     }
-
-    if (loc.isEmpty && addr.isEmpty) return null;
-    if (loc.isNotEmpty && addr.isEmpty) return loc;
-    if (loc.isEmpty && addr.isNotEmpty) return addr;
-
-    return _isAr ? '$loc - $addr' : '$loc - $addr';
+    return out;
   }
 
-  // بناء البيانات للإرسال
+  Map<String, dynamic>? _buildExtraDetails() {
+    final map = <String, dynamic>{};
+    if (_isLand) {
+      map.addAll({
+        'land_use': _landUse,
+        'facade': _facade,
+        'street_count': _streetCount,
+        'street_widths': _buildStreetWidths(),
+        'is_corner': _isCornerLand,
+        'plan_number': _planNumber.text.trim(),
+        'parcel_number': _parcelNumber.text.trim(),
+      });
+    } else if (_isApartmentLike) {
+      map.addAll({
+        'living_rooms': _livingRooms,
+        'kitchens': _kitchens,
+        'has_elevator': _hasElevator,
+        'independent_entrance': _independentEntrance,
+        'has_central_ac': _hasCentralAc,
+        'has_split_ac': _hasSplitAc,
+      });
+    } else if (_isVillaLike) {
+      map.addAll({
+        'living_rooms': _livingRooms,
+        'kitchens': _kitchens,
+        'majlis_count': _majlisCount,
+        'annex_count': _annexCount,
+        'has_garden': _hasGarden,
+        'has_pool': _hasPool,
+        'has_courtyard': _hasCourtyard,
+        'car_entrance': _carEntrance,
+        'internal_stair': _internalStair,
+        'separate_apartment': _separateApartment,
+        'has_driver_room': _hasDriverRoom,
+        'has_maid_room': _hasMaidRoom,
+        'has_storage_room': _hasStorageRoom,
+      });
+    } else if (_isBuilding) {
+      map.addAll({
+        'floors_count': _floorsCount,
+        'units_count': _unitsCount,
+        'has_elevator': _hasElevator,
+        'independent_entrance': _independentEntrance,
+      });
+    } else if (_isWarehouse) {
+      map.addAll({
+        'has_loading_dock': _hasLoadingDock,
+        'has_crane': _hasCrane,
+        'parking_spots': _parkingSpots,
+      });
+    } else if (_isProject) {
+      map.addAll({
+        'project_type': _projectType,
+        'plot_area': _plotArea,
+        'units_count': _unitsCount,
+      });
+    } else if (_isOther) {
+      map.addAll({'custom_type': _type});
+    }
+    map.removeWhere((k, v) =>
+        v == null ||
+        (v is String && v.trim().isEmpty) ||
+        (v is List && v.isEmpty));
+    return map.isEmpty ? null : map;
+  }
+
+  Map<String, dynamic> _listingGuidanceForInsert() {
+    final hasV = _videoUrl.text.trim().isNotEmpty;
+    final hasI = _images.isNotEmpty;
+    final cover = (!hasV || !hasI)
+        ? (hasV ? 'video' : 'image')
+        : (_coverHeroIsVideo ? 'video' : 'image');
+    final boundaries = <String, String>{};
+    void putB(String k, TextEditingController c) {
+      final t = c.text.trim();
+      if (t.isNotEmpty) boundaries[k] = t;
+    }
+
+    putB('north', _boundaryNorth);
+    putB('south', _boundarySouth);
+    putB('east', _boundaryEast);
+    putB('west', _boundaryWest);
+
+    final out = <String, dynamic>{
+      'cover_primary': cover,
+      'usage': {
+        'residential': _usageResidential,
+        'commercial': _usageCommercial,
+      },
+      'ad_license_source': _adLicenseSource.name,
+      'property_obligations': {
+        'has_obligations': _propertyHasObligations,
+        'detail': _obligationsDetail.text.trim(),
+      },
+    };
+    final ext = _extendedUsageNotes.text.trim();
+    if (ext.isNotEmpty) {
+      out['extended_usage_notes'] = ext;
+    }
+    final pdf = _licensePdfStoragePath?.trim();
+    if (pdf != null && pdf.isNotEmpty) {
+      out['ad_license_pdf_path'] = pdf;
+    }
+    final ppm = _computedPricePerSqm();
+    if (ppm != null && ppm > 0) {
+      out['price_per_sqm'] = ppm;
+    }
+    if (boundaries.isNotEmpty) {
+      out['parcel_boundaries'] = boundaries;
+    }
+    return out;
+  }
+
   Map<String, dynamic> _buildPayload({
     required String ownerId,
     required bool hasLocationColumn,
+    bool marketerDirectPublish = false,
   }) {
+    final lat = _useMapCoords ? _parseNullableDouble(_latCtrl.text) : _lat;
+    final lng = _useMapCoords ? _parseNullableDouble(_lngCtrl.text) : _lng;
+    final areaStoredM2 = _areaValueInSquareMeters() ?? _parseDouble(_area.text);
+    final publishedIso = DateTime.now().toUtc().toIso8601String();
     final payload = <String, dynamic>{
       'owner_id': ownerId,
       'title': _title.text.trim(),
       'description': _desc.text.trim(),
+      'region': _region.text.trim(),
+      'governorate': _governorate.text.trim(),
       'city': _city.text.trim(),
       'type': _type,
-      'area': _parseDouble(_area.text),
+      'area': areaStoredM2,
       'price': _parseDouble(_price.text),
       'currency': _currency,
       'negotiable': _negotiable,
       'is_auction': _isAuction,
       'current_bid': _isAuction ? _parseDouble(_currentBid.text) : null,
       'views': 0,
-      'status': 'active',
-      'latitude': (_useMapCoords ? _lat : null),
-      'longitude': (_useMapCoords ? _lng : null),
+      if (marketerDirectPublish) ...<String, dynamic>{
+        'status': 'published',
+        'workflow_stage': 'published',
+        'published_by_marketer_id': ownerId,
+        'published_at': publishedIso,
+      } else ...<String, dynamic>{
+        'status': 'waiting_mediator',
+        'workflow_stage': 'waiting_marketers',
+      },
+      'latitude': lat,
+      'longitude': lng,
       'video_url': _videoUrl.text.trim().isEmpty ? null : _videoUrl.text.trim(),
+      'listing_guidance': _listingGuidanceForInsert(),
+      'virtual_tour_url': _virtualTourUrl.text.trim().isEmpty
+          ? null
+          : _virtualTourUrl.text.trim(),
+      'availability_date': _availabilityDate == null
+          ? null
+          : DateTime(
+              _availabilityDate!.year,
+              _availabilityDate!.month,
+              _availabilityDate!.day,
+            ).toIso8601String().substring(0, 10),
+      'amenities': _amenitiesPayloadOrNull(),
+      'address_line':
+          _addressLine.text.trim().isEmpty ? null : _addressLine.text.trim(),
+    };
+    final deedNorm = normalizeDeedNumber(_deedNumber.text);
+    payload['deed_number'] = deedNorm.isEmpty ? null : deedNorm;
+    payload['deed_date'] = _deedDate == null
+        ? null
+        : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+            .toIso8601String()
+            .substring(0, 10);
+    payload['deed_issuer'] =
+        _deedIssuer.text.trim().isEmpty ? null : _deedIssuer.text.trim();
+    final bn = _buildingNumber.text.trim();
+    payload['building_number'] =
+        (_showBuildingNumber && bn.isNotEmpty) ? bn : null;
+    if (hasLocationColumn) payload['location'] = _composeLocationForDb();
+    if (_isProject) {
+      payload['area'] = _plotArea ?? areaStoredM2;
+    }
+    if (_roomStatsForSave) {
+      payload['bedrooms'] = _bedrooms;
+      payload['bathrooms'] = _bathrooms;
+    } else {
+      payload['bedrooms'] = null;
+      payload['bathrooms'] = null;
+    }
+    if (_showParkingYearRow) {
+      payload['parking_spots'] = _parkingSpots;
+      payload['year_built'] = _yearBuilt;
+    } else {
+      payload['parking_spots'] = null;
+      payload['year_built'] = null;
+    }
+    if (_showFurnishedRow) {
+      payload['furnished'] = _furnished;
+    } else {
+      payload['furnished'] = null;
+    }
+    if (_showFloorFields) {
+      payload['floor'] = _floor;
+      payload['total_floors'] = _totalFloors;
+    } else {
+      payload['floor'] = null;
+      payload['total_floors'] = null;
+    }
+    payload['purpose'] = _purpose;
+    if (_regaPayloadForInsert.isNotEmpty) {
+      payload['rega_payload'] = _regaPayloadForInsert;
+    }
+    return payload;
+  }
+
+  Map<String, dynamic> _buildRequestPayload({required String ownerId}) {
+    final lat = _useMapCoords ? _parseNullableDouble(_latCtrl.text) : _lat;
+    final lng = _useMapCoords ? _parseNullableDouble(_lngCtrl.text) : _lng;
+    final areaStoredM2 = _areaValueInSquareMeters() ?? _parseDouble(_area.text);
+    final details = <String, dynamic>{
+      'owner_id': ownerId,
+      'title': _title.text.trim(),
+      'description': _desc.text.trim(),
+      'region': _region.text.trim(),
+      'governorate': _governorate.text.trim(),
+      'city': _city.text.trim(),
+      'location': _location.text.trim(),
+      'address_line': _addressLine.text.trim(),
+      'type': _type,
+      'purpose': _purpose,
+      'area': areaStoredM2,
+      'price': _parseDouble(_price.text),
+      'currency': _currency,
+      'negotiable': _negotiable,
+      'is_auction': _isAuction,
+      'current_bid': _isAuction ? _parseDouble(_currentBid.text) : null,
+      'latitude': lat,
+      'longitude': lng,
+      'video_url': _videoUrl.text.trim().isEmpty ? null : _videoUrl.text.trim(),
+      'listing_guidance': _listingGuidanceForInsert(),
       'virtual_tour_url': _virtualTourUrl.text.trim().isEmpty
           ? null
           : _virtualTourUrl.text.trim(),
@@ -543,157 +2523,423 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               .toIso8601String()
               .substring(0, 10),
       'amenities': _amenitiesPayloadOrNull(),
-      'address_line': _mergeAddressWithLocationIfNeeded(
-          hasLocationColumn: hasLocationColumn),
+      'extra_details': _buildExtraDetails(),
     };
-
-    if (hasLocationColumn) {
-      payload['location'] = _location.text.trim();
+    final dNorm = normalizeDeedNumber(_deedNumber.text);
+    details['deed_number'] = dNorm.isEmpty ? null : dNorm;
+    details['deed_date'] = _deedDate == null
+        ? null
+        : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+            .toIso8601String()
+            .substring(0, 10);
+    details['deed_issuer'] =
+        _deedIssuer.text.trim().isEmpty ? null : _deedIssuer.text.trim();
+    final bNum = _buildingNumber.text.trim();
+    details['building_number'] =
+        (_showBuildingNumber && bNum.isNotEmpty) ? bNum : null;
+    if (_isLand) {
+      details['facade'] = _facade;
+      details['street_count'] = _streetCount;
+      details['street_widths'] = _buildStreetWidths();
+      details['land_use'] = _landUse;
+      details['is_corner'] = _isCornerLand;
+      details['plan_number'] = _planNumber.text.trim();
+      details['parcel_number'] = _parcelNumber.text.trim();
     }
-
-    if (_usePhone) {
-      payload['contact_phone'] = normalizeNumbers(_phone.text).trim();
+    if (_isProject) {
+      details['area'] = _plotArea ?? _parseDouble(_area.text);
     }
-
-    if (_type != 'land') {
-      payload['bedrooms'] = _bedrooms;
-      payload['bathrooms'] = _bathrooms;
-      payload['parking_spots'] = _parkingSpots;
-      payload['furnished'] = _furnished;
-      payload['year_built'] = _yearBuilt;
-
-      if (_type == 'apartment') {
-        payload['floor'] = _floor;
-        payload['total_floors'] = _totalFloors;
-      } else {
-        payload['floor'] = null;
-        payload['total_floors'] = null;
-      }
+    if (_roomStatsForSave) {
+      details['bedrooms'] = _bedrooms;
+      details['bathrooms'] = _bathrooms;
     } else {
-      payload['bedrooms'] = null;
-      payload['bathrooms'] = null;
-      payload['parking_spots'] = null;
-      payload['furnished'] = null;
-      payload['year_built'] = null;
-      payload['floor'] = null;
-      payload['total_floors'] = null;
+      details['bedrooms'] = null;
+      details['bathrooms'] = null;
     }
+    if (_showParkingYearRow) {
+      details['parking_spots'] = _parkingSpots;
+      details['year_built'] = _yearBuilt;
+    } else {
+      details['parking_spots'] = null;
+      details['year_built'] = null;
+    }
+    if (_showFurnishedRow) {
+      details['furnished'] = _furnished;
+    } else {
+      details['furnished'] = null;
+    }
+    details['floor'] = _showFloorFields ? _floor : null;
+    details['total_floors'] = _showFloorFields ? _totalFloors : null;
+    return <String, dynamic>{
+      'owner_id': ownerId,
+      'title': _title.text.trim(),
+      'description': _desc.text.trim(),
+      'city': _city.text.trim(),
+      'price': _parseDouble(_price.text),
+      'status': 'pending',
+      'workflow_stage': 'waiting_marketers',
+      if (lat != null) 'lat': lat,
+      if (lng != null) 'lng': lng,
+      'payload_json': jsonEncode(details),
+    };
+  }
 
-    return payload;
+  Future<List<String>> _uploadRequestImages(
+      {required String ownerId, required String requestId}) async {
+    final bucket = _sb.storage.from('property-images');
+    final uuid = const Uuid();
+    final paths = <String>[];
+    for (int i = 0; i < _images.length; i++) {
+      final picked = _images[i];
+      final fileName = '${uuid.v4()}.jpg';
+      final path = 'requests/$requestId/$ownerId/$fileName';
+      Uint8List bytesToUpload = picked.bytes;
+      try {
+        bytesToUpload = await WatermarkService.addTextWatermark(picked.bytes,
+            text: '© موثوق العقاري | Motawoq Real Estate');
+      } catch (_) {
+        bytesToUpload = picked.bytes;
+      }
+      await bucket.uploadBinary(path, bytesToUpload,
+          fileOptions:
+              const FileOptions(upsert: false, contentType: 'image/jpeg'));
+      paths.add(path);
+    }
+    final patch = <String, dynamic>{'request_image_paths': paths};
+    final vPath = _videoUrl.text.trim();
+    if (vPath.isNotEmpty) {
+      patch['request_video_path'] = vPath;
+    }
+    await _mergeRequestPayloadJson(requestId, patch);
+    return paths;
+  }
+
+  /// يحفظ مسارات الصور داخل `payload_json` لأن أعمدة image_paths/images غير مضمونة في المخطط.
+  Future<void> _mergeRequestPayloadJson(
+    String requestId,
+    Map<String, dynamic> patch,
+  ) async {
+    try {
+      final row = await _sb
+          .from('listing_requests')
+          .select('payload_json')
+          .eq('id', requestId)
+          .maybeSingle();
+      Map<String, dynamic> merged = {};
+      final raw = row?['payload_json'];
+      if (raw is String && raw.trim().isNotEmpty) {
+        final dec = jsonDecode(raw);
+        if (dec is Map) {
+          merged = Map<String, dynamic>.from(dec);
+        }
+      } else if (raw is Map) {
+        merged = Map<String, dynamic>.from(raw);
+      }
+      merged.addAll(patch);
+      await _sb.from('listing_requests').update({
+        'payload_json': jsonEncode(merged),
+      }).eq('id', requestId);
+    } catch (_) {}
+  }
+
+  bool _rowStillListedForSaleLike(Map<String, dynamic> row) {
+    if (row['deleted_by_user'] == true || row['delete_approved'] == true) {
+      return false;
+    }
+    final st = (row['status'] ?? '').toString().toLowerCase();
+    const gone = {
+      'archived',
+      'deleted',
+      'inactive',
+      'closed',
+      'hidden',
+      'rejected',
+      'cancelled',
+      'sold',
+      'completed',
+      'withdrawn',
+    };
+    if (gone.contains(st)) return false;
+    var purp = (row['purpose'] ?? 'sale').toString().toLowerCase();
+    if (purp.isEmpty) purp = 'sale';
+    if (row['is_auction'] == true) {
+      purp = 'auction';
+    }
+    return const {'sale', 'auction', 'investment'}.contains(purp);
+  }
+
+  Future<String?> _blockingDuplicateSaleDeedMessage() async {
+    const salePurposes = {'sale', 'auction', 'investment'};
+    if (!salePurposes.contains(_purpose)) return null;
+    final deed = normalizeDeedNumber(_deedNumber.text);
+    if (deed.isEmpty) return null;
+    try {
+      final res = await _sb
+          .from('properties')
+          .select('id,title,status,is_auction,deleted_by_user,delete_approved')
+          .eq('deed_number', deed)
+          .limit(40);
+      final list = (res as List).cast<Map<String, dynamic>>();
+      for (final row in list) {
+        if (_rowStillListedForSaleLike(row)) {
+          final t = (row['title'] ?? '').toString().trim();
+          return _isAr
+              ? 'يوجد إعلان آخر بنفس رقم الصك ما زال نشطًا للبيع أو المزاد أو الاستثمار${t.isNotEmpty ? ': $t' : ''}.'
+              : 'Another listing with the same deed is still active for sale/auction/investment${t.isNotEmpty ? ': $t' : ''}.';
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _injectDefaultCoverIfNoMedia() async {
+    if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) return;
+    try {
+      final bd = await rootBundle.load('assets/logo.png');
+      if (!mounted) return;
+      setState(() {
+        _images.add(
+          _PickedImage(
+            name: 'default_listing_cover.png',
+            bytes: bd.buffer.asUint8List(),
+          ),
+        );
+      });
+    } catch (_) {}
   }
 
   Future<void> _submit() async {
     setState(() => _error = null);
-
     final user = _sb.auth.currentUser;
     if (user == null) {
       setState(() =>
           _error = _isAr ? 'يجب تسجيل الدخول أولاً' : 'You must sign in first');
       return;
     }
-
-    // ✅ حماية إضافية داخل submit
     final ownerId = _resolveOwnerId();
     if (ownerId.isEmpty || ownerId != user.id) {
       setState(() => _error = _isAr ? 'غير مصرح' : 'Not allowed');
       return;
     }
-
-    final ok = _formKey.currentState?.validate() ?? false;
-    if (!ok) return;
-
-    if (_images.isEmpty) {
-      setState(() => _error =
-          _isAr ? 'اختر صورة واحدة على الأقل' : 'Pick at least one image');
-      return;
-    }
-
-    if (_useMapCoords && (_lat == null || _lng == null)) {
+    await _injectDefaultCoverIfNoMedia();
+    if (_images.isEmpty && _videoUrl.text.trim().isEmpty) {
       setState(() => _error = _isAr
-          ? 'الإحداثيات إلزامية عند تفعيل خيار الخريطة'
-          : 'Coordinates are required when map option is enabled');
+          ? 'تعذر تحميل صورة افتراضية. أضف صورة أو فيديو.'
+          : 'Could not load default image. Add a photo or video.');
+      _scrollToKey(_listingMediaKey);
       return;
     }
-
-    if (_usePhone && normalizeNumbers(_phone.text).trim().isEmpty) {
+    if (!_usageResidential && !_usageCommercial) {
       setState(() => _error = _isAr
-          ? 'رقم التواصل إلزامي عند تفعيل الخيار'
-          : 'Phone is required when enabled');
+          ? 'حدد ما إذا كان العقار مناسبًا للسكني أو التجاري أو كليهما'
+          : 'Select whether the property is suitable for residential and/or commercial use');
+      _scrollToKey(_formCardKey);
       return;
     }
-
+    await _tryAutoFillRegionAndCoordsFromCity();
+    if (_useMapCoords) {
+      final lat = _parseNullableDouble(_latCtrl.text);
+      final lng = _parseNullableDouble(_lngCtrl.text);
+      if (lat == null || lng == null) {
+        setState(() => _error = _isAr
+            ? 'الإحداثيات إلزامية عند تفعيل خيار الخريطة'
+            : 'Coordinates are required when map option is enabled');
+        _scrollToKey(_coordsKey);
+        return;
+      }
+      _lat = lat;
+      _lng = lng;
+    }
+    if (_isLand && _streetCount != null && _streetCount! > 0) {
+      final widths = _buildStreetWidths();
+      if (widths.length < _streetCount!) {
+        setState(() => _error = _isAr
+            ? 'يجب إدخال عرض الشارع لكل شارع'
+            : 'Please enter street width for each street');
+        _scrollToKey(_formCardKey);
+        return;
+      }
+    }
+    final formOk = (_formKeyClassification.currentState?.validate() ?? true) &&
+        (_formKeyLocation.currentState?.validate() ?? true) &&
+        (_formKeyPricing.currentState?.validate() ?? true) &&
+        (_formKeyDetails.currentState?.validate() ?? true);
+    if (!formOk) {
+      _scrollToKey(_formCardKey);
+      return;
+    }
+    if (_useMapCoords) {
+      final coordsOk = _formKeyCoords.currentState?.validate() ?? false;
+      if (!coordsOk) {
+        _scrollToKey(_coordsKey);
+        return;
+      }
+    }
+    if (_requiresDeed) {
+      if (normalizeDeedNumber(_deedNumber.text).isEmpty) {
+        setState(() => _error = _isAr
+            ? 'رقم الصك مطلوب لهذا الغرض'
+            : 'Deed number is required for this purpose');
+        _scrollToKey(_formCardKey);
+        return;
+      }
+      if (_deedDate == null) {
+        setState(() =>
+            _error = _isAr ? 'تاريخ الصك مطلوب' : 'Deed date is required');
+        _scrollToKey(_formCardKey);
+        return;
+      }
+      if (_deedIssuer.text.trim().isEmpty) {
+        setState(() => _error =
+            _isAr ? 'الجهة المصدرة للصك مطلوبة' : 'Deed issuer is required');
+        _scrollToKey(_formCardKey);
+        return;
+      }
+    }
+    final dupMsg = await _blockingDuplicateSaleDeedMessage();
+    if (dupMsg != null) {
+      if (!mounted) return;
+      setState(() => _error = dupMsg);
+      _scrollToKey(_formCardKey);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(_isAr ? 'تنبيه' : 'Notice'),
+          content: Text(dupMsg),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(_isAr ? 'حسنًا' : 'OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
     setState(() => _saving = true);
-
     try {
+      final verified = await _isVerifiedMarketer(ownerId);
+      if (!verified) {
+        // فرد (معلن غير مسوّق): طلب تسويق عام — يظهر لمساري الدعوات/العروض.
+        final requestPayload = _buildRequestPayload(ownerId: ownerId);
+        final insertedReq = await _sb
+            .from('listing_requests')
+            .insert(requestPayload)
+            .select('id')
+            .single();
+        final requestId = insertedReq['id'] as String;
+        OrgActivityService.logListingRequestCreated(requestId);
+        try {
+          await MarketingFlowService(_sb).notifyOwnerListingRequestSubmitted(
+            ownerId: ownerId,
+            requestId: requestId,
+            titleHint: _title.text.trim(),
+          );
+        } catch (_) {}
+        try {
+          await _uploadRequestImages(ownerId: ownerId, requestId: requestId);
+        } catch (_) {}
+        if (!mounted) return;
+        await _showRequestSuccess(requestId: requestId);
+        return;
+      }
+      final marketerDirectPublish = _regaVerificationSatisfied();
       bool hasLocationColumn = true;
-      Map<String, dynamic> payload =
-          _buildPayload(ownerId: ownerId, hasLocationColumn: hasLocationColumn);
-
+      Map<String, dynamic> payload = _buildPayload(
+        ownerId: ownerId,
+        hasLocationColumn: hasLocationColumn,
+        marketerDirectPublish: marketerDirectPublish,
+      );
       Map<String, dynamic> inserted;
       try {
         inserted =
             await _sb.from('properties').insert(payload).select('id').single();
       } catch (e) {
         final msg = e.toString().toLowerCase();
-
         if (msg.contains('contact_phone') && msg.contains('does not exist')) {
           payload.remove('contact_phone');
         }
-
+        for (final col in [
+          'workflow_stage',
+          'purpose',
+          'waiting_marketers_since',
+          'extra_details',
+          'facade',
+          'street_count',
+          'street_widths',
+          'deed_number',
+          'deed_date',
+          'deed_issuer',
+          'building_number',
+          'listing_guidance',
+          'rega_payload',
+          'published_at',
+          'published_by_marketer_id',
+        ]) {
+          if (msg.contains(col) && msg.contains('does not exist')) {
+            payload.remove(col);
+          }
+        }
         if (msg.contains('location') && msg.contains('does not exist')) {
           hasLocationColumn = false;
           payload = _buildPayload(
-              ownerId: ownerId, hasLocationColumn: hasLocationColumn);
+            ownerId: ownerId,
+            hasLocationColumn: hasLocationColumn,
+            marketerDirectPublish: marketerDirectPublish,
+          );
           if (msg.contains('contact_phone') && msg.contains('does not exist')) {
             payload.remove('contact_phone');
           }
         }
-
         inserted =
             await _sb.from('properties').insert(payload).select('id').single();
       }
-
       final propertyId = inserted['id'] as String;
-
-      // الخطوة 2: رفع الصور
+      OrgActivityService.logListingCreated(propertyId);
+      try {
+        await MarketingFlowService(_sb).notifyOwnerPropertyListed(
+          ownerId: ownerId,
+          propertyId: propertyId,
+          titleHint: _title.text.trim(),
+        );
+      } catch (_) {}
       final bucket = _sb.storage.from('property-images');
       final uuid = const Uuid();
       final imagesToInsert = <Map<String, dynamic>>[];
-
       for (int i = 0; i < _images.length; i++) {
         final picked = _images[i];
         final fileName = '${uuid.v4()}.jpg';
         final path = '$ownerId/$fileName';
-
         Uint8List bytesToUpload = picked.bytes;
-
         try {
-          bytesToUpload = await WatermarkService.addTextWatermark(
-            picked.bytes,
-            text: '© عقار موثوق | Aqar-Reliable',
-          );
+          bytesToUpload = await WatermarkService.addTextWatermark(picked.bytes,
+              text: '© موثوق العقاري | Motawoq Real Estate');
         } catch (_) {
           bytesToUpload = picked.bytes;
         }
-
-        await bucket.uploadBinary(
-          path,
-          bytesToUpload,
-          fileOptions:
-              const FileOptions(upsert: false, contentType: 'image/jpeg'),
-        );
-
-        imagesToInsert.add({
-          'property_id': propertyId,
-          'path': path,
-          'sort_order': i,
-        });
+        await bucket.uploadBinary(path, bytesToUpload,
+            fileOptions:
+                const FileOptions(upsert: false, contentType: 'image/jpeg'));
+        imagesToInsert
+            .add({'property_id': propertyId, 'path': path, 'sort_order': i});
       }
-
       if (imagesToInsert.isNotEmpty) {
         await _sb.from('property_images').insert(imagesToInsert);
       }
-
+      final videoPath = _videoUrl.text.trim();
+      if (videoPath.isNotEmpty) {
+        try {
+          await _sb.from('property_images').insert({
+            'property_id': propertyId,
+            'path': videoPath,
+            'file_name': videoPath,
+            'media_type': 'video',
+            'sort_order': imagesToInsert.length,
+          });
+        } catch (_) {
+          // مخطط قديم بدون media_type أو سياسة RLS مختلفة — يبقى video_url على صف العقار.
+        }
+      }
       if (!mounted) return;
       await _showSuccessChoice();
     } catch (e) {
@@ -716,27 +2962,363 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       cancelText: _isAr ? 'إلغاء' : 'Cancel',
       confirmText: _isAr ? 'اختيار' : 'Select',
     );
-
     if (!mounted) return;
     if (picked == null) return;
     setState(() => _availabilityDate = picked);
   }
 
-  // بناء اسم المالك للعرض
-  String get _ownerDisplayName {
-    if (_ownerFirstName != null && _ownerLastName != null) {
-      return '${_ownerFirstName!} ${_ownerLastName!}';
-    } else if (_ownerFirstName != null) {
-      return _ownerFirstName!;
-    } else {
-      return _isAr ? 'مستخدم' : 'User';
+  Future<void> _pickDeedDate() async {
+    final picked = await showDeedDateCalendarDialog(
+      context: context,
+      isAr: _isAr,
+      initialDate: _deedDate,
+    );
+    if (!mounted) return;
+    if (picked == null) return;
+    setState(() => _deedDate = picked);
+  }
+
+  Future<void> _pickAndUploadLicensePdf() async {
+    final user = _sb.auth.currentUser;
+    if (user == null) return;
+    setState(() => _uploadingLicensePdf = true);
+    suspendAutoLock.value = true;
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+        withData: true,
+      );
+      if (!mounted) return;
+      if (res == null || res.files.isEmpty) {
+        setState(() => _uploadingLicensePdf = false);
+        suspendAutoLock.value = false;
+        return;
+      }
+      final f = res.files.single;
+      final bytes = f.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        setState(() => _uploadingLicensePdf = false);
+        suspendAutoLock.value = false;
+        return;
+      }
+      final uuid = const Uuid().v4();
+      final path = 'licenses/${user.id.trim()}/$uuid.pdf';
+      await _sb.storage.from('property-images').uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              upsert: false,
+              contentType: 'application/pdf',
+            ),
+          );
+      if (!mounted) return;
+      setState(() {
+        _licensePdfStoragePath = path;
+        _uploadingLicensePdf = false;
+      });
+      suspendAutoLock.value = false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr ? 'تم رفع ملف الرخصة' : 'License PDF uploaded'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _uploadingLicensePdf = false);
+      suspendAutoLock.value = false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr ? 'تعذر رفع PDF' : 'PDF upload failed'),
+        ),
+      );
+    }
+  }
+
+  void _clearLicensePdf() {
+    setState(() => _licensePdfStoragePath = null);
+  }
+
+  Future<void> _showExtendedUsesDialog() async {
+    final ctrl = TextEditingController(text: _extendedUsageNotes.text);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Text(
+            _isAr ? 'استخدامات موسّعة وتفاصيل إضافية' : 'Extended uses & notes',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+          ),
+          content: SingleChildScrollView(
+            child: TextField(
+              controller: ctrl,
+              maxLines: 6,
+              decoration: InputDecoration(
+                hintText: _isAr
+                    ? 'مثال: واجهتان تجاريتان، أهلية سكنية، إلخ.'
+                    : 'e.g. dual commercial frontage, residential eligibility…',
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                setState(() => _extendedUsageNotes.text = ctrl.text);
+                Navigator.pop(ctx);
+              },
+              child: Text(_isAr ? 'حفظ' : 'Save'),
+            ),
+          ],
+        );
+      },
+    );
+    ctrl.dispose();
+  }
+
+  void _clearLandOnlyFormFields() {
+    _landUse = null;
+    _facade = null;
+    _streetCount = null;
+    _streetWidth1.clear();
+    _streetWidth2.clear();
+    _streetWidth3.clear();
+    _streetWidth4.clear();
+    _isCornerLand = false;
+    _planNumber.clear();
+    _parcelNumber.clear();
+    _boundaryNorth.clear();
+    _boundarySouth.clear();
+    _boundaryEast.clear();
+    _boundaryWest.clear();
+  }
+
+  String _guessVideoMime(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'mov':
+        return 'video/quicktime';
+      case 'mkv':
+        return 'video/x-matroska';
+      case 'webm':
+        return 'video/webm';
+      case 'mp4':
+      default:
+        return 'video/mp4';
+    }
+  }
+
+  Future<void> _uploadVideoBytes(Uint8List bytes, String ext) async {
+    final user = _sb.auth.currentUser;
+    if (user == null) return;
+    setState(() => _uploadingVideo = true);
+    suspendAutoLock.value = true;
+    try {
+      final uuid = const Uuid().v4();
+      final path = '${user.id.trim()}/$uuid.${ext.toLowerCase()}';
+      await _sb.storage.from('property-videos').uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(
+              upsert: false,
+              contentType: _guessVideoMime(ext),
+            ),
+          );
+      if (!mounted) return;
+      setState(() => _videoUrl.text = path);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr ? 'تم رفع الفيديو' : 'Video uploaded'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr ? 'فشل رفع الفيديو: $e' : 'Upload failed: $e'),
+        ),
+      );
+    } finally {
+      suspendAutoLock.value = false;
+      if (mounted) setState(() => _uploadingVideo = false);
+    }
+  }
+
+  Future<void> _pickVideoFromFiles() async {
+    if (_saving || _picking || _uploadingVideo) return;
+    setState(() => _picking = true);
+    suspendAutoLock.value = true;
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        type: FileType.video,
+        withData: true,
+      );
+      if (!mounted || res == null || res.files.isEmpty) return;
+      final f = res.files.first;
+      final bytes = f.bytes;
+      if (bytes == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            content: Text(_isAr ? 'تعذر قراءة الملف' : 'Could not read file'),
+          ),
+        );
+        return;
+      }
+      final path = f.path;
+      if (!await _videoPassesUploadPolicy(
+        path: (path != null && path.isNotEmpty) ? path : null,
+        bytes: bytes,
+      )) {
+        return;
+      }
+      final ext = (f.extension ?? 'mp4').toLowerCase();
+      await _uploadVideoBytes(bytes, ext);
+    } finally {
+      suspendAutoLock.value = false;
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _pickVideoFromGallery() async {
+    if (_saving || _picking || _uploadingVideo) return;
+    final t = AppLocalizations.of(context);
+    if (t != null &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      final ok = await RuntimePermissionHelper.ensurePhotos(context, t: t);
+      if (!ok || !mounted) return;
+    }
+    setState(() => _picking = true);
+    suspendAutoLock.value = true;
+    try {
+      final picker = ImagePicker();
+      final x = await picker.pickVideo(source: ImageSource.gallery);
+      if (!mounted || x == null) return;
+      final path = x.path;
+      final bytes = await x.readAsBytes();
+      if (!await _videoPassesUploadPolicy(
+        path: path.isNotEmpty ? path : null,
+        bytes: bytes,
+      )) {
+        return;
+      }
+      final name = x.name.toLowerCase();
+      final ext = name.contains('.') ? name.split('.').last : 'mp4';
+      await _uploadVideoBytes(bytes, ext);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr ? 'تعذر اختيار الفيديو' : 'Could not pick video'),
+        ),
+      );
+    } finally {
+      suspendAutoLock.value = false;
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _pickVideoFromCamera() async {
+    if (_saving || _picking || _uploadingVideo) return;
+    final t = AppLocalizations.of(context);
+    if (t != null &&
+        !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      final ok = await RuntimePermissionHelper.ensureCamera(context, t: t);
+      if (!ok || !mounted) return;
+    }
+    setState(() => _picking = true);
+    suspendAutoLock.value = true;
+    try {
+      final picker = ImagePicker();
+      final x = await picker.pickVideo(source: ImageSource.camera);
+      if (!mounted || x == null) return;
+      final path = x.path;
+      final bytes = await x.readAsBytes();
+      if (!await _videoPassesUploadPolicy(
+        path: path.isNotEmpty ? path : null,
+        bytes: bytes,
+      )) {
+        return;
+      }
+      final name = x.name.toLowerCase();
+      final ext = name.contains('.') ? name.split('.').last : 'mp4';
+      await _uploadVideoBytes(bytes, ext);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content:
+              Text(_isAr ? 'تعذر التقاط الفيديو' : 'Could not record video'),
+        ),
+      );
+    } finally {
+      suspendAutoLock.value = false;
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  Future<void> _showVideoPickMenu() async {
+    if (_saving || _uploadingVideo) return;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.video_file_outlined),
+                title: Text(_isAr ? 'ملف فيديو' : 'Video file'),
+                onTap: () => Navigator.pop(ctx, 'file'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.video_library_outlined),
+                title: Text(_isAr ? 'معرض الوسائط' : 'Gallery'),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+              if (!kIsWeb)
+                ListTile(
+                  leading: const Icon(Icons.videocam_outlined),
+                  title: Text(_isAr ? 'الكاميرا' : 'Camera'),
+                  onTap: () => Navigator.pop(ctx, 'camera'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'file':
+        await _pickVideoFromFiles();
+        break;
+      case 'gallery':
+        await _pickVideoFromGallery();
+        break;
+      case 'camera':
+        await _pickVideoFromCamera();
+        break;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-
     return Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
@@ -744,145 +3326,286 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         appBar: AppBar(
           title: Text(_isAr ? 'إضافة إعلان' : 'Add Listing'),
           actions: [
-            IconButton(
-              tooltip: _isAr ? 'اختيار صور' : 'Pick images',
-              icon: _picking
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.photo_library_outlined),
-              onPressed: (_saving || _picking) ? null : _pickImages,
-            ),
+            if (_wizardStep == 6)
+              IconButton(
+                tooltip: _isAr ? 'إضافة صور أو فيديو' : 'Add images or video',
+                icon: (_picking || _uploadingVideo)
+                    ? SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: AppLogoLoading(compact: true, size: 22),
+                      )
+                    : const Icon(Icons.perm_media_outlined),
+                onPressed: (_saving || _picking || _uploadingVideo)
+                    ? null
+                    : _showPickMediaMenu,
+              ),
           ],
         ),
         body: SafeArea(
           child: SingleChildScrollView(
+            controller: _scrollCtrl,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 800),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _HeaderCard(
-                      isAr: _isAr,
-                      ownerName: _ownerDisplayName,
-                      ownerId: widget.userId,
-                    ),
-                    const SizedBox(height: 12),
-                    _ImagesCard(
-                      isAr: _isAr,
-                      images: _images,
-                      saving: _saving || _picking,
-                      onPick: _pickImages,
-                      onRemove: _removeImageAt,
-                      onMove: _moveImage,
-                    ),
-                    const SizedBox(height: 12),
-                    _CoordsCard(
-                      isAr: _isAr,
-                      saving: _saving,
-                      enabled: _useMapCoords,
-                      lat: _lat,
-                      lng: _lng,
-                      onToggle: (v) {
-                        setState(() {
-                          _useMapCoords = v;
-                          if (!v) {
-                            _lat = null;
-                            _lng = null;
-                          }
-                        });
-                      },
-                      onPick: _openMapPicker,
-                    ),
-                    const SizedBox(height: 12),
-                    _PhoneCard(
-                      isAr: _isAr,
-                      saving: _saving,
-                      enabled: _usePhone,
-                      loading: _phoneLoading,
-                      phone: _phone,
-                      onToggle: _togglePhone,
-                    ),
-                    const SizedBox(height: 12),
-                    _FormCard(
-                      isAr: _isAr,
-                      formKey: _formKey,
-                      saving: _saving,
-                      type: _type,
-                      onTypeChanged: (v) => setState(() => _type = v),
-                      title: _title,
-                      desc: _desc,
-                      location: _location,
-                      city: _city,
-                      area: _area,
-                      price: _price,
-                      currency: _currency,
-                      negotiable: _negotiable,
-                      onCurrencyChanged: (v) => setState(() => _currency = v),
-                      onNegotiableChanged: (v) =>
-                          setState(() => _negotiable = v),
-                      isAuction: _isAuction,
-                      currentBid: _currentBid,
-                      onAuctionChanged: (v) {
-                        setState(() {
-                          _isAuction = v;
-                          if (!v) _currentBid.text = '';
-                        });
-                      },
-                      bedrooms: _bedrooms,
-                      bathrooms: _bathrooms,
-                      parkingSpots: _parkingSpots,
-                      furnished: _furnished,
-                      yearBuilt: _yearBuilt,
-                      floor: _floor,
-                      totalFloors: _totalFloors,
-                      onBedroomsChanged: (v) => setState(() => _bedrooms = v),
-                      onBathroomsChanged: (v) => setState(() => _bathrooms = v),
-                      onParkingChanged: (v) =>
-                          setState(() => _parkingSpots = v),
-                      onFurnishedChanged: (v) => setState(() => _furnished = v),
-                      onYearBuiltChanged: (v) => setState(() => _yearBuilt = v),
-                      onFloorChanged: (v) => setState(() => _floor = v),
-                      onTotalFloorsChanged: (v) =>
-                          setState(() => _totalFloors = v),
-                      amenities: _amenities,
-                      onAmenityToggle: (k, v) =>
-                          setState(() => _amenities[k] = v),
-                      videoUrl: _videoUrl,
-                      virtualTourUrl: _virtualTourUrl,
-                      availabilityDate: _availabilityDate,
-                      onPickAvailability: _pickAvailabilityDate,
-                      onClearAvailability: () =>
-                          setState(() => _availabilityDate = null),
-                      addressLine: _addressLine,
-                    ),
-                    const SizedBox(height: 12),
-                    if (_error != null) _ErrorBox(text: _error!, isAr: _isAr),
-                    const SizedBox(height: 12),
-                    _SubmitBar(
-                      isAr: _isAr,
-                      saving: _saving,
-                      enabled: _canSubmit && !_picking,
-                      onSubmit: _submit,
-                    ),
-                    const SizedBox(height: 18),
-                    if (kIsWeb)
-                      Text(
-                        _isAr
-                            ? 'ملاحظة: على الويب، اختر صورك من الجهاز وسيتم رفعها إلى التخزين.'
-                            : 'Note: On web, images are picked from your device and uploaded to storage.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: cs.onSurfaceVariant),
-                      ),
-                  ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _HeaderCard(
+                  isAr: _isAr,
+                  marketerPublishName: _marketerPublishName,
                 ),
-              ),
+                const SizedBox(height: 12),
+                Text(
+                  _isAr
+                      ? 'الخطوة ${_wizardStep + 1} من 7 · ${_wizardScreenTitle(_isAr)}'
+                      : 'Step ${_wizardStep + 1} of 7 · ${_wizardScreenTitle(_isAr)}',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: (_wizardStep + 1) / (_kWizardLastStep + 1),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                KeyedSubtree(
+                  key: _formCardKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Visibility(
+                        visible: _wizardStep == 0,
+                        maintainState: true,
+                        child: KeyedSubtree(
+                          key: _regaCardKey,
+                          child: _AdLicenseStepCard(
+                            isAr: _isAr,
+                            adLicenseSource: _adLicenseSource,
+                            onAdLicenseSourceChanged: (v) => setState(() {
+                              _adLicenseSource = v;
+                              if (v != _AdLicenseSource.external) {
+                                _licensePdfStoragePath = null;
+                              }
+                            }),
+                            propertyHasObligations: _propertyHasObligations,
+                            onPropertyHasObligationsChanged: (v) =>
+                                setState(() => _propertyHasObligations = v),
+                            obligationsDetail: _obligationsDetail,
+                            onOpenExtendedUses: _showExtendedUsesDialog,
+                            extendedUsagePreview: _extendedUsageNotes.text,
+                            regaFalLicenseNo: _regaFalLicenseNo,
+                            regaChecking: _regaChecking,
+                            regaVerifyBanner: _regaVerifyBanner,
+                            regaVerifyOk: _regaVerifyOk,
+                            onOpenRegaImport: _openRegaImportPage,
+                          ),
+                        ),
+                      ),
+                      Visibility(
+                        visible: _wizardStep == 1,
+                        maintainState: true,
+                        child: _buildPropertyFormSlice(
+                          AddPropertyFormSlice.classification,
+                          _formKeyClassification,
+                        ),
+                      ),
+                      Visibility(
+                        visible: _wizardStep == 2,
+                        maintainState: true,
+                        child: KeyedSubtree(
+                          key: _coordsKey,
+                          child: _CoordsCard(
+                            isAr: _isAr,
+                            saving: _saving,
+                            enabled: _useMapCoords,
+                            latController: _latCtrl,
+                            lngController: _lngCtrl,
+                            lat: _lat,
+                            lng: _lng,
+                            formKey: _formKeyCoords,
+                            onToggle: (v) {
+                              if (!v) {
+                                setState(() {
+                                  _useMapCoords = false;
+                                  _lat = null;
+                                  _lng = null;
+                                  _latCtrl.clear();
+                                  _lngCtrl.clear();
+                                });
+                                return;
+                              }
+                              setState(() {
+                                _useMapCoords = true;
+                                _lat = null;
+                                _lng = null;
+                                _latCtrl.clear();
+                                _lngCtrl.clear();
+                                _error = null;
+                              });
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted) {
+                                  _openMapPicker(kingdomOverview: true);
+                                }
+                              });
+                            },
+                            onPick: () => _openMapPicker(
+                              kingdomOverview:
+                                  _lat == null && _lng == null && _useMapCoords,
+                            ),
+                            onLatChanged: _onLatChanged,
+                            onLngChanged: _onLngChanged,
+                          ),
+                        ),
+                      ),
+                      Visibility(
+                        visible: _wizardStep == 3,
+                        maintainState: true,
+                        child: _buildPropertyFormSlice(
+                          AddPropertyFormSlice.location,
+                          _formKeyLocation,
+                        ),
+                      ),
+                      Visibility(
+                        visible: _wizardStep == 4,
+                        maintainState: true,
+                        child: _buildPropertyFormSlice(
+                          AddPropertyFormSlice.pricing,
+                          _formKeyPricing,
+                        ),
+                      ),
+                      Visibility(
+                        visible: _wizardStep == 5,
+                        maintainState: true,
+                        child: _buildPropertyFormSlice(
+                          AddPropertyFormSlice.details,
+                          _formKeyDetails,
+                        ),
+                      ),
+                      Visibility(
+                        visible: _wizardStep == 6,
+                        maintainState: true,
+                        child: KeyedSubtree(
+                          key: _listingMediaKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_requiresExternalLicenseBundle) ...[
+                                _ExternalLicenseMediaBanner(isAr: _isAr),
+                                const SizedBox(height: 12),
+                              ],
+                              _ListingMediaCard(
+                                isAr: _isAr,
+                                images: _images,
+                                saving: _saving,
+                                picking: _picking,
+                                uploadingVideo: _uploadingVideo,
+                                hasVideo: _hasUploadedVideo,
+                                showCoverHeroPicker: _images.isNotEmpty &&
+                                    _videoUrl.text.trim().isNotEmpty,
+                                coverHeroIsVideo: _coverHeroIsVideo,
+                                onCoverHeroIsVideoChanged: (v) =>
+                                    setState(() => _coverHeroIsVideo = v),
+                                onPickImages: _showPickImagesMenu,
+                                onPickVideo: _showVideoPickMenu,
+                                onClearVideo: _clearUploadedVideo,
+                                onRemoveImage: _removeImageAt,
+                                onMoveImage: _moveImage,
+                              ),
+                              if (_requiresExternalLicenseBundle) ...[
+                                const SizedBox(height: 14),
+                                _LicensePdfUploadRow(
+                                  isAr: _isAr,
+                                  storagePath: _licensePdfStoragePath,
+                                  uploading: _uploadingLicensePdf,
+                                  busy: _saving ||
+                                      _picking ||
+                                      _uploadingVideo ||
+                                      _uploadingLicensePdf,
+                                  onPick: _pickAndUploadLicensePdf,
+                                  onClear: _clearLicensePdf,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (_error != null) _ErrorBox(text: _error!, isAr: _isAr),
+                const SizedBox(height: 12),
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final narrow = c.maxWidth < 520;
+                    final nextBtn = _wizardStep < 6
+                        ? FilledButton(
+                            onPressed: (_saving ||
+                                    _picking ||
+                                    _uploadingVideo ||
+                                    _uploadingLicensePdf)
+                                ? null
+                                : _wizardNext,
+                            child: Text(_isAr ? 'التالي' : 'Next'),
+                          )
+                        : FilledButton(
+                            onPressed: (_saving ||
+                                    _picking ||
+                                    _uploadingVideo ||
+                                    _uploadingLicensePdf ||
+                                    !_canSubmit)
+                                ? null
+                                : _submit,
+                            child: _saving
+                                ? SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child:
+                                        AppLogoLoading(compact: true, size: 20),
+                                  )
+                                : Text(
+                                    _isAr ? 'نشر الإعلان' : 'Publish listing'),
+                          );
+                    final backBtn = OutlinedButton(
+                      onPressed:
+                          (_wizardStep > 0 && !_saving) ? _wizardPrev : null,
+                      child: Text(_isAr ? 'السابق' : 'Back'),
+                    );
+                    if (narrow) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          backBtn,
+                          const SizedBox(height: 10),
+                          nextBtn,
+                        ],
+                      );
+                    }
+                    return Row(
+                      children: [
+                        Expanded(child: backBtn),
+                        const SizedBox(width: 12),
+                        Expanded(flex: 2, child: nextBtn),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 18),
+                if (kIsWeb && _wizardStep == 6)
+                  Text(
+                    _isAr
+                        ? 'على الويب: اختر الملفات من جهازك للرفع.'
+                        : 'On web: pick files from your device to upload.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+              ],
             ),
           ),
         ),
@@ -895,34 +3618,390 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 // Widgets الفرعية
 // =======================
 
-class _HeaderCard extends StatelessWidget {
+class _AdLicenseStepCard extends StatelessWidget {
   final bool isAr;
-  final String? ownerName;
-  final String ownerId;
+  final _AdLicenseSource adLicenseSource;
+  final ValueChanged<_AdLicenseSource> onAdLicenseSourceChanged;
+  final bool? propertyHasObligations;
+  final ValueChanged<bool?> onPropertyHasObligationsChanged;
+  final TextEditingController obligationsDetail;
+  final VoidCallback onOpenExtendedUses;
+  final String extendedUsagePreview;
+  final TextEditingController regaFalLicenseNo;
+  final bool regaChecking;
+  final String? regaVerifyBanner;
+  final bool? regaVerifyOk;
+  final VoidCallback onOpenRegaImport;
 
-  const _HeaderCard({
+  const _AdLicenseStepCard({
     required this.isAr,
-    required this.ownerName,
-    required this.ownerId,
+    required this.adLicenseSource,
+    required this.onAdLicenseSourceChanged,
+    required this.propertyHasObligations,
+    required this.onPropertyHasObligationsChanged,
+    required this.obligationsDetail,
+    required this.onOpenExtendedUses,
+    required this.extendedUsagePreview,
+    required this.regaFalLicenseNo,
+    required this.regaChecking,
+    required this.regaVerifyBanner,
+    required this.regaVerifyOk,
+    required this.onOpenRegaImport,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                const Color(0xFF0F766E).withOpacity(0.14),
+                cs.surface,
+              ],
+              begin: AlignmentDirectional.topEnd,
+              end: AlignmentDirectional.bottomStart,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: const Color(0xFF0F766E).withOpacity(0.38),
+            ),
+          ),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.account_balance_outlined,
+                    color: Color(0xFF0F766E),
+                    size: 26,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      isAr
+                          ? 'الهيئة العامة للعقار ورخصة الإعلان'
+                          : 'REGA & advertisement license',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                isAr
+                    ? 'المالك الفرد يستطيع المتابعة بدون رخصة فال. المسوق المرخّص يربط رخصة فال وترخيص الإعلان من الهيئة عند وجود إعلان جاهز.'
+                    : 'Individual owners can continue without FAL. Licensed marketers link FAL and the REGA ad license when a licensed ad is ready.',
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 12,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(
+          isAr ? 'مصدر رخصة الإعلان' : 'Ad license source',
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              showCheckmark: false,
+              label: Text(isAr ? 'من داخل التطبيق' : 'In-app'),
+              selected: adLicenseSource == _AdLicenseSource.inApp,
+              onSelected: (_) =>
+                  onAdLicenseSourceChanged(_AdLicenseSource.inApp),
+            ),
+            ChoiceChip(
+              showCheckmark: false,
+              label: Text(isAr ? 'من خارج التطبيق' : 'Outside app'),
+              selected: adLicenseSource == _AdLicenseSource.external,
+              onSelected: (_) =>
+                  onAdLicenseSourceChanged(_AdLicenseSource.external),
+            ),
+            ChoiceChip(
+              showCheckmark: false,
+              label: Text(isAr ? 'لا يوجد بعد' : 'None yet'),
+              selected: adLicenseSource == _AdLicenseSource.none,
+              onSelected: (_) =>
+                  onAdLicenseSourceChanged(_AdLicenseSource.none),
+            ),
+          ],
+        ),
+        if (adLicenseSource != _AdLicenseSource.none) ...[
+          const SizedBox(height: 14),
+          Text(
+            isAr
+                ? 'رقم رخصة فال / الوساطة (10 أرقام)'
+                : 'FAL / brokerage license (10 digits)',
+            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+          ),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: regaFalLicenseNo,
+            keyboardType: TextInputType.number,
+            inputFormatters: latinDigitsOnlyFormatters(maxLength: 10),
+            maxLength: 10,
+            decoration: InputDecoration(
+              counterText: '',
+              labelText:
+                  isAr ? 'رقم الرخصة (10 أرقام)' : 'License number (10 digits)',
+              hintText:
+                  isAr ? 'أدخل 10 أرقام أو الصقها' : 'Type or paste 10 digits',
+            ),
+          ),
+          if (regaChecking) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(minHeight: 3),
+          ],
+          if (regaVerifyBanner != null &&
+              regaVerifyBanner!.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              regaVerifyBanner!,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+                color: regaVerifyOk == true
+                    ? const Color(0xFF0F766E)
+                    : Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: onOpenRegaImport,
+            icon: const Icon(Icons.link, size: 20),
+            label: Text(
+              isAr ? 'ربط عبر صفحة الهيئة (ElanDetails)' : 'Link via REGA page',
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        Text(
+          isAr ? 'التزامات على العقار (إلزامي)' : 'Property obligations *',
+          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              showCheckmark: false,
+              label: Text(isAr ? 'نعم' : 'Yes'),
+              selected: propertyHasObligations == true,
+              onSelected: (_) => onPropertyHasObligationsChanged(true),
+            ),
+            ChoiceChip(
+              showCheckmark: false,
+              label: Text(isAr ? 'لا' : 'No'),
+              selected: propertyHasObligations == false,
+              onSelected: (_) => onPropertyHasObligationsChanged(false),
+            ),
+          ],
+        ),
+        if (propertyHasObligations == true) ...[
+          const SizedBox(height: 10),
+          TextFormField(
+            controller: obligationsDetail,
+            minLines: 2,
+            maxLines: 4,
+            decoration: InputDecoration(
+              labelText: isAr
+                  ? 'وصف موجز للالتزامات *'
+                  : 'Brief description of obligations *',
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        OutlinedButton.icon(
+          onPressed: onOpenExtendedUses,
+          icon: const Icon(Icons.open_in_new, size: 20),
+          label: Text(
+            isAr
+                ? 'استخدامات موسّعة وتفاصيل إضافية'
+                : 'Extended uses & extra detail',
+          ),
+        ),
+        if (extendedUsagePreview.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            isAr
+                ? 'تم حفظ ملاحظات إضافية (${extendedUsagePreview.length} حرفاً)'
+                : 'Saved extended notes (${extendedUsagePreview.length} chars)',
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
 
-    final display = ownerName ?? (isAr ? 'مستخدم' : 'User');
+class _ExternalLicenseMediaBanner extends StatelessWidget {
+  final bool isAr;
 
+  const _ExternalLicenseMediaBanner({required this.isAr});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.primaryContainer.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.primary.withOpacity(0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, color: cs.primary, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              isAr
+                  ? 'رخصة خارج التطبيق: يجب إرفاق صور للعقار، وفيديو، وملف PDF للرخصة.'
+                  : 'External license: you must attach photos, a video, and a PDF of the license.',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LicensePdfUploadRow extends StatelessWidget {
+  final bool isAr;
+  final String? storagePath;
+  final bool uploading;
+  final bool busy;
+  final VoidCallback onPick;
+  final VoidCallback onClear;
+
+  const _LicensePdfUploadRow({
+    required this.isAr,
+    required this.storagePath,
+    required this.uploading,
+    required this.busy,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final has = (storagePath ?? '').trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: FieldGroupTheme.boxDecoration(context),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isAr ? 'ملف PDF لرخصة الإعلان *' : 'Ad license PDF *',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          if (has)
+            Row(
+              children: [
+                Icon(Icons.picture_as_pdf, color: cs.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    storagePath!.split('/').last,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                TextButton(
+                  onPressed: busy ? null : onClear,
+                  child: Text(isAr ? 'إزالة' : 'Remove'),
+                ),
+              ],
+            )
+          else
+            Text(
+              isAr
+                  ? 'اختر ملف PDF من الجهاز (يُفضَّل من الكمبيوتر رفع الملف مباشرة).'
+                  : 'Pick a PDF file (on desktop, uploading the file is preferred).',
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5),
+            ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: (busy || uploading) ? null : onPick,
+            icon: uploading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.upload_file_outlined),
+            label: Text(
+              uploading
+                  ? (isAr ? 'جاري الرفع…' : 'Uploading…')
+                  : (isAr ? 'رفع PDF' : 'Upload PDF'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderCard extends StatelessWidget {
+  final bool isAr;
+  final String? marketerPublishName;
+
+  const _HeaderCard({
+    required this.isAr,
+    required this.marketerPublishName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final name = (marketerPublishName ?? '').trim();
+
+    final base = FieldGroupTheme.boxDecoration(context);
     return Container(
       decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
+        color: base.color,
+        borderRadius: base.borderRadius,
+        border: base.border,
         boxShadow: [
           BoxShadow(
             blurRadius: 8,
             offset: const Offset(0, 4),
             color: cs.shadow.withOpacity(0.1),
-          )
+          ),
         ],
       ),
       padding: const EdgeInsets.all(16),
@@ -935,30 +4014,42 @@ class _HeaderCard extends StatelessWidget {
               color: const Color(0xFF0F766E).withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Icon(Icons.add_home_work_outlined,
-                color: Color(0xFF0F766E)),
+            child: const Icon(
+              Icons.add_home_work_outlined,
+              color: Color(0xFF0F766E),
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  isAr ? 'انشر إعلانك' : 'Publish your listing',
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  isAr ? 'المالك: $display' : 'Owner: $display',
-                  style: TextStyle(
-                    color: cs.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
+            child: name.isEmpty
+                ? Text(
+                    isAr ? 'إضافة إعلان' : 'Add listing',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isAr ? 'نشر بواسطة' : 'Published by',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -966,22 +4057,40 @@ class _HeaderCard extends StatelessWidget {
   }
 }
 
-class _ImagesCard extends StatelessWidget {
+class _ListingMediaCard extends StatelessWidget {
   final bool isAr;
   final List<_PickedImage> images;
   final bool saving;
-  final VoidCallback onPick;
-  final void Function(int i) onRemove;
-  final void Function(int from, int to) onMove;
+  final bool picking;
+  final bool uploadingVideo;
+  final bool hasVideo;
+  final bool showCoverHeroPicker;
+  final bool coverHeroIsVideo;
+  final ValueChanged<bool> onCoverHeroIsVideoChanged;
+  final VoidCallback onPickImages;
+  final VoidCallback onPickVideo;
+  final VoidCallback onClearVideo;
+  final void Function(int i) onRemoveImage;
+  final void Function(int from, int to) onMoveImage;
 
-  const _ImagesCard({
+  const _ListingMediaCard({
     required this.isAr,
     required this.images,
     required this.saving,
-    required this.onPick,
-    required this.onRemove,
-    required this.onMove,
+    required this.picking,
+    required this.uploadingVideo,
+    required this.hasVideo,
+    required this.showCoverHeroPicker,
+    required this.coverHeroIsVideo,
+    required this.onCoverHeroIsVideoChanged,
+    required this.onPickImages,
+    required this.onPickVideo,
+    required this.onClearVideo,
+    required this.onRemoveImage,
+    required this.onMoveImage,
   });
+
+  bool get _busy => saving || picking || uploadingVideo;
 
   @override
   Widget build(BuildContext context) {
@@ -991,28 +4100,143 @@ class _ImagesCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
+        border: Border.all(
+          color: const Color(0xFF0F766E).withOpacity(0.35),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+            color: const Color(0xFF0F766E).withOpacity(0.08),
+          ),
+        ],
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                isAr ? 'الصور (إلزامي)' : 'Images (required)',
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: saving ? null : onPick,
-                icon: const Icon(Icons.add_photo_alternate_outlined),
-                label: Text(isAr ? 'اختيار صور' : 'Pick images'),
+              Icon(Icons.collections_outlined, color: const Color(0xFF0F766E)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isAr ? 'ابدأ بالوسائط' : 'Start with media',
+                      style: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isAr
+                          ? 'أضف صورة واحدة على الأقل أو فيديو، ثم أكمل بقية الحقول أدناه.'
+                          : 'Add at least one image or a video, then fill the rest of the form below.',
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, c) {
+              final narrow = c.maxWidth < 520;
+              final imgBtn = FilledButton.icon(
+                onPressed: _busy ? null : onPickImages,
+                icon: picking
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: AppLogoLoading(compact: true, size: 16),
+                      )
+                    : const Icon(Icons.add_photo_alternate_outlined),
+                label: Text(isAr ? 'إضافة صور' : 'Add images'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F766E),
+                  foregroundColor: Colors.white,
+                ),
+              );
+              final vidBtn = OutlinedButton.icon(
+                onPressed: (_busy || uploadingVideo) ? null : onPickVideo,
+                icon: uploadingVideo
+                    ? SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: AppLogoLoading(compact: true, size: 16),
+                      )
+                    : const Icon(Icons.video_library_outlined),
+                label: Text(isAr ? 'إضافة فيديو' : 'Add video'),
+              );
+              if (narrow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    imgBtn,
+                    const SizedBox(height: 8),
+                    vidBtn,
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: imgBtn),
+                  const SizedBox(width: 10),
+                  Expanded(child: vidBtn),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 14),
+          if (hasVideo || uploadingVideo)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.play_circle_outline,
+                    color: cs.primary,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      uploadingVideo
+                          ? (isAr ? 'جارٍ رفع الفيديو…' : 'Uploading video…')
+                          : (isAr
+                              ? 'تم إرفاق فيديو للإعلان (فيديو واحد كحد أقصى).'
+                              : 'A listing video is attached (max one).'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                  if (hasVideo && !_busy)
+                    TextButton(
+                      onPressed: onClearVideo,
+                      child: Text(isAr ? 'إزالة' : 'Remove'),
+                    ),
+                ],
+              ),
+            ),
+          if (hasVideo || uploadingVideo) const SizedBox(height: 12),
           if (images.isEmpty)
             Container(
               padding: const EdgeInsets.all(16),
@@ -1027,8 +4251,11 @@ class _ImagesCard extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      isAr ? 'لم يتم اختيار صور بعد' : 'No images selected yet',
-                      style: TextStyle(color: cs.onSurfaceVariant),
+                      isAr
+                          ? 'لا توجد صور بعد — يمكنك الاعتماد على الفيديو فقط أو إضافة صور.'
+                          : 'No images yet — you can use video only or add photos.',
+                      style:
+                          TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
                     ),
                   ),
                 ],
@@ -1044,23 +4271,55 @@ class _ImagesCard extends StatelessWidget {
                     index: i,
                     total: images.length,
                     isAr: isAr,
-                    onRemove: saving ? null : () => onRemove(i),
+                    onRemove: _busy ? null : () => onRemoveImage(i),
                     onMoveLeft:
-                        saving || i == 0 ? null : () => onMove(i, i - 1),
-                    onMoveRight: saving || i == images.length - 1
+                        _busy || i == 0 ? null : () => onMoveImage(i, i - 1),
+                    onMoveRight: _busy || i == images.length - 1
                         ? null
-                        : () => onMove(i, i + 1),
+                        : () => onMoveImage(i, i + 1),
                   );
                 }),
               ),
             ),
-          const SizedBox(height: 8),
-          Text(
-            isAr
-                ? 'رتّب الصور: الصورة الأولى هي الغلاف.'
-                : 'Reorder: first image is the cover.',
-            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
-          ),
+          if (images.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              isAr
+                  ? 'الصورة الأولى في القائمة هي غلاف الإعلان (ما لم تختر الفيديو كغلاف عند وجوده).'
+                  : 'The first image is the cover (unless you choose video as cover when both exist).',
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12),
+            ),
+          ],
+          if (showCoverHeroPicker) ...[
+            const SizedBox(height: 14),
+            Text(
+              isAr ? 'ما يظهر أولاً في المعرض' : 'Gallery lead',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<bool>(
+              segments: <ButtonSegment<bool>>[
+                ButtonSegment<bool>(
+                  value: true,
+                  label: Text(isAr ? 'فيديو' : 'Video'),
+                  icon: const Icon(Icons.play_circle_outline, size: 18),
+                ),
+                ButtonSegment<bool>(
+                  value: false,
+                  label: Text(isAr ? 'صورة' : 'Image'),
+                  icon: const Icon(Icons.image_outlined, size: 18),
+                ),
+              ],
+              selected: <bool>{coverHeroIsVideo},
+              onSelectionChanged: (Set<bool> next) {
+                if (_busy || next.isEmpty) return;
+                onCoverHeroIsVideoChanged(next.first);
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -1161,19 +4420,29 @@ class _CoordsCard extends StatelessWidget {
   final bool isAr;
   final bool saving;
   final bool enabled;
+  final TextEditingController latController;
+  final TextEditingController lngController;
   final double? lat;
   final double? lng;
   final ValueChanged<bool> onToggle;
   final VoidCallback onPick;
+  final ValueChanged<String> onLatChanged;
+  final ValueChanged<String> onLngChanged;
+  final GlobalKey<FormState>? formKey;
 
   const _CoordsCard({
     required this.isAr,
     required this.saving,
     required this.enabled,
+    required this.latController,
+    required this.lngController,
     required this.lat,
     required this.lng,
     required this.onToggle,
     required this.onPick,
+    required this.onLatChanged,
+    required this.onLngChanged,
+    this.formKey,
   });
 
   @override
@@ -1181,353 +4450,144 @@ class _CoordsCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     final has = lat != null && lng != null;
-    final text = has
-        ? 'Lat: ${lat!.toStringAsFixed(6)}   |   Lng: ${lng!.toStringAsFixed(6)}'
-        : (isAr ? 'لم يتم اختيار إحداثيات بعد' : 'No coordinates selected');
 
-    return Container(
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(
-                isAr ? 'الإحداثيات من الخريطة' : 'Map coordinates',
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-              ),
-              const Spacer(),
-              Switch(
-                value: enabled,
-                onChanged: saving ? null : onToggle,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.place_outlined, color: cs.onSurfaceVariant),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    text,
-                    style: TextStyle(
-                      color: cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 14,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+    final column = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                isAr ? 'الموقع من الخريطة' : 'Map location',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              onPressed: (!enabled || saving) ? null : onPick,
-              icon: const Icon(Icons.map_outlined),
-              label: Text(
-                isAr ? 'تحديد الموقع من الخريطة' : 'Pick from map',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF0F766E),
-                foregroundColor: Colors.white,
               ),
             ),
-          ),
-          if (enabled && !has) ...[
-            const SizedBox(height: 8),
-            Text(
-              isAr
-                  ? 'ملاحظة: عند تفعيل هذا الخيار يجب اختيار الإحداثيات قبل النشر.'
-                  : 'Note: when enabled, you must pick coordinates before publishing.',
-              style: TextStyle(
-                color: cs.error,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
+            Switch(value: enabled, onChanged: saving ? null : onToggle),
           ],
+        ),
+        if (enabled) ...[
+          const SizedBox(height: 4),
+          Text(
+            isAr
+                ? 'بعد النقطة: تُملأ المنطقة والمدينة في الخطوة التالية (قابلة للتعديل).'
+                : 'After the point: region/city fill in the next step (editable).',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: cs.onSurfaceVariant,
+              height: 1.25,
+            ),
+          ),
         ],
-      ),
-    );
-  }
-}
-
-class _PhoneCard extends StatelessWidget {
-  final bool isAr;
-  final bool saving;
-  final bool enabled;
-  final bool loading;
-  final TextEditingController phone;
-  final ValueChanged<bool> onToggle;
-
-  const _PhoneCard({
-    required this.isAr,
-    required this.saving,
-    required this.enabled,
-    required this.loading,
-    required this.phone,
-    required this.onToggle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(
-                isAr ? 'رقم التواصل' : 'Contact phone',
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-              ),
-              const Spacer(),
-              if (loading)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              Switch(
-                value: enabled,
-                onChanged: saving ? null : onToggle,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: phone,
-            readOnly: true,
-            enabled: enabled && !saving,
-            keyboardType: TextInputType.phone,
-            decoration: InputDecoration(
-              labelText:
-                  isAr ? 'رقم الجوال (من الحساب)' : 'Phone (from profile)',
-              hintText: isAr ? 'يُعبّأ تلقائياً' : 'Auto-filled',
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              filled: true,
-              suffixIcon: enabled ? const Icon(Icons.lock_outline) : null,
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 48,
+          child: FilledButton.icon(
+            onPressed: (!enabled || saving) ? null : onPick,
+            icon: const Icon(Icons.map_outlined),
+            label: Text(
+              has
+                  ? (isAr ? 'تعديل النقطة على الخريطة' : 'Adjust map point')
+                  : (isAr ? 'اختر نقطة على الخريطة' : 'Pick on map'),
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
-            validator: (v) {
-              if (!enabled) return null;
-              final s = _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
-              if (s.isEmpty)
-                return isAr ? 'رقم التواصل مطلوب' : 'Phone is required';
-              return null;
-            },
-          ),
-          if (enabled) ...[
-            const SizedBox(height: 8),
-            Text(
-              isAr
-                  ? 'الرقم يُجلب من الحساب ولا يمكن تعديله هنا.'
-                  : 'This phone is fetched from your profile and cannot be edited here.',
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-// ✅ نفس كود _FormCard و _SubmitBar و _ErrorBox و _PickedImage عندك (بدون تغيير)
-
-class _FormCard extends StatelessWidget {
-  // (كما هو في ملفك)
-  // ...
-  const _FormCard({
-    required this.isAr,
-    required this.formKey,
-    required this.saving,
-    required this.type,
-    required this.onTypeChanged,
-    required this.title,
-    required this.desc,
-    required this.location,
-    required this.city,
-    required this.area,
-    required this.price,
-    required this.currency,
-    required this.negotiable,
-    required this.onCurrencyChanged,
-    required this.onNegotiableChanged,
-    required this.isAuction,
-    required this.currentBid,
-    required this.onAuctionChanged,
-    required this.bedrooms,
-    required this.bathrooms,
-    required this.parkingSpots,
-    required this.furnished,
-    required this.yearBuilt,
-    required this.floor,
-    required this.totalFloors,
-    required this.onBedroomsChanged,
-    required this.onBathroomsChanged,
-    required this.onParkingChanged,
-    required this.onFurnishedChanged,
-    required this.onYearBuiltChanged,
-    required this.onFloorChanged,
-    required this.onTotalFloorsChanged,
-    required this.amenities,
-    required this.onAmenityToggle,
-    required this.videoUrl,
-    required this.virtualTourUrl,
-    required this.availabilityDate,
-    required this.onPickAvailability,
-    required this.onClearAvailability,
-    required this.addressLine,
-  });
-
-  final bool isAr;
-  final GlobalKey<FormState> formKey;
-  final bool saving;
-
-  final String type;
-  final ValueChanged<String> onTypeChanged;
-
-  final TextEditingController title;
-  final TextEditingController desc;
-  final TextEditingController location;
-  final TextEditingController city;
-  final TextEditingController area;
-
-  final TextEditingController price;
-  final String currency;
-  final bool negotiable;
-  final ValueChanged<String> onCurrencyChanged;
-  final ValueChanged<bool> onNegotiableChanged;
-
-  final bool isAuction;
-  final TextEditingController currentBid;
-  final ValueChanged<bool> onAuctionChanged;
-
-  final int? bedrooms;
-  final int? bathrooms;
-  final int? parkingSpots;
-  final bool furnished;
-  final int? yearBuilt;
-  final int? floor;
-  final int? totalFloors;
-
-  final ValueChanged<int?> onBedroomsChanged;
-  final ValueChanged<int?> onBathroomsChanged;
-  final ValueChanged<int?> onParkingChanged;
-  final ValueChanged<bool> onFurnishedChanged;
-  final ValueChanged<int?> onYearBuiltChanged;
-  final ValueChanged<int?> onFloorChanged;
-  final ValueChanged<int?> onTotalFloorsChanged;
-
-  final Map<String, bool> amenities;
-  final void Function(String key, bool value) onAmenityToggle;
-
-  final TextEditingController videoUrl;
-  final TextEditingController virtualTourUrl;
-  final DateTime? availabilityDate;
-  final VoidCallback onPickAvailability;
-  final VoidCallback onClearAvailability;
-
-  final TextEditingController addressLine;
-
-  @override
-  Widget build(BuildContext context) {
-    // ضع نفس build الموجود عندك بدون تغيير
-    return const SizedBox.shrink();
-  }
-}
-
-class _SubmitBar extends StatelessWidget {
-  final bool isAr;
-  final bool saving;
-  final bool enabled;
-  final VoidCallback onSubmit;
-
-  const _SubmitBar({
-    required this.isAr,
-    required this.saving,
-    required this.enabled,
-    required this.onSubmit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              isAr
-                  ? (enabled
-                      ? 'جاهز للنشر'
-                      : 'أكمل الحقول وأضف صورًا (وإحداثيات/هاتف إن فُعّلت)')
-                  : (enabled
-                      ? 'Ready to publish'
-                      : 'Complete fields + images (and coords/phone if enabled)'),
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: enabled ? cs.onSurface : cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          ElevatedButton.icon(
-            onPressed: enabled ? onSubmit : null,
-            icon: saving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.publish_outlined),
-            label: Text(isAr ? 'نشر الإعلان' : 'Publish'),
-            style: ElevatedButton.styleFrom(
+            style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF0F766E),
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
           ),
+        ),
+        if (enabled) ...[
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, c) {
+              final narrow = c.maxWidth < 560;
+
+              final latField = TextFormField(
+                controller: latController,
+                enabled: !saving,
+                onChanged: onLatChanged,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: isAr ? 'N (°)' : 'N (°)',
+                ),
+                validator: (v) {
+                  if (!enabled) return null;
+                  final s =
+                      _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
+                  if (s.isEmpty) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  if (double.tryParse(s) == null) {
+                    return isAr ? 'رقم غير صحيح' : 'Invalid number';
+                  }
+                  return null;
+                },
+              );
+
+              final lngField = TextFormField(
+                controller: lngController,
+                enabled: !saving,
+                onChanged: onLngChanged,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                  signed: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: isAr ? 'E (°)' : 'E (°)',
+                ),
+                validator: (v) {
+                  if (!enabled) return null;
+                  final s =
+                      _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
+                  if (s.isEmpty) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  if (double.tryParse(s) == null) {
+                    return isAr ? 'رقم غير صحيح' : 'Invalid number';
+                  }
+                  return null;
+                },
+              );
+
+              if (narrow) {
+                return Column(
+                  children: [
+                    latField,
+                    const SizedBox(height: 10),
+                    lngField,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: latField),
+                  const SizedBox(width: 10),
+                  Expanded(child: lngField),
+                ],
+              );
+            },
+          ),
         ],
-      ),
+      ],
+    );
+
+    return Container(
+      decoration: FieldGroupTheme.boxDecoration(context),
+      padding: const EdgeInsets.all(16),
+      child: formKey != null
+          ? Form(
+              key: formKey,
+              child: column,
+            )
+          : column,
     );
   }
 }
@@ -1535,7 +4595,11 @@ class _SubmitBar extends StatelessWidget {
 class _ErrorBox extends StatelessWidget {
   final String text;
   final bool isAr;
-  const _ErrorBox({required this.text, required this.isAr});
+
+  const _ErrorBox({
+    required this.text,
+    required this.isAr,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1570,5 +4634,1728 @@ class _ErrorBox extends StatelessWidget {
 class _PickedImage {
   final String name;
   final Uint8List bytes;
-  const _PickedImage({required this.name, required this.bytes});
+
+  const _PickedImage({
+    required this.name,
+    required this.bytes,
+  });
+}
+
+// =======================
+// Form Card - النموذج الرئيسي
+// =======================
+
+class _FormCard extends StatelessWidget {
+  final bool isAr;
+  final GlobalKey<FormState> formKey;
+  final bool saving;
+  final AddPropertyFormSlice slice;
+
+  final bool locationsLoading;
+  final TextEditingController regionController;
+  final TextEditingController governorateController;
+  final TextEditingController cityController;
+  final TextEditingController locationController;
+  final TextEditingController addressLineController;
+
+  final bool regionManual;
+  final bool governorateManual;
+  final bool cityManual;
+  final bool districtManual;
+  final String? selectedDistrict;
+  final List<String> districtOptions;
+  final Future<void> Function(String?) onDistrictSelected;
+  final ValueChanged<bool> onDistrictManualChanged;
+  final String? selectedRegion;
+  final String? selectedGovernorate;
+  final String? selectedCity;
+  final List<String> regionOptions;
+  final List<String> governorateOptions;
+  final List<String> cityOptions;
+  final Future<void> Function(String?) onRegionSelected;
+  final Future<void> Function(String?) onGovernorateSelected;
+  final Future<void> Function(String?) onCitySelected;
+  final ValueChanged<bool> onRegionManualChanged;
+  final ValueChanged<bool> onGovernorateManualChanged;
+  final ValueChanged<bool> onCityManualChanged;
+
+  final TextEditingController boundaryNorth;
+  final TextEditingController boundarySouth;
+  final TextEditingController boundaryEast;
+  final TextEditingController boundaryWest;
+
+  final String type;
+  final String purpose;
+  final List<Map<String, String>> purposeTypes;
+  final ValueChanged<String> onTypeChanged;
+  final ValueChanged<String> onPurposeChanged;
+  final bool usageResidential;
+  final bool usageCommercial;
+  final ValueChanged<bool> onUsageResidentialChanged;
+  final ValueChanged<bool> onUsageCommercialChanged;
+
+  final TextEditingController title;
+  final TextEditingController desc;
+  final TextEditingController area;
+  final TextEditingController price;
+  final ListingAreaUnit areaUnit;
+  final ValueChanged<ListingAreaUnit> onAreaUnitChanged;
+  final double? computedPricePerSqm;
+
+  final String currency;
+  final bool negotiable;
+  final ValueChanged<String> onCurrencyChanged;
+  final ValueChanged<bool> onNegotiableChanged;
+
+  final bool isAuction;
+  final TextEditingController currentBid;
+  final ValueChanged<bool> onAuctionChanged;
+
+  final int? bedrooms;
+  final int? bathrooms;
+  final int? parkingSpots;
+  final bool furnished;
+  final int? yearBuilt;
+  final int? floor;
+  final int? totalFloors;
+
+  final ValueChanged<int?> onBedroomsChanged;
+  final ValueChanged<int?> onBathroomsChanged;
+  final ValueChanged<int?> onParkingChanged;
+  final ValueChanged<bool> onFurnishedChanged;
+  final ValueChanged<int?> onYearBuiltChanged;
+  final ValueChanged<int?> onFloorChanged;
+  final ValueChanged<int?> onTotalFloorsChanged;
+
+  final Map<String, bool> amenities;
+  final void Function(String, bool) onAmenityToggle;
+
+  final bool requiresDeed;
+  final TextEditingController deedNumber;
+  final TextEditingController deedIssuer;
+  final DateTime? deedDate;
+  final VoidCallback onPickDeedDate;
+  final VoidCallback onClearDeedDate;
+  final TextEditingController buildingNumber;
+  final bool showBuildingNumber;
+  final TextEditingController virtualTourUrl;
+  final DateTime? availabilityDate;
+  final VoidCallback onPickAvailability;
+  final VoidCallback onClearAvailability;
+
+  final int? livingRooms;
+  final int? kitchens;
+  final bool hasElevator;
+  final bool independentEntrance;
+  final bool hasCentralAc;
+  final bool hasSplitAc;
+  final ValueChanged<int?> onLivingRoomsChanged;
+  final ValueChanged<int?> onKitchensChanged;
+  final ValueChanged<bool> onHasElevatorChanged;
+  final ValueChanged<bool> onIndependentEntranceChanged;
+  final ValueChanged<bool> onHasCentralAcChanged;
+  final ValueChanged<bool> onHasSplitAcChanged;
+
+  final int? majlisCount;
+  final int? annexCount;
+  final bool hasGarden;
+  final bool hasPool;
+  final bool hasCourtyard;
+  final bool carEntrance;
+  final bool internalStair;
+  final bool separateApartment;
+  final bool hasDriverRoom;
+  final bool hasMaidRoom;
+  final bool hasStorageRoom;
+  final ValueChanged<int?> onMajlisCountChanged;
+  final ValueChanged<int?> onAnnexCountChanged;
+  final ValueChanged<bool> onHasGardenChanged;
+  final ValueChanged<bool> onHasPoolChanged;
+  final ValueChanged<bool> onHasCourtyardChanged;
+  final ValueChanged<bool> onCarEntranceChanged;
+  final ValueChanged<bool> onInternalStairChanged;
+  final ValueChanged<bool> onSeparateApartmentChanged;
+  final ValueChanged<bool> onHasDriverRoomChanged;
+  final ValueChanged<bool> onHasMaidRoomChanged;
+  final ValueChanged<bool> onHasStorageRoomChanged;
+
+  final int? floorsCount;
+  final int? unitsCount;
+  final double? plotArea;
+  final bool hasLoadingDock;
+  final bool hasCrane;
+  final String? projectType;
+  final ValueChanged<int?> onFloorsCountChanged;
+  final ValueChanged<int?> onUnitsCountChanged;
+  final ValueChanged<double?> onPlotAreaChanged;
+  final ValueChanged<bool> onHasLoadingDockChanged;
+  final ValueChanged<bool> onHasCraneChanged;
+  final ValueChanged<String?> onProjectTypeChanged;
+
+  final String? landUse;
+  final String? facade;
+  final int? streetCount;
+  final TextEditingController streetWidth1;
+  final TextEditingController streetWidth2;
+  final TextEditingController streetWidth3;
+  final TextEditingController streetWidth4;
+  final bool isCornerLand;
+  final TextEditingController planNumber;
+  final TextEditingController parcelNumber;
+  final ValueChanged<String?> onLandUseChanged;
+  final ValueChanged<String?> onFacadeChanged;
+  final ValueChanged<int?> onStreetCountChanged;
+  final ValueChanged<bool> onIsCornerLandChanged;
+
+  // إضافة الخصائص الجديدة للتصنيف
+  final bool isLand;
+  final bool isProject;
+  final bool isWarehouse;
+  final bool isBuilding;
+  final bool showResidentialBedBath;
+  final bool showParkingYearRow;
+  final bool showFurnishedRow;
+  final bool showFloorFieldsRow;
+
+  /// اختيار سريع للمدن (الرياض / جدة / مكة) — يُمرَّر فقط لشريحة الموقع.
+  const _FormCard({
+    required this.isAr,
+    required this.formKey,
+    required this.saving,
+    required this.slice,
+    required this.locationsLoading,
+    required this.regionController,
+    required this.governorateController,
+    required this.cityController,
+    required this.locationController,
+    required this.addressLineController,
+    required this.regionManual,
+    required this.governorateManual,
+    required this.cityManual,
+    required this.districtManual,
+    required this.selectedDistrict,
+    required this.districtOptions,
+    required this.onDistrictSelected,
+    required this.onDistrictManualChanged,
+    required this.selectedRegion,
+    required this.selectedGovernorate,
+    required this.selectedCity,
+    required this.regionOptions,
+    required this.governorateOptions,
+    required this.cityOptions,
+    required this.onRegionSelected,
+    required this.onGovernorateSelected,
+    required this.onCitySelected,
+    required this.onRegionManualChanged,
+    required this.onGovernorateManualChanged,
+    required this.onCityManualChanged,
+    required this.boundaryNorth,
+    required this.boundarySouth,
+    required this.boundaryEast,
+    required this.boundaryWest,
+    required this.type,
+    required this.purpose,
+    required this.purposeTypes,
+    required this.onTypeChanged,
+    required this.onPurposeChanged,
+    required this.usageResidential,
+    required this.usageCommercial,
+    required this.onUsageResidentialChanged,
+    required this.onUsageCommercialChanged,
+    required this.title,
+    required this.desc,
+    required this.area,
+    required this.price,
+    required this.areaUnit,
+    required this.onAreaUnitChanged,
+    required this.computedPricePerSqm,
+    required this.currency,
+    required this.negotiable,
+    required this.onCurrencyChanged,
+    required this.onNegotiableChanged,
+    required this.isAuction,
+    required this.currentBid,
+    required this.onAuctionChanged,
+    required this.bedrooms,
+    required this.bathrooms,
+    required this.parkingSpots,
+    required this.furnished,
+    required this.yearBuilt,
+    required this.floor,
+    required this.totalFloors,
+    required this.onBedroomsChanged,
+    required this.onBathroomsChanged,
+    required this.onParkingChanged,
+    required this.onFurnishedChanged,
+    required this.onYearBuiltChanged,
+    required this.onFloorChanged,
+    required this.onTotalFloorsChanged,
+    required this.amenities,
+    required this.onAmenityToggle,
+    required this.requiresDeed,
+    required this.deedNumber,
+    required this.deedIssuer,
+    required this.deedDate,
+    required this.onPickDeedDate,
+    required this.onClearDeedDate,
+    required this.buildingNumber,
+    required this.showBuildingNumber,
+    required this.virtualTourUrl,
+    required this.availabilityDate,
+    required this.onPickAvailability,
+    required this.onClearAvailability,
+    required this.livingRooms,
+    required this.kitchens,
+    required this.hasElevator,
+    required this.independentEntrance,
+    required this.hasCentralAc,
+    required this.hasSplitAc,
+    required this.onLivingRoomsChanged,
+    required this.onKitchensChanged,
+    required this.onHasElevatorChanged,
+    required this.onIndependentEntranceChanged,
+    required this.onHasCentralAcChanged,
+    required this.onHasSplitAcChanged,
+    required this.majlisCount,
+    required this.annexCount,
+    required this.hasGarden,
+    required this.hasPool,
+    required this.hasCourtyard,
+    required this.carEntrance,
+    required this.internalStair,
+    required this.separateApartment,
+    required this.hasDriverRoom,
+    required this.hasMaidRoom,
+    required this.hasStorageRoom,
+    required this.onMajlisCountChanged,
+    required this.onAnnexCountChanged,
+    required this.onHasGardenChanged,
+    required this.onHasPoolChanged,
+    required this.onHasCourtyardChanged,
+    required this.onCarEntranceChanged,
+    required this.onInternalStairChanged,
+    required this.onSeparateApartmentChanged,
+    required this.onHasDriverRoomChanged,
+    required this.onHasMaidRoomChanged,
+    required this.onHasStorageRoomChanged,
+    required this.floorsCount,
+    required this.unitsCount,
+    required this.plotArea,
+    required this.hasLoadingDock,
+    required this.hasCrane,
+    required this.projectType,
+    required this.onFloorsCountChanged,
+    required this.onUnitsCountChanged,
+    required this.onPlotAreaChanged,
+    required this.onHasLoadingDockChanged,
+    required this.onHasCraneChanged,
+    required this.onProjectTypeChanged,
+    required this.landUse,
+    required this.facade,
+    required this.streetCount,
+    required this.streetWidth1,
+    required this.streetWidth2,
+    required this.streetWidth3,
+    required this.streetWidth4,
+    required this.isCornerLand,
+    required this.planNumber,
+    required this.parcelNumber,
+    required this.onLandUseChanged,
+    required this.onFacadeChanged,
+    required this.onStreetCountChanged,
+    required this.onIsCornerLandChanged,
+    required this.isLand,
+    required this.isProject,
+    required this.isWarehouse,
+    required this.isBuilding,
+    required this.showResidentialBedBath,
+    required this.showParkingYearRow,
+    required this.showFurnishedRow,
+    required this.showFloorFieldsRow,
+  });
+
+  String _label(Map<String, String> item) =>
+      isAr ? (item['ar'] ?? '') : (item['en'] ?? '');
+
+  List<DropdownMenuItem<String>> _menuFromOptions(List<String> items) {
+    return items
+        .map((e) => DropdownMenuItem<String>(
+              value: e,
+              child: Text(e),
+            ))
+        .toList();
+  }
+
+  List<DropdownMenuItem<int>> _intItems(int from, int to) {
+    return List.generate(
+      to - from + 1,
+      (i) => from + i,
+    )
+        .map((e) => DropdownMenuItem<int>(
+              value: e,
+              child: Text('$e'),
+            ))
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    InputDecoration deco(String label) => InputDecoration(
+          labelText: label,
+        );
+
+    const kLocSearch = 6;
+
+    final regionDropdownItems = _menuFromOptions(regionOptions);
+
+    final governorateDropdownItems = _menuFromOptions(governorateOptions);
+
+    final cityDropdownItems = _menuFromOptions(cityOptions);
+
+    final districtDropdownItems = _menuFromOptions(districtOptions);
+
+    const kDistrictSearch = 15;
+
+    return Container(
+      decoration: FieldGroupTheme.boxDecoration(context),
+      padding: const EdgeInsets.all(16),
+      child: Form(
+        key: formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _formSliceTitle(slice, isAr),
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _formSliceHint(slice, isAr),
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: cs.primary,
+                height: 1.25,
+              ),
+            ),
+            const SizedBox(height: 14),
+            if (slice == AddPropertyFormSlice.classification) ...[
+              // 1. نوع العقار (هرمي: مجموعة + فرعي)
+              PropertyTypeHierarchyPicker(
+                value: type,
+                isAr: isAr,
+                saving: saving,
+                onChanged: onTypeChanged,
+              ),
+              const SizedBox(height: 12),
+
+              Text(
+                isAr ? 'هل العقار مناسب لـ:' : 'Property is suitable for:',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                children: [
+                  FilterChip(
+                    label: Text(isAr ? 'سكني' : 'Residential'),
+                    selected: usageResidential,
+                    onSelected:
+                        saving ? null : (v) => onUsageResidentialChanged(v),
+                    avatar: Icon(
+                      usageResidential
+                          ? Icons.check_circle
+                          : Icons.circle_outlined,
+                      size: 18,
+                      color: usageResidential ? const Color(0xFF0F766E) : null,
+                    ),
+                  ),
+                  FilterChip(
+                    label: Text(isAr ? 'تجاري' : 'Commercial'),
+                    selected: usageCommercial,
+                    onSelected:
+                        saving ? null : (v) => onUsageCommercialChanged(v),
+                    avatar: Icon(
+                      usageCommercial
+                          ? Icons.check_circle
+                          : Icons.circle_outlined,
+                      size: 18,
+                      color: usageCommercial ? const Color(0xFF0F766E) : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // 2. الغرض
+              Text(
+                isAr ? 'الغرض (بيع / إيجار / …)' : 'Purpose (sale / rent / …)',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: purposeTypes.map((e) {
+                    final code = e['code']!;
+                    final sel = purpose == code;
+                    final col = _purposeAccentColor(code);
+                    return Padding(
+                      padding: const EdgeInsetsDirectional.only(end: 8),
+                      child: FilterChip(
+                        label: Text(_label(e)),
+                        selected: sel,
+                        onSelected:
+                            saving ? null : (_) => onPurposeChanged(code),
+                        selectedColor: col.withOpacity(0.22),
+                        checkmarkColor: col,
+                        side: BorderSide(
+                          color: sel ? col : cs.outlineVariant.withOpacity(0.5),
+                        ),
+                        labelStyle: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: sel ? col : cs.onSurface,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                value: purpose,
+                items: purposeTypes
+                    .map(
+                      (e) => DropdownMenuItem<String>(
+                        value: e['code'],
+                        child: Text(_label(e)),
+                      ),
+                    )
+                    .toList(),
+                onChanged: saving
+                    ? null
+                    : (v) {
+                        if (v != null) onPurposeChanged(v);
+                      },
+                decoration: deco(isAr ? 'الغرض (قائمة)' : 'Purpose (list)'),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (slice == AddPropertyFormSlice.location) ...[
+              if (locationsLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: LinearProgressIndicator(),
+                ),
+
+              // 5. المنطقة
+              LayoutBuilder(
+                builder: (context, c) {
+                  final narrow = c.maxWidth < 700;
+
+                  final Widget regionField;
+                  if (regionManual) {
+                    regionField = TextFormField(
+                      controller: regionController,
+                      enabled: !saving,
+                      decoration: deco(isAr ? 'المنطقة' : 'Region'),
+                      validator: (v) {
+                        if ((v ?? '').trim().isEmpty) {
+                          return isAr ? 'مطلوب' : 'Required';
+                        }
+                        return null;
+                      },
+                    );
+                  } else if (regionOptions.length > kLocSearch) {
+                    regionField = FormField<String>(
+                      validator: (_) => regionController.text.trim().isEmpty
+                          ? (isAr ? 'مطلوب' : 'Required')
+                          : null,
+                      builder: (state) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SearchableSelectField(
+                              label: isAr ? 'المنطقة' : 'Region',
+                              items: regionOptions,
+                              selected: selectedRegion,
+                              isAr: isAr,
+                              enabled: !saving,
+                              allowClear: false,
+                              onSelected: (v) async {
+                                if (v != null) {
+                                  await onRegionSelected(v);
+                                }
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  state.validate();
+                                });
+                              },
+                              onManualEntry: () {
+                                unawaited(
+                                    onRegionSelected(_kManualOptionValue));
+                              },
+                            ),
+                            if (state.hasError)
+                              Padding(
+                                padding: const EdgeInsetsDirectional.only(
+                                    top: 6, start: 12),
+                                child: Text(
+                                  state.errorText!,
+                                  style: TextStyle(
+                                    color: Theme.of(state.context)
+                                        .colorScheme
+                                        .error,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    );
+                  } else {
+                    regionField = Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: selectedRegion != null &&
+                                  regionOptions.contains(selectedRegion)
+                              ? selectedRegion
+                              : null,
+                          items: regionDropdownItems,
+                          onChanged: saving
+                              ? null
+                              : (v) {
+                                  if (v != null) {
+                                    unawaited(onRegionSelected(v));
+                                  }
+                                },
+                          decoration: deco(isAr ? 'المنطقة' : 'Region'),
+                          validator: (_) {
+                            if ((regionController.text).trim().isEmpty) {
+                              return isAr ? 'مطلوب' : 'Required';
+                            }
+                            return null;
+                          },
+                        ),
+                        Align(
+                          alignment: isAr
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: saving
+                                ? null
+                                : () => unawaited(
+                                      onRegionSelected(_kManualOptionValue),
+                                    ),
+                            child: Text(
+                              isAr ? 'إدخال يدوي للمنطقة' : 'Manual region',
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  if (narrow) {
+                    return Column(
+                      children: [
+                        regionField,
+                      ],
+                    );
+                  }
+
+                  return regionField;
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 6. المحافظة
+              LayoutBuilder(
+                builder: (context, c) {
+                  final narrow = c.maxWidth < 700;
+
+                  final Widget governorateField;
+                  if (governorateManual) {
+                    governorateField = TextFormField(
+                      controller: governorateController,
+                      enabled: !saving,
+                      decoration: deco(isAr ? 'المحافظة' : 'Governorate'),
+                      validator: (v) {
+                        if ((v ?? '').trim().isEmpty) {
+                          return isAr ? 'مطلوب' : 'Required';
+                        }
+                        return null;
+                      },
+                    );
+                  } else if (governorateOptions.length > kLocSearch) {
+                    governorateField = FormField<String>(
+                      validator: (_) =>
+                          governorateController.text.trim().isEmpty
+                              ? (isAr ? 'مطلوب' : 'Required')
+                              : null,
+                      builder: (state) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SearchableSelectField(
+                              label: isAr ? 'المحافظة' : 'Governorate',
+                              items: governorateOptions,
+                              selected: selectedGovernorate,
+                              isAr: isAr,
+                              enabled: !saving,
+                              allowClear: false,
+                              onSelected: (v) async {
+                                if (v != null) {
+                                  await onGovernorateSelected(v);
+                                }
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  state.validate();
+                                });
+                              },
+                              onManualEntry: () {
+                                unawaited(
+                                  onGovernorateSelected(_kManualOptionValue),
+                                );
+                              },
+                            ),
+                            if (state.hasError)
+                              Padding(
+                                padding: const EdgeInsetsDirectional.only(
+                                    top: 6, start: 12),
+                                child: Text(
+                                  state.errorText!,
+                                  style: TextStyle(
+                                    color: Theme.of(state.context)
+                                        .colorScheme
+                                        .error,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    );
+                  } else {
+                    governorateField = Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: selectedGovernorate != null &&
+                                  governorateOptions
+                                      .contains(selectedGovernorate)
+                              ? selectedGovernorate
+                              : null,
+                          items: governorateDropdownItems,
+                          onChanged: saving
+                              ? null
+                              : (v) {
+                                  if (v != null) {
+                                    unawaited(onGovernorateSelected(v));
+                                  }
+                                },
+                          decoration: deco(isAr ? 'المحافظة' : 'Governorate'),
+                          validator: (_) {
+                            if ((governorateController.text).trim().isEmpty) {
+                              return isAr ? 'مطلوب' : 'Required';
+                            }
+                            return null;
+                          },
+                        ),
+                        Align(
+                          alignment: isAr
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: saving
+                                ? null
+                                : () => unawaited(
+                                      onGovernorateSelected(
+                                        _kManualOptionValue,
+                                      ),
+                                    ),
+                            child: Text(
+                              isAr
+                                  ? 'إدخال يدوي للمحافظة'
+                                  : 'Manual governorate',
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  if (narrow) {
+                    return Column(
+                      children: [
+                        governorateField,
+                      ],
+                    );
+                  }
+
+                  return governorateField;
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 7. المدينة
+              LayoutBuilder(
+                builder: (context, c) {
+                  final narrow = c.maxWidth < 700;
+
+                  final Widget cityField;
+                  if (cityManual) {
+                    cityField = TextFormField(
+                      controller: cityController,
+                      enabled: !saving,
+                      decoration: deco(isAr ? 'المدينة' : 'City'),
+                      validator: (v) {
+                        if ((v ?? '').trim().isEmpty) {
+                          return isAr ? 'مطلوب' : 'Required';
+                        }
+                        return null;
+                      },
+                    );
+                  } else if (cityOptions.length > kLocSearch) {
+                    cityField = FormField<String>(
+                      validator: (_) => cityController.text.trim().isEmpty
+                          ? (isAr ? 'مطلوب' : 'Required')
+                          : null,
+                      builder: (state) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SearchableSelectField(
+                              label: isAr ? 'المدينة' : 'City',
+                              items: cityOptions,
+                              selected: selectedCity,
+                              isAr: isAr,
+                              enabled: !saving,
+                              allowClear: false,
+                              onSelected: (v) async {
+                                if (v != null) {
+                                  await onCitySelected(v);
+                                }
+                                WidgetsBinding.instance
+                                    .addPostFrameCallback((_) {
+                                  state.validate();
+                                });
+                              },
+                              onManualEntry: () {
+                                unawaited(onCitySelected(_kManualOptionValue));
+                              },
+                            ),
+                            if (state.hasError)
+                              Padding(
+                                padding: const EdgeInsetsDirectional.only(
+                                    top: 6, start: 12),
+                                child: Text(
+                                  state.errorText!,
+                                  style: TextStyle(
+                                    color: Theme.of(state.context)
+                                        .colorScheme
+                                        .error,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    );
+                  } else {
+                    cityField = Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DropdownButtonFormField<String>(
+                          value: selectedCity != null &&
+                                  cityOptions.contains(selectedCity)
+                              ? selectedCity
+                              : null,
+                          items: cityDropdownItems,
+                          onChanged: saving
+                              ? null
+                              : (v) {
+                                  if (v != null) {
+                                    unawaited(onCitySelected(v));
+                                  }
+                                },
+                          decoration: deco(isAr ? 'المدينة' : 'City'),
+                          validator: (_) {
+                            if ((cityController.text).trim().isEmpty) {
+                              return isAr ? 'مطلوب' : 'Required';
+                            }
+                            return null;
+                          },
+                        ),
+                        Align(
+                          alignment: isAr
+                              ? Alignment.centerRight
+                              : Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: saving
+                                ? null
+                                : () => unawaited(
+                                      onCitySelected(_kManualOptionValue),
+                                    ),
+                            child: Text(
+                              isAr ? 'إدخال يدوي للمدينة' : 'Manual city',
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
+                  if (narrow) {
+                    return Column(
+                      children: [
+                        cityField,
+                      ],
+                    );
+                  }
+
+                  return cityField;
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 8. الحي
+              Text(
+                isAr ? 'الحي' : 'District',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (districtOptions.isEmpty)
+                TextFormField(
+                  controller: locationController,
+                  enabled: !saving,
+                  decoration: deco(
+                    isAr
+                        ? 'اسم الحي (اختياري — أدخل يدوياً)'
+                        : 'District (optional — type manually)',
+                  ),
+                )
+              else if (districtManual)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextFormField(
+                      controller: locationController,
+                      enabled: !saving,
+                      decoration:
+                          deco(isAr ? 'اسم الحي (يدوي)' : 'District (manual)'),
+                    ),
+                    Align(
+                      alignment:
+                          isAr ? Alignment.centerRight : Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: saving
+                            ? null
+                            : () => onDistrictManualChanged(false),
+                        child: Text(isAr
+                            ? 'العودة لقائمة الأحياء'
+                            : 'Use district list'),
+                      ),
+                    ),
+                  ],
+                )
+              else if (districtOptions.length > kDistrictSearch)
+                SearchableSelectField(
+                  label: isAr ? 'الحي' : 'District',
+                  items: districtOptions,
+                  selected: selectedDistrict,
+                  isAr: isAr,
+                  enabled: !saving,
+                  allowClear: false,
+                  onSelected: (v) async {
+                    if (v != null) {
+                      await onDistrictSelected(v);
+                    }
+                  },
+                  onManualEntry: () {
+                    unawaited(onDistrictSelected(_kManualOptionValue));
+                  },
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: selectedDistrict != null &&
+                              districtOptions.contains(selectedDistrict)
+                          ? selectedDistrict
+                          : null,
+                      items: districtDropdownItems,
+                      onChanged: saving
+                          ? null
+                          : (v) {
+                              if (v != null) {
+                                unawaited(onDistrictSelected(v));
+                              }
+                            },
+                      decoration: deco(isAr ? 'الحي' : 'District'),
+                    ),
+                    Align(
+                      alignment:
+                          isAr ? Alignment.centerRight : Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: saving
+                            ? null
+                            : () => unawaited(
+                                  onDistrictSelected(_kManualOptionValue),
+                                ),
+                        child: Text(
+                          isAr ? 'إدخال يدوي للحي' : 'Manual district entry',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              if (districtOptions.isNotEmpty && !districtManual) ...[
+                const SizedBox(height: 6),
+                Align(
+                  alignment:
+                      isAr ? Alignment.centerRight : Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed:
+                        saving ? null : () => onDistrictManualChanged(true),
+                    child: Text(isAr
+                        ? 'الحي غير موجود في القائمة'
+                        : 'District not in list'),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+
+              // حدود القطعة (اختياري)
+              Text(
+                isAr ? 'حدود القطعة (اختياري)' : 'Parcel boundaries (optional)',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isAr
+                    ? 'للأراضي والمخططات؛ يُخزَّن مع بيانات الإرشاد.'
+                    : 'For land/plans; stored in listing guidance.',
+                style: TextStyle(
+                  fontSize: 11.8,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              LayoutBuilder(
+                builder: (context, c) {
+                  final narrow = c.maxWidth < 560;
+                  Widget field(TextEditingController ctrl, String lab) {
+                    return TextFormField(
+                      controller: ctrl,
+                      enabled: !saving,
+                      decoration: deco(lab),
+                    );
+                  }
+
+                  final north = field(
+                    boundaryNorth,
+                    isAr ? 'شمال' : 'North',
+                  );
+                  final south = field(
+                    boundarySouth,
+                    isAr ? 'جنوب' : 'South',
+                  );
+                  final east = field(
+                    boundaryEast,
+                    isAr ? 'شرق' : 'East',
+                  );
+                  final west = field(
+                    boundaryWest,
+                    isAr ? 'غرب' : 'West',
+                  );
+
+                  if (narrow) {
+                    return Column(
+                      children: [
+                        north,
+                        const SizedBox(height: 8),
+                        south,
+                        const SizedBox(height: 8),
+                        east,
+                        const SizedBox(height: 8),
+                        west,
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: north),
+                          const SizedBox(width: 8),
+                          Expanded(child: south),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(child: east),
+                          const SizedBox(width: 8),
+                          Expanded(child: west),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+
+              if (showBuildingNumber) ...[
+                TextFormField(
+                  controller: buildingNumber,
+                  enabled: !saving,
+                  decoration: deco(isAr
+                      ? 'رقم المبنى (اختياري)'
+                      : 'Building number (optional)'),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // 9. العنوان الوطني
+              TextFormField(
+                controller: addressLineController,
+                enabled: !saving,
+                decoration: deco(isAr
+                    ? 'العنوان الوطني (اختياري)'
+                    : 'National address (optional)'),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (slice == AddPropertyFormSlice.pricing) ...[
+              // بيانات الصك والعنوان والوصف (بعد الموقع — كتسلسل الفيديو)
+              Text(
+                isAr ? 'بيانات الصك' : 'Deed information',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                requiresDeed
+                    ? (isAr
+                        ? 'إلزامي للبيع والمزاد والاستثمار'
+                        : 'Required for sale, auction, and investment')
+                    : (isAr
+                        ? 'اختياري لعقود الإيجار'
+                        : 'Optional for rental listings'),
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: deedNumber,
+                enabled: !saving,
+                decoration: deco(isAr ? 'رقم الصك' : 'Deed number'),
+                validator: (v) {
+                  if (!requiresDeed) return null;
+                  if (_AddPropertyPageState.normalizeDeedNumber(v ?? '')
+                      .isEmpty) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 6),
+              Text(
+                isAr
+                    ? 'مراقبة التكرار: لا يُسمح بأكثر من إعلان نشط للبيع/المزاد/الاستثمار بنفس رقم الصك.'
+                    : 'Duplicate guard: one active sale/auction/investment listing per deed number.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      deedDate == null
+                          ? (isAr
+                              ? 'تاريخ الصك: غير محدد'
+                              : 'Deed date: not set')
+                          : (isAr
+                              ? 'تاريخ الصك: ${ListingDateDisplay.formatCardDateTime(
+                                  DateTime(
+                                    deedDate!.year,
+                                    deedDate!.month,
+                                    deedDate!.day,
+                                  ),
+                                  isAr: true,
+                                )}'
+                              : 'Deed date: ${ListingDateDisplay.formatCardDateTime(
+                                  DateTime(
+                                    deedDate!.year,
+                                    deedDate!.month,
+                                    deedDate!.day,
+                                  ),
+                                  isAr: false,
+                                )}'),
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: saving ? null : onPickDeedDate,
+                    child: Text(isAr ? 'اختيار' : 'Pick'),
+                  ),
+                  if (deedDate != null)
+                    TextButton(
+                      onPressed: saving ? null : onClearDeedDate,
+                      child: Text(isAr ? 'مسح' : 'Clear'),
+                    ),
+                ],
+              ),
+              TextFormField(
+                controller: deedIssuer,
+                enabled: !saving,
+                decoration:
+                    deco(isAr ? 'الجهة المصدرة للصك' : 'Issuing authority'),
+                validator: (v) {
+                  if (!requiresDeed) return null;
+                  if ((v ?? '').trim().isEmpty) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: title,
+                enabled: !saving,
+                decoration: deco(isAr ? 'عنوان الإعلان' : 'Title'),
+                validator: (v) {
+                  if ((v ?? '').trim().isEmpty) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: desc,
+                enabled: !saving,
+                maxLines: 4,
+                decoration: deco(isAr ? 'الوصف' : 'Description'),
+                validator: (v) {
+                  if ((v ?? '').trim().isEmpty) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 10. المساحة والسعر
+              LayoutBuilder(
+                builder: (context, c) {
+                  final narrow = c.maxWidth < 700;
+
+                  final unitField = DropdownButtonFormField<ListingAreaUnit>(
+                    value: areaUnit,
+                    items: [
+                      DropdownMenuItem(
+                        value: ListingAreaUnit.m2,
+                        child: Text(isAr ? 'م²' : 'm²'),
+                      ),
+                      DropdownMenuItem(
+                        value: ListingAreaUnit.cm2,
+                        child: Text(isAr ? 'سم²' : 'cm²'),
+                      ),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (v) {
+                            if (v != null) onAreaUnitChanged(v);
+                          },
+                    decoration: deco(isAr ? 'وحدة المساحة' : 'Area unit'),
+                  );
+
+                  final areaField = TextFormField(
+                    controller: area,
+                    enabled: !saving,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: latinDecimalNumberFormatters(),
+                    decoration: deco(isAr ? 'المساحة' : 'Area'),
+                    validator: (v) {
+                      final s = _AddPropertyPageState.normalizeNumbers(v ?? '')
+                          .trim();
+                      if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
+                      if (double.tryParse(s) == null) {
+                        return isAr ? 'رقم غير صحيح' : 'Invalid number';
+                      }
+                      return null;
+                    },
+                  );
+
+                  final priceField = TextFormField(
+                    controller: price,
+                    enabled: !saving,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: latinDecimalNumberFormatters(),
+                    decoration: deco(isAr ? 'السعر الإجمالي' : 'Total price'),
+                    validator: (v) {
+                      final s = _AddPropertyPageState.normalizeNumbers(v ?? '')
+                          .trim();
+                      if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
+                      if (double.tryParse(s) == null) {
+                        return isAr ? 'رقم غير صحيح' : 'Invalid number';
+                      }
+                      return null;
+                    },
+                  );
+
+                  final ppm = computedPricePerSqm;
+                  final ppmTextStyle = TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurface,
+                  );
+                  final ppmField = InputDecorator(
+                    decoration: deco(
+                      isAr ? 'سعر المتر (م²)' : 'Price per m²',
+                    ),
+                    child: ppm == null
+                        ? Text('—', style: ppmTextStyle)
+                        : AppMoneyLine(
+                            amount: ppm,
+                            currencyCode: currency,
+                            isAr: isAr,
+                            style: ppmTextStyle,
+                          ),
+                  );
+
+                  if (narrow) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(flex: 3, child: areaField),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 2, child: unitField),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        priceField,
+                        const SizedBox(height: 10),
+                        ppmField,
+                      ],
+                    );
+                  }
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: areaField,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: unitField,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: priceField,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: ppmField,
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  isAr
+                      ? 'سعر المتر = السعر الإجمالي ÷ المساحة (بالم²).'
+                      : 'Price/m² = total price ÷ area (m²).',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // 11. العملة والتفاوض
+              LayoutBuilder(
+                builder: (context, c) {
+                  final narrow = c.maxWidth < 700;
+
+                  final currencyField = DropdownButtonFormField<String>(
+                    value: currency,
+                    items: const [
+                      DropdownMenuItem(value: 'SAR', child: Text('SAR')),
+                      DropdownMenuItem(value: 'AED', child: Text('AED')),
+                      DropdownMenuItem(value: 'USD', child: Text('USD')),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (v) {
+                            if (v != null) onCurrencyChanged(v);
+                          },
+                    decoration: deco(isAr ? 'العملة' : 'Currency'),
+                  );
+
+                  final negotiableField = SwitchListTile(
+                    value: negotiable,
+                    onChanged: saving ? null : onNegotiableChanged,
+                    title: Text(isAr ? 'قابل للتفاوض' : 'Negotiable'),
+                    contentPadding: EdgeInsets.zero,
+                  );
+
+                  if (narrow) {
+                    return Column(
+                      children: [
+                        currencyField,
+                        const SizedBox(height: 4),
+                        negotiableField,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: currencyField),
+                      const SizedBox(width: 10),
+                      Expanded(child: negotiableField),
+                    ],
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 12. المزاد
+              SwitchListTile(
+                value: isAuction,
+                onChanged: saving ? null : onAuctionChanged,
+                title: Text(
+                    isAr ? 'هذا الإعلان مزاد' : 'This listing is an auction'),
+                contentPadding: EdgeInsets.zero,
+              ),
+
+              if (isAuction) ...[
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: currentBid,
+                  enabled: !saving,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration:
+                      deco(isAr ? 'السعر الحالي للمزاد' : 'Current bid'),
+                  validator: (v) {
+                    if (!isAuction) return null;
+                    final s =
+                        _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
+                    if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
+                    if (double.tryParse(s) == null) {
+                      return isAr ? 'رقم غير صحيح' : 'Invalid number';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+
+              const SizedBox(height: 12),
+            ],
+            if (slice == AddPropertyFormSlice.details) ...[
+              // 13. غرف النوم ودورات المياه (حسب نوع العقار)
+              if (showResidentialBedBath && !isWarehouse) ...[
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final narrow = c.maxWidth < 700;
+
+                    final bedroomsField = DropdownButtonFormField<int>(
+                      value: bedrooms,
+                      items: _intItems(0, 10),
+                      onChanged: saving ? null : onBedroomsChanged,
+                      decoration: deco(isAr ? 'غرف النوم' : 'Bedrooms'),
+                    );
+
+                    final bathroomsField = DropdownButtonFormField<int>(
+                      value: bathrooms,
+                      items: _intItems(0, 10),
+                      onChanged: saving ? null : onBathroomsChanged,
+                      decoration: deco(isAr ? 'دورات المياه' : 'Bathrooms'),
+                    );
+
+                    if (narrow) {
+                      return Column(
+                        children: [
+                          bedroomsField,
+                          const SizedBox(height: 10),
+                          bathroomsField,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(child: bedroomsField),
+                        const SizedBox(width: 10),
+                        Expanded(child: bathroomsField),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // 14. مواقف السيارات وسنة البناء (حسب نوع العقار)
+              if (showParkingYearRow) ...[
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final narrow = c.maxWidth < 700;
+
+                    final parkingField = DropdownButtonFormField<int>(
+                      value: parkingSpots,
+                      items: _intItems(0, 10),
+                      onChanged: saving ? null : onParkingChanged,
+                      decoration:
+                          deco(isAr ? 'مواقف السيارات' : 'Parking spots'),
+                    );
+
+                    final yearField = YearBuiltPickerField(
+                      value: yearBuilt,
+                      onChanged: onYearBuiltChanged,
+                      enabled: !saving,
+                      isAr: isAr,
+                      minYear: 1950,
+                      maxYear: DateTime.now().year + 1,
+                    );
+
+                    if (narrow) {
+                      return Column(
+                        children: [
+                          parkingField,
+                          const SizedBox(height: 10),
+                          yearField,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(child: parkingField),
+                        const SizedBox(width: 10),
+                        Expanded(child: yearField),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // 15. مفروش
+              if (showFurnishedRow && !isWarehouse) ...[
+                SwitchListTile(
+                  value: furnished,
+                  onChanged: saving ? null : onFurnishedChanged,
+                  title: Text(isAr ? 'مفروش' : 'Furnished'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // 16. الطوابق (حسب [PropertyTypeCatalog.showsFloorFields])
+              if (showFloorFieldsRow) ...[
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final narrow = c.maxWidth < 700;
+
+                    final floorField = DropdownButtonFormField<int>(
+                      value: floor,
+                      items: _intItems(0, 50),
+                      onChanged: saving ? null : onFloorChanged,
+                      decoration: deco(isAr ? 'الطابق' : 'Floor'),
+                    );
+
+                    final totalFloorsField = DropdownButtonFormField<int>(
+                      value: totalFloors,
+                      items: _intItems(1, 50),
+                      onChanged: saving ? null : onTotalFloorsChanged,
+                      decoration:
+                          deco(isAr ? 'عدد الطوابق الكلي' : 'Total floors'),
+                    );
+
+                    if (narrow) {
+                      return Column(
+                        children: [
+                          floorField,
+                          const SizedBox(height: 10),
+                          totalFloorsField,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(child: floorField),
+                        const SizedBox(width: 10),
+                        Expanded(child: totalFloorsField),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // 17. المرافق
+              Text(
+                isAr ? 'المرافق' : 'Amenities',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: amenities.entries
+                    .where((entry) =>
+                        !isLand ||
+                        PropertyTypeCatalog.amenityKeyRelevantForLand(
+                            entry.key))
+                    .map((entry) {
+                  final key = entry.key;
+                  final value = entry.value;
+                  final labels = <String, String>{
+                    'pool': isAr ? 'مسبح' : 'Pool',
+                    'gym': isAr ? 'نادي' : 'Gym',
+                    'elevator': isAr ? 'مصعد' : 'Elevator',
+                    'security': isAr ? 'أمن' : 'Security',
+                    'garden': isAr ? 'حديقة' : 'Garden',
+                    'balcony': isAr ? 'شرفة' : 'Balcony',
+                    'ac': isAr ? 'تكييف' : 'AC',
+                    'parking': isAr ? 'موقف' : 'Parking',
+                    'wifi': 'Wi-Fi',
+                    'maid_room': isAr ? 'غرفة خادمة' : 'Maid room',
+                    'driver_room': isAr ? 'غرفة سائق' : 'Driver room',
+                    'storage': isAr ? 'مستودع' : 'Storage',
+                    'roof': isAr ? 'سطح' : 'Roof',
+                    'kitchen': isAr ? 'مطبخ' : 'Kitchen',
+                    'majlis': isAr ? 'مجلس' : 'Majlis',
+                    'yard': isAr ? 'حوش' : 'Yard',
+                  };
+
+                  return FilterChip(
+                    label: Text(labels[key] ?? key),
+                    selected: value,
+                    onSelected: saving
+                        ? null
+                        : (v) {
+                            onAmenityToggle(key, v);
+                          },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 12),
+
+              // 18. الروابط (الفيديو يُضاف من بطاقة الوسائط أعلى الصفحة)
+              TextFormField(
+                controller: virtualTourUrl,
+                enabled: !saving,
+                decoration: deco(isAr
+                    ? 'رابط الجولة الافتراضية (اختياري)'
+                    : 'Virtual tour URL (optional)'),
+              ),
+              const SizedBox(height: 12),
+
+              // 19. تاريخ التوفر
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      availabilityDate == null
+                          ? (isAr
+                              ? 'تاريخ التوفر: غير محدد'
+                              : 'Availability date: not set')
+                          : (isAr
+                              ? 'تاريخ التوفر: ${availabilityDate!.year}-${availabilityDate!.month.toString().padLeft(2, '0')}-${availabilityDate!.day.toString().padLeft(2, '0')}'
+                              : 'Availability date: ${availabilityDate!.year}-${availabilityDate!.month.toString().padLeft(2, '0')}-${availabilityDate!.day.toString().padLeft(2, '0')}'),
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: saving ? null : onPickAvailability,
+                    child: Text(isAr ? 'اختيار' : 'Pick'),
+                  ),
+                  if (availabilityDate != null)
+                    TextButton(
+                      onPressed: saving ? null : onClearAvailability,
+                      child: Text(isAr ? 'مسح' : 'Clear'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                isAr
+                    ? 'اليوم أو مضى: متاح للمسوقين بعد الموافقة. مستقبلي: يُفضّل عرضه بعد ذلك التاريخ.'
+                    : 'Past/today: available to marketers after approval. Future: prefer showing after that date.',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }

@@ -1,0 +1,31 @@
+[
+  {"city_ar":"الرياض","city_en":"Riyadh","region_ar":"منطقة الرياض","region_en":"Riyadh Region","lat":24.7136,"lng":46.6753},
+  {"city_ar":"جدة","city_en":"Jeddah","region_ar":"منطقة مكة","region_en":"Makkah Region","lat":21.5433,"lng":39.1728},
+  {"city_ar":"مكة المكرمة","city_en":"Makkah","region_ar":"منطقة مكة","region_en":"Makkah Region","lat":21.3891,"lng":39.8579},
+  {"city_ar":"الطائف","city_en":"Taif","region_ar":"منطقة مكة","region_en":"Makkah Region","lat":21.2703,"lng":40.4158},
+  {"city_ar":"المدينة المنورة","city_en":"Madinah","region_ar":"المدينة المنورة","region_en":"Madinah Region","lat":24.5247,"lng":39.5692},
+  {"city_ar":"ينبع","city_en":"Yanbu","region_ar":"المدينة المنورة","region_en":"Madinah Region","lat":24.0889,"lng":38.0618},
+
+  {"city_ar":"الدمام","city_en":"Dammam","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","lat":26.4207,"lng":50.0888},
+  {"city_ar":"الخبر","city_en":"Khobar","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","lat":26.2172,"lng":50.1971},
+  {"city_ar":"الظهران","city_en":"Dhahran","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","lat":26.2886,"lng":50.1139},
+  {"city_ar":"الجبيل","city_en":"Jubail","region_ar":"المنطقة الشرقية","region_en":"Eastern Province","lat":27.0174,"lng":49.6225},
+
+  {"city_ar":"أبها","city_en":"Abha","region_ar":"عسير","region_en":"Asir Region","lat":18.2465,"lng":42.5117},
+  {"city_ar":"خميس مشيط","city_en":"Khamis Mushait","region_ar":"عسير","region_en":"Asir Region","lat":18.3000,"lng":42.7333},
+  {"city_ar":"بيشة","city_en":"Bisha","region_ar":"عسير","region_en":"Asir Region","lat":19.9846,"lng":42.6052},
+
+  {"city_ar":"نجران","city_en":"Najran","region_ar":"نجران","region_en":"Najran Region","lat":17.5650,"lng":44.2289},
+
+  {"city_ar":"تبوك","city_en":"Tabuk","region_ar":"تبوك","region_en":"Tabuk Region","lat":28.3838,"lng":36.5662},
+  {"city_ar":"حائل","city_en":"Hail","region_ar":"حائل","region_en":"Hail Region","lat":27.5114,"lng":41.7208},
+
+  {"city_ar":"بريدة","city_en":"Buraidah","region_ar":"القصيم","region_en":"Qassim Region","lat":26.3592,"lng":43.9818},
+  {"city_ar":"عنيزة","city_en":"Unaizah","region_ar":"القصيم","region_en":"Qassim Region","lat":26.0914,"lng":43.9930},
+
+  {"city_ar":"جازان","city_en":"Jazan","region_ar":"جازان","region_en":"Jazan Region","lat":16.8892,"lng":42.5511},
+  {"city_ar":"الباحة","city_en":"Al Baha","region_ar":"الباحة","region_en":"Baha Region","lat":20.0129,"lng":41.4677},
+
+  {"city_ar":"سكاكا","city_en":"Sakaka","region_ar":"الجوف","region_en":"Al Jawf Region","lat":29.9697,"lng":40.2064},
+  {"city_ar":"عرعر","city_en":"Arar","region_ar":"الحدود الشمالية","region_en":"Northern Borders","lat":30.9753,"lng":41.0381}
+]

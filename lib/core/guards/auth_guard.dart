@@ -1,7 +1,8 @@
-﻿import 'package:flutter/material.dart';
+﻿// lib/core/guards/auth_guard.dart
+import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../session/app_session.dart';
-import '../../screens/login_screen.dart';
 
 Future<bool> requireAuth(
   BuildContext context, {
@@ -14,6 +15,9 @@ Future<bool> requireAuth(
     return true;
   }
 
+  // ✅ خزن Navigator قبل أي await حتى لا تستخدم context بعد async gap
+  final nav = Navigator.of(context, rootNavigator: true);
+
   final go = await showDialog<bool>(
     context: context,
     builder: (_) => AlertDialog(
@@ -21,11 +25,11 @@ Future<bool> requireAuth(
       content: Text(reason),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context, false),
+          onPressed: () => Navigator.pop(_, false),
           child: const Text('إلغاء'),
         ),
         ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
+          onPressed: () => Navigator.pop(_, true),
           child: const Text('تسجيل الدخول'),
         ),
       ],
@@ -33,16 +37,14 @@ Future<bool> requireAuth(
   );
 
   if (go == true) {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => const LoginScreen(),
-      ),
-    );
-    if (context.mounted && context.read<AppSession>().isLoggedIn) {
+    await nav.pushNamed('/login');
+
+    // ✅ بعد الرجوع، اقرأ Provider (لن تحتاج context إذا أخذت المرجع مسبقًا)
+    if (session.isLoggedIn) {
       onAuthed?.call();
       return true;
     }
   }
+
   return false;
 }

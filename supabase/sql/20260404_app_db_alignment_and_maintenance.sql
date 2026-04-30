@@ -1,0 +1,73 @@
+-- =============================================================================
+-- توافق قاعدة البيانات مع تطبيق aqar_user (مرجع + صيانة اختيارية)
+-- =============================================================================
+--
+-- 1) الفهارس التي أرسلتها لا تُقارن «سطراً بسطر» مع ملفات Dart.
+--    المهم: وجود الجداول/الأعمدة التي يستدعيها التطبيق عبر Supabase.
+--
+-- 2) اختبار app_rls_my_profile_username() من SQL Editor غالباً يعيد NULL لأن
+--    auth.uid() فارغ بدون JWT مستخدم. هذا طبيعي. للتحقق الحقيقي:
+--      - من التطبيق بعد تسجيل الدخول، أو
+--      - في SQL: SET request.jwt.claim.sub = '<user_uuid>'; ثم SELECT ...
+--    نفّذ أيضاً (إن لم تكن طبّقتهما): supabase/sql/20260422_users_profiles_rls_consolidated_fix.sql
+--    ثم supabase/sql/20260420_in_app_notifications_drop_duplicate_select_policy.sql
+--
+-- 3) التطبيق يعتمد بشكل أساسي على: users_profiles, properties, property_images,
+--    listing_requests, listing_request_invites, listing_offers, listing_contracts,
+--    listing_permits, reservations, conversations, messages, in_app_notifications,
+--    marketer_profiles, org_units, org_memberships, org_join_requests, org_activity_log,
+--    account_profiles (اختياري كمرآة)، user_push_tokens، إلخ.
+--
+-- =============================================================================
+-- معاينة: طلبات بها عروض لكن workflow_stage ما زال «قبل العروض» (اختياري)
+-- =============================================================================
+-- SELECT id, status, workflow_stage, updated_at
+-- FROM public.listing_requests
+-- WHERE lower(trim(coalesce(status::text, ''))) = 'offers_received'
+--   AND lower(trim(coalesce(workflow_stage::text, ''))) IN ('waiting_marketers', '');
+
+-- =============================================================================
+-- تحديث اختياري (راجع النتائج أعلاه ثم نفّذ مرة واحدة إن رغبت)
+-- =============================================================================
+-- UPDATE public.listing_requests lr
+-- SET workflow_stage = 'marketer_selected',
+--     updated_at = now()
+-- WHERE lower(trim(coalesce(lr.status::text, ''))) = 'offers_received'
+--   AND lower(trim(coalesce(lr.workflow_stage::text, ''))) IN ('waiting_marketers', '');
+
+-- =============================================================================
+-- تعبئة user_id لصفوف in_app_notifications القديمة (إن كان العمود NULL)
+-- التطبيق يملأ user_id + username عند الإدراج من InAppNotificationWriter.
+-- =============================================================================
+-- SELECT count(*) FROM public.in_app_notifications n
+-- WHERE n.user_id IS NULL AND n.username IS NOT NULL AND trim(n.username::text) <> '';
+--
+-- UPDATE public.in_app_notifications n
+-- SET user_id = up.user_id
+-- FROM public.users_profiles up
+-- WHERE n.user_id IS NULL
+--   AND trim(both from n.username::text) = trim(both from up.username::text);
+
+-- =============================================================================
+-- تدقيق: صفوف users_profiles بدون username (تكسر RLS للإشعارات الداخلية)
+-- =============================================================================
+-- SELECT user_id, email, phone
+-- FROM public.users_profiles
+-- WHERE username IS NULL OR trim(username::text) = '';
+
+-- =============================================================================
+-- ما نحتاجه منك إن استمر خطأ معيّن (أرسل نتيجة SELECT)
+-- =============================================================================
+-- أ) SELECT column_name, data_type FROM information_schema.columns
+--    WHERE table_schema='public' AND table_name='in_app_notifications' ORDER BY ordinal_position;
+-- ب) SELECT polname, pg_get_expr(polqual, polrelid) AS using_expr
+--    FROM pg_policy JOIN pg_class c ON c.oid = polrelid
+--    WHERE c.relname = 'users_profiles';
+-- ج) نفس (ب) لجدول in_app_notifications.
+
+-- =============================================================================
+-- سياسات INSERT مزدوجة على in_app_notifications (مثال: insert_authenticated + no client insert)
+-- احتفظ بواحدة فقط حسب نموذجك: إمّا السماح للعميل أو منع الإدراج من العميل.
+-- =============================================================================
+-- DROP POLICY IF EXISTS no client insert ON public.in_app_notifications;
+-- أو: DROP POLICY IF EXISTS in_app_notifications_insert_authenticated ON public.in_app_notifications;

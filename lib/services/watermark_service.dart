@@ -5,7 +5,7 @@ import 'package:image/image.dart' as img;
 class WatermarkService {
   static Future<Uint8List> addTextWatermark(
     Uint8List inputBytes, {
-    String text = 'Aqar موثوق',
+    String text = 'موثوق العقاري',
     int margin = 16,
     int fontSize = 24, // 14/24/48 supported
     int opacity = 170, // 0..255

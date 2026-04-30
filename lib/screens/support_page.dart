@@ -5,20 +5,19 @@ class SupportPage extends StatelessWidget {
   final bool isAr;
   final Color bankColor;
 
+  /// عند false يُعاد المحتوى فقط (للتضمين داخل تبويبات لوحة أخرى).
+  final bool wrapInScaffold;
+
   const SupportPage({
     super.key,
     required this.userId,
     required this.isAr,
     required this.bankColor,
+    this.wrapInScaffold = true,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(isAr ? 'الدعم الفني' : 'Technical Support'),
-      ),
-      body: Padding(
+  Widget _body(BuildContext context) {
+    return Padding(
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
@@ -96,8 +95,8 @@ class SupportPage extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.all(16.0),
                           child: Text(isAr
-                              ? 'اضغط على زر "إضافة للسلة" في أي عقار متاح.'
-                              : 'Click "Add to Cart" button on any available property.'),
+                              ? 'اضغط على زر «إضافة لصفقاتي» في أي عقار متاح.'
+                              : 'Tap "Add to my deals" on any available property.'),
                         ),
                       ],
                     ),
@@ -108,7 +107,19 @@ class SupportPage extends StatelessWidget {
             ),
           ],
         ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!wrapInScaffold) {
+      return _body(context);
+    }
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(isAr ? 'الدعم الفني' : 'Technical Support'),
       ),
+      body: _body(context),
     );
   }
 }

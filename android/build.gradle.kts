@@ -1,9 +1,5 @@
-// android/build.gradle.kts
-
-// 1) Google Services plugin (Firebase) — يجب توحيد النسخة مع الموجودة على classpath
-plugins {
-    id("com.google.gms.google-services") version "4.3.15" apply false
-}
+import org.gradle.api.file.Directory
+import org.gradle.api.tasks.Delete
 
 allprojects {
     repositories {
@@ -12,7 +8,8 @@ allprojects {
     }
 }
 
-// 2) إعدادات مسارات البناء (الخاصة بمشروعك)
+// Flutter expects APKs under <project>/build/app/outputs/flutter-apk/ (see flutter_tools gradle.dart).
+// Without this, outputs stay under android/app/build/ and `flutter build apk` cannot find the .apk.
 val newBuildDir: Directory =
     rootProject.layout.buildDirectory
         .dir("../../build")
@@ -23,7 +20,6 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
-
 subprojects {
     project.evaluationDependsOn(":app")
 }

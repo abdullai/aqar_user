@@ -1,7 +1,8 @@
 // lib/screens/verify_screen.dart
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'
+    show kIsWeb, kDebugMode, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -11,18 +12,34 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:aqar_user/l10n/app_localizations.dart';
 
 import 'package:pin_code_fields/pin_code_fields.dart';
-import 'package:no_screenshot/no_screenshot.dart';
+
+// screen protection (mobile only)
+import '../core/security/screen_protection.dart';
 
 import 'package:provider/provider.dart';
 import '../core/session/app_session.dart';
+import '../core/theme/app_appearance_bridge.dart';
+import '../core/session/return_after_auth.dart';
+
+import '../core/config/app_config.dart';
 
 import '../services/fast_login_service.dart';
+import '../services/notification_service.dart';
+import '../services/auth_service.dart';
+import '../services/profile_compliance_service.dart';
 import '../services/connectivity_guard.dart';
-import '../services/notification_service.dart'; // ✅ NEW
-import 'login_screen.dart';
+import '../services/user_install_session_service.dart';
+import '../services/user_session_coordination_service.dart';
+import '../core/input/input_normalizers.dart';
+import '../core/utils/profile_greeting_from_row.dart';
+import '../core/haptics/app_haptics.dart';
 
-// ✅ NEW: صوت داخل التطبيق
-import 'package:audioplayers/audioplayers.dart';
+import 'package:sms_autofill/sms_autofill.dart';
+
+import '../core/notifications/app_sound_coordinator.dart';
+
+import '../widgets/app_logo_loading.dart';
+import '../widgets/field_group_frame.dart';
 
 enum OtpSource { inApp, dev }
 
@@ -33,19 +50,22 @@ class VerifyScreen extends StatefulWidget {
   State<VerifyScreen> createState() => _VerifyScreenState();
 }
 
-class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver {
-  static const Color _bankColor = Color(0xFF0F766E);
+class _VerifyScreenState extends State<VerifyScreen>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
+  /// مرحلة تطوير/اختبار (ويب أو غيره): أضف عند البناء
+  /// `--dart-define=AQAR_DEV_OTP=1234` لقبول هذا الرمز دون التحقق عبر السيرفر.
+  /// لا تضع قيمة في إنتاج المتجر.
+  static const String _kEnvDevOtp =
+      String.fromEnvironment('AQAR_DEV_OTP', defaultValue: '');
 
   static const int _otpLen = 4;
   static const int _maxSeconds = 60;
-
   static const int _maxAttempts = 3;
   static const int _lockAfterCycles = 2;
 
   String _otpVerifiedKey(String uid) => 'otp_verified_$uid';
 
-  final NoScreenshot _noScreenshot = NoScreenshot();
-
+  // ✅ NoScreenshot الآمن للمنصات
   bool _privacyMask = false;
 
   Timer? _timer;
@@ -58,16 +78,25 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
 
   String _expectedCode = '';
   String _otp = '';
+
   final TextEditingController _otpController = TextEditingController();
   final FocusNode _otpFocus = FocusNode();
 
-  String _nextRoute = '/';
+  // ✅ Animation Controllers
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  // ✅ NEXT ROUTE
+  String _nextRoute = '/userDashboard';
   Map<String, dynamic> _nextArgs = <String, dynamic>{};
 
   String _fullName = '';
   String _displayName = '';
   DateTime? _lastLogin;
   String _username = '';
+
+  /// يطابق users_profiles.username وقيمة in_app_notifications.username بعد RPC التوحيد.
+  String _profileUsername = '';
   String _deviceId = '';
 
   bool _argsRead = false;
@@ -79,20 +108,58 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
   String? _lastBannerCode;
   int _lastBannerAtMs = 0;
 
-  RealtimeChannel? _notifCh;
+  final List<RealtimeChannel> _notifChannels = [];
 
   late final Future<void> _bootFuture;
   bool _booted = false;
 
   bool _userTypedSomething = false;
 
+  /// بعد «إعادة إرسال» لا نُخرج المستخدم تلقائياً عند انتهاء العداد (النافذة الأولى فقط).
+  bool _didResendOtp = false;
+
+  /// يمنع استدعاءات مزدوجة للعودة لتسجيل الدخول عند انتهاء الوقت.
+  bool _exitingOnTimer = false;
+
   bool _offline = false;
   bool _retryingNet = false;
 
-  // ✅ NEW: مشغل الصوت (داخل التطبيق)
-  final AudioPlayer _player = AudioPlayer();
+  /// عند 500 من PostgREST (غالباً RLS / infinite recursion على users_profiles أو in_app_notifications).
+  String? _restApiFailureHint;
 
-  String _keyExpiresAt() => 'verify_expiresAt_${_username.trim()}';
+  StreamSubscription<String>? _smsCodeSub;
+
+  // ✅ Cache للتحقق من صحة الرمز
+  String? _lastValidCode;
+  DateTime? _lastValidCodeTime;
+  static const Duration _validCodeCacheDuration = Duration(minutes: 2);
+
+  String get _notifUsername => _profileUsername.trim().isNotEmpty
+      ? _profileUsername.trim()
+      : _username.trim();
+
+  List<String> _otpUsernameCandidates() {
+    final out = <String>[];
+    void add(String? s) {
+      final t = (s ?? '').trim();
+      if (t.isEmpty) return;
+      if (!out.contains(t)) out.add(t);
+    }
+
+    add(_notifUsername);
+    add(_profileUsername);
+    add(_username);
+    add(digitsOnly(normalizeAsciiDigits(_username)));
+    return out;
+  }
+
+  DateTime? _latestOf(DateTime? a, DateTime? b) {
+    if (a == null) return b;
+    if (b == null) return a;
+    return a.isAfter(b) ? a : b;
+  }
+
+  String _keyExpiresAt() => 'verify_expiresAt_${_notifUsername}';
 
   bool get _isAr {
     try {
@@ -116,17 +183,122 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // ✅ تهيئة Animation
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _pulseAnimation = CurvedAnimation(
+      parent: _pulseController,
+      curve: Curves.easeInOut,
+    );
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     if (!_argsRead) _readArgsOnce();
     if (_booted) return;
     _booted = true;
-
     _bootFuture = _boot();
+  }
+
+  Future<void> _boot({bool forceRefetch = false}) async {
+    await Future.wait([
+      _enableScreenProtection(),
+      _safeAsync(() => NotificationService.init()),
+    ]);
+
+    await _resolveProfileUsername();
+    await _loadCachedValidCode();
+
+    if (_username.trim().isEmpty) {
+      _toast(_isAr
+          ? 'بيانات التحقق غير مكتملة. أعد تسجيل الدخول.'
+          : 'Missing verification data. Please login again.');
+      await _goToLogin(signOut: true, clearOtp: true);
+      return;
+    }
+
+    final netOk = await _ensureInternetOrShow();
+    if (!netOk) {
+      await _applyAuthUserFallback();
+      return;
+    }
+
+    await _checkLockedStatusAndExitIfNeeded();
+    await _loadProfileFromDbIfNeeded();
+    _listenOtpNotifications();
+    unawaited(_startSmsUserConsentListen());
+    await _loadPersistedTimerStateOnly();
+    _startOrResumeTimer();
+
+    if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
+      onIncomingOtp(
+        _expectedCode,
+        source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
+      );
+      return;
+    }
+
+    if (forceRefetch) {
+      await _requestOtpFromServer(force: true);
+      await _waitForFirstOtpOrFetchFallback();
+      return;
+    }
+
+    await _requestOtpFromServer(force: false);
+    await _waitForFirstOtpOrFetchFallback();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _timer?.cancel();
+    _removeBanner();
+    _pulseController.dispose();
+
+    // ✅ إعادة تفعيل التصوير
+    _safeAsync(() => ScreenProtection.disable());
+
+    for (final ch in _notifChannels) {
+      try {
+        ch.unsubscribe();
+      } catch (_) {}
+    }
+    _notifChannels.clear();
+
+    try {
+      _smsCodeSub?.cancel();
+      _smsCodeSub = null;
+      if (!kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS)) {
+        unawaited(SmsAutoFill().unregisterListener());
+      }
+    } catch (_) {}
+
+    _otpController.dispose();
+    _otpFocus.dispose();
+
+    super.dispose();
+  }
+
+  Future<void> _enableScreenProtection() async {
+    await _safeAsync(() => ScreenProtection.enable());
+  }
+
+  Future<void> _safeAsync(Future<dynamic> Function() fn) async {
+    try {
+      await fn();
+    } catch (_) {}
+  }
+
+  void _safeVoid(void Function() fn) {
+    try {
+      fn();
+    } catch (_) {}
   }
 
   Future<bool> _hasInternet() async {
@@ -182,95 +354,12 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _boot({bool forceRefetch = false}) async {
-    await _enableScreenProtection();
-
-    // ✅ NEW: تأكد تهيئة الإشعارات المحلية + طلب الإذن
-    await _safeAsync(() => NotificationService.init());
-
-    final netOk = await _ensureInternetOrShow();
-    if (!netOk) return;
-
-    if (_username.trim().isEmpty) {
-      _toast(_isAr
-          ? 'بيانات التحقق غير مكتملة. أعد تسجيل الدخول.'
-          : 'Missing verification data. Please login again.');
-      await _goToLogin(signOut: true, clearOtp: true);
-      return;
-    }
-
-    _listenOtpNotifications();
-
-    await _checkLockedStatusAndExitIfNeeded();
-    await _loadProfileFromDbIfNeeded();
-
-    await _loadPersistedTimerStateOnly();
-    _startOrResumeTimer();
-
-    if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
-      onIncomingOtp(
-        _expectedCode,
-        source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
-      );
-      return;
-    }
-
-    if (forceRefetch) {
-      await _requestOtpFromServer(force: true);
-      await _waitForFirstOtpOrFetchFallback();
-      return;
-    }
-
-    await _requestOtpFromServer(force: false);
-    await _waitForFirstOtpOrFetchFallback();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-
-    _timer?.cancel();
-    _removeBanner();
-
-    if (!kIsWeb) {
-      _noScreenshot.screenshotOn().catchError((_) {});
-    }
-
-    try {
-      _notifCh?.unsubscribe();
-    } catch (_) {}
-
-    _otpController.dispose();
-    _otpFocus.dispose();
-
-    // ✅ NEW
-    _player.dispose();
-
-    super.dispose();
-  }
-
-  Future<void> _enableScreenProtection() async {
-    if (kIsWeb) return;
-    await _safeAsync(() => _noScreenshot.screenshotOff());
-  }
-
-  Future<void> _safeAsync(Future<dynamic> Function() fn) async {
-    try {
-      await fn();
-    } catch (_) {}
-  }
-
-  void _safeVoid(void Function() fn) {
-    try {
-      fn();
-    } catch (_) {}
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
 
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
       setState(() => _privacyMask = true);
     } else if (state == AppLifecycleState.resumed) {
       setState(() => _privacyMask = false);
@@ -288,23 +377,71 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     _expectedFromArgs = fromArgs.isNotEmpty;
     _expectedCode = _expectedFromArgs ? fromArgs : '';
 
-    _nextRoute = (args['next'] as String?) ?? '/';
+    _nextRoute = (args['next'] as String?) ?? _nextRoute;
+
     final na = args['nextArgs'];
-    _nextArgs = (na is Map) ? Map<String, dynamic>.from(na) : <String, dynamic>{};
+    _nextArgs =
+        (na is Map) ? Map<String, dynamic>.from(na) : <String, dynamic>{};
 
     _fullName = (args['fullName'] as String?) ?? '';
-    _lastLogin = args['lastLogin'] as DateTime?;
+    final llRaw = args['lastLogin'];
+    if (llRaw is DateTime) {
+      _lastLogin = llRaw;
+    } else if (llRaw != null) {
+      _lastLogin = DateTime.tryParse(llRaw.toString());
+    }
+    final fn = _fullName.trim();
+    if (fn.isNotEmpty) {
+      _displayName = fn;
+    }
     _username = (args['username'] as String?) ?? '';
     _deviceId = (args['deviceId'] as String?) ?? '';
   }
 
+  Future<void> _loadCachedValidCode() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final keyU in _otpUsernameCandidates()) {
+        if (keyU.isEmpty) continue;
+        final code = prefs.getString('last_valid_otp_$keyU');
+        final timeStr = prefs.getString('last_valid_otp_time_$keyU');
+
+        if (code != null && timeStr != null) {
+          final time = DateTime.tryParse(timeStr);
+          if (time != null &&
+              DateTime.now().difference(time) < _validCodeCacheDuration) {
+            _lastValidCode = code;
+            _lastValidCodeTime = time;
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveCachedValidCode(String code) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now().toIso8601String();
+      for (final keyU in _otpUsernameCandidates()) {
+        if (keyU.isEmpty) continue;
+        await prefs.setString('last_valid_otp_$keyU', code);
+        await prefs.setString('last_valid_otp_time_$keyU', now);
+      }
+      _lastValidCode = code;
+      _lastValidCodeTime = DateTime.now();
+    } catch (_) {}
+  }
+
   Future<void> _loadPersistedTimerStateOnly() async {
-    final u = _username.trim();
+    final u = _notifUsername;
     if (u.isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
     final expStr = prefs.getString(_keyExpiresAt());
-    final exp = (expStr == null || expStr.trim().isEmpty) ? null : DateTime.tryParse(expStr);
+    final exp = (expStr == null || expStr.trim().isEmpty)
+        ? null
+        : DateTime.tryParse(expStr);
 
     final nowUtc = DateTime.now().toUtc();
 
@@ -321,7 +458,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
   }
 
   Future<void> _persistTimerOnly() async {
-    final u = _username.trim();
+    final u = _notifUsername;
     if (u.isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
@@ -331,8 +468,9 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
   }
 
   Future<void> _clearPersistedTimerOnly() async {
-    final u = _username.trim();
+    final u = _notifUsername;
     if (u.isEmpty) return;
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyExpiresAt());
   }
@@ -357,6 +495,11 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     if (mounted) setState(() {});
     if (recalcOnly) return;
 
+    if (diff <= 0) {
+      unawaited(_onFirstOtpWindowExpiredIfNoInput());
+      return;
+    }
+
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
   }
 
@@ -367,23 +510,50 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
 
     final expUtc = exp.isUtc ? exp : exp.toUtc();
     final diff = expUtc.difference(DateTime.now().toUtc()).inSeconds;
+
     if (diff <= 0) {
       _timer?.cancel();
       setState(() => _secondsLeft = 0);
+      unawaited(_onFirstOtpWindowExpiredIfNoInput());
       return;
     }
+
     setState(() => _secondsLeft = diff);
   }
 
-  Future<bool> _isLockedInDb() async {
-    final u = _username.trim();
-    if (u.isEmpty) return false;
+  bool _otpBoxesAreEmpty() {
+    final ui = _otpDigitsFromUi().replaceAll(RegExp(r'\D'), '');
+    return ui.isEmpty;
+  }
 
+  Future<void> _onFirstOtpWindowExpiredIfNoInput() async {
+    if (!mounted || _exitingOnTimer) return;
+    if (_offline) return;
+    if (_submitting) return;
+    if (_didResendOtp) return;
+    if (!_otpBoxesAreEmpty()) return;
+
+    _exitingOnTimer = true;
+    _toast(_isAr
+        ? 'انتهى وقت إدخال الرمز. أعد تسجيل الدخول.'
+        : 'Verification time expired. Please sign in again.');
+    await _goToLogin(signOut: true, clearOtp: true);
+  }
+
+  Future<bool> _isLockedInDb() async {
     try {
       final sb = Supabase.instance.client;
-      final row = await sb.from('users_profiles').select('status').eq('username', u).maybeSingle();
-      final s = (row?['status'] ?? '').toString().trim().toLowerCase();
-      return s == 'locked';
+      for (final u in _otpUsernameCandidates()) {
+        if (u.isEmpty) continue;
+        final row = await sb
+            .from('users_profiles')
+            .select('status')
+            .eq('username', u)
+            .maybeSingle();
+        final s = (row?['status'] ?? '').toString().trim().toLowerCase();
+        if (s == 'locked') return true;
+      }
+      return false;
     } catch (_) {
       return false;
     }
@@ -402,15 +572,18 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
   }
 
   Future<Map<String, dynamic>?> _getOtpFailState() async {
-    final u = _username.trim();
-    if (u.isEmpty) return null;
     try {
       final sb = Supabase.instance.client;
-      return await sb
-          .from('users_profiles')
-          .select('otp_fail_cycles, otp_fail_count')
-          .eq('username', u)
-          .maybeSingle();
+      for (final u in _otpUsernameCandidates()) {
+        if (u.isEmpty) continue;
+        final row = await sb
+            .from('users_profiles')
+            .select('otp_fail_cycles, otp_fail_count')
+            .eq('username', u)
+            .maybeSingle();
+        if (row != null) return row;
+      }
+      return null;
     } catch (_) {
       return null;
     }
@@ -421,9 +594,6 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     required int count,
     required bool lockNow,
   }) async {
-    final u = _username.trim();
-    if (u.isEmpty) return;
-
     try {
       final sb = Supabase.instance.client;
       final data = <String, dynamic>{
@@ -433,20 +603,39 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
       };
       if (lockNow) data['status'] = 'locked';
 
-      await sb.from('users_profiles').update(data).eq('username', u);
+      for (final u in _otpUsernameCandidates()) {
+        if (u.isEmpty) continue;
+        final existing = await sb
+            .from('users_profiles')
+            .select('username')
+            .eq('username', u)
+            .maybeSingle();
+        if (existing == null) continue;
+        await sb.from('users_profiles').update(data).eq('username', u);
+        return;
+      }
     } catch (_) {}
   }
 
   Future<void> _resetOtpFailStateInDb() async {
-    final u = _username.trim();
-    if (u.isEmpty) return;
     try {
       final sb = Supabase.instance.client;
-      await sb.from('users_profiles').update({
+      final data = <String, dynamic>{
         'otp_fail_cycles': 0,
         'otp_fail_count': 0,
         'otp_fail_last_at': null,
-      }).eq('username', u);
+      };
+      for (final u in _otpUsernameCandidates()) {
+        if (u.isEmpty) continue;
+        final existing = await sb
+            .from('users_profiles')
+            .select('username')
+            .eq('username', u)
+            .maybeSingle();
+        if (existing == null) continue;
+        await sb.from('users_profiles').update(data).eq('username', u);
+        return;
+      }
     } catch (_) {}
   }
 
@@ -481,10 +670,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     int h = v.hour;
     final m = _two(v.minute);
     final isPm = h >= 12;
-
     int h12 = h % 12;
     if (h12 == 0) h12 = 12;
-
     final suffix = _isAr ? (isPm ? 'م' : 'ص') : (isPm ? 'PM' : 'AM');
     return '${_two(h12)}:$m $suffix';
   }
@@ -492,23 +679,55 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
   String _weekdayName(DateTime d) {
     final wd = d.toLocal().weekday;
     if (_isAr) {
-      const ar = ['الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
+      const ar = [
+        'الاثنين',
+        'الثلاثاء',
+        'الأربعاء',
+        'خميس',
+        'الجمعة',
+        'السبت',
+        'الأحد'
+      ];
       return ar[wd - 1];
     } else {
-      const en = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const en = [
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday'
+      ];
       return (wd >= 1 && wd <= 7) ? en[wd - 1] : 'Day';
     }
   }
 
   String _todayLine() {
     final now = DateTime.now();
-    return '${_weekdayName(now)}  ${_formatDateDDMMYYYY(now)}  •  ${_formatTime12(now)}';
+    return '${_weekdayName(now)} ${_formatDateDDMMYYYY(now)} • ${_formatTime12(now)}';
   }
 
   String _lastLoginLine() {
     final v = _lastLogin;
     if (v == null) return _isAr ? 'غير متوفر' : 'N/A';
-    return '${_formatDateDDMMYYYY(v)}  •  ${_formatTime12(v)}';
+    return '${_formatDateDDMMYYYY(v)} • ${_formatTime12(v)}';
+  }
+
+  /// لا نعرض أرقام الهوية / المعرف العام / أي «اسم» مكوّن من أرقام فقط كتحية بشرية.
+  bool _looksLikeNumericLoginIdentifier(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return false;
+    if (!RegExp(r'^\d+$').hasMatch(t)) return false;
+    return t.length >= 9 && t.length <= 12;
+  }
+
+  String _greetingDisplayName() {
+    final a = _displayName.trim();
+    final b = _fullName.trim();
+    if (a.isNotEmpty && !_looksLikeNumericLoginIdentifier(a)) return a;
+    if (b.isNotEmpty && !_looksLikeNumericLoginIdentifier(b)) return b;
+    return '';
   }
 
   Future<void> _requestOtpFromServer({required bool force}) async {
@@ -526,10 +745,10 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     }
 
     try {
-      await Supabase.instance.client.rpc(
-        'request_inapp_otp',
-        params: {'p_username': u},
-      );
+      final ok = await AuthService.requestOtp(u);
+      if (!ok) {
+        _toast(_isAr ? 'تعذر إرسال إشعار الرمز' : 'Failed to send in-app code');
+      }
     } catch (_) {
       _toast(_isAr ? 'تعذر إرسال إشعار الرمز' : 'Failed to send in-app code');
     }
@@ -537,13 +756,13 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
 
   Future<void> _waitForFirstOtpOrFetchFallback() async {
     if (!await _ensureInternetOrShow()) return;
-
     if (_expectedCode.trim().isNotEmpty) return;
 
     const delays = <int>[250, 650, 1200, 1800, 2600];
     for (final ms in delays) {
       await Future<void>.delayed(Duration(milliseconds: ms));
       if (!mounted) return;
+
       if (_expectedCode.trim().isNotEmpty) return;
 
       final ok = await _hasInternet();
@@ -558,64 +777,130 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _fetchLatestOtpNotificationAndApply() async {
-    final u = _username.trim();
-    if (u.isEmpty) return;
+  void _noteVerifySupabaseFailure(Object e, {required String where}) {
+    if (e is! PostgrestException) return;
+    if (kDebugMode) {
+      debugPrint(
+        '[VerifyScreen] PostgrestException ($where): ${e.message} code=${e.code} details=${e.details}',
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _restApiFailureHint = _isAr
+          ? 'تعذّر جلب بيانات التحقق من Supabase (خطأ خادم، غالباً 500). '
+              'السبب الشائع: حلقة RLS على users_profiles أو تداخل مع in_app_notifications.\n'
+              'نفّذ في SQL Editor بالترتيب:\n'
+              '1) supabase/sql/20260422_users_profiles_rls_consolidated_fix.sql\n'
+              '2) supabase/sql/20260420_in_app_notifications_drop_duplicate_select_policy.sql\n'
+              '3) إن استمر 500: supabase/sql/20260427_users_profiles_rls_helper_row_security_off.sql\n'
+              'ثم راجع Logs → Postgres في لوحة Supabase.'
+          : 'Supabase request failed (often HTTP 500). Common cause: RLS recursion on users_profiles '
+              'or conflicting in_app_notifications policies.\n'
+              'Run in SQL Editor:\n'
+              '1) supabase/sql/20260422_users_profiles_rls_consolidated_fix.sql\n'
+              '2) supabase/sql/20260420_in_app_notifications_drop_duplicate_select_policy.sql\n'
+              '3) If still 500: supabase/sql/20260427_users_profiles_rls_helper_row_security_off.sql\n'
+              'Then check Supabase → Logs → Postgres.';
+    });
+    _toast(_isAr
+        ? 'خطأ من قاعدة البيانات — لن يظهر الرمز حتى يُصلح الخادم'
+        : 'Database error — OTP cannot load until server is fixed');
+  }
 
+  Future<void> _fetchLatestOtpNotificationAndApply() async {
     try {
+      // الاعتماد على RLS: الصفوف المرئية فقط هي التي username يطابق users_profiles.
+      // تجنّب .eq('username', …) لأن أي اختلاف بسيط عن القيمة المخزنة يعيد صفراً ولا يظهر الرمز.
       final rows = await Supabase.instance.client
           .from('in_app_notifications')
           .select('type, body, data, created_at')
-          .eq('username', u)
           .order('created_at', ascending: false)
-          .limit(1);
+          .limit(15);
 
+      if (!mounted) return;
       if (rows.isNotEmpty) {
-        final row = (rows.first is Map) ? Map<String, dynamic>.from(rows.first) : null;
-        if (row != null) {
-          _applyOtpFromRow(
-            row,
-            source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
-          );
-        }
+        setState(() => _restApiFailureHint = null);
       }
+
+      if (rows.isEmpty) return;
+      for (final raw in rows) {
+        final row = Map<String, dynamic>.from(raw as Map);
+        final typeNorm = (row['type'] ?? '').toString().trim().toLowerCase();
+        if (typeNorm != 'otp') continue;
+        _applyOtpFromRow(row,
+            source: kDebugMode ? OtpSource.dev : OtpSource.inApp);
+        return;
+      }
+    } on PostgrestException catch (e) {
+      _noteVerifySupabaseFailure(e, where: 'in_app_notifications');
     } catch (_) {}
   }
 
   void _listenOtpNotifications() {
-    final u = _username.trim();
-    if (u.isEmpty) return;
+    if (_username.trim().isEmpty) {
+      if (kDebugMode) {
+        debugPrint('[VerifyScreen] Cannot listen OTP: username is empty');
+      }
+      return;
+    }
 
-    try {
-      _notifCh?.unsubscribe();
-    } catch (_) {}
+    for (final ch in _notifChannels) {
+      try {
+        ch.unsubscribe();
+      } catch (_) {}
+    }
+    _notifChannels.clear();
 
-    _notifCh = Supabase.instance.client
-        .channel('otp_notif_$u')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.insert,
-          schema: 'public',
-          table: 'in_app_notifications',
-          filter: PostgresChangeFilter(
-            type: PostgresChangeFilterType.eq,
-            column: 'username',
-            value: u,
-          ),
-          callback: (payload) {
-            final row = payload.newRecord;
-            final map = Map<String, dynamic>.from(row);
-            _applyOtpFromRow(
-              map,
-              source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
-            );
-          },
-        )
-        .subscribe();
+    // اشتراك بعدة قيم username محتملة (ما كتبه المستخدم، ما في الملف، والرقم بعد التطبيع)
+    // حتى لا يُفوت Realtime إن اختلفت قليلاً عن ما خزّنه request_inapp_otp.
+    final seen = <String>{};
+    final candidates = <String>[];
+    for (final c in _otpUsernameCandidates()) {
+      final t = c.trim();
+      if (t.isEmpty || seen.contains(t)) continue;
+      seen.add(t);
+      candidates.add(t);
+    }
+
+    if (candidates.isEmpty) {
+      if (kDebugMode) {
+        debugPrint('[VerifyScreen] Cannot listen OTP: no username candidates');
+      }
+      return;
+    }
+
+    for (var i = 0; i < candidates.length; i++) {
+      final u = candidates[i];
+      final ch = Supabase.instance.client
+          .channel('verify_otp_inserts_${u}_${hashCode}_$i')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.insert,
+            schema: 'public',
+            table: 'in_app_notifications',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'username',
+              value: u,
+            ),
+            callback: (payload) {
+              final row = Map<String, dynamic>.from(payload.newRecord);
+              final typeNorm =
+                  (row['type'] ?? '').toString().trim().toLowerCase();
+              if (typeNorm != 'otp') return;
+              _applyOtpFromRow(
+                row,
+                source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
+              );
+            },
+          )
+          .subscribe();
+      _notifChannels.add(ch);
+    }
   }
 
   void _applyOtpFromRow(Map<String, dynamic> row, {required OtpSource source}) {
-    final type = (row['type'] ?? '').toString().trim();
-    if (type != 'otp') return;
+    final typeNorm = (row['type'] ?? '').toString().trim().toLowerCase();
+    if (typeNorm != 'otp') return;
 
     String code = '';
     DateTime? exp;
@@ -644,8 +929,10 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     if (exp != null) {
       _expiresAt = (exp.isUtc ? exp : exp.toUtc());
     } else {
-      _expiresAt = DateTime.now().toUtc().add(const Duration(seconds: _maxSeconds));
+      _expiresAt =
+          DateTime.now().toUtc().add(const Duration(seconds: _maxSeconds));
     }
+
     _startOrResumeTimer();
     _persistTimerOnly();
 
@@ -653,7 +940,6 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
 
     setState(() {
       _expectedCode = code;
-
       if (!_userTypedSomething) {
         _otp = '';
         _otpController.clear();
@@ -664,26 +950,53 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     onIncomingOtp(code, source: source);
   }
 
-  // ✅ NEW: تشغيل صوت + إرسال إشعار نظامي بصوت
   Future<void> _playAndNotifyOtp(String code, OtpSource source) async {
-    // 1) Local Notification (بنغمة نظام)
     final title = _isAr
         ? (source == OtpSource.dev ? 'رمز (DEV)' : 'رمز التحقق')
         : (source == OtpSource.dev ? 'DEV code' : 'Verification code');
-    final body = _isAr ? 'رمز التحقق: $code' : 'Your code: $code';
+    // لا نعرض الرمز في إشعار النظام/الشريط — يبقى داخل التطبيق فقط (أمان + ممارسة عالمية).
+    final publicBody = _isAr
+        ? 'وصل رمز تحقق إلى هاتفك. افتح التطبيق وأدخل الرمز في الشاشة.'
+        : 'A verification code was sent. Open the app and enter it on screen.';
 
-    await _safeAsync(() => NotificationService.showOtpNotification(
-          title: title,
-          body: body,
-        ));
+    // الويب: لا يوجد إشعار نظام محلي — SnackBar عام بدون كشف الرمز.
+    if (kIsWeb && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+          content: Text(
+            publicBody,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      );
+    }
 
-    // 2) صوت داخل التطبيق (Asset)
-    // هذا يفيد عندما التطبيق مفتوح وودك تسمع صوت حتى لو النظام ما أظهر نوتفكيشن.
-    await _safeAsync(() async {
-      await _player.stop();
-      final soundPath = kIsWeb ? 'sounds/otp.mp3' : 'sounds/otp.wav';
-	  await _player.play(AssetSource(soundPath));
-    });
+    if (kIsWeb) {
+      // إشعار OTP المحلي غير مدعوم على الويب — الكفاية: SnackBar أعلاه + نغمة الأصول.
+      await _safeAsync(() => AppSoundCoordinator.playUiEffect(
+            assetPath: 'sounds/otp_chime.wav',
+            volume: 1.0,
+          ));
+    } else {
+      await _safeAsync(() => NotificationService.showOtpNotification(
+            title: title,
+            body: publicBody,
+            playChannelSound: true,
+          ));
+      if (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) {
+        await _safeAsync(() async {
+          try {
+            await HapticFeedback.mediumImpact();
+          } catch (_) {}
+        });
+      }
+    }
+
+    // ✅ تشغيل Animation
+    _pulseController.forward().then((_) => _pulseController.reverse());
   }
 
   void onIncomingOtp(String text, {required OtpSource source}) {
@@ -694,29 +1007,29 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
 
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_lastBannerCode == code && (now - _lastBannerAtMs) < 1200) return;
+
     _lastBannerCode = code;
     _lastBannerAtMs = now;
 
-    // ✅ NEW
     _safeAsync(() => _playAndNotifyOtp(code, source));
-
     _showBanner(code: code, source: source);
   }
 
   void _showBanner({required String code, required OtpSource source}) {
     if (!mounted) return;
-
     _removeBanner();
-    _bannerPinnedManual = false;
 
+    _bannerPinnedManual = false;
     final overlay = Overlay.of(context);
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
     final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
-    final border = isDark ? Colors.white.withOpacity(0.10) : Colors.black.withOpacity(0.08);
+    final border = isDark
+        ? Colors.white.withOpacity(0.10)
+        : Colors.black.withOpacity(0.08);
     final titleColor = isDark ? Colors.white : const Color(0xFF0B1220);
-    final bodyColor = isDark ? const Color(0xFFD1D5DB) : const Color(0xFF475569);
+    final bodyColor =
+        isDark ? const Color(0xFFD1D5DB) : const Color(0xFF475569);
 
     final title = _isAr
         ? (source == OtpSource.dev ? 'رمز (DEV)' : 'تم استلام رمز التحقق')
@@ -727,15 +1040,14 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
         return LayoutBuilder(
           builder: (context, c) {
             final w = c.maxWidth;
-
             final bool isTiny = w < 360;
             final bool isXTiny = w < 320;
 
             final double side = (w * 0.04).clamp(8.0, 16.0);
-            final double topExtra = (w * 0.02).clamp(4.0, 10.0) + (isTiny ? 2.0 : 4.0);
+            final double topExtra =
+                (w * 0.02).clamp(4.0, 10.0) + (isTiny ? 2.0 : 4.0);
 
             final double radius = (w * 0.055).clamp(16.0, 22.0);
-
             final double titleFs = (w * 0.040).clamp(12.0, 15.0);
             final double bodyFs = (w * 0.036).clamp(12.0, 14.0);
             final double btnFs = (w * 0.034).clamp(11.8, 13.5);
@@ -777,7 +1089,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                   textColor: titleColor,
                   primary: true,
                   onTap: () {
-                    HapticFeedback.selectionClick();
+                    AppHaptics.selection();
                     _removeBanner();
                     _applyIncomingCode(code, fromUserAction: true);
                     _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
@@ -788,7 +1100,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                   label: _isAr ? 'إدخال يدوي' : 'Manual',
                   textColor: bodyColor,
                   onTap: () {
-                    HapticFeedback.selectionClick();
+                    AppHaptics.selection();
                     _bannerPinnedManual = true;
                     _bannerTimer?.cancel();
                     _bannerTimer = null;
@@ -797,7 +1109,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                 ),
                 const SizedBox(width: 6),
                 actionButton(
-                  label: _isAr ? 'إغلاق' : 'Close',
+                  label: _isAr ? 'إلغاء' : 'Cancel',
                   textColor: bodyColor,
                   onTap: _removeBanner,
                 ),
@@ -836,7 +1148,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                             BoxShadow(
                               blurRadius: 18,
                               offset: const Offset(0, 10),
-                              color: Colors.black.withOpacity(isDark ? 0.35 : 0.12),
+                              color: Colors.black
+                                  .withOpacity(isDark ? 0.35 : 0.12),
                             ),
                           ],
                         ),
@@ -850,7 +1163,9 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                   width: isXTiny ? 34 : 38,
                                   height: isXTiny ? 34 : 38,
                                   decoration: BoxDecoration(
-                                    color: (isDark ? Colors.white : Colors.black).withOpacity(0.06),
+                                    color:
+                                        (isDark ? Colors.white : Colors.black)
+                                            .withOpacity(0.06),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Icon(
@@ -863,7 +1178,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                 Expanded(
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         title,
@@ -878,7 +1194,9 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        _isAr ? 'رمز التحقق: $code' : 'Your code: $code',
+                                        _isAr
+                                            ? 'رمز التحقق: $code'
+                                            : 'Your code: $code',
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
@@ -929,7 +1247,6 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     _bannerTimer?.cancel();
     _bannerTimer = null;
     _bannerPinnedManual = false;
-
     _bannerEntry?.remove();
     _bannerEntry = null;
   }
@@ -961,54 +1278,130 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     });
 
     _otpFocus.requestFocus();
+    _maybeAutoSubmit();
+    // بعد اللصق قد يتأخر PinCodeTextField خطوة عن الـ controller — نعيد المحاولة بعد الإطار.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _maybeAutoSubmit();
+    });
+  }
+
+  void _maybeAutoSubmit() {
+    if (_submitting) return;
+    final raw = _otpDigitsFromUi().replaceAll(RegExp(r'\D'), '');
+    if (raw.isEmpty) return;
+    final entSlice = raw.length >= _otpLen ? raw.substring(0, _otpLen) : raw;
+    if (entSlice.length != _otpLen) return;
+
+    // المصدر الحقيقي للصحة هو verify_inapp_otp على الخادم.
+    // لا نمنع الإرسال التلقائي إذا اختلف اللصق عن _expectedCode (قد يكون معروضاً قديماً أو لم يُحمَّل بعد).
+    unawaited(_submit());
+  }
+
+  /// يأخذ الأرقام من الحقل أو من الحالة — يصلح اختلاف PinCodeTextField عن _otp.
+  String _otpDigitsFromUi() {
+    final fromCtrl = _otpController.text.replaceAll(RegExp(r'\D'), '');
+    final fromState = _otp.replaceAll(RegExp(r'\D'), '');
+    if (fromCtrl.length >= _otpLen) {
+      return fromCtrl.length > _otpLen
+          ? fromCtrl.substring(0, _otpLen)
+          : fromCtrl;
+    }
+    if (fromState.length >= _otpLen) {
+      return fromState.length > _otpLen
+          ? fromState.substring(0, _otpLen)
+          : fromState;
+    }
+    return fromCtrl.length > fromState.length ? fromCtrl : fromState;
   }
 
   Future<void> _submit() async {
     if (!await _ensureInternetOrShow()) return;
     if (_submitting) return;
 
-    final entered = _otp.trim();
+    var entered = _otpDigitsFromUi();
+    if (entered.length != _otpLen) {
+      entered = _otp.trim().replaceAll(RegExp(r'\D'), '');
+    }
+    if (entered.length > _otpLen) {
+      entered = entered.substring(0, _otpLen);
+    }
 
     if (entered.isEmpty) {
-      HapticFeedback.mediumImpact();
+      AppHaptics.medium();
       setState(() => _error = true);
-      _toast(_isAr ? 'الرجاء إدخال الرمز المرسل' : 'Please enter the sent code');
+      _toast(
+          _isAr ? 'الرجاء إدخال الرمز المرسل' : 'Please enter the sent code');
       _otpFocus.requestFocus();
       return;
     }
+
     if (entered.length != _otpLen) {
-      HapticFeedback.mediumImpact();
+      AppHaptics.medium();
       setState(() => _error = true);
-      _toast(_isAr ? 'الرجاء إدخال الرمز كاملاً' : 'Please enter the full code');
+      _toast(
+          _isAr ? 'الرجاء إدخال الرمز كاملاً' : 'Please enter the full code');
       _otpFocus.requestFocus();
       return;
     }
 
     setState(() => _submitting = true);
+
     try {
-      final u = _username.trim();
-      final c = entered.trim().padLeft(_otpLen, '0');
+      final uRaw = digitsOnly(normalizeAsciiDigits(_username.trim()));
+      // يجب أن يطابق p_username في request_inapp_otp — صف الملف قد يحمل username مختلفاً (معرف عام/قديم).
+      final canonical = await AuthService.securityUsernameForDeviceFlow(uRaw);
+      var digits = entered.replaceAll(RegExp(r'\D'), '');
+      if (digits.length > _otpLen) {
+        digits = digits.substring(0, _otpLen);
+      }
+      final c = digits.padLeft(_otpLen, '0');
 
       bool ok = false;
-      try {
-        final v = await Supabase.instance.client.rpc(
-          'verify_inapp_otp',
-          params: {'p_username': u, 'p_code': c},
-        );
-        ok = (v is bool) ? v : (v?.toString() == 'true');
-      } catch (_) {
-        ok = false;
+      if (_matchesEnvDevOtp(c)) {
+        ok = true;
+        if (kDebugMode) {
+          // ignore: avoid_print
+          print('[VerifyScreen] AQAR_DEV_OTP bypass (staging only)');
+        }
+      } else {
+        final tried = <String>{};
+        Future<bool> rpcOnce(String un) async {
+          final t = un.trim();
+          if (t.isEmpty || tried.contains(t)) return false;
+          tried.add(t);
+          try {
+            final v = await Supabase.instance.client.rpc(
+              'verify_inapp_otp',
+              params: {'p_username': t, 'p_code': c},
+            );
+            return (v is bool) ? v : (v?.toString() == 'true');
+          } catch (_) {
+            return false;
+          }
+        }
+
+        if (await rpcOnce(canonical)) {
+          ok = true;
+        } else {
+          for (final alt in _otpUsernameCandidates()) {
+            if (await rpcOnce(alt)) {
+              ok = true;
+              break;
+            }
+          }
+        }
       }
 
       if (!ok) {
-        HapticFeedback.vibrate();
-
+        AppHaptics.vibrate();
         setState(() {
           _attemptsLeft--;
           _error = true;
         });
 
         final state = await _getOtpFailState();
+
         int cycles = (state?['otp_fail_cycles'] ?? 0) is int
             ? (state?['otp_fail_cycles'] as int)
             : int.tryParse('${state?['otp_fail_cycles'] ?? 0}') ?? 0;
@@ -1018,7 +1411,6 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
             : int.tryParse('${state?['otp_fail_count'] ?? 0}') ?? 0;
 
         count += 1;
-
         if (count >= _maxAttempts) {
           count = 0;
           cycles += 1;
@@ -1036,55 +1428,94 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
         }
 
         if (_attemptsLeft <= 0) {
-          _toast(_isAr ? 'تم تجاوز الحد. تم إعادتك لتسجيل الدخول.' : 'Limit reached. Returning to login.');
+          _toast(_isAr
+              ? 'تم تجاوز الحد. تم إعادتك لتسجيل الدخول.'
+              : 'Limit reached. Returning to login.');
           await _goToLogin(signOut: true, clearOtp: true);
           return;
         }
 
-        _toast(_isAr ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft' : 'Invalid code. Left: $_attemptsLeft');
+        _toast(_isAr
+            ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
+            : 'Invalid code. Left: $_attemptsLeft');
         _otpFocus.requestFocus();
         return;
       }
 
       await _resetOtpFailStateInDb();
+      await _saveCachedValidCode(c);
 
-      final uid = Supabase.instance.client.auth.currentUser?.id;
-      if (uid != null && uid.isNotEmpty) {
-        try {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setBool(_otpVerifiedKey(uid), true);
-        } catch (_) {}
-        await context.read<AppSession>().setUser(uid);
+      final sb = Supabase.instance.client;
+      final uid = sb.auth.currentUser?.id;
 
-        if (_deviceId.trim().isNotEmpty) {
-          await _safeAsync(() => Supabase.instance.client.rpc(
-                'register_device',
-                params: {
-                  'p_username': _username.trim(),
-                  'p_device_id': _deviceId.trim(),
-                },
-              ));
-        }
-
-        try {
-          final display = (_displayName.trim().isNotEmpty)
-              ? _displayName.trim()
-              : (_fullName.trim().isNotEmpty ? _fullName.trim() : _username.trim());
-
-          await FastLoginService.saveUserContext(
-            uid: uid,
-            usernameNationalId: _username.trim(),
-            displayName: display,
-          );
-        } catch (_) {}
+      if (uid == null || uid.isEmpty) {
+        _toast(_isAr
+            ? 'لا توجد جلسة دخول. أعد تسجيل الدخول.'
+            : 'No session. Please login again.');
+        await _goToLogin(signOut: true, clearOtp: true);
+        return;
       }
+
+      final prefs = await SharedPreferences.getInstance();
+
+      await prefs.setBool(AppConfig.prefGuestModeKey, false);
+      await prefs.setString(AppConfig.prefEntryModeKey, 'user');
+      await prefs.setBool(_otpVerifiedKey(uid), true);
+
+      await _safeAsync(() => NotificationService.clearOtpNotifications());
+
+      if (!mounted) return;
+      final appSession = context.read<AppSession>();
+      await appSession.setUser(uid);
+      appSession.schedulePostAuthHomeWarmup();
+
+      await ProfileComplianceService.tryUploadPendingSignupSignature(sb);
+
+      final deviceSlot =
+          await UserInstallSessionService.registerDeviceSlotAfterSignIn();
+      if (!mounted) return;
+      if (!deviceSlot.ok && deviceSlot.code == 'device_limit') {
+        Navigator.of(context).pushNamedAndRemoveUntil(
+          '/deviceManagement',
+          (r) => false,
+          arguments: <String, dynamic>{'mandatory': true},
+        );
+        return;
+      }
+
+      final sessionHints =
+          await UserInstallSessionService.sessionHintsForBump();
+      await UserSessionCoordinationService.afterSignIn(
+        uid,
+        cityHint: sessionHints.city,
+        deviceLabel: sessionHints.label,
+      );
+
+      try {
+        final display = _greetingDisplayName();
+
+        await FastLoginService.saveUserContext(
+          uid: uid,
+          usernameNationalId: _username.trim(),
+          displayName: display.isNotEmpty ? display : null,
+        );
+      } catch (_) {}
 
       _timer?.cancel();
       _removeBanner();
       await _clearPersistedTimerOnly();
 
+      final tuple = await ReturnAfterAuth.consume();
+      var route = _nextRoute;
+      Map<String, dynamic>? lockedArgs;
+      if (tuple != null) {
+        route = tuple.route;
+        lockedArgs = ReturnAfterAuth.decodeArgsJson(tuple.argsJson);
+      }
+
       final nextArgs = <String, dynamic>{
         ..._nextArgs,
+        if (lockedArgs != null) ...lockedArgs,
         'username': _username,
         'deviceId': _deviceId,
         'fullName': _fullName,
@@ -1092,7 +1523,12 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
       };
 
       if (!mounted) return;
-      Navigator.pushReplacementNamed(context, _nextRoute, arguments: nextArgs);
+
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        route,
+        (r) => false,
+        arguments: nextArgs,
+      );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -1102,9 +1538,13 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     if (!await _ensureInternetOrShow()) return;
 
     if (_secondsLeft > 0) {
-      _toast(_isAr ? 'لا يمكن الإرسال قبل انتهاء العداد' : 'Resend is available after the timer ends');
+      _toast(_isAr
+          ? 'لا يمكن الإرسال قبل انتهاء العداد'
+          : 'Resend is available after the timer ends');
       return;
     }
+
+    _didResendOtp = true;
 
     setState(() {
       _attemptsLeft = _maxAttempts;
@@ -1114,7 +1554,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
       _userTypedSomething = false;
 
       _expectedCode = '';
-      _expiresAt = DateTime.now().toUtc().add(const Duration(seconds: _maxSeconds));
+      _expiresAt =
+          DateTime.now().toUtc().add(const Duration(seconds: _maxSeconds));
       _secondsLeft = _maxSeconds;
     });
 
@@ -1129,7 +1570,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     _toast(_isAr ? 'تم إرسال إشعار برمز جديد' : 'A new in-app code was sent');
   }
 
-  Future<void> _goToLogin({required bool signOut, required bool clearOtp}) async {
+  Future<void> _goToLogin(
+      {required bool signOut, required bool clearOtp}) async {
     _timer?.cancel();
     _removeBanner();
 
@@ -1151,76 +1593,154 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
       try {
         await context.read<AppSession>().setGuest();
       } catch (_) {}
+      unawaited(syncSessionAppearanceNotifiers?.call() ?? Future.value());
     }
 
     if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
+
+    Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
+      '/login',
       (r) => false,
     );
   }
 
+  Future<void> _resolveProfileUsername() async {
+    final raw = digitsOnly(normalizeAsciiDigits(_username.trim()));
+    if (raw.isEmpty) {
+      _profileUsername = '';
+      return;
+    }
+    try {
+      _profileUsername = await AuthService.securityUsernameForDeviceFlow(raw);
+    } catch (_) {
+      _profileUsername = raw;
+    }
+    if (_profileUsername.trim().isEmpty) _profileUsername = raw;
+  }
+
+  Future<void> _startSmsUserConsentListen() async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    try {
+      await SmsAutoFill().listenForCode(smsCodeRegexPattern: r'\d{4}');
+      await _smsCodeSub?.cancel();
+      _smsCodeSub = SmsAutoFill().code.listen((code) {
+        final only = code.replaceAll(RegExp(r'\D'), '');
+        if (only.length >= _otpLen && mounted) {
+          _applyIncomingCode(only, fromUserAction: false);
+        }
+      });
+    } catch (_) {}
+  }
+
   Future<void> _loadProfileFromDbIfNeeded() async {
-    final u = _username.trim();
-    if (u.isEmpty) return;
+    Map<String, dynamic>? row;
+    const selectCols = 'username,'
+        'first_name_ar,second_name_ar,third_name_ar,fourth_name_ar,'
+        'first_name_en,second_name_en,third_name_en,fourth_name_en,'
+        'full_name_ar,full_name_en,full_name,office_name,last_login_at';
 
     try {
       final sb = Supabase.instance.client;
-      final row = await sb
-          .from('users_profiles')
-          .select(
-            'first_name_ar,second_name_ar,third_name_ar,fourth_name_ar,'
-            'first_name_en,second_name_en,third_name_en,fourth_name_en,'
-            'full_name_ar,full_name_en,full_name,last_login_at',
-          )
-          .eq('username', u)
-          .maybeSingle();
-
-      if (!mounted || row == null) return;
-
-      String pickStr(String k) => (row[k] ?? '').toString().trim();
-
-      final arParts = [
-        pickStr('first_name_ar'),
-        pickStr('second_name_ar'),
-        pickStr('third_name_ar'),
-        pickStr('fourth_name_ar'),
-      ].where((e) => e.isNotEmpty).toList();
-
-      final enParts = [
-        pickStr('first_name_en'),
-        pickStr('second_name_en'),
-        pickStr('third_name_en'),
-        pickStr('fourth_name_en'),
-      ].where((e) => e.isNotEmpty).toList();
-
-      final arFull = pickStr('full_name_ar');
-      final enFull = pickStr('full_name_en');
-      final anyFull = pickStr('full_name');
-
-      final nameFromPartsAr = arParts.join(' ');
-      final nameFromPartsEn = enParts.join(' ');
-
-      final display = _isAr
-          ? (nameFromPartsAr.isNotEmpty ? nameFromPartsAr : (arFull.isNotEmpty ? arFull : anyFull))
-          : (nameFromPartsEn.isNotEmpty ? nameFromPartsEn : (enFull.isNotEmpty ? enFull : anyFull));
-
-      DateTime? last;
-      final lastRaw = row['last_login_at'];
-      if (lastRaw is DateTime) {
-        last = lastRaw;
-      } else if (lastRaw != null) {
-        last = DateTime.tryParse(lastRaw.toString());
+      final uid = sb.auth.currentUser?.id;
+      if (uid == null || uid.isEmpty) {
+        await _applyAuthUserFallback();
+        return;
       }
 
+      final raw = await sb
+          .from('users_profiles')
+          .select(selectCols)
+          .eq('user_id', uid)
+          .maybeSingle();
+
+      if (raw != null) {
+        row = Map<String, dynamic>.from(raw);
+        if (mounted) setState(() => _restApiFailureHint = null);
+      } else {
+        for (final key in _otpUsernameCandidates()) {
+          if (key.isEmpty) continue;
+          try {
+            final r = await sb
+                .from('users_profiles')
+                .select(selectCols)
+                .eq('username', key)
+                .maybeSingle();
+            if (r != null) {
+              row = Map<String, dynamic>.from(r);
+              break;
+            }
+          } on PostgrestException catch (e) {
+            _noteVerifySupabaseFailure(e, where: 'users_profiles by username');
+          } catch (_) {}
+        }
+      }
+    } on PostgrestException catch (e) {
+      row = null;
+      _noteVerifySupabaseFailure(e, where: 'users_profiles by user_id');
+    } catch (_) {
+      row = null;
+    }
+
+    if (!mounted) return;
+
+    if (row != null) {
+      final dbUsername = (row['username'] ?? '').toString().trim();
+      // دائماً مزامنة مفتاح الإشعارات/التحقق مع عمود users_profiles.username (ما يطبقه RLS).
+      if (dbUsername.isNotEmpty) {
+        _profileUsername = dbUsername;
+      }
+
+      final display = ProfileGreetingFromRow.displayName(row, isAr: _isAr);
+      final last = ProfileGreetingFromRow.lastLoginAt(row);
+
       setState(() {
-        if (display.trim().isNotEmpty) {
+        if (display != null && display.trim().isNotEmpty) {
           _displayName = display.trim();
           _fullName = _displayName;
         }
-        if (_lastLogin == null && last != null) _lastLogin = last;
+        if (last != null) {
+          _lastLogin = _latestOf(_lastLogin, last);
+        }
       });
-    } catch (_) {}
+    }
+
+    await _applyAuthUserFallback();
+  }
+
+  /// عند عدم وجود users_profiles أو فشل RLS: الاسم وآخر دخول من جلسة Auth.
+  Future<void> _applyAuthUserFallback() async {
+    final u = Supabase.instance.client.auth.currentUser;
+    if (u == null || !mounted) return;
+
+    final metaName =
+        ProfileGreetingFromRow.displayNameFromAuthMetadata(u.userMetadata);
+    final lastAuth =
+        ProfileGreetingFromRow.lastSignInFromAuthString(u.lastSignInAt);
+
+    setState(() {
+      if (metaName != null && metaName.isNotEmpty) {
+        final badDisplay = _displayName.isEmpty ||
+            _looksLikeNumericLoginIdentifier(_displayName);
+        final badFull =
+            _fullName.isEmpty || _looksLikeNumericLoginIdentifier(_fullName);
+        if (badDisplay) _displayName = metaName;
+        if (badFull) _fullName = metaName;
+      }
+      if (lastAuth != null) {
+        _lastLogin = _latestOf(_lastLogin, lastAuth);
+      }
+    });
+  }
+
+  bool _matchesEnvDevOtp(String fourDigitCode) {
+    final o = _kEnvDevOtp.trim();
+    if (o.length != _otpLen) return false;
+    if (!RegExp(r'^\d{4}$').hasMatch(o)) return false;
+    return fourDigitCode == o;
   }
 
   Widget _infoRow({
@@ -1255,111 +1775,97 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     return LayoutBuilder(
       builder: (context, c) {
         final cs = Theme.of(context).colorScheme;
-
         final maxW = c.maxWidth;
+
         const len = _otpLen;
         const gap = 10.0;
+
         final available = (maxW - (gap * (len - 1))).clamp(160.0, 1000.0);
         final raw = available / len;
         final fieldW = raw.clamp(42.0, 62.0);
         final fieldH = (fieldW + 4).clamp(50.0, 66.0);
 
-        final inactiveBorder = isDark ? Colors.white.withOpacity(0.18) : Colors.black.withOpacity(0.10);
-        final activeBorder = _bankColor.withOpacity(0.65);
-        final selectedBorder = _bankColor;
+        final inactiveBorder = isDark
+            ? Colors.white.withOpacity(0.18)
+            : Colors.black.withOpacity(0.10);
+        final primary = cs.primary;
+        final activeBorder = primary.withOpacity(0.65);
+        final selectedBorder = primary;
         final errorBorder = cs.error;
 
         final useInactive = _error ? errorBorder : inactiveBorder;
         final useActive = _error ? errorBorder : activeBorder;
         final useSelected = _error ? errorBorder : selectedBorder;
 
-        final fill = isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.04);
+        final fill = isDark
+            ? Colors.white.withOpacity(0.06)
+            : Colors.black.withOpacity(0.04);
 
-        return PinCodeTextField(
-          appContext: context,
-          length: _otpLen,
-          controller: _otpController,
-          focusNode: _otpFocus,
-          autoDisposeControllers: false,
-          autoFocus: true,
-          keyboardType: TextInputType.number,
-          enableActiveFill: true,
-          animationType: AnimationType.fade,
-          animationDuration: const Duration(milliseconds: 120),
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(_otpLen),
-          ],
-          mainAxisAlignment: MainAxisAlignment.center,
-          pinTheme: PinTheme(
-            shape: PinCodeFieldShape.box,
-            borderRadius: BorderRadius.circular(12),
-            fieldHeight: fieldH,
-            fieldWidth: fieldW,
-            inactiveColor: useInactive,
-            activeColor: useActive,
-            selectedColor: useSelected,
-            inactiveFillColor: fill,
-            selectedFillColor: fill,
-            activeFillColor: fill,
-            borderWidth: 1.4,
+        return AutofillGroup(
+          child: PinCodeTextField(
+            appContext: context,
+            length: _otpLen,
+            controller: _otpController,
+            focusNode: _otpFocus,
+            autoDisposeControllers: false,
+            autoFocus: true,
+            keyboardType: TextInputType.number,
+            enableActiveFill: true,
+            animationType: AnimationType.fade,
+            animationDuration: const Duration(milliseconds: 120),
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(_otpLen),
+            ],
+            mainAxisAlignment: MainAxisAlignment.center,
+            pinTheme: PinTheme(
+              shape: PinCodeFieldShape.box,
+              borderRadius: BorderRadius.circular(12),
+              fieldHeight: fieldH,
+              fieldWidth: fieldW,
+              inactiveColor: useInactive,
+              activeColor: useActive,
+              selectedColor: useSelected,
+              inactiveFillColor: fill,
+              selectedFillColor: fill,
+              activeFillColor: fill,
+              borderWidth: 1.4,
+            ),
+            textStyle: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: fontSize + 4,
+            ),
+            onChanged: (v) {
+              final only = v.replaceAll(RegExp(r'\D'), '');
+              setState(() {
+                _otp =
+                    only.length > _otpLen ? only.substring(0, _otpLen) : only;
+                if (_error) _error = false;
+                _userTypedSomething = _otp.isNotEmpty;
+              });
+
+              _maybeAutoSubmit();
+            },
+            onCompleted: (_) {
+              AppHaptics.selection();
+              _maybeAutoSubmit();
+            },
+            beforeTextPaste: (text) {
+              final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
+              if (only.isEmpty) return true;
+              AppHaptics.selection();
+              _applyIncomingCode(only, fromUserAction: true);
+              _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
+              // على الويب أيضاً نمنع السلوك الافتراضي لضبط الحقل و _otp معاً
+              return false;
+            },
           ),
-          textStyle: TextStyle(
-            fontWeight: FontWeight.w900,
-            fontSize: fontSize + 4,
-          ),
-          onChanged: (v) {
-            final only = v.replaceAll(RegExp(r'\D'), '');
-            setState(() {
-              _otp = only.length > _otpLen ? only.substring(0, _otpLen) : only;
-              if (_error) _error = false;
-              _userTypedSomething = _otp.isNotEmpty;
-            });
-          },
-          onCompleted: (_) {
-            HapticFeedback.selectionClick();
-          },
-          beforeTextPaste: (text) {
-            final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
-            if (only.isEmpty) return false;
-            HapticFeedback.selectionClick();
-            _applyIncomingCode(only, fromUserAction: true);
-            _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
-            return false;
-          },
         );
       },
     );
   }
 
-  Widget _singleLineGreeting({
-    required String greeting,
-    required String name,
-    required Color color,
-    required double fontSize,
-  }) {
-    final hasName = name.trim().isNotEmpty;
-    final text = hasName ? '$greeting : ${name.trim()}' : greeting;
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: AlignmentDirectional.centerStart,
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.visible,
-        softWrap: false,
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: FontWeight.w900,
-          color: color,
-          height: 1.1,
-        ),
-      ),
-    );
-  }
-
-  Widget _offlineOverlay({required bool isDark}) {
+  Widget _offlineOverlay({required bool isDark, required Color primary}) {
     final bg = isDark ? const Color(0xFF0B1220) : const Color(0xFFF5F7FA);
     final card = isDark ? const Color(0xFF121A2A) : Colors.white;
     final title = isDark ? Colors.white : const Color(0xFF0B1220);
@@ -1385,7 +1891,9 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                   const Icon(Icons.wifi_off_rounded, size: 52),
                   const SizedBox(height: 10),
                   Text(
-                    _isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection',
+                    _isAr
+                        ? 'لا يوجد اتصال بالإنترنت'
+                        : 'No internet connection',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontWeight: FontWeight.w900,
@@ -1411,7 +1919,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                     height: 48,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _bankColor,
+                        backgroundColor: primary,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
@@ -1434,7 +1942,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                   const SizedBox(height: 6),
                   TextButton(
                     onPressed: () => _goToLogin(signOut: true, clearOtp: true),
-                    child: Text(_isAr ? 'العودة لتسجيل الدخول' : 'Back to login'),
+                    child:
+                        Text(_isAr ? 'العودة لتسجيل الدخول' : 'Back to login'),
                   ),
                 ],
               ),
@@ -1445,11 +1954,37 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     );
   }
 
+  Widget _singleLineGreeting({
+    required String greeting,
+    required String name,
+    required Color color,
+    required double fontSize,
+  }) {
+    final hasName = name.trim().isNotEmpty;
+    final text = hasName ? '$greeting : ${name.trim()}' : greeting;
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: AlignmentDirectional.centerStart,
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.visible,
+        softWrap: false,
+        style: TextStyle(
+          fontSize: fontSize,
+          fontWeight: FontWeight.w900,
+          color: color,
+          height: 1.1,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = isDark ? const Color(0xFF0B1220) : const Color(0xFFF5F7FA);
     final card = isDark ? const Color(0xFF121A2A) : Colors.white;
     final titleColor = isDark ? Colors.white : const Color(0xFF0B1220);
@@ -1458,9 +1993,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
     final nameSize = _font(context, 18.0, 15.5);
     final bodySize = _font(context, 13.5, 12.2);
 
-    final displayName = (_displayName.trim().isNotEmpty)
-        ? _displayName.trim()
-        : (_fullName.trim().isNotEmpty ? _fullName.trim() : _username.trim());
+    final displayName = _greetingDisplayName();
 
     final showResend = _secondsLeft <= 0;
 
@@ -1472,7 +2005,7 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
           if (snap.connectionState != ConnectionState.done) {
             return Scaffold(
               backgroundColor: bg,
-              body: const Center(child: CircularProgressIndicator()),
+              body: const Center(child: AppLogoLoading()),
             );
           }
 
@@ -1515,7 +2048,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                                 signOut: true,
                                                 clearOtp: true,
                                               ),
-                                              icon: const Icon(Icons.arrow_back),
+                                              icon:
+                                                  const Icon(Icons.arrow_back),
                                               tooltip: 'Back',
                                             ),
                                           const Spacer(),
@@ -1525,31 +2059,51 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                                 signOut: true,
                                                 clearOtp: true,
                                               ),
-                                              icon: const Icon(Icons.arrow_back),
+                                              icon:
+                                                  const Icon(Icons.arrow_back),
                                               tooltip: 'رجوع',
                                             ),
                                         ],
                                       ),
                                       Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
-                                          Container(
-                                            width: isTiny ? 40 : 44,
-                                            height: isTiny ? 40 : 44,
-                                            decoration: BoxDecoration(
-                                              color: _bankColor.withOpacity(0.12),
-                                              borderRadius: BorderRadius.circular(14),
-                                            ),
-                                            child: Icon(
-                                              Icons.verified_user_rounded,
-                                              color: _bankColor,
-                                              size: isTiny ? 22 : 24,
-                                            ),
+                                          AnimatedBuilder(
+                                            animation: _pulseAnimation,
+                                            builder: (context, child) {
+                                              return Transform.scale(
+                                                scale: 1.0 +
+                                                    (_pulseAnimation.value *
+                                                        0.1),
+                                                child: Container(
+                                                  width: isTiny ? 40 : 44,
+                                                  height: isTiny ? 40 : 44,
+                                                  decoration: BoxDecoration(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primary
+                                                        .withOpacity(0.12),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            14),
+                                                  ),
+                                                  child: Icon(
+                                                    Icons.verified_user_rounded,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .primary,
+                                                    size: isTiny ? 22 : 24,
+                                                  ),
+                                                ),
+                                              );
+                                            },
                                           ),
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
                                                 _singleLineGreeting(
                                                   greeting: _greeting(),
@@ -1559,7 +2113,8 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                                 ),
                                                 const SizedBox(height: 8),
                                                 _infoRow(
-                                                  icon: Icons.calendar_today_rounded,
+                                                  icon: Icons
+                                                      .calendar_today_rounded,
                                                   text: _todayLine(),
                                                   color: subColor,
                                                   fontSize: bodySize,
@@ -1567,7 +2122,10 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                                 const SizedBox(height: 8),
                                                 _infoRow(
                                                   icon: Icons.login_rounded,
-                                                  text: (_isAr ? 'آخر تسجيل دخول: ' : 'Last login: ') + _lastLoginLine(),
+                                                  text: (_isAr
+                                                          ? 'آخر تسجيل دخول: '
+                                                          : 'Last login: ') +
+                                                      _lastLoginLine(),
                                                   color: subColor,
                                                   fontSize: bodySize,
                                                 ),
@@ -1596,21 +2154,59 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                         ),
                                         textAlign: TextAlign.center,
                                       ),
+                                      if (_restApiFailureHint != null) ...[
+                                        const SizedBox(height: 12),
+                                        Container(
+                                          width: double.infinity,
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .errorContainer
+                                                .withValues(alpha: 0.85),
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .error
+                                                  .withValues(alpha: 0.4),
+                                            ),
+                                          ),
+                                          child: SelectableText(
+                                            _restApiFailureHint!,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: bodySize - 1,
+                                              height: 1.35,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onErrorContainer,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                       const SizedBox(height: 14),
-                                      Wrap(
-                                        alignment: WrapAlignment.center,
-                                        spacing: 10,
-                                        runSpacing: 6,
+
+                                      // ✅ Timer and Resend in one line (محاذاة في خط واحد)
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
                                         children: [
                                           Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(Icons.timer_outlined, size: 18, color: subColor),
+                                              Icon(Icons.timer_outlined,
+                                                  size: 18, color: subColor),
                                               const SizedBox(width: 6),
                                               Text(
                                                 showResend
-                                                    ? (_isAr ? 'انتهى الوقت' : 'Time expired')
-                                                    : (_isAr ? 'المتبقي: $_secondsLeft ث' : 'Remaining: $_secondsLeft s'),
+                                                    ? (_isAr
+                                                        ? 'انتهى الوقت'
+                                                        : 'Time expired')
+                                                    : (_isAr
+                                                        ? 'المتبقي: $_secondsLeft ث'
+                                                        : 'Remaining: $_secondsLeft s'),
                                                 style: TextStyle(
                                                   color: subColor,
                                                   fontWeight: FontWeight.w900,
@@ -1619,8 +2215,11 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                               ),
                                             ],
                                           ),
+                                          const SizedBox(width: 16),
                                           TextButton.icon(
-                                            onPressed: showResend && !_offline ? _resendCode : null,
+                                            onPressed: showResend && !_offline
+                                                ? _resendCode
+                                                : null,
                                             icon: const Icon(Icons.refresh),
                                             label: Text(
                                               _isAr ? 'إعادة إرسال' : 'Resend',
@@ -1632,12 +2231,21 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                           ),
                                         ],
                                       ),
+
                                       const SizedBox(height: 10),
-                                      Directionality(
-                                        textDirection: TextDirection.ltr,
-                                        child: _otpBoxes(
-                                          isDark: isDark,
-                                          fontSize: bodySize,
+                                      FieldGroupFrame(
+                                        title: t.fieldGroupOtpTitle,
+                                        subtitle: t.fieldGroupOtpSubtitle,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 14,
+                                          horizontal: 12,
+                                        ),
+                                        child: Directionality(
+                                          textDirection: TextDirection.ltr,
+                                          child: _otpBoxes(
+                                            isDark: isDark,
+                                            fontSize: bodySize,
+                                          ),
                                         ),
                                       ),
                                       if (_error) ...[
@@ -1645,7 +2253,9 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                         Text(
                                           t.invalidCode,
                                           style: TextStyle(
-                                            color: Theme.of(context).colorScheme.error,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .error,
                                             fontWeight: FontWeight.w900,
                                             fontSize: bodySize,
                                           ),
@@ -1653,7 +2263,9 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                         ),
                                         const SizedBox(height: 6),
                                         Text(
-                                          _isAr ? 'المحاولات المتبقية: $_attemptsLeft' : 'Attempts left: $_attemptsLeft',
+                                          _isAr
+                                              ? 'المحاولات المتبقية: $_attemptsLeft'
+                                              : 'Attempts left: $_attemptsLeft',
                                           style: TextStyle(
                                             fontWeight: FontWeight.w900,
                                             fontSize: bodySize,
@@ -1668,37 +2280,42 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                                         height: 50,
                                         child: ElevatedButton(
                                           style: ElevatedButton.styleFrom(
-                                            backgroundColor: _bankColor,
+                                            backgroundColor: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
                                             foregroundColor: Colors.white,
                                             shape: RoundedRectangleBorder(
-                                              borderRadius: BorderRadius.circular(16),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
                                             ),
                                           ),
-                                          onPressed: (_submitting || _offline) ? null : _submit,
+                                          onPressed: (_submitting || _offline)
+                                              ? null
+                                              : _submit,
                                           child: _submitting
-                                              ? const SizedBox(
-                                                  width: 18,
-                                                  height: 18,
-                                                  child: CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    color: Colors.white,
+                                              ? SizedBox(
+                                                  width: 22,
+                                                  height: 22,
+                                                  child: AppLogoLoading(
+                                                    compact: true,
+                                                    size: 20,
                                                   ),
                                                 )
                                               : Text(
                                                   t.confirm,
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.w900,
-                                                    fontSize: _font(context, 16, 15),
+                                                    fontSize:
+                                                        _font(context, 16, 15),
                                                   ),
                                                 ),
                                         ),
                                       ),
                                       const SizedBox(height: 10),
-                                      if (kIsWeb)
-                                        TextButton(
-                                          onPressed: _clear,
-                                          child: Text(_isAr ? 'مسح' : 'Clear'),
-                                        ),
+                                      TextButton(
+                                        onPressed: _clear,
+                                        child: Text(_isAr ? 'مسح' : 'Clear'),
+                                      ),
                                     ],
                                   ),
                                 ),
@@ -1723,7 +2340,11 @@ class _VerifyScreenState extends State<VerifyScreen> with WidgetsBindingObserver
                           ),
                         ),
                       ),
-                    if (_offline) _offlineOverlay(isDark: isDark),
+                    if (_offline)
+                      _offlineOverlay(
+                        isDark: isDark,
+                        primary: Theme.of(context).colorScheme.primary,
+                      ),
                   ],
                 ),
               ),
