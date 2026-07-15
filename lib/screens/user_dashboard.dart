@@ -23,6 +23,8 @@ import 'edit_property_page.dart';
 import 'chat_page.dart';
 import 'login_screen.dart';
 import 'support_page.dart';
+import 'subscription_page.dart';
+import '../services/subscription_service.dart';
 
 part 'user_dashboard.ext.bodies.dart';
 part 'user_dashboard.ext.build.dart';

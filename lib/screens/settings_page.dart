@@ -6,8 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../main.dart';
 import '../services/fast_login_service.dart';
+import 'subscription_page.dart';
 
 class SettingsPage extends StatefulWidget {
   final String lang;
@@ -453,6 +456,46 @@ class _SettingsPageState extends State<SettingsPage> {
               label: Text(_isAr
                   ? 'إيقاف الدخول السريع نهائياً'
                   : 'Disable Quick Login'),
+            ),
+            const SizedBox(height: 28),
+            Text(
+              _isAr ? 'الاشتراك' : 'Subscription',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.workspace_premium_outlined),
+              title: Text(_isAr ? 'باقات الاشتراك' : 'Subscription plans'),
+              subtitle: Text(_isAr
+                  ? 'إدارة باقتك وحدود الإعلانات النشطة'
+                  : 'Manage your plan and active listing limits'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _busy
+                  ? null
+                  : () {
+                      final uid =
+                          Supabase.instance.client.auth.currentUser?.id ?? '';
+                      if (uid.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            behavior: SnackBarBehavior.floating,
+                            content: Text(_isAr
+                                ? 'يلزم تسجيل الدخول'
+                                : 'Please sign in'),
+                          ),
+                        );
+                        return;
+                      }
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SubscriptionPage(
+                            userId: uid,
+                            lang: _lang,
+                          ),
+                        ),
+                      );
+                    },
             ),
             const SizedBox(height: 28),
             FilledButton.icon(

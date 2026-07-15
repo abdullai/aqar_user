@@ -739,6 +739,17 @@ property_images ( sort_order, path )
                 },
               ),
               IconButton(
+                tooltip: _isArabic ? 'الاشتراك' : 'Subscription',
+                icon: const Icon(Icons.workspace_premium_outlined),
+                onPressed: () {
+                  if (_isGuest) {
+                    _showLoginDialog();
+                    return;
+                  }
+                  _openSubscription();
+                },
+              ),
+              IconButton(
                 tooltip: _isArabic ? 'الدعم الفني' : 'Support',
                 icon: const Icon(Icons.help_outline),
                 onPressed: () {

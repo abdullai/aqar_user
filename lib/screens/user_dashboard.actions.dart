@@ -75,6 +75,50 @@ extension _UserDashboardStateActions on _UserDashboardState {
       return;
     }
 
+    // ✅ التحقق من حد إعلانات الباقة قبل فتح نموذج الإضافة
+    try {
+      final check = await SubscriptionService.canAddListing(_uid);
+      if (!check.allowed) {
+        if (!mounted) return;
+        final goUpgrade = await showDialog<bool>(
+          context: context,
+          builder: (ctx) {
+            return Directionality(
+              textDirection:
+                  _isArabic ? TextDirection.rtl : TextDirection.ltr,
+              child: AlertDialog(
+                title: Text(_isArabic ? 'حد الاشتراك' : 'Subscription limit'),
+                content: Text(
+                  _isArabic
+                      ? (check.reasonAr ??
+                          'وصلتَ إلى حد باقتك. رقِّ اشتراكك لإضافة المزيد.')
+                      : (check.reasonEn ??
+                          'You reached your plan limit. Upgrade to add more.'),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: Text(_isArabic ? 'لاحقاً' : 'Later'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: Text(
+                        _isArabic ? 'عرض الباقات' : 'View plans'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+        if (goUpgrade == true && mounted) {
+          await _openSubscription();
+        }
+        return;
+      }
+    } catch (_) {
+      // عند فشل التحقق نسمح بالإضافة حتى لا نمنع المستخدم.
+    }
+
     final res = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
         fullscreenDialog: true,
@@ -88,6 +132,23 @@ extension _UserDashboardStateActions on _UserDashboardState {
       await _reloadAll();
       if (mounted) _ss(() => _tabIndex = 1);
     }
+  }
+
+  Future<void> _openSubscription() async {
+    if (_isGuest) {
+      _showLoginDialog();
+      return;
+    }
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SubscriptionPage(
+          userId: _uid,
+          lang: _lang,
+          accentColor: _UserDashboardState._bankColor,
+        ),
+      ),
+    );
   }
 
   void _openDetails(Property p) {
