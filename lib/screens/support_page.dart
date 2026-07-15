@@ -101,7 +101,19 @@ class SupportPage extends StatelessWidget {
                         ),
                       ],
                     ),
-                    // أضف المزيد من الأسئلة هنا
+                    ExpansionTile(
+                      title: Text(isAr
+                          ? 'ما هي باقات الاشتراك؟'
+                          : 'What are subscription plans?'),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Text(isAr
+                              ? 'من أيقونة التاج في لوحة التحكم أو من الإعدادات يمكنك اختيار باقة (مجاني / أساسي / احترافي / أعمال) لزيادة عدد إعلاناتك النشطة.'
+                              : 'From the crown icon on the dashboard or Settings, choose a plan (Free / Basic / Pro / Business) to increase your active listing limit.'),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
