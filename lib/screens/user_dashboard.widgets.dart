@@ -1,5 +1,7 @@
 part of 'user_dashboard.dart';
 
+// ignore_for_file: unused_element, unused_element_parameter
+
 // === ملف: user_dashboard.widgets.dart ===
 // الهدف: Widgets مساعدة خاصة بالـ Dashboard مع تمرير جميع الدوال المطلوبة
 //
@@ -14,8 +16,12 @@ part of 'user_dashboard.dart';
 // Widgets
 // =========================
 
-/// زوايا بطاقات الرئيسية — مظهر حديث (تطبيقات 2024+).
-const double _kHomeCardRadius = 20;
+/// زوايا بطاقات الرئيسية — أقرب لهوية «موثوق» (بطاقات ناعمة 2024+).
+const double _kHomeCardRadius = 24;
+
+/// أخضر العلامة من هوية المشروع.
+const Color _kAqarBrandPrimary = Color(0xFF0B4D3E);
+const Color _kAqarBrandAccentBg = Color(0xFFEBF6F3);
 
 BoxDecoration _homeFeedCardFaceDecoration({
   required ColorScheme cs,
@@ -25,35 +31,68 @@ BoxDecoration _homeFeedCardFaceDecoration({
   Color? borderStrong,
   double borderWidth = 1.25,
   List<BoxShadow>? boxShadow,
+  bool emphasizePaid = false,
 }) {
+  final isLight = cs.brightness == Brightness.light;
+  // سطح صافٍ (أبيض/سطح الثيم) — بدون مزج ألوان باهتة على البطاقة العادية.
+  final base = isLight
+      ? (emphasizePaid ? const Color(0xFFF7FBF9) : Colors.white)
+      : (emphasizePaid ? cs.surfaceContainerHighest : cs.surface);
+  final face = emphasizePaid
+      ? Color.alphaBlend(
+          _kAqarBrandPrimary.withValues(alpha: isLight ? 0.04 : 0.08),
+          base,
+        )
+      : base;
   final borderColor = borderStrong ??
-      Color.alphaBlend(
-        Color.alphaBlend(
-          typeAccent.withOpacity(0.32),
-          purposeAccent.withOpacity(0.2),
-        ),
-        borderHint,
-      );
+      (emphasizePaid
+          ? Color.alphaBlend(
+              _kAqarBrandPrimary.withValues(alpha: 0.28),
+              borderHint,
+            )
+          : Color.alphaBlend(
+              cs.outlineVariant.withValues(alpha: isLight ? 0.55 : 0.45),
+              borderHint,
+            ));
   return BoxDecoration(
-    color: Color.alphaBlend(
-      typeAccent.withOpacity(0.06),
-      Color.alphaBlend(purposeAccent.withOpacity(0.05), cs.surface),
-    ),
+    color: face,
+    gradient: null,
     borderRadius: BorderRadius.circular(_kHomeCardRadius),
-    border: Border.all(
-      color: borderColor,
-      width: borderWidth,
-    ),
+    border: Border.all(color: borderColor, width: borderWidth),
     boxShadow: boxShadow ??
-        [
-          BoxShadow(
-            color: cs.shadow.withOpacity(0.08),
-            blurRadius: 32,
-            offset: const Offset(0, 14),
-            spreadRadius: -8,
-          ),
-        ],
+        (isLight
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 14,
+                  offset: const Offset(0, 6),
+                ),
+              ]
+            : null),
   );
+}
+
+String _paidPriorityBadgeLabel(MarketPropertyRequestRow r, bool isAr) {
+  final left = InstantMarketRequestFeed.boostRemaining(r);
+  if (r.isInstantPaid) {
+    if (left != null) {
+      final h = left.inHours.clamp(1, 999);
+      return isAr ? 'مدفوع · متبقي ~$h س' : 'Paid · ~$h h left';
+    }
+    return isAr ? 'طلب مدفوع أولوية' : 'Paid priority';
+  }
+  if (r.requestPriority == MarketPropertyRequestPriority.urgent) {
+    if (left != null) {
+      final h = left.inHours.clamp(1, 999);
+      return isAr ? 'مستعجل · متبقي ~$h س' : 'Urgent · ~$h h left';
+    }
+    return isAr ? 'مستعجل' : 'Urgent';
+  }
+  if (left != null) {
+    final h = left.inHours.clamp(1, 999);
+    return isAr ? 'أولوية · متبقي ~$h س' : 'Priority · ~$h h left';
+  }
+  return isAr ? 'ذو أولوية' : 'Priority';
 }
 
 Color _marketRequestBorderAccent(
@@ -108,10 +147,10 @@ class _IconBadgeButton extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.06),
+                  color: color.withOpacity(0.10),
                   borderRadius: BorderRadius.circular(999),
                 ),
-                child: Icon(icon, color: cs.onSurface),
+                child: Icon(icon, color: color),
               ),
             ),
           ),
@@ -170,49 +209,50 @@ class _BadgeIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Container(
-          width: 28,
-          height: 28,
-          alignment: Alignment.center,
-          child: Icon(icon, color: cs.onSurface),
-        ),
-        if (badge > 0)
-          PositionedDirectional(
-            end: -8,
-            top: -7,
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 18),
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-              decoration: BoxDecoration(
-                color: cs.error,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: cs.surface, width: 1.4),
-                boxShadow: [
-                  BoxShadow(
-                    blurRadius: 10,
-                    offset: const Offset(0, 6),
-                    color: Colors.black.withOpacity(0.12),
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Icon(icon, color: color, size: 24),
+          if (badge > 0)
+            PositionedDirectional(
+              end: -6,
+              top: -4,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 18),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: cs.error,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: cs.surface, width: 1.4),
+                  boxShadow: [
+                    BoxShadow(
+                      blurRadius: 10,
+                      offset: const Offset(0, 6),
+                      color: Colors.black.withOpacity(0.12),
+                    ),
+                  ],
+                ),
+                child: Text(
+                  badge > 99 ? '99+' : '$badge',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: cs.onError,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 10,
+                    height: 1.0,
                   ),
-                ],
-              ),
-              child: Text(
-                badge > 99 ? '99+' : '$badge',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: cs.onError,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 10,
-                  height: 1.0,
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -233,30 +273,30 @@ class _DeskNavBottomIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final c = filled ? cs.primary : cs.onSurface;
-    return Stack(
-      clipBehavior: Clip.none,
-      alignment: Alignment.center,
-      children: [
-        SizedBox(
-          width: 28,
-          height: 28,
-          child: Icon(icon, color: c),
-        ),
-        if (showDot)
-          PositionedDirectional(
-            end: -4,
-            top: -4,
-            child: Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                color: cs.error,
-                shape: BoxShape.circle,
-                border: Border.all(color: cs.surface, width: 1.2),
+    return SizedBox(
+      width: 32,
+      height: 32,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          Icon(icon, color: c, size: 24),
+          if (showDot)
+            PositionedDirectional(
+              end: -2,
+              top: -2,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: cs.error,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: cs.surface, width: 1.2),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -557,7 +597,7 @@ class _RequestCard extends StatelessWidget {
                       if (onMakeOffer != null)
                         _buildActionButton(
                           icon: Icons.request_quote_outlined,
-                          label: isAr ? 'تقديم عرض' : 'Make offer',
+                          label: isAr ? 'إتمام الصفقة' : 'Complete deal',
                           onPressed: onMakeOffer!,
                           color: Colors.green,
                         ),
@@ -751,11 +791,14 @@ class _ReservationCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        gradient: LinearGradient(
-          begin: AlignmentDirectional.topStart,
-          end: AlignmentDirectional.bottomEnd,
-          colors: [tintedBg, cardBg],
-        ),
+        color: kIsWeb ? tintedBg : null,
+        gradient: kIsWeb
+            ? null
+            : LinearGradient(
+                begin: AlignmentDirectional.topStart,
+                end: AlignmentDirectional.bottomEnd,
+                colors: [tintedBg, cardBg],
+              ),
         border: Border.all(
           color: Color.alphaBlend(
             bankColor.withValues(alpha: light ? 0.30 : 0.42),
@@ -830,30 +873,27 @@ class _ReservationCard extends StatelessWidget {
                         final narrow = c.maxWidth < 560;
 
                         if (narrow) {
-                          if (actionWidgets.length <= 2) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                          // سطر أفقي متكيّف بدل تكديس عمودي يطيل البطاقة.
+                          return SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
                               children: [
                                 for (int i = 0;
                                     i < actionWidgets.length;
                                     i++) ...[
-                                  actionWidgets[i],
-                                  if (i != actionWidgets.length - 1)
-                                    const SizedBox(height: 10),
+                                  if (i > 0) const SizedBox(width: 8),
+                                  ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      minWidth: 118,
+                                      maxWidth: actionWidgets.length <= 2
+                                          ? c.maxWidth
+                                          : 168,
+                                    ),
+                                    child: actionWidgets[i],
+                                  ),
                                 ],
                               ],
-                            );
-                          }
-                          return Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final w in actionWidgets)
-                                SizedBox(
-                                  width: (c.maxWidth - 8) / 2,
-                                  child: w,
-                                ),
-                            ],
+                            ),
                           );
                         }
 
@@ -948,6 +988,70 @@ class _ReservationExpiryCountdownState
   }
 }
 
+/// عدد أعمدة شبكة بطاقات الإعلانات والخليط (صفحتي / الرئيسية) — منطق موحّد.
+int _homeListingGridCrossAxisCount(double w) {
+  // جوال / ويب ضيق / تابلت عمودي: عمود واحد بعرض الشاشة كاملاً.
+  if (w < 600) return 1;
+  // ويب ويندوز / شاشات عريضة: عمودان — صورة بجانب البيانات.
+  return 2;
+}
+
+/// ارتفاع موحّد لخلية الشبكة (طلب + إعلان) عند أكثر من عمود.
+/// ويب سطح المكتب يستخدم تخطيطاً جانبياً (صورة+بيانات) فيحتاج ارتفاعاً كافياً بلا قصّ.
+double? _homeListingGridEqualCardHeight({
+  required double maxWidth,
+  required int crossAxisCount,
+  double horizontalPadding = 24,
+  double spacing = 12,
+}) {
+  if (crossAxisCount <= 1) return null;
+  final gaps = spacing * (crossAxisCount - 1);
+  final usable = (maxWidth - horizontalPadding - gaps).clamp(180.0, maxWidth);
+  final cellW = usable / crossAxisCount;
+  if (kIsWeb) {
+    // ارتفاع أوضح للصورة الكبيرة بجانب البيانات (~45%).
+    return (cellW / 1.55).clamp(248.0, 340.0);
+  }
+  return (cellW / 0.46).clamp(460.0, 760.0);
+}
+
+/// عرض ≥600: بطاقات شبكة بتخطيط جانبي (صورة بجانب البيانات) — ويب وتطبيق.
+/// العربية: الصورة يمين المستخدم. الإنجليزية: يسار.
+bool _homeListingCardsUseSideBySideLayout(BuildContext context) {
+  return MediaQuery.sizeOf(context).width >= 600;
+}
+
+/// نسبة صورة البطاقة: أقصر على الشاشات الضيقة لتوفير مساحة للبيانات.
+double _homeListingHeroAspectRatio(BuildContext context, {bool isRequest = false}) {
+  final w = MediaQuery.sizeOf(context).width;
+  if (w < 600) {
+    // جوال / ويب ضيق: صورة أقصر (نمط بطاقات عقارية عالمي).
+    return isRequest ? 2.35 : 2.2;
+  }
+  return isRequest ? 1.72 : 1.58;
+}
+
+/// صفقة مكتملة/مباع — تُستبعد من المفضلة ويُخفى قلب التفضيل.
+bool _listingCompletedDealForFavorites(Property p) {
+  final s = (p.status ?? '').trim().toLowerCase();
+  final rs = (p.reservationStatus ?? '').trim().toLowerCase();
+  return s == 'sold' ||
+      s == 'closed' ||
+      s == 'completed' ||
+      rs == 'sold' ||
+      rs == 'closed' ||
+      rs == 'completed';
+}
+
+Widget _wrapEqualGridCardHeight({
+  required double? height,
+  required Widget child,
+}) {
+  // IntrinsicHeight + CrossAxisAlignment.stretch يوحّدان الارتفاع؛
+  // البطاقة تملأ الفراغ عبر UnifiedRealEstateCard دون قصّ.
+  return child;
+}
+
 // =========================
 // Mixed home timeline (إعلانات + طلبات — الأحدث أولاً)
 // =========================
@@ -955,6 +1059,8 @@ class _ReservationExpiryCountdownState
 class _HomeMixedTimeline extends StatelessWidget {
   const _HomeMixedTimeline({
     required this.entries,
+    this.scrollController,
+    this.primaryScroll = false,
     required this.currentUserId,
     required this.isAr,
     required this.bankColor,
@@ -976,19 +1082,27 @@ class _HomeMixedTimeline extends StatelessWidget {
     this.onSubmitMarketRequestOffer,
     required this.marketRequestPriorityLabel,
     this.suppressPublicOwnerIdentityOnCards = false,
+    this.showRegulatoryIdentityOnCards = true,
     this.onShareListingFromCard,
     this.onHomeHideFromFeed,
     this.onHomeReportListing,
     this.onHomeHideMarketRequest,
     this.onHomeReportMarketRequest,
     this.onEditMarketRequest,
+    this.onCopyMarketRequestWebLink,
+    this.onShareMarketRequestFromCard,
     this.homeFeedShowsHiddenOnly = false,
     this.onRestorePropertyToHome,
     this.onWithdrawPropertyReport,
     this.onRestoreMarketRequest,
+    this.markPublishedItemsAsMine = false,
+    this.dealSubscriptionBlocked = false,
+    this.onSubscribeForDeal,
   });
 
   final List<HomeMixedFeedEntry> entries;
+  final ScrollController? scrollController;
+  final bool primaryScroll;
   final String currentUserId;
   final bool isAr;
   final Color bankColor;
@@ -1012,6 +1126,7 @@ class _HomeMixedTimeline extends StatelessWidget {
   final String Function(MarketPropertyRequestRow r) marketRequestPriorityLabel;
 
   final bool suppressPublicOwnerIdentityOnCards;
+  final bool showRegulatoryIdentityOnCards;
   final Future<void> Function(Property p)? onShareListingFromCard;
 
   final Future<void> Function(Property p)? onHomeHideFromFeed;
@@ -1021,6 +1136,10 @@ class _HomeMixedTimeline extends StatelessWidget {
   final Future<void> Function(MarketPropertyRequestRow r)?
       onHomeReportMarketRequest;
   final Future<void> Function(MarketPropertyRequestRow r)? onEditMarketRequest;
+  final Future<void> Function(MarketPropertyRequestRow r)?
+      onCopyMarketRequestWebLink;
+  final Future<void> Function(MarketPropertyRequestRow r)?
+      onShareMarketRequestFromCard;
 
   final bool homeFeedShowsHiddenOnly;
   final Future<void> Function(Property p)? onRestorePropertyToHome;
@@ -1028,118 +1147,225 @@ class _HomeMixedTimeline extends StatelessWidget {
   final Future<void> Function(MarketPropertyRequestRow r)?
       onRestoreMarketRequest;
 
+  final bool dealSubscriptionBlocked;
+  final VoidCallback? onSubscribeForDeal;
+
+  /// عند `true` (تبويب «إعلاناتي/طلباتي»): تُغلَّف كل بطاقة إعلان وصلت لمرحلة
+  /// النشر العام (`published` أو `reserved`) بشارة «منشور» صغيرة في الزاوية
+  /// العلوية لتمييز أنّ هذا الإعلان منشور للجميع في الرئيسية، ويخصّ المستخدم
+  /// (إمّا كمعلن فرد أو كمسوّق نشره نيابة عن المالك).
+  final bool markPublishedItemsAsMine;
+
+  Widget _gridCellAt(int index) {
+    if (index >= entries.length) return const SizedBox.shrink();
+    return _cardForEntry(entries[index]) ?? const SizedBox.shrink();
+  }
+
+  /// شارة «منشور» صغيرة في الزاوية العلوية للبطاقة — تُستخدم في تبويب
+  /// «إعلاناتي/طلباتي» لتمييز أنّ الإعلان وصل للنشر العام في الرئيسية
+  /// رغم أنه يخصّ المستخدم (كمعلن فرد أو كمسوّق نشر نيابة عن المالك).
+  Widget _wrapWithPublishedChip(
+    Widget card,
+    Property property, {
+    required bool showChip,
+  }) {
+    if (!showChip) return card;
+    final stage = property.effectiveWorkflowStage;
+    final isPublishedLike = stage == ListingWorkflowStage.published ||
+        stage == ListingWorkflowStage.reserved;
+    if (!isPublishedLike) return card;
+    final pubBy = (property.publishedByMarketerId ?? '').trim();
+    final isMine = property.ownerId == currentUserId ||
+        (pubBy.isNotEmpty && pubBy == currentUserId);
+    if (!isMine) return card;
+    final ownerLabel = isAr
+        ? (property.ownerId == currentUserId ? 'منشور' : 'منشور بواسطتي')
+        : (property.ownerId == currentUserId ? 'Published' : 'Published by me');
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        card,
+        PositionedDirectional(
+          top: 8,
+          start: 12,
+          child: _PublishedSelfChip(label: ownerLabel),
+        ),
+      ],
+    );
+  }
+
+  Widget? _cardForEntry(HomeMixedFeedEntry e) {
+    final p = e.listing;
+    if (p != null) {
+      final isOwner = p.ownerId == currentUserId;
+      final isGuest = currentUserId == 'guest';
+      final allowCart = ListingPermissionsHelper.canAddToCart(
+        property: p,
+        currentUserId: isGuest ? null : currentUserId,
+        isGuest: isGuest,
+        showCartNavSlot: canShowCartButton,
+      );
+      final card = _RealEstateCard(
+        property: p,
+        isOwner: isOwner,
+        isAr: isAr,
+        bankColor: bankColor,
+        favorite: !isGuest && isFav(p.id),
+        onToggleFav: () => onToggleFav(p.id),
+        onOpenDetails: () => onOpenDetails(p),
+        activeCartHoldsCount: activeHoldCount(p.id),
+        isReserved: isReserved(p.id),
+        reservedUntil: reservedUntil(p.id),
+        reservedByName: reservedByName(p.id),
+        onAddToCart: allowCart ? () => onAddToCart(p) : null,
+        currentUserId: currentUserId,
+        showEditDelete: isOwner,
+        onEditProperty: isOwner ? () => onEditProperty(p) : null,
+        onDeleteProperty: isOwner ? () => onDeleteProperty(p) : null,
+        timeAgo: timeAgo,
+        canShowCartButton: canShowCartButton,
+        onViewsPillTap: onPropertyViewsInteraction == null
+            ? null
+            : (ctx) => onPropertyViewsInteraction!(ctx, p, isOwner),
+        showListingQuickActions: true,
+        onCopyListingWebLink: onCopyListingWebLink,
+        suppressPublicOwnerIdentity: suppressPublicOwnerIdentityOnCards,
+        showRegulatoryIdentityOnCard:
+            showRegulatoryIdentityOnCards && currentUserId != 'guest',
+        omitMarketingLicenseEntriesOnCard: true,
+        onShareListingFromCard: onShareListingFromCard == null
+            ? null
+            : () => onShareListingFromCard!(p),
+        onHomeHideFromFeed: onHomeHideFromFeed,
+        onHomeReportListing: onHomeReportListing,
+        homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
+        onRestorePropertyToHome: onRestorePropertyToHome,
+        onWithdrawPropertyReport: onWithdrawPropertyReport,
+        preferStaticPrimaryImage: true,
+      );
+      return _wrapWithPublishedChip(
+        card,
+        p,
+        showChip: markPublishedItemsAsMine,
+      );
+    }
+    final r = e.request;
+    if (r == null) return null;
+    return _MarketRequestListingStyleCard(
+      request: r,
+      isAr: isAr,
+      bankColor: bankColor,
+      currentUserId: currentUserId,
+      timeAgo: timeAgo,
+      priorityLabel: marketRequestPriorityLabel(r),
+      onOpen: () => onOpenMarketRequest(r),
+      onSubmitOffer: onSubmitMarketRequestOffer == null
+          ? null
+          : () => onSubmitMarketRequestOffer!(r),
+      dealSubscriptionBlocked: dealSubscriptionBlocked,
+      onSubscribeForDeal: onSubscribeForDeal,
+      homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
+      onRestoreMarketRequest: onRestoreMarketRequest,
+      onHomeHideMarketRequest: onHomeHideMarketRequest,
+      onHomeReportMarketRequest: onHomeReportMarketRequest,
+      onEditMarketRequest: onEditMarketRequest,
+      onCopyMarketRequestWebLink: onCopyMarketRequestWebLink,
+      onShareMarketRequestFromCard: onShareMarketRequestFromCard,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cards = <Widget>[];
-    for (var i = 0; i < entries.length; i++) {
-      final e = entries[i];
-      final p = e.listing;
-      if (p != null) {
-        final isOwner = p.ownerId == currentUserId;
-        final isGuest = currentUserId == 'guest';
-        final allowCart = ListingPermissionsHelper.canAddToCart(
-          property: p,
-          currentUserId: isGuest ? null : currentUserId,
-          isGuest: isGuest,
-          showCartNavSlot: canShowCartButton,
+    if (entries.isEmpty) return const SizedBox.shrink();
+
+    Widget buildEntryList({
+      required int cross,
+      required double maxWidth,
+      required ScrollController? controller,
+      required bool primary,
+    }) {
+      const spacing = 8.0;
+      final pad = const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
+
+      final cacheExtent = primary && kIsWeb ? 360.0 : (primary ? 250.0 : 0.0);
+
+      if (cross <= 1) {
+        return ListView.separated(
+          // ويب/Expanded: primary:false دائماً — الاعتماد على PrimaryScrollController
+          // كان يُظهر عدد النتائج دون رسم البطاقات (ارتفاع/ربط تمرير معطوب).
+          controller: controller,
+          primary: false,
+          shrinkWrap: !primary,
+          cacheExtent: cacheExtent,
+          physics: primary
+              ? const AlwaysScrollableScrollPhysics()
+              : const NeverScrollableScrollPhysics(),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: pad,
+          itemCount: entries.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          itemBuilder: (context, i) {
+            final card = _cardForEntry(entries[i]);
+            return card ?? const SizedBox.shrink();
+          },
         );
-        cards.add(
-          _RealEstateCard(
-            property: p,
-            isOwner: isOwner,
-            isAr: isAr,
-            bankColor: bankColor,
-            favorite: !isGuest && isFav(p.id),
-            onToggleFav: () => onToggleFav(p.id),
-            onOpenDetails: () => onOpenDetails(p),
-            activeCartHoldsCount: activeHoldCount(p.id),
-            isReserved: isReserved(p.id),
-            reservedUntil: reservedUntil(p.id),
-            reservedByName: reservedByName(p.id),
-            onAddToCart: allowCart ? () => onAddToCart(p) : null,
-            currentUserId: currentUserId,
-            showEditDelete: isOwner,
-            onEditProperty: isOwner ? () => onEditProperty(p) : null,
-            onDeleteProperty: isOwner ? () => onDeleteProperty(p) : null,
-            timeAgo: timeAgo,
-            forceListLayout: true,
-            canShowCartButton: canShowCartButton,
-            onViewsPillTap: onPropertyViewsInteraction == null
-                ? null
-                : (ctx) => onPropertyViewsInteraction!(ctx, p, isOwner),
-            showListingQuickActions: true,
-            onCopyListingWebLink: onCopyListingWebLink,
-            suppressPublicOwnerIdentity: suppressPublicOwnerIdentityOnCards,
-            onShareListingFromCard: onShareListingFromCard == null
-                ? null
-                : () => onShareListingFromCard!(p),
-            onHomeHideFromFeed: onHomeHideFromFeed,
-            onHomeReportListing: onHomeReportListing,
-            homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
-            onRestorePropertyToHome: onRestorePropertyToHome,
-            onWithdrawPropertyReport: onWithdrawPropertyReport,
-          ),
-        );
-        continue;
       }
-      final r = e.request;
-      if (r == null) continue;
-      cards.add(
-        _MarketRequestListingStyleCard(
-          request: r,
-          isAr: isAr,
-          bankColor: bankColor,
-          currentUserId: currentUserId,
-          timeAgo: timeAgo,
-          priorityLabel: marketRequestPriorityLabel(r),
-          onOpen: () => onOpenMarketRequest(r),
-          onSubmitOffer: onSubmitMarketRequestOffer == null
-              ? null
-              : () => onSubmitMarketRequestOffer!(r),
-          homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
-          onRestoreMarketRequest: onRestoreMarketRequest,
-          onHomeHideMarketRequest: onHomeHideMarketRequest,
-          onHomeReportMarketRequest: onHomeReportMarketRequest,
-          onEditMarketRequest: onEditMarketRequest,
-        ),
+
+      final rowCount = (entries.length + cross - 1) ~/ cross;
+      final equalH = _homeListingGridEqualCardHeight(
+        maxWidth: maxWidth,
+        crossAxisCount: cross,
+        horizontalPadding: 24,
+        spacing: spacing,
+      );
+      return ListView.separated(
+        controller: controller,
+        primary: false,
+        shrinkWrap: !primary,
+        cacheExtent: cacheExtent,
+        physics: primary
+            ? const AlwaysScrollableScrollPhysics()
+            : const NeverScrollableScrollPhysics(),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: pad,
+        itemCount: rowCount,
+        separatorBuilder: (_, __) => const SizedBox(height: spacing),
+        itemBuilder: (context, row) {
+          final start = row * cross;
+          // ارتفاع موحّد بين بطاقة الإعلان والطلب في نفس الصف.
+          return IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var j = 0; j < cross; j++) ...[
+                  if (j > 0) const SizedBox(width: spacing),
+                  Expanded(
+                    child: _wrapEqualGridCardHeight(
+                      height: equalH,
+                      child: _gridCellAt(start + j),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
       );
     }
 
-    Widget narrowColumn() {
-      final tiles = <Widget>[];
-      for (var i = 0; i < cards.length; i++) {
-        if (i > 0) tiles.add(const SizedBox(height: 12));
-        tiles.add(cards[i]);
-      }
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: tiles,
-      );
-    }
-
-    Widget wideGrid() {
-      final rows = <Widget>[];
-      for (var i = 0; i < cards.length; i += 2) {
-        if (i > 0) rows.add(const SizedBox(height: 12));
-        final a = cards[i];
-        final b = i + 1 < cards.length ? cards[i + 1] : null;
-        // بدون IntrinsicHeight — على الويب يفسد ارتفاع الصف ويسبب تداخل البطاقات ويعطل التمرير.
-        rows.add(
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: a),
-              const SizedBox(width: 12),
-              Expanded(child: b ?? const SizedBox.shrink()),
-            ],
-          ),
-        );
-      }
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: rows,
+    // primaryScroll: قائمة جذر داخل Expanded → shrinkWrap=false + AlwaysScrollable.
+    // ListView.primary يبقى false دائماً أعلاه (لا PrimaryScrollController على الويب).
+    if (primaryScroll) {
+      return LayoutBuilder(
+        builder: (context, c) {
+          final cross = _homeListingGridCrossAxisCount(c.maxWidth);
+          return buildEntryList(
+            cross: cross,
+            maxWidth: c.maxWidth,
+            controller: scrollController,
+            primary: true,
+          );
+        },
       );
     }
 
@@ -1147,11 +1373,13 @@ class _HomeMixedTimeline extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: LayoutBuilder(
         builder: (context, c) {
-          final wide = c.maxWidth >= 720;
-          if (!wide || cards.length <= 1) {
-            return narrowColumn();
-          }
-          return wideGrid();
+          final cross = _homeListingGridCrossAxisCount(c.maxWidth);
+          return buildEntryList(
+            cross: cross,
+            maxWidth: c.maxWidth,
+            controller: null,
+            primary: false,
+          );
         },
       ),
     );
@@ -1177,6 +1405,10 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
     this.onHomeHideMarketRequest,
     this.onHomeReportMarketRequest,
     this.onEditMarketRequest,
+    this.onCopyMarketRequestWebLink,
+    this.onShareMarketRequestFromCard,
+    this.dealSubscriptionBlocked = false,
+    this.onSubscribeForDeal,
   });
 
   final MarketPropertyRequestRow request;
@@ -1195,13 +1427,18 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
   final Future<void> Function(MarketPropertyRequestRow r)?
       onHomeReportMarketRequest;
   final Future<void> Function(MarketPropertyRequestRow r)? onEditMarketRequest;
+  final Future<void> Function(MarketPropertyRequestRow r)?
+      onCopyMarketRequestWebLink;
+  final Future<void> Function(MarketPropertyRequestRow r)?
+      onShareMarketRequestFromCard;
+  final bool dealSubscriptionBlocked;
+  final VoidCallback? onSubscribeForDeal;
 
-  static String _requestListingLabel(MarketPropertyRequestRow r) {
-    final c = DisplayIds.tenDigit(r.requestPublicCode ?? r.id);
-    if (c.isNotEmpty) return c;
-    final t = r.id.trim();
-    if (t.length <= 10) return t;
-    return '…${t.substring(t.length - 8)}';
+  /// رقم الطلب العقاري من الخادم فقط ([MarketPropertyRequestRow.requestPublicCode])؛ لا يُشتق من UUID.
+  static String? _requestPublicTenDigit(MarketPropertyRequestRow r) {
+    final c = r.requestPublicCode?.trim() ?? '';
+    if (c.isEmpty) return null;
+    return DisplayIds.tenDigit(c);
   }
 
   static Future<void> _copyValue(
@@ -1222,21 +1459,26 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
   }
 
   static Widget _copyIcon(BuildContext context, String value, bool isAr) {
-    return IconButton(
-      tooltip: isAr ? 'نسخ' : 'Copy',
-      visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-      padding: EdgeInsets.zero,
-      iconSize: 16,
-      icon: const Icon(Icons.copy_rounded),
-      onPressed: () => unawaited(_copyValue(context, value, isAr)),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => unawaited(_copyValue(context, value, isAr)),
+      child: IconButton(
+        tooltip: isAr ? 'نسخ' : 'Copy',
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+        padding: EdgeInsets.zero,
+        iconSize: 16,
+        icon: const Icon(Icons.copy_rounded),
+        onPressed: () => unawaited(_copyValue(context, value, isAr)),
+      ),
     );
   }
 
   static String _areaSpec(MarketPropertyRequestRow r, bool isAr) {
-    if (r.areaMinM2 == null) return '';
+    final area = r.areaMinM2;
+    if (area == null) return '';
     final v = AppMoney.formatNumber(
-      r.areaMinM2!,
+      area,
       isAr: isAr,
       maxFractionDigits: 0,
     );
@@ -1265,47 +1507,103 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
   ) {
     final min = r.budgetMin;
     final max = r.budgetMax;
-    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          height: 1.0,
+          fontSize: 10,
+        );
+    final amountStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
           fontWeight: FontWeight.w900,
           color: color,
           height: 1.1,
+          fontSize: 14,
         );
     if (min == null && max == null) {
       return Text(
-        isAr ? 'الميزانية غير محددة' : 'Budget not set',
+        isAr ? 'المبلغ غير محدد' : 'Amount not set',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: style,
+        style: amountStyle,
       );
     }
 
-    Widget amount(double v) => AppMoneyLine(
-          amount: v,
-          currencyCode: 'SAR',
-          isAr: isAr,
-          maxFractionDigits: 0,
-          symbolColor: color,
-          style: style,
+    Widget amountWidget;
+    if (min != null && max != null && max != min) {
+      amountWidget = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppMoneyLine(
+            amount: min,
+            currencyCode: 'SAR',
+            isAr: isAr,
+            maxFractionDigits: 0,
+            symbolColor: color,
+            style: amountStyle,
+          ),
+          Text(
+            isAr ? ' إلى ' : ' to ',
+            style: amountStyle?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          AppMoneyLine(
+            amount: max,
+            currencyCode: 'SAR',
+            isAr: isAr,
+            maxFractionDigits: 0,
+            symbolColor: color,
+            style: amountStyle,
+          ),
+        ],
+      );
+    } else {
+      final amount = min ?? max;
+      if (amount == null) {
+        return Text(
+          isAr ? 'المبلغ غير محدد' : 'Amount not set',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: amountStyle,
         );
+      }
+      amountWidget = AppMoneyLine(
+        amount: amount,
+        currencyCode: 'SAR',
+        isAr: isAr,
+        maxFractionDigits: 0,
+        symbolColor: color,
+        style: amountStyle,
+      );
+    }
 
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: AlignmentDirectional.centerStart,
-      child: Row(
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEBF6F3).withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF0B4D3E).withValues(alpha: 0.12),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            isAr ? 'الميزانية: ' : 'Budget: ',
-            style: style,
+            isAr ? 'المبلغ المحدد' : 'Specified amount',
             maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: labelStyle,
           ),
-          if (min != null) amount(min),
-          if (min != null && max != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text('-', style: style, maxLines: 1),
+          const SizedBox(height: 3),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: amountWidget,
             ),
-          if (max != null && max != min) amount(max),
+          ),
         ],
       ),
     );
@@ -1314,10 +1612,10 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
   /// إخفاء القائمة عند عدم توفر إجراءات (حسب حالة الطلب في الخادم).
   static bool _showOverflowMenuForStatus(
     MarketPropertyRequestRow r, {
-    required bool loggedIn,
+    required bool allowMenu,
     required bool baseShowMenu,
   }) {
-    if (!loggedIn || !baseShowMenu) return false;
+    if (!allowMenu || !baseShowMenu) return false;
     final st = r.status.trim().toLowerCase();
     if (st == 'closed' || st == 'cancelled' || st == 'canceled') {
       return false;
@@ -1327,6 +1625,45 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    try {
+      return _buildSafe(context);
+    } catch (e, st) {
+      assert(() {
+        // ignore: avoid_print
+        print('[DBG][HOME][REQUEST_CARD] build failed: $e\n$st');
+        return true;
+      }());
+      final cs = Theme.of(context).colorScheme;
+      return Material(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(_kHomeCardRadius),
+        child: InkWell(
+          onTap: onOpen,
+          borderRadius: BorderRadius.circular(_kHomeCardRadius),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              isAr
+                  ? (request.title.trim().isEmpty
+                      ? 'طلب عقاري'
+                      : request.title.trim())
+                  : (request.title.trim().isEmpty
+                      ? 'Market request'
+                      : request.title.trim()),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildSafe(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final r = request;
@@ -1351,81 +1688,97 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
             onRestoreMarketRequest != null) ||
         (!homeFeedShowsHiddenOnly &&
             (onHomeHideMarketRequest != null ||
-                onHomeReportMarketRequest != null));
+                onHomeReportMarketRequest != null)) ||
+        (onCopyMarketRequestWebLink != null) ||
+        (onShareMarketRequestFromCard != null);
+    // ضيف: نسخ/مشاركة فقط. مسجّل: إخفاء/بلاغ/استعادة حسب الوضع.
     final showMenu = _showOverflowMenuForStatus(
       r,
-      loggedIn: loggedIn || !homeFeedShowsHiddenOnly,
+      allowMenu: loggedIn || !homeFeedShowsHiddenOnly,
       baseShowMenu: baseShowMenu,
     );
     final canSubmitOffer = !homeFeedShowsHiddenOnly &&
         !requestCompleted &&
         !deletionRequested &&
         (currentUserId == 'guest' || currentUserId != r.requesterId);
-    final isRequester = currentUserId != 'guest' && currentUserId == r.requesterId;
-    String wmTail(String id) {
-      final s = id.trim();
-      if (s.length <= 8) return s;
-      return s.substring(s.length - 8);
-    }
+    final isRequester =
+        currentUserId != 'guest' && currentUserId == r.requesterId;
 
     final purposeShort = r.purpose == 'rent'
-        ? (isAr ? 'إيجار' : 'Rent')
-        : (isAr ? 'شراء' : 'Buy');
-    final purposeChip = r.purpose == 'rent'
-        ? (isAr ? 'إيجار' : 'Rent')
-        : (isAr ? 'شراء' : 'Purchase');
-    final metaLine =
-        '${PropertyTypeCatalog.label(r.propertyType, isAr)} · $purposeShort · $priorityLabel';
+        ? (isAr ? 'للإيجار' : 'for rent')
+        : (isAr ? 'للشراء' : 'to buy');
+    final headline = PropertyListingDisplay.displayRequestTitle(r, isAr);
+    final requestTen = _requestPublicTenDigit(r);
+    final showPriorityChip =
+        !InstantMarketRequestBadge.showsFor(r.requestPriority) &&
+            priorityLabel.trim().isNotEmpty;
+    final locationParts = PropertyListingDisplay.locationPartsWithoutTitleEcho(
+      PropertyListingDisplay.locationHierarchyPartsForRequest(r),
+      headline,
+    );
 
     final dataColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          r.title.trim().isEmpty
-              ? (isAr ? 'طلب عقاري' : 'Property request')
-              : r.title,
-          maxLines: 1,
+          headline,
+          maxLines: 2,
+          softWrap: true,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w900,
-            height: 1.15,
+            fontSize: 15.5,
+            height: 1.28,
+            letterSpacing: -0.15,
+            color: theme.brightness == Brightness.dark
+                ? null
+                : const Color(0xFF041D18),
+            fontFamily: 'Cairo',
           ),
         ),
-        const SizedBox(height: 3),
-        Text(
-          metaLine,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelMedium?.copyWith(
-            fontWeight: FontWeight.w800,
-            color: purposeAccent,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: purposeAccent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: purposeAccent.withValues(alpha: 0.28)),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              child: Text(
-                purposeChip,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: purposeAccent,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
+        if (showPriorityChip) ...[
+          const SizedBox(height: 3),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: purposeAccent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: purposeAccent.withValues(alpha: 0.28),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                child: Text(
+                  priorityLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: purposeAccent,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
+        if (InstantMarketRequestBadge.showsFor(r.requestPriority)) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: InstantMarketRequestBadge(
+              isAr: isAr,
+              row: r,
+              viewerRegion: null,
+              showRemaining: true,
+            ),
+          ),
+          const SizedBox(height: 4),
+          InstantMarketRequestFeatureStrip(isAr: isAr),
+        ],
         if (deletionRequested || requestCompleted) ...[
           const SizedBox(height: 4),
           FittedBox(
@@ -1462,18 +1815,20 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
           bankColor: bankColor,
           areaText: _areaSpec(r, isAr),
           roomsText: _roomsSpec(r, isAr),
-          districtText: _districtSpec(r),
+          locationParts: locationParts,
         ),
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(Icons.payments_outlined, size: 17, color: bankColor),
-            const SizedBox(width: 6),
-            Expanded(child: _budgetLine(context, r, isAr, purposeAccent)),
-          ],
-        ),
-        if (r.showRequesterName &&
+        if (!isRequester && r.requesterId.trim().isNotEmpty) ...[
+          const SizedBox(height: 6),
+          UserPresenceStrip(
+            userId: r.requesterId.trim(),
+            isAr: isAr,
+            compact: true,
+            surface: PresenceDisplaySurface.requestCards,
+            fallbackTimestamp: r.updatedAt ?? r.createdAt,
+          ),
+        ],
+        if ((r.showRequesterName ||
+                (r.requesterPublicName?.trim().isNotEmpty == true)) &&
             (r.requesterPublicName?.trim().isNotEmpty == true ||
                 (r.requesterAvatarUrl ?? '').trim().isNotEmpty)) ...[
           const SizedBox(height: 5),
@@ -1484,7 +1839,7 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
                   padding: const EdgeInsetsDirectional.only(end: 6),
                   child: ClipOval(
                     child: CachedNetworkImage(
-                      imageUrl: r.requesterAvatarUrl!.trim(),
+                      imageUrl: (r.requesterAvatarUrl ?? '').trim(),
                       width: 24,
                       height: 24,
                       fit: BoxFit.cover,
@@ -1497,105 +1852,150 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
                   ),
                 ),
               Expanded(
-                child: Text(
-                  isAr
-                      ? 'منشئ الطلب: ${(r.requesterPublicName ?? '').trim()}'
-                      : 'Request creator: ${(r.requesterPublicName ?? '').trim()}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: cs.primary,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      isAr ? 'منشئ الطلب' : 'Request creator',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                        height: 1.05,
+                        fontSize: 10.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      (r.requesterPublicName ?? '').trim().isEmpty
+                          ? (isAr ? 'طالب' : 'Requester')
+                          : (r.requesterPublicName ?? '').trim(),
+                      maxLines: 2,
+                      softWrap: true,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.primary,
+                        height: 1.25,
+                        fontSize: 13.5,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ],
+        if (requestTen != null) ...[
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: Text(
+                  isAr ? 'رقم الطلب: $requestTen' : 'Request no.: $requestTen',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.primary,
+                  ),
+                ),
+              ),
+              _copyIcon(context, requestTen, isAr),
+            ],
+          ),
+        ],
         const SizedBox(height: 4),
+        _budgetLine(context, r, isAr, purposeAccent),
+        const SizedBox(height: 6),
         Row(
-          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Icon(
+              Icons.schedule_rounded,
+              size: 14,
+              color: cs.primary,
+            ),
+            const SizedBox(width: 5),
             Expanded(
               child: Text(
                 isAr
-                    ? 'رقم الطلب: ${_requestListingLabel(r)}'
-                    : 'Request no.: ${_requestListingLabel(r)}',
-                maxLines: 1,
+                    ? 'تاريخ الطلب: ${ListingDateDisplay.formatCardDateTime(r.sortTime, isAr: isAr)} · ${timeAgo(r.sortTime, isAr)}'
+                    : 'Requested: ${ListingDateDisplay.formatCardDateTime(r.sortTime, isAr: isAr)} · ${timeAgo(r.sortTime, isAr)}',
+                maxLines: 2,
+                softWrap: true,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: cs.onSurface,
                   fontWeight: FontWeight.w800,
-                  color: cs.primary,
+                  fontFamily: 'Cairo',
+                  height: 1.25,
+                  fontSize: 12,
                 ),
               ),
             ),
-            _copyIcon(context, _requestListingLabel(r), isAr),
           ],
-        ),
-        const SizedBox(height: 3),
-        Text(
-          isAr ? 'تاريخ ووقت الإنشاء' : 'Created date and time',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: cs.onSurfaceVariant,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        const SizedBox(height: 1),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: AlignmentDirectional.centerStart,
-          child: Text(
-            '${ListingDateDisplay.formatCardDateTime(r.sortTime, isAr: isAr)} • ${timeAgo(r.sortTime, isAr)}',
-            maxLines: 1,
-            softWrap: false,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: cs.onSurfaceVariant,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
         ),
       ],
     );
 
     final requestFooter = LayoutBuilder(
       builder: (context, c) {
+        if (canSubmitOffer &&
+            dealSubscriptionBlocked &&
+            !request.isInstantPaid &&
+            onSubscribeForDeal != null) {
+          return SubscriptionGateAlertChip(
+            isAr: isAr,
+            action: SubscriptionGateAction.completeMarketDeal,
+            onSubscribe: onSubscribeForDeal!,
+            compact: true,
+          );
+        }
         final mainAction = canSubmitOffer
             ? ElevatedButton.icon(
-              onPressed: onSubmitOffer ?? onOpen,
-              icon: const Icon(Icons.local_offer_outlined, size: 18),
-              label: Text(
-                isAr ? 'تقديم عرض' : 'Submit offer',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: bankColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                onPressed: onSubmitOffer ?? onOpen,
+                icon: const Icon(Icons.handshake_outlined, size: 18),
+                label: Text(
+                  isAr ? 'إتمام الصفقة' : 'Complete deal',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
-              ),
-            )
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0B4D3E),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 50),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  elevation: 2,
+                  shadowColor: const Color(0xFF0B4D3E).withValues(alpha: 0.35),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              )
             : OutlinedButton.icon(
-              onPressed: onOpen,
-              icon: const Icon(Icons.open_in_new, size: 18),
-              label: Text(
-                isAr ? 'تفاصيل الطلب' : 'Request details',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                onPressed: onOpen,
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: Text(
+                  isAr ? 'تفاصيل الطلب' : 'Request details',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
                 ),
-              ),
-            );
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              );
         final editAction = isRequester && onEditMarketRequest != null
             ? OutlinedButton.icon(
                 onPressed: () => unawaited(onEditMarketRequest!(r)),
@@ -1614,7 +2014,8 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
                 ),
               )
             : null;
-        if (editAction == null) return SizedBox(width: double.infinity, child: mainAction);
+        if (editAction == null)
+          return SizedBox(width: double.infinity, child: mainAction);
         if (c.maxWidth < 420) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1631,119 +2032,135 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
       },
     );
 
-    PopupMenuItem<String> requestMenuItem({
-      required String value,
-      required IconData icon,
-      required String label,
-      required Color color,
-    }) {
-      return PopupMenuItem<String>(
-        value: value,
-        height: 48,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 190),
-          child: Row(
-            children: [
-              Icon(icon, size: 22, color: color),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     final imageStack = Stack(
       fit: StackFit.expand,
       children: [
-        LayoutBuilder(
-          builder: (context, c) {
-            final side = c.maxHeight.isFinite ? c.maxHeight : c.maxWidth;
-            return MarketRequestLeadThumb(
-              storagePath: r.coverImageStoragePath,
-              width: side,
-              height: side,
-              borderRadius: 0,
-            );
-          },
-        ),
-        ListingWatermarkOverlay(
-          traceId: wmTail(r.id),
-          isAr: isAr,
-          headline: isAr ? 'طلب عقاري' : 'Property request',
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                Colors.black.withOpacity(0.5),
-                Colors.transparent,
-              ],
+        // رأس مميّز للطلب (بدون صورة مشروع) ليفرق عن بطاقة الإعلان العقاري.
+        ColoredBox(
+          color: theme.brightness == Brightness.dark
+              ? const Color(0xFF3B2114)
+              : const Color(0xFFFFF4EC),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topRight,
+                end: Alignment.bottomLeft,
+                colors: theme.brightness == Brightness.dark
+                    ? const [
+                        Color(0xFF4A2818),
+                        Color(0xFF2A1810),
+                      ]
+                    : const [
+                        Color(0xFFFFF7ED),
+                        Color(0xFFFFEDD5),
+                      ],
+              ),
+            ),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEA580C).withValues(alpha: 0.14),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color:
+                              const Color(0xFFEA580C).withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.assignment_turned_in_outlined,
+                        size: 28,
+                        color: Color(0xFFEA580C),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      isAr ? 'طلب عقاري' : 'Property request',
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                        fontFamily: 'Cairo',
+                        color: theme.brightness == Brightness.dark
+                            ? const Color(0xFFFFEDD5)
+                            : const Color(0xFF9A3412),
+                      ),
+                    ),
+                    if (purposeShort.trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        purposeShort.trim(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                          fontFamily: 'Cairo',
+                          color: theme.brightness == Brightness.dark
+                              ? const Color(0xFFFDBA74)
+                              : const Color(0xFFC2410C),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
+        if (InstantMarketRequestFeed.showsPaidPriorityChrome(r)) ...[
+          // بداية الاتجاه — بعيداً عن قائمة ⋮ في النهاية حتى لا يغطي النبض الثلاث نقاط.
+          PositionedDirectional(
+            top: 8,
+            start: 10,
+            child: CardImagePulseBadge(
+              label: _paidPriorityBadgeLabel(r, isAr),
+              color: r.isInstantPaid
+                  ? const Color(0xFF0B4D3E)
+                  : const Color(0xFFDA3E27),
+              icon: r.isInstantPaid
+                  ? Icons.workspace_premium_rounded
+                  : Icons.bolt_rounded,
+              prominent: true,
+            ),
+          ),
+        ],
         if (showMenu)
           PositionedDirectional(
             top: 8,
             end: 8,
-            child: Material(
-              color: Colors.black.withOpacity(0.45),
-              shape: const CircleBorder(),
-              clipBehavior: Clip.antiAlias,
-              child: PopupMenuButton<String>(
-                padding: EdgeInsets.zero,
-                iconSize: 20,
-                icon:
-                    const Icon(Icons.more_vert, color: Colors.white, size: 20),
-                color: cs.surface,
-                elevation: 2,
-                onSelected: (v) {
-                  if (v == 'restore') {
-                    unawaited(onRestoreMarketRequest!(r));
-                  } else if (v == 'hide') {
-                    unawaited(onHomeHideMarketRequest!(r));
-                  } else if (v == 'report') {
-                    unawaited(onHomeReportMarketRequest!(r));
-                  }
-                },
-                itemBuilder: (ctx) => [
-                  if (homeFeedShowsHiddenOnly && onRestoreMarketRequest != null)
-                    requestMenuItem(
-                      value: 'restore',
-                      icon: Icons.visibility_rounded,
-                      label: isAr ? 'إظهار في الرئيسية' : 'Show on home',
-                      color: cs.primary,
-                    )
-                  else ...[
-                    if (onHomeHideMarketRequest != null)
-                      requestMenuItem(
-                        value: 'hide',
-                        icon: Icons.visibility_off_outlined,
-                        label: isAr ? 'إخفاء من الرئيسية' : 'Hide from home',
-                        color: cs.onSurface,
-                      ),
-                    if (onHomeReportMarketRequest != null)
-                      requestMenuItem(
-                        value: 'report',
-                        icon: Icons.flag_outlined,
-                        label: isAr ? 'إبلاغ' : 'Report',
-                        color: cs.error,
-                      ),
-                  ],
-                ],
-              ),
+            child: MarketRequestPublicActionsMenuButton(
+              colorScheme: cs,
+              homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
+              onCopyLink: onCopyMarketRequestWebLink == null
+                  ? null
+                  : () => onCopyMarketRequestWebLink!(r),
+              onShare: onShareMarketRequestFromCard == null
+                  ? null
+                  : () => onShareMarketRequestFromCard!(r),
+              onHideFromHome:
+                  homeFeedShowsHiddenOnly || onHomeHideMarketRequest == null
+                      ? null
+                      : () => onHomeHideMarketRequest!(r),
+              onReport:
+                  homeFeedShowsHiddenOnly || onHomeReportMarketRequest == null
+                      ? null
+                      : () => onHomeReportMarketRequest!(r),
+              onRestoreToHome:
+                  !homeFeedShowsHiddenOnly || onRestoreMarketRequest == null
+                      ? null
+                      : () => onRestoreMarketRequest!(r),
             ),
           ),
       ],
@@ -1755,15 +2172,26 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         typeAccent: typeAccent,
         purposeAccent: purposeAccent,
         borderHint: borderColor,
-        borderStrong: _marketRequestBorderAccent(r, cs, purposeAccent),
-        borderWidth: 1.38,
+        borderStrong: InstantMarketRequestFeed.showsPaidPriorityChrome(r)
+            ? const Color(0xFFDFB230)
+            : Color.alphaBlend(
+                cs.outlineVariant.withValues(alpha: 0.7),
+                borderColor,
+              ),
+        borderWidth:
+            InstantMarketRequestFeed.showsPaidPriorityChrome(r) ? 2.2 : 1.15,
+        emphasizePaid: InstantMarketRequestFeed.showsPaidPriorityChrome(r),
       ),
       isAr: isAr,
       kind: UnifiedCardKind.request,
       onCardTap: onOpen,
       cardRadius: _kHomeCardRadius,
+      fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
+      // جوال/ضيق: صورة أعلى بعرض البطاقة وارتفاع مريح ثم البيانات تحتها.
+      heroAspectRatio: _homeListingHeroAspectRatio(context, isRequest: true),
       dataColumn: dataColumn,
       imageColumn: imageStack,
+      belowMainRow: null,
       footer: requestFooter,
     );
   }
@@ -1775,6 +2203,8 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
 
 class _PropertyGrid extends StatelessWidget {
   final List<Property> items;
+  final ScrollController? scrollController;
+  final bool primaryScroll;
   final String currentUserId;
   final bool isAr;
   final Color bankColor;
@@ -1806,6 +2236,7 @@ class _PropertyGrid extends StatelessWidget {
   final Future<void> Function(Property p)? onCopyListingWebLink;
 
   final bool suppressPublicOwnerIdentityOnCards;
+  final bool showRegulatoryIdentityOnCards;
   final Future<void> Function(Property p)? onShareListingFromCard;
 
   final Future<void> Function(Property p)? onHomeHideFromFeed;
@@ -1817,6 +2248,8 @@ class _PropertyGrid extends StatelessWidget {
 
   const _PropertyGrid({
     required this.items,
+    this.scrollController,
+    this.primaryScroll = false,
     required this.currentUserId,
     required this.isAr,
     required this.bankColor,
@@ -1837,6 +2270,7 @@ class _PropertyGrid extends StatelessWidget {
     this.showListingQuickActions = false,
     this.onCopyListingWebLink,
     this.suppressPublicOwnerIdentityOnCards = false,
+    this.showRegulatoryIdentityOnCards = true,
     this.onShareListingFromCard,
     this.onHomeHideFromFeed,
     this.onHomeReportListing,
@@ -1845,13 +2279,7 @@ class _PropertyGrid extends StatelessWidget {
     this.onWithdrawPropertyReport,
   });
 
-  int _crossAxisCount(double w) {
-    if (w < 600) return 1;
-    if (w < 980) return 2;
-    if (w < 1250) return 3;
-    if (w < 1550) return 4;
-    return 5;
-  }
+  int _crossAxisCount(double w) => _homeListingGridCrossAxisCount(w);
 
   @override
   Widget build(BuildContext context) {
@@ -1862,72 +2290,7 @@ class _PropertyGrid extends StatelessWidget {
         // ضيق العرض (ويب أو تطبيق): عمود واحد؛ عرض أوسع: شبكة تتكيّف بعدد الأعمدة.
         final isPhone = w < 600;
 
-        if (isPhone) {
-          final tiles = <Widget>[];
-          for (var i = 0; i < items.length; i++) {
-            if (i > 0) tiles.add(const SizedBox(height: 12));
-            final p = items[i];
-            final isOwner = p.ownerId == currentUserId;
-            final isGuest = currentUserId == 'guest';
-            final allowCart = ListingPermissionsHelper.canAddToCart(
-              property: p,
-              currentUserId: isGuest ? null : currentUserId,
-              isGuest: isGuest,
-              showCartNavSlot: canShowCartButton,
-            );
-
-            tiles.add(
-              _RealEstateCard(
-                property: p,
-                isOwner: isOwner,
-                isAr: isAr,
-                bankColor: bankColor,
-                favorite: !isGuest && isFav(p.id),
-                onToggleFav: () => onToggleFav(p.id),
-                onOpenDetails: () => onOpenDetails(p),
-                activeCartHoldsCount: activeHoldCount(p.id),
-                isReserved: isReserved(p.id),
-                reservedUntil: reservedUntil(p.id),
-                reservedByName: reservedByName(p.id),
-                onAddToCart: allowCart ? () => onAddToCart(p) : null,
-                currentUserId: currentUserId,
-                showEditDelete: showEditDelete && isOwner,
-                onEditProperty: () => onEditProperty(p),
-                onDeleteProperty: () => onDeleteProperty(p),
-                timeAgo: timeAgo,
-                forceListLayout: true,
-                canShowCartButton: canShowCartButton,
-                onViewsPillTap: onPropertyViewsInteraction == null
-                    ? null
-                    : (ctx) => onPropertyViewsInteraction!(ctx, p, isOwner),
-                showListingQuickActions: showListingQuickActions,
-                onCopyListingWebLink: onCopyListingWebLink,
-                suppressPublicOwnerIdentity: suppressPublicOwnerIdentityOnCards,
-                onShareListingFromCard: onShareListingFromCard == null
-                    ? null
-                    : () => onShareListingFromCard!(p),
-                onHomeHideFromFeed: onHomeHideFromFeed,
-                onHomeReportListing: onHomeReportListing,
-                homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
-                onRestorePropertyToHome: onRestorePropertyToHome,
-                onWithdrawPropertyReport: onWithdrawPropertyReport,
-              ),
-            );
-          }
-          return Padding(
-            padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: tiles,
-            ),
-          );
-        }
-
-        final cross = _crossAxisCount(w);
-        const spacing = 12.0;
-
-        Widget cardFor(Property p) {
+        Widget listingCard(Property p) {
           final isOwner = p.ownerId == currentUserId;
           final isGuest = currentUserId == 'guest';
           final allowCart = ListingPermissionsHelper.canAddToCart(
@@ -1955,7 +2318,6 @@ class _PropertyGrid extends StatelessWidget {
             onEditProperty: () => onEditProperty(p),
             onDeleteProperty: () => onDeleteProperty(p),
             timeAgo: timeAgo,
-            forceListLayout: false,
             canShowCartButton: canShowCartButton,
             onViewsPillTap: onPropertyViewsInteraction == null
                 ? null
@@ -1963,6 +2325,9 @@ class _PropertyGrid extends StatelessWidget {
             showListingQuickActions: showListingQuickActions,
             onCopyListingWebLink: onCopyListingWebLink,
             suppressPublicOwnerIdentity: suppressPublicOwnerIdentityOnCards,
+            showRegulatoryIdentityOnCard:
+                showRegulatoryIdentityOnCards && currentUserId != 'guest',
+            omitMarketingLicenseEntriesOnCard: true,
             onShareListingFromCard: onShareListingFromCard == null
                 ? null
                 : () => onShareListingFromCard!(p),
@@ -1971,10 +2336,83 @@ class _PropertyGrid extends StatelessWidget {
             homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
             onRestorePropertyToHome: onRestorePropertyToHome,
             onWithdrawPropertyReport: onWithdrawPropertyReport,
+            preferStaticPrimaryImage: true,
           );
         }
 
+        if (isPhone) {
+          if (primaryScroll) {
+            return ListView.separated(
+              controller: scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
+              cacheExtent: kIsWeb ? 360 : 250,
+              itemCount: items.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, i) => listingCard(items[i]),
+            );
+          }
+
+          final tiles = <Widget>[];
+          for (var i = 0; i < items.length; i++) {
+            if (i > 0) tiles.add(const SizedBox(height: 12));
+            tiles.add(listingCard(items[i]));
+          }
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: tiles,
+            ),
+          );
+        }
+
+        final cross = _crossAxisCount(w);
+        const spacing = 12.0;
+        final equalH = _homeListingGridEqualCardHeight(
+          maxWidth: w,
+          crossAxisCount: cross,
+          horizontalPadding: paddingH * 2,
+          spacing: spacing,
+        );
+
         // بدون GridView بنسبة ارتفاع ثابتة (كانت تُفرغ أسفل البطاقة على الويب)
+        final rowCount = (items.length + cross - 1) ~/ cross;
+        if (primaryScroll) {
+          return ListView.separated(
+            controller: scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
+            cacheExtent: kIsWeb ? 360 : 250,
+            itemCount: rowCount,
+            separatorBuilder: (_, __) => const SizedBox(height: spacing),
+            itemBuilder: (context, row) {
+              final start = row * cross;
+              return IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var j = 0; j < cross; j++) ...[
+                      if (j > 0) SizedBox(width: spacing),
+                      Expanded(
+                        child: start + j < items.length
+                            ? _wrapEqualGridCardHeight(
+                                height: equalH,
+                                child: listingCard(items[start + j]),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          );
+        }
+
         final rowChildren = <Widget>[];
         for (var start = 0; start < items.length; start += cross) {
           if (rowChildren.isNotEmpty) {
@@ -1984,18 +2422,23 @@ class _PropertyGrid extends StatelessWidget {
               start + cross > items.length ? items.length : start + cross;
           final chunk = items.sublist(start, end);
           rowChildren.add(
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var j = 0; j < cross; j++) ...[
-                  if (j > 0) SizedBox(width: spacing),
-                  Expanded(
-                    child: j < chunk.length
-                        ? cardFor(chunk[j])
-                        : const SizedBox.shrink(),
-                  ),
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var j = 0; j < cross; j++) ...[
+                    if (j > 0) SizedBox(width: spacing),
+                    Expanded(
+                      child: j < chunk.length
+                          ? _wrapEqualGridCardHeight(
+                              height: equalH,
+                              child: listingCard(chunk[j]),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           );
         }
@@ -2036,7 +2479,6 @@ class _RealEstateCard extends StatelessWidget {
   final bool showEditDelete;
   final VoidCallback? onEditProperty;
   final VoidCallback? onDeleteProperty;
-  final bool forceListLayout;
   final String Function(DateTime, bool) timeAgo;
 
   // ✅ NEW
@@ -2068,6 +2510,21 @@ class _RealEstateCard extends StatelessWidget {
   /// «صفحتي» — عرض النصوص كاملة دون ellipsis حيث يلزم.
   final bool relaxTextTruncation;
 
+  /// الرئيسية/المنشور: سطر الوسيط + فال/REGA من لقطة الترخيص. قبل النشر في «صفحتي»: إخفاؤها وإبقاء المعلن (ومع [isOwner] يُعرض جوال المعلن تحت الاسم عند توفره).
+  final bool showRegulatoryIdentityOnCard;
+
+  /// الرئيسية: عرض الصورة الأولى فقط بدون تمرير/نقاط؛ يقلل العمل وتسرّع التحميل.
+  final bool preferStaticPrimaryImage;
+
+  /// تبويب «صفحتي» — إعلانات المالك: هوية المالك قبل النشر ثم الوسيط والترخيص بعد النشر.
+  final bool ownerHubListingCard;
+
+  /// «صفحتي»: إخفاء أسطر رقم فال / رقم إعلان الهيئة مع الإبقاء على سطر الوسيط.
+  final bool omitMarketingLicenseEntriesOnCard;
+
+  /// محتوى داخل البطاقة تحت صف البيانات+الصورة (مراحل التسويق، أزرار واضحة).
+  final Widget? cardBelowMainRow;
+
   const _RealEstateCard({
     required this.property,
     required this.isOwner,
@@ -2086,7 +2543,6 @@ class _RealEstateCard extends StatelessWidget {
     this.showEditDelete = false,
     this.onEditProperty,
     this.onDeleteProperty,
-    this.forceListLayout = false,
     this.canShowCartButton = true,
     this.onViewsPillTap,
     this.showListingQuickActions = false,
@@ -2100,6 +2556,11 @@ class _RealEstateCard extends StatelessWidget {
     this.onRestorePropertyToHome,
     this.onWithdrawPropertyReport,
     this.relaxTextTruncation = false,
+    this.showRegulatoryIdentityOnCard = true,
+    this.preferStaticPrimaryImage = false,
+    this.ownerHubListingCard = false,
+    this.omitMarketingLicenseEntriesOnCard = false,
+    this.cardBelowMainRow,
   });
 
   Future<void> _copyValue(BuildContext context, String value) async {
@@ -2116,14 +2577,101 @@ class _RealEstateCard extends StatelessWidget {
   }
 
   Widget _copyInlineIcon(BuildContext context, String value) {
+    final cs = Theme.of(context).colorScheme;
     return IconButton(
-      tooltip: isAr ? 'نسخ' : 'Copy',
+      tooltip: 'Copy',
       visualDensity: VisualDensity.compact,
-      constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+      constraints: const BoxConstraints.tightFor(width: 28, height: 28),
       padding: EdgeInsets.zero,
-      iconSize: 16,
-      icon: const Icon(Icons.copy_rounded),
+      iconSize: 15,
       onPressed: () => unawaited(_copyValue(context, value)),
+      icon: Icon(Icons.copy_rounded, size: 15, color: cs.primary),
+    );
+  }
+
+  /// فال + رقم الإعلان + إعلان الهيئة — رقم ونسخ واضحان على الجوال والويب.
+  Widget _elegantLicenseCopyGrid(
+    BuildContext context, {
+    required ThemeData theme,
+    required ColorScheme cs,
+    required List<Map<String, String>> entries,
+  }) {
+    final shown = entries.take(3).toList(growable: false);
+    if (shown.isEmpty) return const SizedBox.shrink();
+    final isDark = cs.brightness == Brightness.dark;
+    final labelColor = isDark ? cs.onSurfaceVariant : const Color(0xFF1A3A32);
+    final valueColor = isDark ? cs.onSurface : const Color(0xFF041D18);
+
+    Widget tile(Map<String, String> e) {
+      final label = (e['label'] ?? '').trim();
+      final value = (e['value'] ?? '').trim();
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 4, 8),
+        decoration: BoxDecoration(
+          color: isDark
+              ? cs.surfaceContainerHighest.withValues(alpha: 0.7)
+              : const Color(0xFFE8F3F0),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color:
+                AqarBrandColors.primary.withValues(alpha: isDark ? 0.45 : 0.28),
+            width: 1.2,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: labelColor,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'Cairo',
+                fontSize: 11,
+                height: 1.05,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Text(
+                    value,
+                    maxLines: 2,
+                    softWrap: true,
+                    overflow: TextOverflow.visible,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: valueColor,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Cairo',
+                      fontSize: 13,
+                      height: 1.15,
+                      letterSpacing: 0.15,
+                    ),
+                  ),
+                ),
+                _copyInlineIcon(context, value),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    // عمود واحد دائماً حتى يظهر الرقم كاملاً على الجوال والويب الضيق.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < shown.length; i++) ...[
+          if (i > 0) const SizedBox(height: 6),
+          tile(shown[i]),
+        ],
+      ],
     );
   }
 
@@ -2159,15 +2707,47 @@ class _RealEstateCard extends StatelessWidget {
     if (s.isNotEmpty) return s;
     final publishedBy = (p.publishedByMarketerId ?? '').trim();
     if (publishedBy.isEmpty) return null;
-    return isAr ? 'مسوق عقاري معتمد' : 'Licensed real estate marketer';
+    return null;
+  }
+
+  /// تسمية دور الجهة الظاهرة على البطاقة (مسوّق / مكتب / مؤسسة / شركة).
+  static String marketerRoleCaption(Property p, bool isAr) {
+    final snap = p.marketingLicenseSnapshot ?? const <String, dynamic>{};
+    final raw = (snap['marketer_entity_type'] ??
+            snap['entity_type'] ??
+            snap['organization_type'] ??
+            snap['broker_entity_type'] ??
+            '')
+        .toString()
+        .toLowerCase()
+        .trim();
+    if (raw.contains('office') ||
+        raw.contains('مكتب') ||
+        raw == 'broker_office') {
+      return isAr ? 'مكتب عقاري' : 'Real estate office';
+    }
+    if (raw.contains('company') ||
+        raw.contains('شركة') ||
+        raw == 'broker_company') {
+      return isAr ? 'شركة عقارية' : 'Real estate company';
+    }
+    if (raw.contains('institution') ||
+        raw.contains('establishment') ||
+        raw.contains('مؤسسة') ||
+        raw == 'broker_institution') {
+      return isAr ? 'مؤسسة عقارية' : 'Real estate establishment';
+    }
+    if ((p.publishedByMarketerId ?? '').trim().isNotEmpty) {
+      return isAr ? 'منشور بواسطة المسوق' : 'Published by marketer';
+    }
+    return isAr ? 'المعلن' : 'Advertiser';
   }
 
   static List<Map<String, String>> listingLicenseEntries(
     Property p,
     bool isAr,
   ) {
-    final snap = p.marketingLicenseSnapshot;
-    if (snap == null || snap.isEmpty) return const [];
+    final snap = p.marketingLicenseSnapshot ?? const <String, dynamic>{};
 
     String pick(List<String> keys) {
       for (final key in keys) {
@@ -2177,6 +2757,12 @@ class _RealEstateCard extends StatelessWidget {
       return '';
     }
 
+    final falLicense = pick(const [
+      'fal_broker_license_number',
+      'fal_license_number',
+      'broker_license_number',
+      'brokerage_license_number',
+    ]);
     final adLicense = pick(const [
       'rega_ad_license_number',
       'ad_license_number',
@@ -2184,23 +2770,42 @@ class _RealEstateCard extends StatelessWidget {
       'advertising_license_number',
       'license_number',
     ]);
-    final falLicense = pick(const [
-      'fal_broker_license_number',
-      'fal_license_number',
-      'broker_license_number',
-      'brokerage_license_number',
-    ]);
+    final listingCode = (p.listingPublicCode ?? '').trim();
+    final listingDisplay =
+        listingCode.isEmpty ? '' : DisplayIds.tenDigit(listingCode);
+    final deedNo = (p.deedNumber ?? '').trim();
+    String deedDateStr = '';
+    if (p.deedDate != null) {
+      final d = p.deedDate!;
+      deedDateStr =
+          '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    }
 
     return [
       if (falLicense.isNotEmpty)
         {
-          'label': isAr ? 'رقم رخصة فال' : 'FAL license no.',
+          'label': isAr ? 'رخصة فال' : 'FAL',
           'value': falLicense,
+        },
+      if (listingDisplay.isNotEmpty)
+        {
+          'label': isAr ? 'رقم الإعلان' : 'Listing no.',
+          'value': listingDisplay,
         },
       if (adLicense.isNotEmpty)
         {
-          'label': isAr ? 'رقم إعلان الهيئة' : 'REGA ad no.',
+          'label': isAr ? 'إعلان الهيئة' : 'REGA ad',
           'value': adLicense,
+        },
+      if (deedNo.isNotEmpty)
+        {
+          'label': isAr ? 'رقم الصك' : 'Deed no.',
+          'value': deedNo,
+        },
+      if (deedDateStr.isNotEmpty)
+        {
+          'label': isAr ? 'تاريخ الصك' : 'Deed date',
+          'value': deedDateStr,
         },
     ];
   }
@@ -2212,41 +2817,107 @@ class _RealEstateCard extends StatelessWidget {
   }
 
   /// وقت إنشاء الإعلان من المالك، ووقت النشر عند توفره (من جهة التسويق).
+  /// يُعرض داخل عمود البيانات بجانب الصورة — ليس تحتها.
   static Widget listingCardCreatedPublishedTimes({
+    required BuildContext context,
     required Property property,
     required bool isAr,
     required TextStyle style,
     bool relaxClamp = false,
     String Function(DateTime, bool)? relativeTime,
+    bool compactInline = true,
   }) {
-    final createdAt = property.createdAt;
+    final cs = Theme.of(context).colorScheme;
+    final createdAt = property.publishedAt ?? property.createdAt;
     final abs = ListingDateDisplay.formatCardDateTime(
       createdAt,
       isAr: isAr,
     );
     final rel = relativeTime?.call(createdAt, isAr).trim() ?? '';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          isAr ? 'تاريخ ووقت الإنشاء' : 'Created date and time',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: style.copyWith(fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 2),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: AlignmentDirectional.centerStart,
-          child: Text(
-            rel.isEmpty ? abs : '$abs • $rel',
-            maxLines: 1,
-            softWrap: false,
-            style: style.copyWith(fontWeight: FontWeight.w800),
+    final clock = abs.isEmpty ? '' : (rel.isEmpty ? abs : '$abs  ·  $rel');
+    if (compactInline) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.schedule_rounded,
+            size: 14,
+            color: cs.primary,
           ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              clock.isNotEmpty
+                  ? (isAr ? 'تاريخ الإعلان: $clock' : 'Listed: $clock')
+                  : (isAr ? 'تاريخ الإعلان: —' : 'Listed: —'),
+              maxLines: 2,
+              softWrap: true,
+              overflow: TextOverflow.ellipsis,
+              style: style.copyWith(
+                fontWeight: FontWeight.w800,
+                fontFamily: 'Cairo',
+                color: clock.isNotEmpty ? cs.onSurface : cs.onSurfaceVariant,
+                height: 1.25,
+                fontSize: (style.fontSize ?? 12) * 0.95,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    final isDark = cs.brightness == Brightness.dark;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: isDark ? cs.surfaceContainerHighest : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? cs.outlineVariant : const Color(0xFFE5E7EB),
         ),
-      ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                size: 13,
+                color: isDark ? cs.primary : AqarBrandColors.primary,
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(
+                  isAr ? 'تاريخ ووقت الإعلان' : 'Listing date and time',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style.copyWith(
+                    fontWeight: FontWeight.w900,
+                    fontFamily: 'Cairo',
+                    color: cs.onSurface,
+                    fontSize: (style.fontSize ?? 11) * 0.95,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            clock.isNotEmpty ? clock : (isAr ? '—' : '—'),
+            maxLines: 2,
+            softWrap: true,
+            overflow: TextOverflow.ellipsis,
+            style: style.copyWith(
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Cairo',
+              color: clock.isNotEmpty ? cs.primary : cs.onSurfaceVariant,
+              height: 1.25,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -2298,25 +2969,103 @@ class _RealEstateCard extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         _PropertyImage(
-          urls: property.images,
+          urls: PropertyListingDisplay.propertyCardImagePaths(property),
           fit: BoxFit.cover,
           videoPathOrUrl: property.videoUrl,
           isAr: isAr,
           allowInlineVideo: !kIsWeb,
           listingIdForWatermark: property.id,
+          preferStaticPrimaryImage: preferStaticPrimaryImage,
         ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                Colors.black.withOpacity(0.14),
-                Colors.transparent,
-              ],
+        if (property.isAuction)
+          Positioned(
+            bottom: 8,
+            left: isAr ? null : 8,
+            right: isAr ? 8 : null,
+            child: CardImagePulseBadge(
+              label: isAr ? 'مزايدة' : 'Auction',
+              color: const Color(0xFFEA580C),
+              icon: Icons.gavel_rounded,
             ),
           ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: kIsWeb ? Colors.black.withOpacity(0.08) : null,
+            gradient: kIsWeb
+                ? null
+                : LinearGradient(
+                    begin: Alignment.bottomCenter,
+                    end: Alignment.topCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.14),
+                      Colors.transparent,
+                    ],
+                  ),
+          ),
         ),
+        // قلب المفضلة — ظاهر وفعّال لكل الإعلانات غير المكتملة (بما فيها الضيف → حوار الدخول).
+        if (!_listingCompletedDealForFavorites(property))
+          PositionedDirectional(
+            top: 8,
+            start: 8,
+            child: Material(
+              elevation: 3,
+              color: Colors.black.withValues(alpha: 0.48),
+              shape: const CircleBorder(),
+              clipBehavior: Clip.antiAlias,
+              child: IconButton(
+                tooltip: favorite
+                    ? (isAr ? 'إزالة من المفضلة' : 'Remove favorite')
+                    : (isAr ? 'إضافة للمفضلة' : 'Add to favorites'),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 36,
+                  height: 36,
+                ),
+                iconSize: 20,
+                onPressed: onToggleFav,
+                icon: Icon(
+                  favorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: favorite ? const Color(0xFFEF4444) : Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+        // عدد الصور أسفل منتصف الصورة.
+        if (PropertyListingDisplay.propertyCardImagePaths(property).length > 1)
+          Positioned(
+            bottom: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.photo_camera_outlined,
+                        size: 12, color: Colors.white),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${PropertyListingDisplay.propertyCardImagePaths(property).length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         if (showOwnerOverflow)
           PositionedDirectional(
             top: 8,
@@ -2457,11 +3206,9 @@ class _RealEstateCard extends StatelessWidget {
                 onShowViews: onViewsPillTap == null
                     ? null
                     : () async => onViewsPillTap!(context),
-                onToggleFavorite: loggedIn && !isOwner
-                    ? () async {
-                        onToggleFav();
-                      }
-                    : null,
+                onToggleFavorite: () async {
+                  onToggleFav();
+                },
                 onHideFromHome:
                     hasHide ? () => onHomeHideFromFeed!(property) : null,
                 onReport:
@@ -2481,196 +3228,125 @@ class _RealEstateCard extends StatelessWidget {
     );
   }
 
-  Widget _imageBlock(
-    BuildContext context, {
-    required bool horizontal,
-  }) {
-    final cs = Theme.of(context).colorScheme;
-    final allowReport =
-        ListingPermissionsHelper.shouldOfferPublicListingReport(property);
-    final loggedIn = currentUserId != 'guest';
-    final isGuest = currentUserId == 'guest';
-
-    final hasCopy = onCopyListingWebLink != null;
-    final hasShare = onShareListingFromCard != null;
-    final hasHide =
-        !isOwner && !homeFeedShowsHiddenOnly && onHomeHideFromFeed != null;
-    final hasReport = !isOwner &&
-        !homeFeedShowsHiddenOnly &&
-        allowReport &&
-        onHomeReportListing != null;
-    final hasHiddenFeedActions = homeFeedShowsHiddenOnly &&
-        loggedIn &&
-        !isOwner &&
-        (onRestorePropertyToHome != null || onWithdrawPropertyReport != null);
-
-    final showListingOverflowMenu = hasCopy ||
-        hasShare ||
-        hasHide ||
-        hasReport ||
-        hasHiddenFeedActions ||
-        onViewsPillTap != null ||
-        (isOwner && loggedIn && (hasShare || hasCopy)) ||
-        (isGuest && (hasCopy || hasShare));
-
-    return ClipRRect(
-      borderRadius: horizontal
-          ? const BorderRadiusDirectional.horizontal(
-              start: Radius.circular(_kHomeCardRadius),
-              end: Radius.circular(0),
-            )
-          : const BorderRadius.vertical(top: Radius.circular(_kHomeCardRadius)),
-      child: Stack(
-        fit: StackFit.expand,
+  List<Widget> _ownerHubPrePublishIdentitySlice(
+    BuildContext context,
+    ThemeData theme,
+    ColorScheme cs,
+    double layoutWidth,
+  ) {
+    final ownerDisp = ownerNameForCard(
+      property,
+      isAr,
+      layoutWidth,
+      viewingAsPropertyOwner: true,
+      suppressPublicOwnerIdentity: false,
+      showFullOwnerLegalNameOnCard: true,
+    );
+    final ph = (property.ownerPhone ?? '').trim();
+    return [
+      const SizedBox(height: 4),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _PropertyImage(
-            urls: property.images,
-            fit: BoxFit.cover,
-            videoPathOrUrl: property.videoUrl,
-            isAr: isAr,
-            allowInlineVideo: !kIsWeb,
-            listingIdForWatermark: property.id,
+          Padding(
+            padding: const EdgeInsetsDirectional.only(end: 6),
+            child: Icon(Icons.person_outline, size: 20, color: bankColor),
           ),
-          DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [
-                  Colors.black.withOpacity(0.14),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-          ),
-          PositionedDirectional(
-            top: 8,
-            end: 8,
-            child: Row(
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (showListingOverflowMenu)
-                  ListingPublicActionsMenuButton(
-                    property: property,
-                    colorScheme: cs,
-                    homeFeedShowsHiddenOnly: homeFeedShowsHiddenOnly,
-                    onCopyLink:
-                        hasCopy ? () => onCopyListingWebLink!(property) : null,
-                    onShare: hasShare ? () => onShareListingFromCard!() : null,
-                    onShowViews: onViewsPillTap == null
-                        ? null
-                        : () async => onViewsPillTap!(context),
-                    onToggleFavorite: loggedIn && !isOwner
-                        ? () async {
-                            onToggleFav();
-                          }
-                        : null,
-                    onHideFromHome:
-                        hasHide ? () => onHomeHideFromFeed!(property) : null,
-                    onReport:
-                        hasReport ? () => onHomeReportListing!(property) : null,
-                    onRestoreToHome: homeFeedShowsHiddenOnly &&
-                            onRestorePropertyToHome != null
-                        ? () => onRestorePropertyToHome!(property)
-                        : null,
-                    onWithdrawReport: homeFeedShowsHiddenOnly &&
-                            onWithdrawPropertyReport != null
-                        ? () => onWithdrawPropertyReport!(property)
-                        : null,
+                Text(
+                  isAr ? 'منشئ الطلب' : 'Request creator',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w800,
+                    height: 1.05,
                   ),
-              ],
-            ),
-          ),
-          if (showEditDelete &&
-              (onEditProperty != null || onDeleteProperty != null))
-            PositionedDirectional(
-              top: 8,
-              start: 8,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (onEditProperty != null)
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(999),
-                        onTap: onEditProperty,
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.8),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.25),
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.edit,
-                            color: Colors.white,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
-                  if (onDeleteProperty != null)
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(999),
-                        onTap: onDeleteProperty,
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: cs.error.withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.25),
-                            ),
-                          ),
-                          child: Icon(
-                            Icons.delete,
-                            color: cs.onError,
-                            size: 18,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          Positioned.fill(
-            child: IgnorePointer(
-              ignoring: true,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border.all(color: cs.outlineVariant.withOpacity(0.0)),
                 ),
-              ),
+                const SizedBox(height: 2),
+                Text(
+                  ownerDisp,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.start,
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                    height: 1.2,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
-    );
+      if (ph.isNotEmpty) ...[
+        const SizedBox(height: 2),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      isAr ? 'جوال منشئ الطلب' : "Creator's mobile",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w800,
+                        height: 1.05,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      ph,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _copyInlineIcon(context, ph),
+            ],
+          ),
+        ),
+      ],
+    ];
   }
 
-  Widget _metaChip({
-    required IconData icon,
-    required String text,
-    Color? color,
-  }) {
-    return _MiniChip(
-      icon: icon,
-      text: text,
-      color: color ?? bankColor,
-    );
+  /// شارة «منشور بواسطة المسوّق» + «متصل الآن» في الرئيسية فقط.
+  bool _showHomePublishedByMarketerBadge(bool ownerHubListingCard) {
+    if (ownerHubListingCard) return false;
+    final pubBy = (property.publishedByMarketerId ?? '').trim();
+    if (pubBy.isEmpty) return false;
+    if (pubBy == currentUserId.trim()) return false;
+    final st = property.effectiveWorkflowStage;
+    return st == ListingWorkflowStage.published ||
+        st == ListingWorkflowStage.reserved;
   }
 
   Widget _unifiedListCard(
     BuildContext context, {
     required ThemeData theme,
     required ColorScheme cs,
-    required String locationText,
+    required String
+        locationText, // ignored — hierarchy via PropertyListingDisplay
+
     required String? marketerLine,
     required String advertiserName,
     required double baseAmount,
@@ -2679,50 +3355,119 @@ class _RealEstateCard extends StatelessWidget {
     required bool canAddToCart,
     required bool canBidFromCard,
     bool relaxText = false,
+    String? ownerPhoneWhenBrokerHidden,
+    String peerPresenceId = '',
+    required double layoutWidth,
+    bool ownerHubListingCard = false,
+    Widget? belowMainRow,
+    bool omitMarketingLicenseEntries = false,
   }) {
-    final borderColor = theme.brightness == Brightness.light
+    final borderHint = theme.brightness == Brightness.light
         ? Colors.black.withOpacity(0.15)
         : Colors.white.withOpacity(0.15);
     final listingBorder = Color.lerp(
-      PropertyListingDisplay.accentColor(property),
-      typeAccent,
-      0.28,
-    )!;
+          PropertyListingDisplay.accentColor(property),
+          typeAccent,
+          0.28,
+        ) ??
+        typeAccent;
 
     final br = property.bedrooms;
-    final roomsText = br != null ? (isAr ? '$br غرف' : '$br br') : '';
-    final areaValue = AppMoney.formatNumber(
-      property.area,
-      isAr: isAr,
-      maxFractionDigits: 0,
-    );
-    final areaText = isAr ? '$areaValue م²' : '$areaValue m²';
+    final roomsText = br != null && br > 0 ? (isAr ? '$br غرف' : '$br br') : '';
+    final areaVal = property.area;
+    final areaText = areaVal > 0
+        ? (isAr
+            ? '${AppMoney.formatNumber(areaVal, isAr: isAr, maxFractionDigits: 0)} م²'
+            : '${AppMoney.formatNumber(areaVal, isAr: isAr, maxFractionDigits: 0)} m²')
+        : '';
     final licenseEntries = listingLicenseEntries(property, isAr);
+    final ownerPrePublish =
+        ownerHubListingCard && isOwner && marketerLine == null;
+    // عند وجود جهة تسويق لا نكرّر نفس الاسم تحت «منشئ الإعلان».
+    final hideAdvertiserRow = ownerPrePublish ||
+        marketerLine != null ||
+        (ownerHubListingCard && isOwner && marketerLine != null);
 
-    final int? textCap = relaxText ? null : 1;
-    final overflow = relaxText ? TextOverflow.visible : TextOverflow.ellipsis;
+    final compactHome =
+        !ownerHubListingCard && layoutWidth > 0 && layoutWidth < 420;
+    final gapSm = compactHome ? 2.0 : 4.0;
+    // لا نخفي الرخص/الصك على الشاشات الضيقة — نفس بيانات الويب.
+    final hideLicenses = omitMarketingLicenseEntries;
+    final listingTitle =
+        PropertyListingDisplay.displayListingTitle(property, isAr);
+    // موقع مختصر (مدينة/حي) — بدون تكرار ما في العنوان.
+    final locationParts = PropertyListingDisplay.locationPartsWithoutTitleEcho(
+      PropertyListingDisplay.locationHierarchyParts(property),
+      listingTitle,
+    );
+    final locationPin = locationParts.isEmpty
+        ? ''
+        : locationParts.length <= 2
+            ? locationParts.join('، ')
+            : locationParts.sublist(locationParts.length - 2).join('، ');
+    final extraChips = PropertyListingDisplay.diversifySpecChips(
+      property,
+      isAr,
+      max: 2,
+    );
 
     final dataColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (property.title.trim().isNotEmpty)
+        if (listingTitle.trim().isNotEmpty)
           Text(
-            property.title,
-            maxLines: textCap,
-            overflow: overflow,
+            listingTitle,
+            maxLines: 2,
+            softWrap: true,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.w900,
-              height: 1.15,
+              fontSize: 16,
+              height: 1.28,
+              letterSpacing: -0.15,
+              color: theme.brightness == Brightness.dark
+                  ? null
+                  : const Color(0xFF041D18),
+              fontFamily: 'Cairo',
             ),
           ),
-        if (property.title.trim().isNotEmpty) const SizedBox(height: 3),
+        SizedBox(height: gapSm + 1),
+        // السعر بارز مباشرة تحت العنوان (أسلوب بطاقة عالمي).
+        if (baseAmount > 0)
+          AppMoneyLine(
+            amount: baseAmount,
+            currencyCode: 'SAR',
+            isAr: isAr,
+            maxFractionDigits: 0,
+            symbolColor:
+                property.isAuction ? Colors.orange.shade800 : cs.primary,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: property.isAuction ? Colors.orange.shade800 : cs.onSurface,
+              fontFamily: 'Cairo',
+              fontSize: 18.5,
+              height: 1.15,
+            ),
+          )
+        else
+          Text(
+            isAr ? 'السعر عند الطلب' : 'Price on request',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: cs.onSurfaceVariant,
+              fontFamily: 'Cairo',
+              fontSize: 13.5,
+            ),
+          ),
         if (property.isAuction) ...[
-          const SizedBox(height: 4),
+          SizedBox(height: gapSm),
           Text(
             isAr ? 'مزايدة علنية' : 'Open auction',
-            maxLines: textCap,
-            overflow: overflow,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 12,
@@ -2730,19 +3475,42 @@ class _RealEstateCard extends StatelessWidget {
             ),
           ),
         ],
-        const SizedBox(height: 6),
+        SizedBox(height: gapSm + 2),
         UnifiedCardSpecRow(
           bankColor: bankColor,
           areaText: areaText,
           roomsText: roomsText,
-          districtText: locationText,
+          locationParts: const [],
+          extraChips: extraChips,
         ),
+        if (locationPin.isNotEmpty) ...[
+          SizedBox(height: gapSm),
+          Row(
+            children: [
+              Icon(Icons.place_outlined, size: 15, color: cs.onSurfaceVariant),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  locationPin,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurfaceVariant,
+                    fontFamily: 'Cairo',
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
         if (marketerLine != null) ...[
-          const SizedBox(height: 6),
+          SizedBox(height: gapSm),
           Align(
             alignment: AlignmentDirectional.centerStart,
             child: Row(
-              mainAxisSize: MainAxisSize.max,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (property.marketerBrandImagePublicUrl != null)
                   Padding(
@@ -2764,126 +3532,263 @@ class _RealEstateCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                Flexible(
-                  child: Text(
-                    isAr
-                        ? 'الوسيط العقاري: $marketerLine'
-                        : 'Real estate broker: $marketerLine',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.start,
-                    style: TextStyle(
-                      color: cs.onSurface,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (licenseEntries.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            for (final entry in licenseEntries.take(2))
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        '${entry['label']}: ${entry['value']}',
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isAr ? 'منشئ الإعلان' : 'Listing publisher',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: cs.onSurfaceVariant,
                           fontWeight: FontWeight.w800,
-                          height: 1.1,
+                          fontFamily: 'Cairo',
+                          height: 1.05,
+                          fontSize: 10.5,
                         ),
                       ),
-                    ),
-                    _copyInlineIcon(context, entry['value'] ?? ''),
-                  ],
-                ),
-              ),
-          ],
-        ],
-        if (advertiserName.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(
-              isAr ? 'المعلن: $advertiserName' : 'Advertiser: $advertiserName',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.start,
-              style: theme.textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ],
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.payments_outlined,
-              size: 17,
-              color:
-                  property.isAuction ? Colors.orange.shade800 : purposeAccent,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: AppMoneyLine(
-                amount: baseAmount,
-                currencyCode: 'SAR',
-                isAr: isAr,
-                maxFractionDigits: 0,
-                symbolColor:
-                    property.isAuction ? Colors.orange.shade800 : purposeAccent,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: property.isAuction
-                      ? Colors.orange.shade800
-                      : purposeAccent,
-                  fontSize: 15,
-                  height: 1.1,
-                ),
-              ),
-            ),
-          ],
-        ),
-        if ((property.listingPublicCode ?? property.id).trim().isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  isAr
-                      ? 'رقم الإعلان: ${DisplayIds.tenDigit(property.listingPublicCode ?? property.id)}'
-                      : 'Listing no.: ${DisplayIds.tenDigit(property.listingPublicCode ?? property.id)}',
-                  maxLines: textCap,
-                  overflow: overflow,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: cs.primary,
+                      if (marketerRoleCaption(property, isAr)
+                          .trim()
+                          .isNotEmpty) ...[
+                        const SizedBox(height: 1),
+                        Text(
+                          marketerRoleCaption(property, isAr),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: cs.primary,
+                            fontWeight: FontWeight.w800,
+                            fontFamily: 'Cairo',
+                            height: 1.05,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 2),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              (marketerLine ?? '').trim(),
+                              maxLines: 2,
+                              softWrap: true,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.start,
+                              style: TextStyle(
+                                color: theme.brightness == Brightness.dark
+                                    ? cs.onSurface
+                                    : const Color(0xFF041D18),
+                                fontWeight: FontWeight.w900,
+                                fontFamily: 'Cairo',
+                                fontSize: 13.5,
+                                height: 1.25,
+                                letterSpacing: -0.1,
+                              ),
+                            ),
+                          ),
+                          if (PropertyListingDisplay.showMarketerVerifiedBadge(
+                            property,
+                          ))
+                            const Padding(
+                              padding: EdgeInsetsDirectional.only(
+                                start: 4,
+                                top: 1,
+                              ),
+                              child: Icon(
+                                Icons.verified_rounded,
+                                size: 17,
+                                color: Color(0xFF10B981),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (peerPresenceId.trim().isNotEmpty ||
+                          _showHomePublishedByMarketerBadge(
+                            ownerHubListingCard,
+                          )) ...[
+                        const SizedBox(height: 4),
+                        UserPresenceStrip(
+                          userId: peerPresenceId.trim().isNotEmpty
+                              ? peerPresenceId.trim()
+                              : (property.publishedByMarketerId ?? '').trim(),
+                          isAr: isAr,
+                          compact: true,
+                          surface: PresenceDisplaySurface.listingCards,
+                          fallbackTimestamp:
+                              property.publishedAt ?? property.createdAt,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
+              ],
+            ),
+          ),
+          if (!hideLicenses && licenseEntries.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            _elegantLicenseCopyGrid(
+              context,
+              theme: theme,
+              cs: cs,
+              entries: licenseEntries,
+            ),
+          ],
+        ] else if (!hideLicenses && licenseEntries.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          _elegantLicenseCopyGrid(
+            context,
+            theme: theme,
+            cs: cs,
+            entries: licenseEntries,
+          ),
+        ] else if (ownerPrePublish) ...[
+          ..._ownerHubPrePublishIdentitySlice(context, theme, cs, layoutWidth),
+        ],
+        if (property.orgListingSnapshot != null &&
+            property.orgListingSnapshot!.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Builder(
+            builder: (ctx) {
+              final o = property.orgListingSnapshot!;
+              final id = (o['id'] ?? o['org_unit_id'] ?? '').toString().trim();
+              final nameAr = (o['display_name_ar'] ?? '').toString().trim();
+              final nameEn = (o['display_name_en'] ?? '').toString().trim();
+              final name = isAr
+                  ? (nameAr.isNotEmpty ? nameAr : nameEn)
+                  : (nameEn.isNotEmpty ? nameEn : nameAr);
+              final fal = (o['fal_public_code'] ?? '').toString().trim();
+              final mc = int.tryParse('${o['member_count']}') ?? 0;
+              if (name.isEmpty && fal.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              final t = AppLocalizations.of(ctx);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.apartment_outlined,
+                          size: 16, color: cs.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: InkWell(
+                          onTap: id.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.push(
+                                    ctx,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => OrganizationProfileScreen(
+                                        orgId: id,
+                                        lang: isAr ? 'ar' : 'en',
+                                      ),
+                                    ),
+                                  );
+                                },
+                          child: Text(
+                            '${t?.orgListingOrgTap ?? 'Org'}: ${name.isEmpty ? '—' : name}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: cs.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (mc > 0) ...[
+                        Icon(Icons.people_outline, size: 14, color: cs.outline),
+                        const SizedBox(width: 2),
+                        Text(
+                          '$mc',
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (!omitMarketingLicenseEntries && fal.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    OrgLicenseBadge(code: fal, compact: true),
+                  ],
+                ],
+              );
+            },
+          ),
+        ],
+        if (!hideAdvertiserRow && advertiserName.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                isAr ? 'منشئ الإعلان' : 'Listing creator',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 10.5,
+                  height: 1.05,
+                ),
               ),
-              _copyInlineIcon(
-                context,
-                DisplayIds.tenDigit(property.listingPublicCode ?? property.id),
+              const SizedBox(height: 2),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Text(
+                      advertiserName,
+                      maxLines: 5,
+                      softWrap: true,
+                      overflow: TextOverflow.visible,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface,
+                        fontSize: 13.5,
+                        height: 1.3,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                  ),
+                  if (PropertyListingDisplay.showMarketerVerifiedBadge(
+                    property,
+                  ))
+                    const Padding(
+                      padding: EdgeInsetsDirectional.only(start: 4, top: 1),
+                      child: Icon(
+                        Icons.verified_rounded,
+                        size: 16,
+                        color: Color(0xFF10B981),
+                      ),
+                    ),
+                ],
               ),
+              if (peerPresenceId.trim().isNotEmpty) ...[
+                const SizedBox(height: 4),
+                UserPresenceStrip(
+                  userId: peerPresenceId.trim(),
+                  isAr: isAr,
+                  compact: true,
+                  surface: PresenceDisplaySurface.listingCards,
+                  fallbackTimestamp: property.publishedAt ?? property.createdAt,
+                ),
+              ],
             ],
           ),
         ],
-        const SizedBox(height: 3),
+        SizedBox(height: gapSm + 2),
         listingCardCreatedPublishedTimes(
+          context: context,
           property: property,
           isAr: isAr,
           relaxClamp: relaxText,
           relativeTime: timeAgo,
+          compactInline: true,
           style: (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
             color: cs.onSurfaceVariant,
             height: 1.15,
@@ -2891,6 +3796,8 @@ class _RealEstateCard extends StatelessWidget {
         ),
       ],
     );
+
+    final Widget? dateBelow = belowMainRow;
 
     Widget? slotA;
     Widget? slotB;
@@ -2900,22 +3807,27 @@ class _RealEstateCard extends StatelessWidget {
         onPressed:
             canAddToCart ? () async => onAddToCart?.call() : onOpenDetails,
         icon: Icon(
-            canAddToCart ? Icons.local_offer_outlined : Icons.gavel_outlined),
+            canAddToCart ? Icons.handshake_outlined : Icons.gavel_outlined),
         label: Text(
           canAddToCart
-              ? (isAr ? 'تقديم عرض' : 'Submit offer')
+              ? (isAr ? 'إتمام الصفقة' : 'Complete deal')
               : (isAr ? 'المزايدة' : 'Place bid'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: canAddToCart ? bankColor : Colors.orange.shade800,
+          backgroundColor:
+              canAddToCart ? const Color(0xFF0B4D3E) : Colors.orange.shade800,
           foregroundColor: Colors.white,
+          minimumSize: const Size(0, 50),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          elevation: 2,
+          shadowColor: const Color(0xFF0B4D3E).withValues(alpha: 0.35),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
           ),
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
         ),
       );
     } else if (showListingQuickActions) {
@@ -2929,7 +3841,9 @@ class _RealEstateCard extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          minimumSize: const Size(0, 48),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
         ),
       );
     }
@@ -2952,35 +3866,82 @@ class _RealEstateCard extends StatelessWidget {
         cs: cs,
         typeAccent: typeAccent,
         purposeAccent: purposeAccent,
-        borderHint: borderColor,
-        borderStrong: listingBorder,
-        borderWidth: property.isAuction ? 1.55 : 1.35,
+        borderHint: borderHint,
+        borderStrong: property.isAuction
+            ? listingBorder
+            : Color.alphaBlend(
+                cs.outlineVariant.withValues(alpha: 0.75),
+                borderHint,
+              ),
+        borderWidth: property.isAuction ? 1.55 : 1.15,
+        emphasizePaid: property.isAuction,
       ),
       isAr: isAr,
       kind: UnifiedCardKind.ad,
       onCardTap: onOpenDetails,
+      onCardDoubleTap: onToggleFav,
       cardRadius: _kHomeCardRadius,
+      fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
+      // جوال/ضيق: صورة علوية بعرض الشاشة ثم البيانات تحتها.
+      heroAspectRatio: _homeListingHeroAspectRatio(context),
       dataColumn: dataColumn,
       imageColumn: _imageBlockUnifiedList(
         context,
         canAddToCart: canAddToCart,
         canBidFromCard: canBidFromCard,
       ),
+      belowMainRow: dateBelow,
       footer: footer,
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    try {
+      return _buildSafe(context);
+    } catch (e, st) {
+      assert(() {
+        // ignore: avoid_print
+        print('[DBG][HOME][LISTING_CARD] build failed: $e\n$st');
+        return true;
+      }());
+      final cs = Theme.of(context).colorScheme;
+      return Material(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(_kHomeCardRadius),
+        child: InkWell(
+          onTap: onOpenDetails,
+          borderRadius: BorderRadius.circular(_kHomeCardRadius),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              property.title.trim().isEmpty
+                  ? (isAr ? 'إعلان عقاري' : 'Listing')
+                  : property.title.trim(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _buildSafe(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
     final locationText = locationTextFor(property);
-    final marketerLine = marketerLineFor(property, isAr);
-    final licenseEntries = listingLicenseEntries(property, isAr);
-    final borderColor = theme.brightness == Brightness.light
-        ? Colors.black.withOpacity(0.15)
-        : Colors.white.withOpacity(0.15);
+    final marketerLineResolved =
+        showRegulatoryIdentityOnCard ? marketerLineFor(property, isAr) : null;
+    final ownerPhoneWhenBrokerHidden =
+        (!showRegulatoryIdentityOnCard && isOwner)
+            ? (property.ownerPhone ?? '').trim()
+            : '';
     final purposeAccent = PropertyListingDisplay.accentColor(property);
     final typeKey = property.listingTypeKey.trim().isNotEmpty
         ? property.listingTypeKey
@@ -3004,42 +3965,6 @@ class _RealEstateCard extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, c) {
         final w = c.maxWidth;
-        final listLike = forceListLayout;
-
-        if (listLike) {
-          final advertiserName = ownerNameForCard(
-            property,
-            isAr,
-            w,
-            viewingAsPropertyOwner: isOwner,
-            suppressPublicOwnerIdentity: suppressPublicOwnerIdentity,
-            showFullOwnerLegalNameOnCard: showFullOwnerLegalNameOnCard,
-          );
-          final baseAmount = property.isAuction
-              ? (property.currentBid ?? property.price).toDouble()
-              : property.price.toDouble();
-          return _unifiedListCard(
-            context,
-            theme: theme,
-            cs: cs,
-            locationText: locationText,
-            marketerLine: marketerLine,
-            advertiserName: advertiserName,
-            baseAmount: baseAmount,
-            purposeAccent: purposeAccent,
-            typeAccent: typeAccent,
-            canAddToCart: canAddToCart,
-            canBidFromCard: canBidFromCard,
-            relaxText: relaxTextTruncation,
-          );
-        }
-
-        // ✅ في وضع الـ Grid نجعل البطاقة عمودية دائمًا
-        // حتى لا ينضغط أسفل البطاقة ويختفي زر السلة
-        final horizontal = listLike;
-        final imageW =
-            horizontal ? (listLike ? 146.0 : (w < 380 ? 132.0 : 180.0)) : null;
-        final imageH = listLike ? 178.0 : null;
         final advertiserName = ownerNameForCard(
           property,
           isAr,
@@ -3048,440 +3973,155 @@ class _RealEstateCard extends StatelessWidget {
           suppressPublicOwnerIdentity: suppressPublicOwnerIdentity,
           showFullOwnerLegalNameOnCard: showFullOwnerLegalNameOnCard,
         );
-        final peerPresenceId = !isOwner && !isGuest
-            ? ((property.publishedByMarketerId ?? '').trim().isNotEmpty
-                ? (property.publishedByMarketerId!).trim()
-                : property.ownerId.trim())
-            : '';
-        final baseAmount = property.isAuction
+        final publishedBy = (property.publishedByMarketerId ?? '').trim();
+        final ownerUid = property.ownerId.trim();
+        final selfUid = isGuest ? '' : currentUserId.trim();
+        String peerPresenceId = '';
+        if (publishedBy.isNotEmpty && publishedBy != selfUid) {
+          peerPresenceId = publishedBy;
+        } else if (!isOwner &&
+            ownerUid.isNotEmpty &&
+            ownerUid != selfUid &&
+            publishedBy.isEmpty) {
+          peerPresenceId = ownerUid;
+        }
+        // — الرئيسية (بعد النشر): الأساس + ضريبة 5٪ + أتعاب التسويق على البطاقة.
+        // — صفحتي/التبويبات الداخلية: السعر الأساسي فقط؛ التفصيل داخل تفاصيل العرض.
+        final rawBase = property.isAuction
             ? (property.currentBid ?? property.price).toDouble()
             : property.price.toDouble();
-
-        Widget content() {
-          final relax = relaxTextTruncation;
-          final int? cap = relax ? null : 2;
-          final int? capId = relax ? null : 1;
-          final overflow = relax ? TextOverflow.visible : TextOverflow.ellipsis;
-
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (marketerLine != null) ...[
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (property.marketerBrandImagePublicUrl != null) ...[
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: SizedBox(
-                            width: 36,
-                            height: 36,
-                            child: CachedNetworkImage(
-                              imageUrl: property.marketerBrandImagePublicUrl!,
-                              fit: BoxFit.cover,
-                              errorWidget: (_, __, ___) => Icon(
-                                Icons.business_outlined,
-                                size: 18,
-                                color: bankColor,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ] else
-                        Icon(
-                          Icons.business_outlined,
-                          size: 18,
-                          color: bankColor,
-                        ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                isAr
-                                    ? 'الوسيط العقاري: $marketerLine'
-                                    : 'Real estate broker: $marketerLine',
-                                maxLines: cap,
-                                overflow: overflow,
-                                style: TextStyle(
-                                  color: cs.onSurface,
-                                  fontWeight: FontWeight.w800,
-                                  height: 1.25,
-                                ),
-                              ),
-                            ),
-                            if (PropertyListingDisplay
-                                .showMarketerVerifiedBadge(
-                              property,
-                            ))
-                              Padding(
-                                padding: const EdgeInsetsDirectional.only(
-                                  start: 4,
-                                  top: 1,
-                                ),
-                                child: Icon(
-                                  Icons.verified_rounded,
-                                  size: 17,
-                                  color: purposeAccent,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (licenseEntries.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    for (final entry in licenseEntries.take(2))
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${entry['label']}: ${entry['value']}',
-                              maxLines: capId,
-                              overflow: overflow,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: cs.onSurfaceVariant,
-                                height: 1.15,
-                              ),
-                            ),
-                          ),
-                          _copyInlineIcon(context, entry['value'] ?? ''),
-                        ],
-                      ),
-                  ],
-                  const SizedBox(height: 10),
-                ],
-                if (!relax &&
-                    peerPresenceId.isNotEmpty &&
-                    peerPresenceId != currentUserId) ...[
-                  UserPresenceStrip(userId: peerPresenceId, isAr: isAr),
-                  const SizedBox(height: 10),
-                ],
-                if (property.title.trim().isNotEmpty) ...[
-                  Text(
-                    property.title,
-                    maxLines: cap,
-                    overflow: overflow,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: cs.onSurface,
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if (property.isAuction) ...[
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Color.alphaBlend(
-                        Colors.orange.withValues(
-                          alpha:
-                              theme.brightness == Brightness.dark ? 0.22 : 0.12,
-                        ),
-                        cs.surfaceContainerHighest.withValues(alpha: 0.5),
-                      ),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Colors.orange.shade800.withValues(alpha: 0.35),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.gavel_rounded,
-                          size: 22,
-                          color: Colors.orange.shade800,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            isAr ? 'مزايدة علنية' : 'Open auction',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w900,
-                              fontSize: 12,
-                              color: Colors.orange.shade900,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if ((property.listingPublicCode ?? property.id)
-                    .trim()
-                    .isNotEmpty) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          isAr
-                              ? 'رقم الإعلان: ${DisplayIds.tenDigit(property.listingPublicCode ?? property.id)}'
-                              : 'Listing no.: ${DisplayIds.tenDigit(property.listingPublicCode ?? property.id)}',
-                          maxLines: capId,
-                          overflow: overflow,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: cs.primary,
-                          ),
-                        ),
-                      ),
-                      _copyInlineIcon(
-                        context,
-                        DisplayIds.tenDigit(
-                          property.listingPublicCode ?? property.id,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                const SizedBox(height: 10),
-                _InfoLine(
-                  icon: Icons.location_on_outlined,
-                  text: locationText,
-                  isAr: isAr,
-                  valueColor: cs.onSurface,
-                  iconColor: bankColor,
-                  maxLines: cap,
-                ),
-                if (advertiserName.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  _InfoLine(
-                    icon: Icons.person_outline,
-                    text: isAr
-                        ? 'المعلن: $advertiserName'
-                        : 'Advertiser: $advertiserName',
-                    isAr: isAr,
-                    valueColor: cs.onSurface,
-                    iconColor: bankColor,
-                    maxLines: cap,
-                  ),
-                ],
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _metaChip(
-                      icon: PropertyListingDisplay.areaIcon(property),
-                      text: isAr
-                          ? '${AppMoney.formatNumber(property.area, isAr: isAr, maxFractionDigits: 0)} م²'
-                          : '${AppMoney.formatNumber(property.area, isAr: isAr, maxFractionDigits: 0)} m²',
-                    ),
-                    for (final u in PropertyListingDisplay.usageBadgeTuples(
-                      property,
-                      isAr,
-                    ))
-                      _metaChip(
-                        icon: u.$1,
-                        text: '${u.$2} ✓',
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: listingCardCreatedPublishedTimes(
-                        property: property,
-                        isAr: isAr,
-                        relaxClamp: relax,
-                        relativeTime: timeAgo,
-                        style: (theme.textTheme.bodySmall ?? const TextStyle())
-                            .copyWith(
-                          color: cs.onSurfaceVariant,
-                          height: 1.2,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      flex: 2,
-                      child: Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: AlignmentDirectional.centerEnd,
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: (w * 0.52).clamp(120.0, 280.0),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.payments_outlined,
-                                      size: 17,
-                                      color: property.isAuction
-                                          ? Colors.orange.shade800
-                                          : purposeAccent,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    AppMoneyLine(
-                                      amount: baseAmount,
-                                      currencyCode: 'SAR',
-                                      isAr: isAr,
-                                      maxFractionDigits: 0,
-                                      style:
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                                fontWeight: FontWeight.w900,
-                                                color: property.isAuction
-                                                    ? Colors.orange.shade800
-                                                    : purposeAccent,
-                                                fontSize: 14,
-                                                height: 1.1,
-                                              ) ??
-                                              TextStyle(
-                                                fontWeight: FontWeight.w900,
-                                                color: property.isAuction
-                                                    ? Colors.orange.shade800
-                                                    : purposeAccent,
-                                                fontSize: 14,
-                                                height: 1.1,
-                                              ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (canAddToCart || canBidFromCard)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: canAddToCart
-                            ? () async => onAddToCart?.call()
-                            : onOpenDetails,
-                        icon: Icon(
-                          canAddToCart
-                              ? Icons.local_offer_outlined
-                              : Icons.gavel_outlined,
-                        ),
-                        label: Text(
-                          canAddToCart
-                              ? (isAr ? 'تقديم عرض' : 'Submit offer')
-                              : (isAr ? 'المزايدة' : 'Place bid'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              canAddToCart ? bankColor : Colors.orange.shade800,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ),
-                  ),
-                if (showListingQuickActions) ...[
-                  Padding(
-                    padding: EdgeInsets.only(
-                      top: (canAddToCart || canBidFromCard) ? 10 : 12,
-                    ),
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        OutlinedButton.icon(
-                          onPressed: onOpenDetails,
-                          icon: const Icon(Icons.open_in_new, size: 18),
-                          label: Text(
-                            isAr ? 'تفاصيل العقار' : 'Property details',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-        }
-
-        final listingBorder = Color.lerp(
-          PropertyListingDisplay.accentColor(property),
-          typeAccent,
-          0.28,
-        )!;
-        return RepaintBoundary(
-          child: _WebHoverListingShell(
-            child: Container(
-              decoration: _homeFeedCardFaceDecoration(
-                cs: cs,
-                typeAccent: typeAccent,
-                purposeAccent: purposeAccent,
-                borderHint: borderColor,
-                borderStrong: listingBorder,
-                borderWidth: property.isAuction ? 1.55 : 1.35,
-              ),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(_kHomeCardRadius),
-                  mouseCursor: SystemMouseCursors.click,
-                  onTap: onOpenDetails,
-                  child: horizontal
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: imageW!,
-                              height: imageH,
-                              child: _imageBlock(context, horizontal: true),
-                            ),
-                            Expanded(child: content()),
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: kIsWeb ? 1.22 : 1.38,
-                              child: _imageBlock(context, horizontal: false),
-                            ),
-                            content(),
-                          ],
-                        ),
-                ),
-              ),
-            ),
-          ),
+        final baseAmount = property.isAuction || ownerHubListingCard
+            ? rawBase
+            : MarketingOfferFee.listingDisplayTotalIncVatAndFee(rawBase);
+        return _unifiedListCard(
+          context,
+          theme: theme,
+          cs: cs,
+          locationText: locationText,
+          marketerLine: marketerLineResolved,
+          advertiserName: advertiserName,
+          baseAmount: baseAmount,
+          purposeAccent: purposeAccent,
+          typeAccent: typeAccent,
+          canAddToCart: canAddToCart,
+          canBidFromCard: canBidFromCard,
+          relaxText: relaxTextTruncation,
+          ownerPhoneWhenBrokerHidden: ownerPhoneWhenBrokerHidden.isEmpty
+              ? null
+              : ownerPhoneWhenBrokerHidden,
+          peerPresenceId: peerPresenceId,
+          layoutWidth: w,
+          ownerHubListingCard: ownerHubListingCard,
+          belowMainRow: cardBelowMainRow,
+          omitMarketingLicenseEntries: omitMarketingLicenseEntriesOnCard,
         );
       },
+    );
+  }
+}
+
+/// شارة على بطاقة الرئيسية: إعلان نُشر عبر مسوّق عقاري (للزوار والمالك).
+class _PublishedByMarketerChip extends StatelessWidget {
+  const _PublishedByMarketerChip({required this.isAr});
+  final bool isAr;
+
+  @override
+  Widget build(BuildContext context) {
+    final narrow = MediaQuery.sizeOf(context).width < 390;
+    final label = narrow
+        ? (isAr ? 'مسوّق معتمد' : 'Licensed marketer')
+        : (isAr ? 'منشور بواسطة المسوّق' : 'Published by marketer');
+    return Material(
+      color: Colors.transparent,
+      elevation: 4,
+      borderRadius: BorderRadius.circular(999),
+      shadowColor: Colors.black.withValues(alpha: 0.18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F766E),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.88),
+            width: 1.1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.campaign_outlined, size: 13, color: Colors.white),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+                height: 1.1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// شارة «منشور» مدمَجة على بطاقات «إعلاناتي/طلباتي» — تأكيد بصري سريع بأنّ
+/// هذا الإعلان قد نُشر للجمهور في الرئيسية ويخصّ المستخدم (مالك فرد أو مسوّق نشر).
+class _PublishedSelfChip extends StatelessWidget {
+  const _PublishedSelfChip({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 6,
+      borderRadius: BorderRadius.circular(999),
+      shadowColor: Colors.black.withValues(alpha: 0.2),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B7A3E),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+              color: Colors.white.withValues(alpha: 0.85), width: 1.2),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.public_rounded,
+              size: 13,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.2,
+                shadows: [
+                  Shadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 2),
+            const Icon(
+              Icons.check_circle_rounded,
+              size: 13,
+              color: Color(0xFFB7F5C7),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3514,87 +4154,6 @@ class _HeartTapScaleState extends State<_HeartTapScale> {
   }
 }
 
-/// Web: subtle hover scale on listing cards (keeps mobile path unchanged).
-class _WebHoverListingShell extends StatefulWidget {
-  const _WebHoverListingShell({required this.child});
-
-  final Widget child;
-
-  @override
-  State<_WebHoverListingShell> createState() => _WebHoverListingShellState();
-}
-
-class _WebHoverListingShellState extends State<_WebHoverListingShell> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    if (!kIsWeb) return widget.child;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: AnimatedScale(
-        scale: _hover ? 1.004 : 1.0,
-        duration: const Duration(milliseconds: 170),
-        curve: Curves.easeOutCubic,
-        child: widget.child,
-      ),
-    );
-  }
-}
-
-class _InfoLine extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  final bool isAr;
-  final Color? valueColor;
-  final Color? iconColor;
-
-  /// عند null تُعرض السطور كاملة دون قص (مثل تبويب «صفحتي»).
-  final int? maxLines;
-
-  const _InfoLine({
-    required this.icon,
-    required this.text,
-    required this.isAr,
-    this.valueColor,
-    this.iconColor,
-    this.maxLines = 2,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(
-          icon,
-          size: 16,
-          color: iconColor ?? cs.onSurfaceVariant,
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            text,
-            maxLines: maxLines,
-            overflow:
-                maxLines == null ? TextOverflow.visible : TextOverflow.ellipsis,
-            style: TextStyle(
-              color: valueColor ?? cs.onSurface,
-              fontSize: 12.8,
-              fontWeight: FontWeight.w800,
-              height: 1.25,
-            ),
-            textAlign: isAr ? TextAlign.right : TextAlign.left,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _PropertyImage extends StatelessWidget {
   final List<String> urls;
   final BoxFit fit;
@@ -3608,6 +4167,9 @@ class _PropertyImage extends StatelessWidget {
   final String? listingIdForWatermark;
   final bool showListingWatermark;
 
+  /// عند true مع عدة صور: نعرض الأولى فقط (بدون PageView/نقاط).
+  final bool preferStaticPrimaryImage;
+
   const _PropertyImage({
     required this.urls,
     this.fit = BoxFit.cover,
@@ -3616,11 +4178,11 @@ class _PropertyImage extends StatelessWidget {
     this.allowInlineVideo = true,
     this.listingIdForWatermark,
     this.showListingWatermark = true,
+    this.preferStaticPrimaryImage = false,
   });
 
   static const String _imagesBucket = 'property-images';
   static const String _videosBucket = 'property-videos';
-  static const String _fallbackAsset = 'assets/logo.png';
 
   bool _isUrl(String s) => s.startsWith('http://') || s.startsWith('https://');
 
@@ -3664,19 +4226,12 @@ class _PropertyImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    Widget placeholder() => Container(
-          color: cs.surfaceContainerHighest.withOpacity(0.55),
-          padding: const EdgeInsets.all(18),
-          child: Center(
-            child: Image.asset(
-              _fallbackAsset,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.high,
-              errorBuilder: (_, __, ___) => Icon(
-                Icons.image_not_supported_outlined,
-                color: cs.primary,
-              ),
-            ),
+    Widget placeholder() => ColoredBox(
+          color: cs.surfaceContainerHighest.withOpacity(0.35),
+          child: const BrandingLogoImage(
+            fillFrame: true,
+            filterQuality: FilterQuality.high,
+            errorIcon: Icons.image_not_supported_outlined,
           ),
         );
 
@@ -3745,12 +4300,14 @@ class _PropertyImage extends StatelessWidget {
         .toList();
     if (normalized.isEmpty) return placeholder();
 
+    final instantFade = preferStaticPrimaryImage;
     Widget oneImage(String imageUrl) => CachedNetworkImage(
           imageUrl: imageUrl,
           fit: fit,
           memCacheWidth: kIsWeb ? 900 : 1400,
           memCacheHeight: kIsWeb ? 650 : 1000,
-          fadeInDuration: const Duration(milliseconds: 180),
+          fadeInDuration:
+              instantFade ? Duration.zero : const Duration(milliseconds: 180),
           placeholder: (context, url) => Container(
             color: cs.surfaceContainerHighest.withOpacity(0.35),
             child: Center(
@@ -3763,7 +4320,7 @@ class _PropertyImage extends StatelessWidget {
           },
         );
 
-    if (normalized.length == 1) {
+    if (normalized.length == 1 || preferStaticPrimaryImage) {
       return _withWatermark(oneImage(normalized.first));
     }
 
@@ -4085,7 +4642,7 @@ class _SearchField extends StatelessWidget {
               ),
             ],
           ),
-          child: TextField(
+          child: AqarTextField(
             onChanged: onChanged,
             style: TextStyle(
               fontWeight: FontWeight.w900,
@@ -4170,6 +4727,260 @@ class _SearchField extends StatelessWidget {
 // =========================
 // Sort Menu
 // =========================
+
+/// قسم البحث الجغرافي الهرمي + اختصار «خريطة» داخل ورقة «البحث المتقدّم».
+/// يظهر القيم المختارة كشرائح (Chips) قابلة للنقر لإعادة تشغيل المختار، مع زر
+/// مسح كامل وزر فتح الخريطة لاستكشاف الإعلانات/الطلبات بإحداثياتها.
+class _AdvSearchLocationSection extends StatelessWidget {
+  const _AdvSearchLocationSection({
+    required this.isAr,
+    required this.brandPrimary,
+    required this.region,
+    required this.governorate,
+    required this.city,
+    required this.district,
+    required this.onPickLocation,
+    required this.onClearLocation,
+    required this.onOpenMap,
+  });
+
+  final bool isAr;
+  final Color brandPrimary;
+  final String region;
+  final String governorate;
+  final String city;
+  final String district;
+  final VoidCallback onPickLocation;
+  final VoidCallback onClearLocation;
+  final VoidCallback onOpenMap;
+
+  bool get _anySelected =>
+      region.isNotEmpty ||
+      governorate.isNotEmpty ||
+      city.isNotEmpty ||
+      district.isNotEmpty;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final chips = <_AdvLocChipData>[
+      if (region.isNotEmpty)
+        _AdvLocChipData(
+          label: isAr ? 'المنطقة' : 'Region',
+          value: region,
+          icon: Icons.public_outlined,
+        ),
+      if (governorate.isNotEmpty)
+        _AdvLocChipData(
+          label: isAr ? 'المحافظة' : 'Governorate',
+          value: governorate,
+          icon: Icons.account_balance_outlined,
+        ),
+      if (city.isNotEmpty)
+        _AdvLocChipData(
+          label: isAr ? 'المدينة' : 'City',
+          value: city,
+          icon: Icons.location_city_outlined,
+        ),
+      if (district.isNotEmpty)
+        _AdvLocChipData(
+          label: isAr ? 'الحيّ' : 'District',
+          value: district,
+          icon: Icons.holiday_village_outlined,
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.travel_explore_outlined, color: brandPrimary, size: 18),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                isAr ? 'الموقع الجغرافي' : 'Geographic location',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            ),
+            if (_anySelected)
+              TextButton.icon(
+                onPressed: onClearLocation,
+                icon: const Icon(Icons.close, size: 16),
+                label: Text(isAr ? 'مسح' : 'Clear'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Material(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.32),
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            onTap: onPickLocation,
+            borderRadius: BorderRadius.circular(18),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: brandPrimary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      Icons.map_outlined,
+                      color: brandPrimary,
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _anySelected
+                              ? (isAr
+                                  ? 'حدّد البحث بالمنطقة/المحافظة/المدينة/الحي'
+                                  : 'Region / Governorate / City / District')
+                              : (isAr
+                                  ? 'ابحث بالمنطقة ثم المحافظة ثم المدينة ثم الحيّ'
+                                  : 'Drill down: Region → Governorate → City → District'),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            color: cs.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        if (chips.isEmpty)
+                          Text(
+                            isAr
+                                ? 'لم يتم تحديد موقع — اضغط للاختيار التدرّجي.'
+                                : 'No location chosen — tap to browse hierarchically.',
+                            style: TextStyle(
+                              color: cs.onSurfaceVariant,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          )
+                        else
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: chips
+                                .map(
+                                  (c) => _AdvLocChip(
+                                    data: c,
+                                    color: brandPrimary,
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    isAr
+                        ? Icons.chevron_left_rounded
+                        : Icons.chevron_right_rounded,
+                    color: cs.outline,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(
+                    color: brandPrimary.withValues(alpha: 0.55),
+                  ),
+                  foregroundColor: brandPrimary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: onOpenMap,
+                icon: const Icon(Icons.map_rounded),
+                label: Text(
+                  isAr ? 'البحث في الخريطة' : 'Search on map',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _AdvLocChipData {
+  const _AdvLocChipData({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  final String label;
+  final String value;
+  final IconData icon;
+}
+
+class _AdvLocChip extends StatelessWidget {
+  const _AdvLocChip({required this.data, required this.color});
+
+  final _AdvLocChipData data;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(data.icon, size: 13, color: color),
+          const SizedBox(width: 5),
+          Text(
+            '${data.label}: ',
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          Text(
+            data.value,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _SortMenu extends StatelessWidget {
   final bool isAr;

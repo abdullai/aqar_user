@@ -11,10 +11,13 @@ class ContractVerifyPage extends StatefulWidget {
     super.key,
     required this.contractId,
     required this.lang,
+    this.verifyToken,
   });
 
   final String contractId;
   final String lang;
+  /// يطابق `listing_contracts.verify_public_token` (من QR أو رابط `vt=`).
+  final String? verifyToken;
 
   @override
   State<ContractVerifyPage> createState() => _ContractVerifyPageState();
@@ -41,6 +44,24 @@ class _ContractVerifyPageState extends State<ContractVerifyPage> {
       _err = null;
     });
     try {
+      final vt = widget.verifyToken?.trim() ?? '';
+      if (vt.isNotEmpty) {
+        final ok = await _flow.assertListingContractVerifyToken(
+          contractId: widget.contractId.trim(),
+          token: vt,
+        );
+        if (!ok) {
+          if (!mounted) return;
+          setState(() {
+            _err = _isAr
+                ? 'رمز التحقق غير صالح أو لا يطابق هذا العقد.'
+                : 'Verification token is invalid or does not match this contract.';
+            _row = null;
+            _loading = false;
+          });
+          return;
+        }
+      }
       final c = await _flow.contractById(widget.contractId.trim());
       if (!mounted) return;
       setState(() {

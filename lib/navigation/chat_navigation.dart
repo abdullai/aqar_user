@@ -15,6 +15,7 @@ abstract final class ChatOverlayNavigation {
     ConversationKind? kind,
     String? supportUserId,
     String? marketRequestId,
+    String? initialDraftMessage,
   }) {
     final h = MediaQuery.sizeOf(context).height;
     return showModalBottomSheet<void>(
@@ -27,6 +28,7 @@ abstract final class ChatOverlayNavigation {
           height: h * 0.78,
           child: ChatPage(
             isAr: isAr,
+            embedInParentDashboardShell: false,
             conversationId: conversationId,
             propertyId: propertyId,
             reservationId: reservationId,
@@ -35,6 +37,7 @@ abstract final class ChatOverlayNavigation {
             kind: kind,
             supportUserId: supportUserId,
             marketRequestId: marketRequestId,
+            initialDraftMessage: initialDraftMessage,
           ),
         );
       },
@@ -48,6 +51,7 @@ abstract final class ChatNavigation {
 
   static Route<void> materialRoute({
     required bool isAr,
+    bool embedInParentDashboardShell = false,
     String? conversationId,
     String? propertyId,
     String? reservationId,
@@ -56,6 +60,7 @@ abstract final class ChatNavigation {
     ConversationKind? kind,
     String? supportUserId,
     String? marketRequestId,
+    String? initialDraftMessage,
   }) {
     return MaterialPageRoute<void>(
       settings: RouteSettings(
@@ -75,6 +80,7 @@ abstract final class ChatNavigation {
       ),
       builder: (_) => ChatPage(
         isAr: isAr,
+        embedInParentDashboardShell: embedInParentDashboardShell,
         conversationId: conversationId,
         propertyId: propertyId,
         reservationId: reservationId,
@@ -83,6 +89,7 @@ abstract final class ChatNavigation {
         kind: kind,
         supportUserId: supportUserId,
         marketRequestId: marketRequestId,
+        initialDraftMessage: initialDraftMessage,
       ),
     );
   }
@@ -91,6 +98,7 @@ abstract final class ChatNavigation {
   static Future<void> push(
     BuildContext context, {
     required bool isAr,
+    bool embedInParentDashboardShell = false,
     String? conversationId,
     String? propertyId,
     String? reservationId,
@@ -99,10 +107,12 @@ abstract final class ChatNavigation {
     ConversationKind? kind,
     String? supportUserId,
     String? marketRequestId,
+    String? initialDraftMessage,
   }) {
     return Navigator.of(context).push(
       materialRoute(
         isAr: isAr,
+        embedInParentDashboardShell: embedInParentDashboardShell,
         conversationId: conversationId,
         propertyId: propertyId,
         reservationId: reservationId,
@@ -111,6 +121,7 @@ abstract final class ChatNavigation {
         kind: kind,
         supportUserId: supportUserId,
         marketRequestId: marketRequestId,
+        initialDraftMessage: initialDraftMessage,
       ),
     );
   }

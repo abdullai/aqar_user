@@ -23,7 +23,7 @@ messaging.onBackgroundMessage((payload) => {
     payload.data?.title_ar ||
     payload.data?.title_en ||
     payload.data?.title ||
-    'Aqar';
+    'موثوق لاين';
   const body =
     payload.notification?.body ||
     payload.data?.body_ar ||

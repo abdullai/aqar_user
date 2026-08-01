@@ -58,16 +58,43 @@ class InAppNotificationWriter {
     }
 
     try {
-      await sb.from('in_app_notifications').insert({
-        'user_id': uid,
-        'username': usernameForRow,
-        'type': type,
-        'title': titleAr,
-        'body': bodyAr,
-        'data': merged,
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-        'is_read': false,
-      });
-    } catch (_) {}
+      // إدراج عبر RPC SECURITY DEFINER — لا يعتمد على سياسة INSERT المفتوحة.
+      final entityIdParam = () {
+        final e = (entityId ?? '').trim();
+        if (e.isEmpty) return null;
+        if (RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(e)) return e;
+        merged.putIfAbsent('entity_id_text', () => e);
+        return null;
+      }();
+      await sb.rpc(
+        'workflow_create_notification',
+        params: {
+          'p_user_id': uid,
+          'p_type': type,
+          'p_title': titleAr,
+          'p_body': bodyAr,
+          'p_entity_type': entityType,
+          'p_entity_id': entityIdParam,
+          'p_data': merged,
+        },
+      );
+    } catch (_) {
+      // احتياط: إدراج ذاتي فقط إن فشل الـ RPC (نفس المستخدم).
+      try {
+        final me = sb.auth.currentUser?.id;
+        if (me != null && me == uid) {
+          await sb.from('in_app_notifications').insert({
+            'user_id': uid,
+            'username': usernameForRow,
+            'type': type,
+            'title': titleAr,
+            'body': bodyAr,
+            'data': merged,
+            'created_at': DateTime.now().toUtc().toIso8601String(),
+            'is_read': false,
+          });
+        }
+      } catch (_) {}
+    }
   }
 }

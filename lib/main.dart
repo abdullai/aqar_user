@@ -27,10 +27,16 @@ import 'core/config/app_config.dart';
 import 'core/session/account_role_cache.dart';
 import 'core/theme/app_text_scale.dart';
 import 'core/session/app_session.dart';
+import 'core/auth/auth_signed_out_navigation_guard.dart';
+import 'core/auth/auth_local_sign_out.dart';
 import 'core/session/user_appearance_session.dart';
 import 'core/session/return_after_auth.dart';
 import 'core/session/web_session_ttl.dart';
 import 'core/session/web_visibility.dart';
+import 'core/navigation/web_bootstrap_diag.dart';
+import 'core/navigation/web_dashboard_hash.dart';
+import 'core/subscription/app_subscription_gate.dart';
+import 'widgets/web_browser_lifecycle_host.dart';
 
 // ✅ L10n
 import 'package:aqar_user/l10n/app_localizations.dart';
@@ -50,6 +56,7 @@ import 'screens/change_password_screen.dart';
 import 'screens/gate_screen.dart';
 import 'screens/fast_login_screen.dart';
 import 'screens/password_setup.dart';
+import 'screens/register_screen.dart';
 import 'screens/entry_choice_screen.dart';
 
 // ✅ NEW: Account Type + Verification Screens
@@ -58,17 +65,24 @@ import 'screens/verification_request_screen.dart';
 
 import 'services/inactivity_service.dart';
 import 'services/fast_login_service.dart';
+import 'services/account_completion_service.dart';
 import 'services/user_session_coordination_service.dart';
 import 'services/user_install_session_service.dart';
+import 'services/session_manager.dart';
 import 'services/connectivity_guard.dart';
 import 'theme.dart';
 import 'core/theme/app_accent.dart';
 import 'core/theme/app_appearance_bridge.dart';
 import 'core/gestures/hardware_keyboard_scroll.dart';
+import 'core/gestures/soft_keyboard_ensure_visible.dart';
 import 'core/utils/listing_date_display.dart';
 import 'core/listing/property_type_custom_registry.dart';
 import 'widgets/app_logo_loading.dart';
+import 'widgets/app_busy_indicator.dart';
+import 'core/branding/app_branding.dart';
+import 'core/platform/app_web_splash.dart';
 import 'core/haptics/app_haptics.dart';
+import 'core/motion/app_motion_policy.dart';
 import 'core/notifications/in_app_notification_sound.dart';
 import 'core/notifications/chat_message_sound.dart';
 
@@ -97,6 +111,8 @@ import 'screens/post_auth_shell.dart';
 import 'screens/org_team_management_page.dart';
 import 'screens/org_monitor_dashboard_page.dart';
 import 'screens/create_listing_request_page.dart';
+import 'core/navigation/web_dashboard_entry.dart';
+import 'core/navigation/start_router_controller.dart';
 
 final ValueNotifier<bool> recoveryFlowNotifier = ValueNotifier<bool>(false);
 
@@ -114,7 +130,8 @@ const String kPrefFastLoginEnabled = AppConfig.prefFastLoginEnabledKey;
 const String kPrefFastLoginPinSet = AppConfig.prefFastLoginPinSetKey;
 const String kPrefAppPausedAtMs = AppConfig.prefAppPausedAtMsKey;
 const String kPrefBgLockGraceMinutes = AppConfig.prefBgLockGraceMinutesKey;
-const int kAppBackgroundLockGraceMinutesDefault = 3;
+/// مهلة إخفاء التبويب قبل القفل/الخروج — دقيقة واحدة كانت قصيرة جداً على ويندوز/Chrome.
+const int kAppBackgroundLockGraceMinutesDefault = 15;
 
 Future<Duration> readAppBackgroundLockGrace() async {
   final p = await SharedPreferences.getInstance();
@@ -297,23 +314,39 @@ Future<void> _loadAppDotEnv() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await _loadAppDotEnv();
-  await _tryLoadWebSupabaseRuntimeConfig();
+  await Future.wait([
+    _loadAppDotEnv(),
+    _tryLoadWebSupabaseRuntimeConfig(),
+  ]);
 
   try {
-    await intl_locale.initializeDateFormatting('ar');
-    await intl_locale.initializeDateFormatting('en');
-  } catch (_) {}
+    await Future.wait([
+      intl_locale.initializeDateFormatting('ar'),
+      intl_locale.initializeDateFormatting('en'),
+      intl_locale.initializeDateFormatting('ar_SA'),
+      intl_locale.initializeDateFormatting('en_US'),
+    ]);
+  } catch (e) {
+    debugPrint('initializeDateFormatting failed: $e');
+  }
 
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     debugPrint('FlutterError: ${details.exception}');
     debugPrint('${details.stack}');
+    if (kIsWeb) {
+      WebBootstrapDiag.warn('FlutterError', details.exceptionAsString());
+    }
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('PlatformError: $error');
+    if (kIsWeb) {
+      WebBootstrapDiag.warn('PlatformError', error.toString());
+    }
+    return true;
   };
 
   final prefs = await SharedPreferences.getInstance();
-
-  await PropertyTypeCustomRegistry.ensureLoaded();
 
   // =========================
   // ✅ One-time legacy migration (إذا كانت مفاتيح قديمة موجودة)
@@ -345,10 +378,17 @@ Future<void> main() async {
   textScaleNotifier.value = savedScale == null
       ? 1.0
       : savedScale.clamp(AppConfig.textScaleMin, AppConfig.textScaleMax);
-  await InAppNotificationSoundPrefs.loadFromPrefs();
-  await ChatMessageSoundPrefs.loadFromPrefs();
-  await ListingDateDisplay.loadFromPrefs();
-  await loadAppAccentFromPrefs();
+
+  // تفضيلات مستقلة — تحميل متوازٍ لتقليل زمن ما قبل runApp.
+  await Future.wait([
+    PropertyTypeCustomRegistry.ensureLoaded(),
+    AppMotionPolicy.bootstrap(),
+    InAppNotificationSoundPrefs.loadFromPrefs(),
+    ChatMessageSoundPrefs.loadFromPrefs(),
+    ListingDateDisplay.loadFromPrefs(),
+    loadAppAccentFromPrefs(),
+    AccountRoleCache.loadFromPrefs(),
+  ]);
   reloadAppAppearanceFromStoredPrefs = () async {
     final p = await SharedPreferences.getInstance();
     final st = p.getString(kPrefTheme) ?? 'light';
@@ -370,7 +410,6 @@ Future<void> main() async {
       themeModeNotifier: themeModeNotifier,
     );
   };
-  await AccountRoleCache.loadFromPrefs();
 
   final supabaseAnon = SupabaseConfig.supabaseAnonKey;
   if (supabaseAnon.isEmpty) {
@@ -401,63 +440,81 @@ Future<void> main() async {
           AppListingLinks.pendingContractVerifyPrefKey,
           cid,
         );
+        final vt = AppListingLinks.verifyTokenFromVerifyUri(initialUri);
+        if (vt != null && vt.isNotEmpty) {
+          await prefs.setString(
+            AppListingLinks.pendingContractVerifyTokenPrefKey,
+            vt,
+          );
+        } else {
+          await prefs.remove(AppListingLinks.pendingContractVerifyTokenPrefKey);
+        }
       }
     } catch (_) {}
   }
 
   // =========================================================
-  // ✅ Web: لا نسمح باستعادة جلسة/كاش سابق (إغلاق المتصفح ثم العودة)
+  // ✅ Web: جلسة ذكية — لا مسح أعمى عند كل تحميل (كان يُسبب حلقات وتجمّد)
   // =========================================================
   if (kIsWeb) {
-    // مسح الجلسة محلياً فقط عند وجود جلسة فعلية.
-    // استدعاء /auth/v1/logout بدون refresh token صالح يعيد 403 ويظهر في Network بدون فائدة.
+    WebBootstrapDiag.log('app.main', 'bootstrap web session');
     try {
-      final auth = Supabase.instance.client.auth;
-      if (auth.currentSession != null) {
-        await auth.signOut(scope: SignOutScope.local);
-      }
-    } catch (_) {}
-
-    try {
-      await prefs.remove(kPrefGuestMode);
-      await prefs.remove(kPrefEntryMode);
-      await prefs.remove(kPrefWebGuestLastActivityMs);
-
-      final keys = prefs.getKeys().toList();
-      for (final k in keys) {
-        if (k.startsWith('otp_verified_')) {
-          await prefs.remove(k);
-        }
-      }
-
-      await prefs.remove(kPrefFastLoginEnabled);
-      await prefs.remove(kPrefFastLoginPinSet);
-    } catch (_) {}
+      await SessionManager.bootstrapWebAfterSupabaseInit(
+        Supabase.instance.client,
+      );
+      WebBootstrapDiag.log(
+        'app.main',
+        'session uid=${Supabase.instance.client.auth.currentUser?.id ?? "none"}',
+      );
+    } catch (e) {
+      WebBootstrapDiag.warn('app.main', 'session bootstrap failed: $e');
+    }
   }
 
   if (!kIsWeb) {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  // لا تمنع الإقلاع
-  unawaited(
-    NotificationService.init()
-        .timeout(const Duration(seconds: 6), onTimeout: () => null)
-        .catchError((e, st) {
-      debugPrint('NotificationService.init error: $e');
-      debugPrint('$st');
-    }),
-  );
+  // الويب: لا نحتاج Firebase قبل أول إطار (FCM معطّل). الجوال: يبقى قبل الإقلاع.
+  if (kIsWeb) {
+    unawaited(() async {
+      try {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      } catch (e, st) {
+        debugPrint('Firebase.initializeApp (web deferred) error: $e');
+        debugPrint('$st');
+      }
+    }());
+  } else {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    unawaited(
+      NotificationService.init()
+          .timeout(const Duration(seconds: 6), onTimeout: () => null)
+          .catchError((e, st) {
+        debugPrint('NotificationService.init error: $e');
+        debugPrint('$st');
+      }),
+    );
+  }
 
   recoveryFlowNotifier.value = _isRecoveryUrlOrCode();
 
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppSession(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AppSession()),
+        ChangeNotifierProvider(
+          create: (_) {
+            final gate = AppSubscriptionGate(Supabase.instance.client);
+            gate.bindLifecycle();
+            return gate;
+          },
+        ),
+      ],
       child: const AqarUserApp(),
     ),
   );
@@ -481,7 +538,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
   bool _navigating = false;
 
   /// بعد أول إطار: لا يعيق [main] — يبقي الإقلاع خفيفاً.
+  /// الويب: بدون Realtime (WebSocket) — يمنع ERR_NAME_NOT_RESOLVED وتجمّد main thread.
   void _ensureInAppNotificationRealtime() {
+    if (kIsWeb) return;
     if (_inAppNotifChannel != null) return;
     try {
       _inAppNotifChannel = Supabase.instance.client
@@ -562,6 +621,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
           : InactivityPolicy.webDesktopAutoLogoutCountdown,
       useIdleBlurOverlay: !idleMobileNative,
     );
+    InactivityService.dismissBlockingPromptCallback =
+        _inactivity.dismissBlockingPrompt;
     _inactivity.start();
 
     UserSessionCoordinationService.navigatorKey = _navKey;
@@ -574,6 +635,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     }
 
     AppHardwareKeyboardScroll.install(_navKey);
+    AppSoftKeyboardEnsureVisible.install();
 
     _sub = Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
       final event = data.event;
@@ -581,8 +643,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       // ✅ لا تعمل أي redirect على initialSession
       if (event == AuthChangeEvent.initialSession) return;
 
-      // ✅ عند تسجيل الدخول/تحديث التوكن: زامن FCM token (لكن لا تعلق)
-      if (data.session != null &&
+      // FCM: جوال فقط — الويب بدون Service Worker يسبب AbortError
+      if (!kIsWeb &&
+          data.session != null &&
           (event == AuthChangeEvent.signedIn ||
               event == AuthChangeEvent.tokenRefreshed ||
               event == AuthChangeEvent.userUpdated)) {
@@ -597,6 +660,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       // ADMIN_HOOK: Remote force-logout trigger — استخدم Admin API أو bump_user_session_epoch من الخادم.
       if (event == AuthChangeEvent.signedIn && data.session != null) {
         final uid = data.session!.user.id;
+        // كل دخول جديد: أعد بوابة استكمال البيانات (حتى بعد «ذكرني لاحقاً»).
+        unawaited(AccountCompletionService.clearEnrollmentDeferred());
         unawaited(_completePostSignIn(uid));
         unawaited(
           loadAppAccentFromPrefs(userId: uid),
@@ -618,6 +683,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
 
       // ✅ SignedOut
       if (event == AuthChangeEvent.signedOut) {
+        if (SessionManager.duringPublicSessionReset) {
+          return;
+        }
         UserSessionCoordinationService.dispose();
         recoveryFlowNotifier.value = false;
 
@@ -656,7 +724,11 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
             current == AppRoutes.ownerRequests ||
             current == AppRoutes.marketerDashboard;
 
-        if (isProtected) {
+        // ضيف الويب/الجوال: signOut(local) بعد setGuest يطلق signedOut — لا نعيد
+        // التوجيه إلى '/' وإلا نُعاد لـ [StartRouter] (شاشة تحميل) ويُشعَر بتعليق.
+        if (isProtected &&
+            !isGuest &&
+            !AuthSignedOutNavigationGuard.suppressRootRedirectOnSignedOut) {
           _safeNavTo('/');
         }
       }
@@ -681,6 +753,11 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
         unawaited(_onAppResumedCheckAppLock());
         unawaited(UserInstallSessionService.reconcileSlotOnForeground());
       });
+      // تحديث الصفحة / رجوع المتصفح يطلقان pagehide — لا نسجّل خروجاً هنا.
+      // نبقي فقط ختم وقت الإخفاء للأمان عند العودة بعد مهلة طويلة.
+      listenDocumentPageHide(({required bool persisted}) {
+        unawaited(_stampWebPageHidePause(persisted: persisted));
+      });
     }
 
     if (!kIsWeb) {
@@ -691,11 +768,13 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
 
         final cid = AppListingLinks.contractIdFromVerifyUri(uri);
         if (cid != null && cid.isNotEmpty) {
+          final vt = AppListingLinks.verifyTokenFromVerifyUri(uri) ?? '';
           nav.pushNamed<void>(
             AppRoutes.contractVerify,
             arguments: <String, String>{
               'contractId': cid,
               'lang': lang,
+              if (vt.isNotEmpty) 'verifyToken': vt,
             },
           );
           return;
@@ -731,15 +810,20 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     } catch (_) {
       return;
     }
-    final reg = await UserInstallSessionService.registerDeviceSlotAfterSignIn();
-    if (!reg.ok && reg.code == 'device_limit') {
-      if (!mounted) return;
-      _navKey.currentState?.pushNamedAndRemoveUntil(
-        AppRoutes.deviceManagement,
-        (route) => false,
-        arguments: <String, dynamic>{'mandatory': true},
-      );
-      return;
+    final onDashboard =
+        current == '/userDashboard' || current == '/userdashboard';
+    if (!onDashboard) {
+      final reg =
+          await UserInstallSessionService.registerDeviceSlotAfterSignIn();
+      if (!reg.ok && reg.code == 'device_limit') {
+        if (!mounted) return;
+        _navKey.currentState?.pushNamedAndRemoveUntil(
+          AppRoutes.deviceManagement,
+          (route) => false,
+          arguments: <String, dynamic>{'mandatory': true},
+        );
+        return;
+      }
     }
     final hints = await UserInstallSessionService.sessionHintsForBump();
     await UserSessionCoordinationService.afterSignIn(
@@ -751,11 +835,30 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
 
   /// إخفاء التطبيق: مع الدخول السريع نُبقي الجلسة ونسجّل وقت الخلفية؛ وإلا نخرج كسابق.
   ///
-  /// **الويب:** لا نُسجّل خروجاً عند إخفاء التبويب فقط (كان يُلغي حوار الخمول ويُظهر
-  /// «سجّل الدخول» دون عدّاد). الخروج يتم عبر انتهاء العدّ في [InactivityService] أو انتهاء الجلسة.
-  Future<void> _signOutOnBackgroundHide() async {
+  /// **الويب:** تبديل التبويب لا يخرج فوراً. تحديث الصفحة لا يخرج (انظر [_stampWebPageHidePause]).
+  Future<void> _stampWebPageHidePause({required bool persisted}) async {
     if (recoveryFlowNotifier.value) return;
     if (suspendAutoLock.value) return;
+    FastLoginService.clearRuntimeUnlock();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        kPrefAppPausedAtMs,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (_) {}
+    // persisted / تحديث: نبقي JWT في التخزين المحلي ليعود المستخدم لنفس الجلسة.
+  }
+
+  /// إخفاء التطبيق: مع الدخول السريع نُبقي الجلسة ونسجّل وقت الخلفية؛ وإلا نخرج كسابق.
+  ///
+  /// تبديل التبويب فقط لا يُخرج فوراً — يعتمد العدّاد. إغلاق التبويب لم يعد يمسح الجلسة
+  /// عند pagehide حتى لا يُقطع تحديث F5/رجوع المتصفح.
+  Future<void> _signOutOnBackgroundHide({bool pageHide = false}) async {
+    if (recoveryFlowNotifier.value) return;
+    if (suspendAutoLock.value) return;
+    // أي إخفاء للواجهة يُبطل فتح الجلسة الحالي — عند العودة يُطلب الدخول المفضّل.
+    FastLoginService.clearRuntimeUnlock();
     try {
       final prefs = await SharedPreferences.getInstance();
       final guest = prefs.getBool(kPrefGuestMode) ?? false;
@@ -774,17 +877,23 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     final hasLock = await FastLoginService.hasAnyLockEnabled();
 
     if (kIsWeb) {
-      if (hasLock) {
+      // ويب: لا خروج صامت عند pagehide/إخفاء — ختم الوقت فقط.
+      // الأمان: خمول + FastLogin عند العودة بعد المهلة.
+      if (pageHide) {
+        await _stampWebPageHidePause(persisted: false);
+        return;
+      }
+      try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt(
           kPrefAppPausedAtMs,
           DateTime.now().millisecondsSinceEpoch,
         );
-      }
+      } catch (_) {}
       return;
     }
 
-    if (hasLock) {
+    if (hasLock && !pageHide) {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(
         kPrefAppPausedAtMs,
@@ -793,11 +902,15 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       return;
     }
 
-    _inactivity.stop();
+    // بلا قفل سريع: لا نسجّل خروجاً فورياً عند الخلفية —
+    // حوار العدّ التنازلي في InactivityService هو المسار الوحيد.
     try {
-      await Supabase.instance.client.auth.signOut(scope: SignOutScope.global);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        kPrefAppPausedAtMs,
+        DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (_) {}
-    if (mounted) _inactivity.start();
   }
 
   Future<void> _onAppResumedCheckAppLock() async {
@@ -856,9 +969,37 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       return;
     }
 
-    // للمستخدم المسجل نترك نافذة الخمول تعرض العدّاد وأزرار الاستمرار/الخروج.
-    // عند انتهاء العدّاد فقط ينقل InactivityService المستخدم للقفل أو تسجيل الدخول.
-    if (Supabase.instance.client.auth.currentSession != null) return;
+    // مستخدم مسجّل: بعد مهلة الخلفية → قفل سريع (بصمة/PIN) أو تسجيل دخول كامل.
+    FastLoginService.clearRuntimeUnlock();
+    final session = Supabase.instance.client.auth.currentSession;
+    final hasLock = await FastLoginService.hasAnyLockEnabled();
+
+    if (session != null && hasLock) {
+      unawaited(ReturnAfterAuth.saveFromNavigatorKey(_navKey));
+      _inactivity.dismissBlockingPrompt();
+      nav.pushNamedAndRemoveUntil('/fastLogin', (r) => false);
+      return;
+    }
+
+    if (session == null) {
+      nav.pushNamedAndRemoveUntil('/login', (r) => false);
+      return;
+    }
+
+    // جلسة موجودة بلا قفل سريع بعد تجاوز المهلة → خروج إلى شاشة الدخول.
+    _inactivity.stop();
+    try {
+      await AuthLocalSignOut.signOutLocal(
+        Supabase.instance.client,
+        tryRemoteRevoke: true,
+      );
+    } catch (_) {
+      try {
+        await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
+      } catch (_) {}
+    }
+    if (mounted) _inactivity.start();
+    nav.pushNamedAndRemoveUntil('/login', (r) => false);
   }
 
   void _safeNavTo(String route) {
@@ -883,6 +1024,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     AppHardwareKeyboardScroll.uninstall();
+    AppSoftKeyboardEnsureVisible.uninstall();
     WidgetsBinding.instance.removeObserver(this);
     _sub?.cancel();
     _appLinksSub?.cancel();
@@ -909,11 +1051,16 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     }
 
     if (suspendAutoLock.value == true) return;
+    if (state == AppLifecycleState.detached) {
+      unawaited(_signOutOnBackgroundHide(pageHide: true));
+      return;
+    }
     if (state != AppLifecycleState.paused &&
         state != AppLifecycleState.hidden) {
       return;
     }
     unawaited(NotificationService.clearOsApplicationIconBadge());
+    FastLoginService.clearRuntimeUnlock();
     _inactivity.onAppPaused();
     unawaited(_signOutOnBackgroundHide());
   }
@@ -975,8 +1122,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                           child: Listener(
                             behavior: HitTestBehavior.translucent,
                             onPointerDown: (_) => _inactivity.userActivity(),
-                            onPointerMove: (_) => _inactivity.userActivity(),
-                            onPointerSignal: (_) => _inactivity.userActivity(),
+                            // عجلة الفأرة/إشارة التمرير لا تعيد مهلة الخمول — كانت تمنع ظهور النافذة.
                             child: wrapped,
                           ),
                         );
@@ -1002,46 +1148,81 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
 
                         wrapped = Consumer<AppSession>(
                           builder: (context, session, appChild) {
-                            if (session.hasInternet) return appChild!;
+                            final child = appChild ?? const SizedBox.shrink();
+                            // جوال + ويب: شريط علوي فقط — لا IgnorePointer على كامل التطبيق.
+                            // الطبقة الكاملة كانت تجمّد اللمس بعد الدخول عند فشل فحص خاطئ.
+                            if (session.hasInternet) return child;
                             final loc = l10n;
-                            return PopScope(
-                              canPop: false,
-                              child: Stack(
-                                children: [
-                                  IgnorePointer(
-                                    ignoring: true,
-                                    child: appChild,
-                                  ),
-                                  Positioned.fill(
-                                    child: _GlobalOfflineOverlay(
-                                      isAr: lang == 'ar',
-                                      title: loc?.noInternetConnectionTitle ??
-                                          (lang == 'ar'
-                                              ? 'لا يوجد اتصال بالإنترنت'
-                                              : 'No Internet Connection'),
-                                      message: [
-                                        loc?.ensureInternetThenRetry ??
-                                            (lang == 'ar'
-                                                ? 'تأكد من اتصال الإنترنت ثم أعد المحاولة.'
-                                                : 'Make sure you are online, then retry.'),
-                                        loc?.offlineGlobalOverlayHint ??
-                                            (lang == 'ar'
-                                                ? 'جلسة تسجيل الدخول تبقى على هذا الجهاز.'
-                                                : 'Your session stays on this device.'),
-                                      ].join('\n\n'),
-                                      retryLabel: loc?.retryLabel ??
-                                          (lang == 'ar'
-                                              ? 'إعادة المحاولة'
-                                              : 'Retry'),
-                                      verifying: session.networkCheckBusy,
-                                      onRetry: () => unawaited(
-                                        session.refreshConnectivity(
-                                            userInitiated: true),
+                            final cs = Theme.of(context).colorScheme;
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                child,
+                                Positioned(
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  child: Material(
+                                    elevation: 4,
+                                    color: cs.errorContainer,
+                                    child: SafeArea(
+                                      bottom: false,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 6,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.wifi_off_rounded,
+                                              size: 20,
+                                              color: cs.onErrorContainer,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                loc?.noInternetConnectionTitle ??
+                                                    (lang == 'ar'
+                                                        ? 'لا يوجد اتصال بالإنترنت'
+                                                        : 'No Internet Connection'),
+                                                style: TextStyle(
+                                                  color: cs.onErrorContainer,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            if (session.networkCheckBusy)
+                                              SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  color: cs.onErrorContainer,
+                                                ),
+                                              )
+                                            else
+                                              TextButton(
+                                                onPressed: () => unawaited(
+                                                  session.refreshConnectivity(
+                                                    userInitiated: true,
+                                                  ),
+                                                ),
+                                                child: Text(
+                                                  loc?.retryLabel ??
+                                                      (lang == 'ar'
+                                                          ? 'إعادة المحاولة'
+                                                          : 'Retry'),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
                             );
                           },
                           child: wrapped,
@@ -1051,6 +1232,13 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                           lang: lang,
                           child: wrapped,
                         );
+
+                        if (kIsWeb) {
+                          wrapped = WebBrowserLifecycleHost(
+                            lang: lang,
+                            child: wrapped,
+                          );
+                        }
 
                         return Directionality(
                           textDirection:
@@ -1070,6 +1258,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                             const ChangePasswordScreen(),
                         '/passwordSetup': (context) =>
                             const PasswordSetupScreen(),
+                        '/register': (context) => const RegisterScreen(),
 
                         // ✅ NEW routes
                         '/accountTypeSetup': (_) =>
@@ -1077,10 +1266,18 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                         '/verificationRequest': (_) =>
                             const VerificationRequestScreen(),
 
-                        '/userDashboard': (context) => UserDashboard(
-                              key: const ValueKey('dashboard'),
-                              lang: lang,
-                            ),
+                        '/userDashboard': (context) => kIsWeb
+                            ? WebDashboardEntryRedirect(lang: lang)
+                            : UserDashboard(
+                                key: const ValueKey('dashboard'),
+                                lang: lang,
+                              ),
+                        '/userdashboard': (context) => kIsWeb
+                            ? WebDashboardEntryRedirect(lang: lang)
+                            : UserDashboard(
+                                key: const ValueKey('dashboard'),
+                                lang: lang,
+                              ),
                         '/settings': (context) => const SettingsPage(),
                         '/fastLogin': (context) => const FastLoginScreen(),
                         AppRoutes.deviceManagement: (context) {
@@ -1184,10 +1381,14 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                           final args =
                               ModalRoute.of(context)?.settings.arguments;
                           var contractId = '';
+                          var verifyToken = '';
                           String resolvedLang = lang;
                           if (args is Map) {
                             contractId =
                                 (args['contractId'] ?? args['id'] ?? '')
+                                    .toString();
+                            verifyToken =
+                                (args['verifyToken'] ?? args['vt'] ?? '')
                                     .toString();
                             final l = (args['lang'] ?? '').toString();
                             if (l.isNotEmpty) resolvedLang = l;
@@ -1197,6 +1398,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                           return ContractVerifyPage(
                             contractId: contractId.trim(),
                             lang: resolvedLang,
+                            verifyToken:
+                                verifyToken.trim().isEmpty ? null : verifyToken.trim(),
                           );
                         },
                       },
@@ -1220,117 +1423,12 @@ class StartRouter extends StatefulWidget {
   State<StartRouter> createState() => _StartRouterState();
 }
 
-class _GlobalOfflineOverlay extends StatelessWidget {
-  final bool isAr;
-  final String title;
-  final String message;
-  final String retryLabel;
-  final bool verifying;
-  final VoidCallback onRetry;
-
-  const _GlobalOfflineOverlay({
-    required this.isAr,
-    required this.title,
-    required this.message,
-    required this.retryLabel,
-    this.verifying = false,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xEE0B1220) : const Color(0xEEF5F7FA);
-    final card = isDark ? const Color(0xFF121A2A) : Colors.white;
-    final titleColor = isDark ? Colors.white : const Color(0xFF0B1220);
-    final subColor = isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569);
-
-    return Directionality(
-      textDirection: isAr ? TextDirection.rtl : TextDirection.ltr,
-      child: AbsorbPointer(
-        absorbing: verifying,
-        child: ColoredBox(
-          color: bg,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Card(
-                color: card,
-                elevation: 16,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(22),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.wifi_off_rounded, size: 56, color: titleColor),
-                      const SizedBox(height: 10),
-                      Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 16,
-                          color: titleColor,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        message,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: subColor,
-                          height: 1.35,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: cs.primary,
-                            foregroundColor: cs.onPrimary,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: verifying ? null : onRetry,
-                          icon: verifying
-                              ? SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: cs.onPrimary,
-                                  ),
-                                )
-                              : const Icon(Icons.refresh_rounded),
-                          label: Text(retryLabel),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _StartRouterState extends State<StartRouter> {
   bool _loading = true;
   Widget? _target;
 
   bool _retryingNet = false;
+  StreamSubscription<AuthState>? _authSub;
 
   bool get _isMobile =>
       !kIsWeb &&
@@ -1340,15 +1438,126 @@ class _StartRouterState extends State<StartRouter> {
   @override
   void initState() {
     super.initState();
-    _resolve();
+    if (kIsWeb) {
+      StartRouterController.register(_refreshAfterWebAuth);
+    }
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (!mounted) return;
+      if (data.event == AuthChangeEvent.signedOut) {
+        if (SessionManager.duringPublicSessionReset) return;
+        // ضيف: مسح JWT بعد setGuest يطلق signedOut — لا نُعيد شاشة التحميل (كان يعلّق).
+        unawaited(() async {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final guest = prefs.getBool(kPrefGuestMode) ?? false;
+            final entry =
+                (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
+            if (guest || entry == 'guest') return;
+          } catch (_) {}
+          if (!mounted) return;
+          // الويب: اللوحة مُضمّنة — لا تُعد التحميل عند signedOut عرضي.
+          if (kIsWeb && _target != null) return;
+          setState(() {
+            _loading = true;
+            _target = null;
+          });
+          unawaited(_resolve());
+        }());
+      }
+    });
+    unawaited(_resolve());
+  }
+
+  @override
+  void dispose() {
+    if (kIsWeb) {
+      StartRouterController.unregister(_refreshAfterWebAuth);
+    }
+    _authSub?.cancel();
+    super.dispose();
+  }
+
+  /// مايو: فتح اللوحة مباشرة داخل StartRouter — بدون WebDashboardShell.
+  Future<void> _openWebDashboardInPlace() async {
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final entryMode =
+        (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
+    final guestMode = prefs.getBool(kPrefGuestMode) ?? false;
+    final session = Supabase.instance.client.auth.currentSession;
+    // Auth حيّ = مستخدم مسجّل حتى لو بقيت prefs الضيف.
+    final isGuest =
+        session == null && (guestMode || entryMode == 'guest');
+    if (session != null && (guestMode || entryMode == 'guest')) {
+      try {
+        await prefs.setBool(kPrefGuestMode, false);
+        await prefs.setString(kPrefEntryMode, 'user');
+      } catch (_) {}
+    }
+
+    if (isGuest || session == null) {
+      if (!mounted) return;
+      setState(() {
+        _target = UserDashboard(
+          key: const ValueKey('dashboard-guest'),
+          lang: widget.lang,
+        );
+        _loading = false;
+      });
+      if (kIsWeb) syncWebDashboardHashInAddressBar();
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _target = PostAuthShell(
+        lang: widget.lang,
+        child: UserDashboard(
+          key: const ValueKey('dashboard'),
+          lang: widget.lang,
+        ),
+      );
+      _loading = false;
+    });
+    if (kIsWeb) syncWebDashboardHashInAddressBar();
+  }
+
+  /// بعد OTP/ضيف: تحديث اللوحة داخل نفس [StartRouter] دون إعادة بناء المكدس.
+  Future<void> _refreshAfterWebAuth() async {
+    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final entryMode =
+        (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
+    final guestMode = prefs.getBool(kPrefGuestMode) ?? false;
+    final session = Supabase.instance.client.auth.currentSession;
+    final isGuest =
+        session == null && (guestMode || entryMode == 'guest');
+
+    if (isGuest) {
+      await _openWebDashboardInPlace();
+      return;
+    }
+
+    final sb = Supabase.instance.client;
+    final uid = sb.auth.currentUser?.id ?? '';
+    final verified = uid.isNotEmpty
+        ? (prefs.getBool(otpVerifiedKey(uid)) ?? false)
+        : false;
+
+    if (verified) {
+      await _openWebDashboardInPlace();
+      return;
+    }
+    await _resolve();
   }
 
   Future<bool> _hasInternet() async {
+    // فشل مفتوح: لا نمنع الدخول للوحة بسبب فحص شبكة بطيء/فاشل.
     try {
-      return await ConnectivityGuard.hasReachableInternet()
-          .timeout(const Duration(seconds: 20), onTimeout: () => false);
+      return await ConnectivityGuard.hasPluginLink()
+          .timeout(const Duration(seconds: 5), onTimeout: () => true);
     } catch (_) {
-      return false;
+      return true;
     }
   }
 
@@ -1372,7 +1581,7 @@ class _StartRouterState extends State<StartRouter> {
       return;
     }
 
-    final okNet = await _hasInternet();
+    final okNet = kIsWeb ? true : await _hasInternet();
     if (!mounted) return;
 
     if (!okNet) {
@@ -1387,8 +1596,6 @@ class _StartRouterState extends State<StartRouter> {
       return;
     }
 
-    await Future.delayed(const Duration(milliseconds: 80));
-
     final prefs = await SharedPreferences.getInstance();
 
     final String entryMode =
@@ -1398,7 +1605,15 @@ class _StartRouterState extends State<StartRouter> {
     final sb = Supabase.instance.client;
     Session? session = sb.auth.currentSession;
 
-    final bool isGuest = guestMode || entryMode == 'guest';
+    // جلسة Auth حية تلغي prefs الضيف المتأخرة (كانت تسبب إقلاع مزدوج على الويب).
+    final bool isGuest =
+        (session == null) && (guestMode || entryMode == 'guest');
+    if (session != null && (guestMode || entryMode == 'guest')) {
+      try {
+        await prefs.setBool(kPrefGuestMode, false);
+        await prefs.setString(kPrefEntryMode, 'user');
+      } catch (_) {}
+    }
 
     if (kIsWeb && session != null && !isGuest) {
       if (await shouldForceWebReauthDueToIdle()) {
@@ -1428,11 +1643,12 @@ class _StartRouterState extends State<StartRouter> {
       if (!mounted) return;
       setState(() {
         _target = UserDashboard(
-          key: const ValueKey('dashboard'),
+          key: const ValueKey('dashboard-guest'),
           lang: widget.lang,
         );
         _loading = false;
       });
+      if (kIsWeb) syncWebDashboardHashInAddressBar();
       return;
     }
 
@@ -1446,8 +1662,8 @@ class _StartRouterState extends State<StartRouter> {
       if (verified) {
         unawaited(FastLoginService.syncBootstrapRoutePrefs());
 
-        if (_isMobile &&
-            await FastLoginService.hasAnyLockEnabled() &&
+        // عند كل فتح جديد للعملية: إن وُجد قفل سريع (PIN/بصمة) يُطلب قبل اللوحة.
+        if (await FastLoginService.hasAnyLockEnabled() &&
             !FastLoginService.hasUnlockedThisRuntimeSession) {
           if (!mounted) return;
           setState(() {
@@ -1457,38 +1673,22 @@ class _StartRouterState extends State<StartRouter> {
           return;
         }
 
-        try {
-          final svc = MarketingFlowService(Supabase.instance.client);
-          final isMarketer = await svc.isMarketer();
-          if (!mounted) return;
-
-          setState(() {
-            _target = PostAuthShell(
+        // مايو: فتح مباشر دون WebDashboardShell.
+        // لا نوجّه المسوّق إلى MarketerDashboardPage (لوحة فريق فقط) —
+        // الرئيسية/إعلاناتي/طلباتي كلها داخل UserDashboard.
+        if (!mounted) return;
+        setState(() {
+          _target = PostAuthShell(
+            lang: widget.lang,
+            child: UserDashboard(
+              key: const ValueKey('dashboard'),
               lang: widget.lang,
-              child: isMarketer
-                  ? MarketerDashboardPage(lang: widget.lang)
-                  : UserDashboard(
-                      key: const ValueKey('dashboard'),
-                      lang: widget.lang,
-                    ),
-            );
-            _loading = false;
-          });
-          return;
-        } catch (_) {
-          if (!mounted) return;
-          setState(() {
-            _target = PostAuthShell(
-              lang: widget.lang,
-              child: UserDashboard(
-                key: const ValueKey('dashboard'),
-                lang: widget.lang,
-              ),
-            );
-            _loading = false;
-          });
-          return;
-        }
+            ),
+          );
+          _loading = false;
+        });
+        if (kIsWeb) syncWebDashboardHashInAddressBar();
+        return;
       }
     }
 
@@ -1514,13 +1714,72 @@ class _StartRouterState extends State<StartRouter> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
+      if (kIsWeb) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          removeWebHtmlSplash();
+        });
+      }
       return Scaffold(
+        backgroundColor: const Color(0xFFF3F6F8),
         body: Center(
-          child: AppLogoLoading(
-            size: MediaQuery.sizeOf(context).shortestSide < 360 ? 80 : 96,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.92, end: 1),
+            duration: const Duration(milliseconds: 700),
+            curve: Curves.easeOutCubic,
+            builder: (context, scale, child) {
+              return Opacity(
+                opacity: ((scale - 0.92) / 0.08).clamp(0.0, 1.0),
+                child: Transform.scale(scale: scale, child: child),
+              );
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  AppBranding.bootLogoAsset(context),
+                  width: (MediaQuery.sizeOf(context).shortestSide * 0.42)
+                      .clamp(140.0, 220.0),
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  errorBuilder: (_, __, ___) => AppBusyIndicator.page(
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      AppBranding.welcomeHeadline(
+                        context,
+                        isAr: widget.lang.toLowerCase() != 'en',
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: const Color(0xFF0B1220),
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                AppBusyIndicator.page(
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
           ),
         ),
       );
+    }
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        removeWebHtmlSplash();
+      });
     }
     return _target ?? const SizedBox.shrink();
   }

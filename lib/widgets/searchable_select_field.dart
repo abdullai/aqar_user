@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 /// حقل يبدو كحقل إدخال لكنه يفتح قائمة عمودية مع بحث داخل التمرير.
 /// يُستخدم للمناطق/المحافظات/المدن عندما تكون الخيارات كثيرة.
@@ -66,7 +67,7 @@ class SearchableSelectField extends StatelessWidget {
                   ValueListenableBuilder<String>(
                     valueListenable: q,
                     builder: (context, query, _) {
-                      return TextField(
+                      return AqarTextField(
                         autofocus: true,
                         decoration: InputDecoration(
                           hintText: searchHint ??

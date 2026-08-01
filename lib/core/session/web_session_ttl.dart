@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/app_config.dart';
 import 'app_session.dart';
 
 /// انتهاء جلسة الويب بعد خمول (آخر نشاط) لتفادي فتح `#/userDashboard` كآخر مستخدم
@@ -11,7 +12,7 @@ import 'app_session.dart';
 const String kPrefWebLastActivityMs = 'web_last_activity_ms';
 
 /// آخر نشاط لجلسة **الضيف** على الويب (منفصل عن جلسة المستخدم المسجّل).
-const String kPrefWebGuestLastActivityMs = 'web_guest_last_activity_ms';
+const String kPrefWebGuestLastActivityMs = AppConfig.prefWebGuestLastActivityMs;
 
 /// حد أقصى للخمول بالساعات (1–720). الافتراضي 24 ساعة.
 const String kPrefWebMaxIdleHours = 'web_max_idle_hours';

@@ -42,16 +42,41 @@ class ProfileComplianceService {
     return _falTypes.contains((accountType ?? '').trim().toLowerCase());
   }
 
-  /// تحميل صف الامتثال — محاولة كاملة ثم أعمدة أقل عند فشل RLS/عمود ناقص
-  /// حتى لا يُعاد `null` بالخطأ فيُتخطى التوقيع/فال/المراجعة.
+  /// تحميل صف الامتثال — يشمل حقول بوابة استكمال الملف (أسماء/جوال/فال)
+  /// حتى لا تُعرض البوابة بالخطأ عندما تكون الأسماء موجودة لكن غير مُحمَّلة.
   static Future<Map<String, dynamic>?> loadProfileRow(SupabaseClient sb) async {
     final uid = sb.auth.currentUser?.id;
     if (uid == null) return null;
 
-    const fullCols = 'account_type, username, unified_national_number, '
-        'fal_license_expires_at, fal_compliance_hold, '
-        'signature_storage_path, verification_status, license_no, '
-        'profile_data_revision';
+    const attempts = <String>[
+      'user_id, account_type, username, phone, avatar_url, '
+          'unified_national_number, '
+          'fal_license_expires_at, fal_compliance_hold, '
+          'signature_storage_path, verification_status, license_no, '
+          'profile_data_revision, '
+          'display_name, public_name_source, '
+          'first_name_ar, second_name_ar, third_name_ar, fourth_name_ar, '
+          'first_name_en, second_name_en, third_name_en, fourth_name_en, '
+          'full_name_ar, full_name_en, full_name, office_name',
+      'user_id, account_type, username, phone, avatar_url, '
+          'unified_national_number, '
+          'fal_license_expires_at, fal_compliance_hold, '
+          'signature_storage_path, verification_status, license_no, '
+          'profile_data_revision, '
+          'first_name_ar, second_name_ar, third_name_ar, fourth_name_ar, '
+          'first_name_en, second_name_en, third_name_en, fourth_name_en, '
+          'full_name_ar, full_name_en, full_name, office_name',
+      'account_type, username, phone, avatar_url, '
+          'unified_national_number, '
+          'fal_license_expires_at, fal_compliance_hold, '
+          'signature_storage_path, verification_status, license_no, '
+          'profile_data_revision, full_name_ar, full_name_en, full_name, office_name',
+      'account_type, username, phone, avatar_url, '
+          'unified_national_number, '
+          'fal_license_expires_at, fal_compliance_hold, '
+          'signature_storage_path, verification_status, license_no, '
+          'profile_data_revision',
+    ];
 
     Future<Map<String, dynamic>?> oneSelect(String cols) async {
       final row = await sb
@@ -63,29 +88,18 @@ class ProfileComplianceService {
       return Map<String, dynamic>.from(row);
     }
 
-    try {
-      final m = await oneSelect(fullCols);
-      if (m != null) {
-        m.putIfAbsent('profile_data_revision', () => 1);
-        return m;
-      }
-      return null;
-    } catch (_) {
+    for (final cols in attempts) {
       try {
-        final m = await oneSelect(
-          'account_type, username, unified_national_number, '
-          'fal_license_expires_at, fal_compliance_hold, '
-          'signature_storage_path, verification_status, license_no, '
-          'profile_data_revision',
-        );
+        final m = await oneSelect(cols);
         if (m != null) {
           m.putIfAbsent('profile_data_revision', () => 1);
+          return m;
         }
-        return m;
       } catch (_) {
-        return null;
+        // جرّب أعمدة أقل عند غياب عمود/RLS.
       }
     }
+    return null;
   }
 
   static FalComplianceLevel evaluateFal(Map<String, dynamic>? row) {
@@ -108,8 +122,12 @@ class ProfileComplianceService {
     return FalComplianceLevel.ok;
   }
 
-  /// توقيع إلزامي إن كان المسار فارغاً — يشمل الحسابات القديمة بمجرد توفر صف الملف.
+  /// مفتاح إيقاف مؤقت: إخفاء/تعطيل إلزام التوقيع حتى إشعار آخر.
+  static const bool kProfileSignatureRequired = false;
+
+  /// توقيع إلزامي إن كان المسار فارغاً — معطّل حالياً عبر [kProfileSignatureRequired].
   static bool needsSignature(Map<String, dynamic>? row) {
+    if (!kProfileSignatureRequired) return false;
     if (row == null) return false;
     final p = row['signature_storage_path']?.toString().trim() ?? '';
     final lower = p.toLowerCase();

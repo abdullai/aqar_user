@@ -69,28 +69,83 @@ abstract final class ChatPeerService {
     final today = DateTime(now.year, now.month, now.day);
     final d = DateTime(dt.year, dt.month, dt.day);
     final diff = today.difference(d).inDays;
-    final t = DateFormat.Hm().format(dt);
+    String t;
+    try {
+      t = DateFormat.Hm().format(dt);
+    } catch (_) {
+      t =
+          '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    }
     if (diff == 0) {
       return isAr ? 'آخر ظهور اليوم $t' : 'Last seen today at $t';
     }
     if (diff == 1) {
       return isAr ? 'آخر ظهور أمس' : 'Last seen yesterday';
     }
-    final dateStr = DateFormat.yMMMd(isAr ? 'ar' : 'en').format(dt);
-    return isAr ? 'آخر ظهور $dateStr' : 'Last seen $dateStr';
+    try {
+      final dateStr = DateFormat.yMMMd(isAr ? 'ar' : 'en').format(dt);
+      return isAr ? 'آخر ظهور $dateStr' : 'Last seen $dateStr';
+    } catch (_) {
+      final dateStr =
+          '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+      return isAr ? 'آخر ظهور $dateStr' : 'Last seen $dateStr';
+    }
   }
 
   /// متصل الآن (نبض حديث) أو آخر ظهور، مع احترام إخفاء الظهور.
-  static String formatPresenceLine(Map<String, dynamic>? row, bool isAr) {
+  /// عند عدم وجود بيانات (قبل أول استعلام): لا نُظهر «جارٍ التحميل…» —
+  /// يُترك للواجهة قرار الإخفاء أو عرض حالة افتراضية لتجنّب اللحظة المزعجة.
+  ///
+  /// [fallbackTimestamp] يُستخدم لعرض «آخر تحديث» نسبة لتاريخ نشاط آخر
+  /// (مثل تاريخ تحديث الطلب العقاري) إذا لم يكن لدينا بيانات ظهور حقيقية.
+  static String formatPresenceLine(
+    Map<String, dynamic>? row,
+    bool isAr, {
+    DateTime? fallbackTimestamp,
+  }) {
+    String fmtFallback(DateTime dt) {
+      final local = dt.toLocal();
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final d = DateTime(local.year, local.month, local.day);
+      final diff = today.difference(d).inDays;
+      String t;
+      String full;
+      try {
+        t = DateFormat.Hm().format(local);
+        full = DateFormat.yMMMd(isAr ? 'ar' : 'en').add_Hm().format(local);
+      } catch (_) {
+        t =
+            '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+        full =
+            '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} $t';
+      }
+      if (diff == 0) {
+        return isAr ? 'آخر ظهور اليوم $t' : 'Last seen today at $t';
+      }
+      if (diff == 1) {
+        return isAr ? 'آخر ظهور أمس $t' : 'Last seen yesterday at $t';
+      }
+      return isAr ? 'آخر ظهور $full' : 'Last seen $full';
+    }
+
     if (row == null) {
-      return isAr
-          ? 'جارٍ تحميل حالة الشريك…'
-          : 'Loading partner status…';
+      if (fallbackTimestamp != null) {
+        return fmtFallback(fallbackTimestamp.toLocal());
+      }
+      return isAr ? 'لا يوجد ظهور حديث' : 'No recent activity';
+    }
+    // تلميح الخادم من RPC `get_user_presence_summary` — أدق من حساب
+    // العميل وحده عند تأخّر Realtime.
+    if (row['_online_now_hint'] == true) {
+      return isAr ? 'متصل الآن' : 'Online';
     }
     final hidden = row['chat_last_seen_hidden'] == true;
     final dt = _parseTs(row['chat_last_seen_at']);
+    // متصل الآن إذا كانت آخر نبضة خلال 60 ثانية — متناسب مع نبضة العميل
+    // كل ~20 ثانية ونافذة الخادم 90 ثانية.
     final recent = dt != null &&
-        DateTime.now().difference(dt) < const Duration(minutes: 2);
+        DateTime.now().difference(dt) < const Duration(seconds: 60);
     if (hidden) {
       if (recent) {
         return isAr ? 'متصل الآن' : 'Online';
@@ -102,7 +157,13 @@ abstract final class ChatPeerService {
     if (recent) {
       return isAr ? 'متصل الآن' : 'Online';
     }
-    return formatChatLastSeen(row, isAr);
+    if (dt != null) {
+      return formatChatLastSeen(row, isAr);
+    }
+    if (fallbackTimestamp != null) {
+      return fmtFallback(fallbackTimestamp.toLocal());
+    }
+    return isAr ? 'لا يوجد ظهور حديث' : 'No recent activity';
   }
 
   /// تلخيص تقييمات لعدة مستخدمين (أفضل لقوائم العروض).

@@ -35,21 +35,21 @@ class ListingWorkflowUiContext {
 
   static const _ownerTabAr = [
     'بانتظار عروض المسوقين',
-    'بانتظار التعاقد',
+    'العروض المقدمة',
+    'بانتظار التصريح',
     'لم يتخذ إجراء 72 ساعة',
     'مفسوخ / ملغى',
     'العقارات المحجوزة',
-    'إعلاناتي المنشورة',
     'صفقات مكتملة',
   ];
 
   static const _ownerTabEn = [
     'Awaiting marketer offers',
-    'Awaiting contracting',
+    'Submitted offers',
+    'Awaiting permit',
     'No action (72h)',
     'Cancelled / terminated',
     'Reserved properties',
-    'My published ads',
     'Completed deals',
   ];
 
@@ -65,20 +65,37 @@ class ListingWorkflowUiContext {
     final wf = (r['workflow_stage'] ?? '').toString().trim().toLowerCase();
     final st = (r['status'] ?? '').toString().trim().toLowerCase();
 
+    final offersN = (r['_owner_pending_offers_count'] is num)
+        ? (r['_owner_pending_offers_count'] as num).toInt()
+        : int.tryParse('${r['_owner_pending_offers_count'] ?? ''}') ?? 0;
     final tab = ListingStageUiHelper.ownerHubDisplayTabIndex(
       stage,
       legacyListingStatus: st,
+      ownerPendingOffersCount: offersN,
     ).clamp(0, 6);
 
-    final showOffers = stage == ListingWorkflowStage.waitingMarketers ||
-        stage == ListingWorkflowStage.marketerSelected ||
-        st == 'offers_received' ||
-        st == 'assigned' ||
-        st == 'new' ||
-        st == 'invited' ||
-        st == 'pending';
+    // بعد توقيع العقد أو بدء التصريح/النشر: لا يُعرض زر «عروض المسوقين».
+    final pastContracting = stage == ListingWorkflowStage.marketerSelected ||
+        stage == ListingWorkflowStage.contractSigned ||
+        stage == ListingWorkflowStage.permitPending ||
+        stage == ListingWorkflowStage.permitIssued ||
+        stage == ListingWorkflowStage.published ||
+        stage == ListingWorkflowStage.reserved ||
+        wf == 'contract_signed' ||
+        wf == 'permit_pending' ||
+        wf == 'permit_issued' ||
+        wf == 'published';
+    final showOffers = !pastContracting &&
+        (stage == ListingWorkflowStage.waitingMarketers ||
+            st == 'offers_received' ||
+            st == 'assigned' ||
+            st == 'new' ||
+            st == 'invited' ||
+            st == 'pending');
 
     final showRelist = wf == 'inactive_72h' ||
+        wf == 'inactive72h' ||
+        wf == 'owner_action_required' ||
         wf == 'cancelled' ||
         wf == 'contract_cancelled' ||
         wf == 'terminated' ||
@@ -87,25 +104,44 @@ class ListingWorkflowUiContext {
         st == 'contract_cancelled' ||
         st == 'terminated' ||
         st == 'rejected' ||
-        st == 'declined';
+        st == 'declined' ||
+        stage == ListingWorkflowStage.inactive72h;
 
-    final showMarketerOffer = stage == ListingWorkflowStage.waitingMarketers ||
-        st == 'new' ||
-        st == 'invited' ||
-        st == 'pending';
+    final activelyCollecting = wf == 'waiting_marketers' ||
+        const {
+          'waiting_marketers',
+          'offers_received',
+          'new',
+          'invited',
+          'pending',
+        }.contains(st);
 
-    final published = stage == ListingWorkflowStage.published ||
-        stage == ListingWorkflowStage.reserved ||
-        const {'published', 'active', 'approved', 'live'}.contains(st);
+    final showMarketerOffer = stage != ListingWorkflowStage.inactive72h &&
+        (activelyCollecting ||
+            stage == ListingWorkflowStage.waitingMarketers ||
+            st == 'new' ||
+            st == 'invited' ||
+            st == 'pending');
+
+    final published = wf != 'waiting_marketers' &&
+        st != 'waiting_marketers' &&
+        (stage == ListingWorkflowStage.published ||
+            stage == ListingWorkflowStage.reserved ||
+            const {'published', 'active', 'approved', 'live'}.contains(st));
 
     final deadline = _parseDt(r['permit_deadline_at']) ??
+        _parseDt(r['request_permit_deadline_at']) ??
+        _parseDt(r['permits_due_at']) ??
         _parseDt(r['marketer_response_deadline_at']);
+
+    final statusAr = ListingStageUiHelper.stageLabelAr(stage);
+    final statusEn = ListingStageUiHelper.stageLabelEn(stage);
 
     return ListingWorkflowUiContext(
       isPrePublishRequest: true,
       stage: stage,
-      statusLabelAr: ListingStageUiHelper.stageLabelAr(stage),
-      statusLabelEn: ListingStageUiHelper.stageLabelEn(stage),
+      statusLabelAr: statusAr,
+      statusLabelEn: statusEn,
       suggestedOwnerHubTabIndex: tab,
       ownerHubTabNameAr: _ownerTabAr[tab],
       ownerHubTabNameEn: _ownerTabEn[tab],

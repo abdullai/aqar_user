@@ -101,7 +101,7 @@ abstract class AppLocalizations {
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
-  /// **'Motawoq Real Estate'**
+  /// **'Mawthuq Line Real Estate App'**
   String get appTitle;
 
   /// No description provided for @welcomeTitle.
@@ -113,7 +113,7 @@ abstract class AppLocalizations {
   /// No description provided for @welcomeTrustedAqar.
   ///
   /// In en, this message translates to:
-  /// **'Welcome to Motawoq Real Estate'**
+  /// **'Welcome to Mawthuq Line Real Estate App'**
   String get welcomeTrustedAqar;
 
   /// No description provided for @signInToContinue.
@@ -281,19 +281,19 @@ abstract class AppLocalizations {
   /// No description provided for @legalTermsCoachTitle.
   ///
   /// In en, this message translates to:
-  /// **'Terms & privacy'**
+  /// **'Terms & Conditions'**
   String get legalTermsCoachTitle;
 
   /// No description provided for @legalTermsCoachBody.
   ///
   /// In en, this message translates to:
-  /// **'You can review the terms and privacy policy anytime in Settings. Acceptance may still be required at sign-in.'**
+  /// **'Review the Terms & Conditions via the link, then check the acknowledgment box to continue. This prompt will not appear again after you confirm.'**
   String get legalTermsCoachBody;
 
   /// No description provided for @legalTermsCoachOk.
   ///
   /// In en, this message translates to:
-  /// **'OK'**
+  /// **'Acknowledged — continue'**
   String get legalTermsCoachOk;
 
   /// No description provided for @fieldGroupCredentialsTitle.
@@ -461,7 +461,7 @@ abstract class AppLocalizations {
   /// No description provided for @welcomeDashboardBannerTitle.
   ///
   /// In en, this message translates to:
-  /// **'Welcome to Motawoq Real Estate'**
+  /// **'Welcome to Mawthuq Line Real Estate'**
   String get welcomeDashboardBannerTitle;
 
   /// No description provided for @welcomeDashboardBannerBody.
@@ -485,13 +485,13 @@ abstract class AppLocalizations {
   /// No description provided for @loginUsernameFieldHelper.
   ///
   /// In en, this message translates to:
-  /// **'ID/Iqama, FAL license, or unified national no. 700… (10 digits)'**
+  /// **'Enter ID / Iqama — 10 digits'**
   String get loginUsernameFieldHelper;
 
   /// No description provided for @loginIdentifierFieldLabel.
   ///
   /// In en, this message translates to:
-  /// **'National ID, unified CR, or FAL license — 10 digits'**
+  /// **'Username'**
   String get loginIdentifierFieldLabel;
 
   /// No description provided for @loginPasswordFieldLabel.
@@ -785,7 +785,7 @@ abstract class AppLocalizations {
   /// No description provided for @marketerTabAwaitingOwner.
   ///
   /// In en, this message translates to:
-  /// **'⏳ Awaiting owner · contracting'**
+  /// **'✅ Permit issuance'**
   String get marketerTabAwaitingOwner;
 
   /// No description provided for @marketerTabMyOffers.
@@ -1379,7 +1379,7 @@ abstract class AppLocalizations {
   /// No description provided for @legalTermsFallbackBody.
   ///
   /// In en, this message translates to:
-  /// **'Terms and privacy text could not be loaded from the server. By continuing you agree to use Motawoq Real Estate in accordance with applicable laws in the Kingdom of Saudi Arabia, including personal data protection rules where they apply, to provide accurate information, and to use listings and messaging responsibly. For the full text, contact support or try again later.'**
+  /// **'Terms and privacy text could not be loaded from the server. By continuing you agree to use Mawthuq Line Real Estate Establishment in accordance with applicable laws in the Kingdom of Saudi Arabia, including personal data protection rules where they apply, to provide accurate information, and to use listings and messaging responsibly. For the full text, contact support or try again later.'**
   String get legalTermsFallbackBody;
 
   /// No description provided for @permissionsGateTitle.
@@ -1715,7 +1715,7 @@ abstract class AppLocalizations {
   /// No description provided for @loginIdentifierFieldHint.
   ///
   /// In en, this message translates to:
-  /// **'ID/Iqama, FAL license, or unified national no. 700… (10 digits)'**
+  /// **'Enter ID / Iqama number (10 digits)'**
   String get loginIdentifierFieldHint;
 
   /// No description provided for @loginEnterIdentifierFirst.
@@ -2099,13 +2099,13 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingWelcomeTitleApp.
   ///
   /// In en, this message translates to:
-  /// **'Motawoq Real Estate app'**
+  /// **'Mawthuq Line Real Estate App'**
   String get onboardingWelcomeTitleApp;
 
   /// No description provided for @onboardingWelcomeTitleWeb.
   ///
   /// In en, this message translates to:
-  /// **'Motawoq Real Estate online platform'**
+  /// **'Mawthuq Line Real Estate Establishment'**
   String get onboardingWelcomeTitleWeb;
 
   /// No description provided for @onboardingWelcomeBodyApp.
@@ -2117,7 +2117,7 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingWelcomeBodyWeb.
   ///
   /// In en, this message translates to:
-  /// **'We’re glad you’re here on the Motawoq Real Estate online platform. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.'**
+  /// **'We’re glad you’re here on the Mawthuq Line Real Estate Establishment platform. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.'**
   String get onboardingWelcomeBodyWeb;
 
   /// No description provided for @onboardingHomeTitle.
@@ -2630,6 +2630,72 @@ abstract class AppLocalizations {
   /// **'Clear other devices'**
   String get securityClearOtherDevices;
 
+  /// No description provided for @securityDeviceColBrowser.
+  ///
+  /// In en, this message translates to:
+  /// **'Browser / device'**
+  String get securityDeviceColBrowser;
+
+  /// No description provided for @securityDeviceColPlatform.
+  ///
+  /// In en, this message translates to:
+  /// **'Platform'**
+  String get securityDeviceColPlatform;
+
+  /// No description provided for @securityDeviceColLocation.
+  ///
+  /// In en, this message translates to:
+  /// **'Location'**
+  String get securityDeviceColLocation;
+
+  /// No description provided for @securityDeviceColLastSignIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Last sign-in'**
+  String get securityDeviceColLastSignIn;
+
+  /// No description provided for @securityDeviceColRegistered.
+  ///
+  /// In en, this message translates to:
+  /// **'Registered'**
+  String get securityDeviceColRegistered;
+
+  /// No description provided for @securityDeviceColStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get securityDeviceColStatus;
+
+  /// No description provided for @securityDeviceStatusCurrent.
+  ///
+  /// In en, this message translates to:
+  /// **'This device'**
+  String get securityDeviceStatusCurrent;
+
+  /// No description provided for @securityDeviceUnknownBrowser.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown device'**
+  String get securityDeviceUnknownBrowser;
+
+  /// No description provided for @securityDeviceRemoveAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get securityDeviceRemoveAction;
+
+  /// No description provided for @securityDeviceOtpSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Verification code sent'**
+  String get securityDeviceOtpSent;
+
+  /// No description provided for @securityDeviceOtpResendWait.
+  ///
+  /// In en, this message translates to:
+  /// **'Wait for the timer before resending'**
+  String get securityDeviceOtpResendWait;
+
   /// No description provided for @securityRetryContinue.
   ///
   /// In en, this message translates to:
@@ -2653,6 +2719,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Sign-in history'**
   String get settingsSectionSessionHistory;
+
+  /// No description provided for @settingsSectionAccountHub.
+  ///
+  /// In en, this message translates to:
+  /// **'Account & guided tour'**
+  String get settingsSectionAccountHub;
+
+  /// No description provided for @settingsReplayDashboardTourTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replay dashboard tour'**
+  String get settingsReplayDashboardTourTitle;
+
+  /// No description provided for @settingsReplayDashboardTourSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Walks main tabs again (Home → My page → …). Starts when you return to the dashboard.'**
+  String get settingsReplayDashboardTourSubtitle;
+
+  /// No description provided for @settingsReplayDashboardTourSnackbar.
+  ///
+  /// In en, this message translates to:
+  /// **'Tour will start when you go back to the dashboard.'**
+  String get settingsReplayDashboardTourSnackbar;
+
+  /// No description provided for @settingsOpenSwitchAccountTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch account'**
+  String get settingsOpenSwitchAccountTitle;
+
+  /// No description provided for @settingsOpenSwitchAccountSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick another profile you used on this device.'**
+  String get settingsOpenSwitchAccountSubtitle;
+
+  /// No description provided for @settingsOpenSessionHistoryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Full session log'**
+  String get settingsOpenSessionHistoryTitle;
+
+  /// No description provided for @settingsOpenSessionHistorySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the detailed sign-in history screen.'**
+  String get settingsOpenSessionHistorySubtitle;
 
   /// No description provided for @settingsDevicesFooterHint.
   ///
@@ -3074,11 +3188,41 @@ abstract class AppLocalizations {
   /// **'Inappropriate behavior after contact'**
   String get listingReportReasonHarassment;
 
+  /// No description provided for @listingReportReasonFraudFinancial.
+  ///
+  /// In en, this message translates to:
+  /// **'Fraud, extortion, or illegal payment demands'**
+  String get listingReportReasonFraudFinancial;
+
+  /// No description provided for @listingReportReasonIllegalContent.
+  ///
+  /// In en, this message translates to:
+  /// **'Illegal content or serious criminal activity'**
+  String get listingReportReasonIllegalContent;
+
+  /// No description provided for @listingReportReasonPrivacyViolation.
+  ///
+  /// In en, this message translates to:
+  /// **'Privacy breach or misuse of personal data'**
+  String get listingReportReasonPrivacyViolation;
+
   /// No description provided for @listingReportReasonOther.
   ///
   /// In en, this message translates to:
   /// **'Other (add details)'**
   String get listingReportReasonOther;
+
+  /// No description provided for @listingReportLegalDetailsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Legal / factual explanation (required for this selection)'**
+  String get listingReportLegalDetailsLabel;
+
+  /// No description provided for @listingReportLegalDetailsRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a clear explanation (at least 30 characters) for the selected reason.'**
+  String get listingReportLegalDetailsRequired;
 
   /// No description provided for @inAppNotifListingReportTitle.
   ///
@@ -3224,6 +3368,1332 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Search notifications…'**
   String get inboxSearchHint;
+
+  /// No description provided for @registerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Create account'**
+  String get registerTitle;
+
+  /// No description provided for @registerSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose account type, then complete registration.'**
+  String get registerSubtitle;
+
+  /// No description provided for @registerAccountTypeHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Account type'**
+  String get registerAccountTypeHeading;
+
+  /// No description provided for @accountKindIndividual.
+  ///
+  /// In en, this message translates to:
+  /// **'Individual user (browse)'**
+  String get accountKindIndividual;
+
+  /// No description provided for @accountKindOffice.
+  ///
+  /// In en, this message translates to:
+  /// **'Real estate office (max 3 members)'**
+  String get accountKindOffice;
+
+  /// No description provided for @accountKindInstitution.
+  ///
+  /// In en, this message translates to:
+  /// **'Real estate institution (max 6 members)'**
+  String get accountKindInstitution;
+
+  /// No description provided for @accountKindCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'Real estate company (max 12 members)'**
+  String get accountKindCompany;
+
+  /// No description provided for @registerContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue to registration'**
+  String get registerContinue;
+
+  /// No description provided for @accountKindIndependentAdvertiser.
+  ///
+  /// In en, this message translates to:
+  /// **'Independent (individual advertiser)'**
+  String get accountKindIndependentAdvertiser;
+
+  /// No description provided for @accountKindMarketer.
+  ///
+  /// In en, this message translates to:
+  /// **'Real estate marketer'**
+  String get accountKindMarketer;
+
+  /// No description provided for @registerOrgModeSectionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization setup'**
+  String get registerOrgModeSectionTitle;
+
+  /// No description provided for @registerOrgModeCreate.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a new organization (you will be the owner)'**
+  String get registerOrgModeCreate;
+
+  /// No description provided for @registerOrgModeJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Join an existing organization'**
+  String get registerOrgModeJoin;
+
+  /// No description provided for @registerInviteCodeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization or invitation code (FAL)'**
+  String get registerInviteCodeLabel;
+
+  /// No description provided for @registerInviteCodeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the code shared by the owner'**
+  String get registerInviteCodeHint;
+
+  /// No description provided for @registerLookupOrg.
+  ///
+  /// In en, this message translates to:
+  /// **'Look up organization'**
+  String get registerLookupOrg;
+
+  /// No description provided for @registerOrgPreviewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm organization'**
+  String get registerOrgPreviewTitle;
+
+  /// No description provided for @registerOrgPreviewFal.
+  ///
+  /// In en, this message translates to:
+  /// **'Display code: {code}'**
+  String registerOrgPreviewFal(String code);
+
+  /// No description provided for @registerInviteInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Code not found. Check with the owner and try again.'**
+  String get registerInviteInvalid;
+
+  /// No description provided for @registerInviteContinueRequiresPreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Look up the organization before continuing.'**
+  String get registerInviteContinueRequiresPreview;
+
+  /// No description provided for @registerSignupJoinPendingSnackbar.
+  ///
+  /// In en, this message translates to:
+  /// **'Account created. After you sign in, your join request is sent to the owner for approval.'**
+  String get registerSignupJoinPendingSnackbar;
+
+  /// No description provided for @registerPendingJoinIntro.
+  ///
+  /// In en, this message translates to:
+  /// **'Join request submitted from account registration.'**
+  String get registerPendingJoinIntro;
+
+  /// No description provided for @registerJoinFlowHint.
+  ///
+  /// In en, this message translates to:
+  /// **'After you complete signup and sign in, a join request is sent to the organization owner for approval.'**
+  String get registerJoinFlowHint;
+
+  /// No description provided for @orgBrowseTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Organizations'**
+  String get orgBrowseTitle;
+
+  /// No description provided for @orgBrowseEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No organizations yet.'**
+  String get orgBrowseEmpty;
+
+  /// No description provided for @orgJoinSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Request to join'**
+  String get orgJoinSubmit;
+
+  /// No description provided for @orgJoinMessageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional message'**
+  String get orgJoinMessageHint;
+
+  /// No description provided for @orgProfileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization'**
+  String get orgProfileTitle;
+
+  /// No description provided for @orgMembersCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} members'**
+  String orgMembersCount(int count);
+
+  /// No description provided for @orgFalBadge.
+  ///
+  /// In en, this message translates to:
+  /// **'FAL {code}'**
+  String orgFalBadge(String code);
+
+  /// No description provided for @orgSetupTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization created'**
+  String get orgSetupTitle;
+
+  /// No description provided for @orgSetupFalLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Public license: {code}'**
+  String orgSetupFalLine(String code);
+
+  /// No description provided for @orgSettingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization settings'**
+  String get orgSettingsTitle;
+
+  /// No description provided for @orgRenewFal.
+  ///
+  /// In en, this message translates to:
+  /// **'Renew FAL display license'**
+  String get orgRenewFal;
+
+  /// No description provided for @orgBuySeats.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase extra seats'**
+  String get orgBuySeats;
+
+  /// No description provided for @orgAssignPermissionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Member permissions'**
+  String get orgAssignPermissionsTitle;
+
+  /// No description provided for @permManageTeam.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage team'**
+  String get permManageTeam;
+
+  /// No description provided for @permAddProperties.
+  ///
+  /// In en, this message translates to:
+  /// **'Add properties'**
+  String get permAddProperties;
+
+  /// No description provided for @permAddAds.
+  ///
+  /// In en, this message translates to:
+  /// **'Add ads only'**
+  String get permAddAds;
+
+  /// No description provided for @permViewMarket.
+  ///
+  /// In en, this message translates to:
+  /// **'Market access'**
+  String get permViewMarket;
+
+  /// No description provided for @permViewProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'My profile tab'**
+  String get permViewProfile;
+
+  /// No description provided for @permAccessChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Chats'**
+  String get permAccessChat;
+
+  /// No description provided for @permEditOrgSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization settings'**
+  String get permEditOrgSettings;
+
+  /// No description provided for @permViewAnalytics.
+  ///
+  /// In en, this message translates to:
+  /// **'Analytics'**
+  String get permViewAnalytics;
+
+  /// No description provided for @orgListingOrgTap.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization'**
+  String get orgListingOrgTap;
+
+  /// No description provided for @manageMembersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Member management'**
+  String get manageMembersTitle;
+
+  /// No description provided for @tabActiveMembers.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get tabActiveMembers;
+
+  /// No description provided for @tabBanned.
+  ///
+  /// In en, this message translates to:
+  /// **'Banned'**
+  String get tabBanned;
+
+  /// No description provided for @tabAlumni.
+  ///
+  /// In en, this message translates to:
+  /// **'Left'**
+  String get tabAlumni;
+
+  /// No description provided for @tabLeaveRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'Leave requests'**
+  String get tabLeaveRequests;
+
+  /// No description provided for @orgRejectReasonHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional reason (shown to applicant)'**
+  String get orgRejectReasonHint;
+
+  /// No description provided for @deskTabTeamDashboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Team board'**
+  String get deskTabTeamDashboard;
+
+  /// No description provided for @deskTabRolesPermissions.
+  ///
+  /// In en, this message translates to:
+  /// **'Roles'**
+  String get deskTabRolesPermissions;
+
+  /// No description provided for @deskTabTeamAnalytics.
+  ///
+  /// In en, this message translates to:
+  /// **'Statistics'**
+  String get deskTabTeamAnalytics;
+
+  /// No description provided for @deskTabReportsDesk.
+  ///
+  /// In en, this message translates to:
+  /// **'Reports & export'**
+  String get deskTabReportsDesk;
+
+  /// No description provided for @deskTabAnalyticsReports.
+  ///
+  /// In en, this message translates to:
+  /// **'Analytics'**
+  String get deskTabAnalyticsReports;
+
+  /// No description provided for @appBarOrgJoinRequestsTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending join requests'**
+  String get appBarOrgJoinRequestsTooltip;
+
+  /// No description provided for @orgTeamDeskTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'My organization'**
+  String get orgTeamDeskTitle;
+
+  /// No description provided for @orgStatActiveMembers.
+  ///
+  /// In en, this message translates to:
+  /// **'Active members'**
+  String get orgStatActiveMembers;
+
+  /// No description provided for @orgStatPendingJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending requests'**
+  String get orgStatPendingJoin;
+
+  /// No description provided for @orgStatOrgListings.
+  ///
+  /// In en, this message translates to:
+  /// **'Team listings'**
+  String get orgStatOrgListings;
+
+  /// No description provided for @orgStatOrgAds.
+  ///
+  /// In en, this message translates to:
+  /// **'Team ads'**
+  String get orgStatOrgAds;
+
+  /// No description provided for @orgLeaderboardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Member leaderboard'**
+  String get orgLeaderboardTitle;
+
+  /// No description provided for @orgLeaderboardProps.
+  ///
+  /// In en, this message translates to:
+  /// **'Listings'**
+  String get orgLeaderboardProps;
+
+  /// No description provided for @orgLeaderboardAds.
+  ///
+  /// In en, this message translates to:
+  /// **'Ads'**
+  String get orgLeaderboardAds;
+
+  /// No description provided for @orgLeaderboardRank.
+  ///
+  /// In en, this message translates to:
+  /// **'Rank'**
+  String get orgLeaderboardRank;
+
+  /// No description provided for @orgRolesPickMember.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick a teammate'**
+  String get orgRolesPickMember;
+
+  /// No description provided for @orgRolesEditPermissions.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit permissions'**
+  String get orgRolesEditPermissions;
+
+  /// No description provided for @orgExportReport.
+  ///
+  /// In en, this message translates to:
+  /// **'Export report'**
+  String get orgExportReport;
+
+  /// No description provided for @orgExportCsv.
+  ///
+  /// In en, this message translates to:
+  /// **'Share CSV summary'**
+  String get orgExportCsv;
+
+  /// No description provided for @orgAnalyticsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No analytics data yet.'**
+  String get orgAnalyticsEmpty;
+
+  /// No description provided for @organalyticsSoldRented.
+  ///
+  /// In en, this message translates to:
+  /// **'Sold / rented (est.)'**
+  String get organalyticsSoldRented;
+
+  /// No description provided for @organalyticsScore.
+  ///
+  /// In en, this message translates to:
+  /// **'Score'**
+  String get organalyticsScore;
+
+  /// No description provided for @permManageTeamHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve or decline join requests, edit permissions, ban or remove members.'**
+  String get permManageTeamHelp;
+
+  /// No description provided for @permAddPropertiesHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Create and publish new property listings on behalf of the organization.'**
+  String get permAddPropertiesHelp;
+
+  /// No description provided for @permAddAdsHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Create side or promotional ads where your role allows.'**
+  String get permAddAdsHelp;
+
+  /// No description provided for @permViewMarketHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the public real-estate market tab.'**
+  String get permViewMarketHelp;
+
+  /// No description provided for @permViewProfileHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Access your personal profile tab inside the app.'**
+  String get permViewProfileHelp;
+
+  /// No description provided for @permAccessChatHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Use internal team chat and direct team messages.'**
+  String get permAccessChatHelp;
+
+  /// No description provided for @permEditOrgSettingsHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit organization branding, contacts, and desk settings.'**
+  String get permEditOrgSettingsHelp;
+
+  /// No description provided for @permViewAnalyticsHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'View team dashboards, charts, and exports.'**
+  String get permViewAnalyticsHelp;
+
+  /// No description provided for @permAddListingRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing requests'**
+  String get permAddListingRequests;
+
+  /// No description provided for @permAddListingRequestsHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Add buy/rent property requests that appear on the home feed.'**
+  String get permAddListingRequestsHelp;
+
+  /// No description provided for @permEditProperties.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit properties'**
+  String get permEditProperties;
+
+  /// No description provided for @permEditPropertiesHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit or delete any property listing owned by your organization.'**
+  String get permEditPropertiesHelp;
+
+  /// No description provided for @permManageSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage subscription'**
+  String get permManageSubscription;
+
+  /// No description provided for @permManageSubscriptionHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Purchase extra seats, renew the display license, and manage the plan.'**
+  String get permManageSubscriptionHelp;
+
+  /// No description provided for @permExportData.
+  ///
+  /// In en, this message translates to:
+  /// **'Export data'**
+  String get permExportData;
+
+  /// No description provided for @permExportDataHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Export team summaries to CSV or share reports from analytics.'**
+  String get permExportDataHelp;
+
+  /// No description provided for @permInviteMembers.
+  ///
+  /// In en, this message translates to:
+  /// **'Invite members'**
+  String get permInviteMembers;
+
+  /// No description provided for @permInviteMembersHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the invite / FAL code and renew it so teammates can join.'**
+  String get permInviteMembersHelp;
+
+  /// No description provided for @permManageChatRooms.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage chat rooms'**
+  String get permManageChatRooms;
+
+  /// No description provided for @permManageChatRoomsHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Create private team chat rooms and assign moderators.'**
+  String get permManageChatRoomsHelp;
+
+  /// No description provided for @permViewMemberActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'Member activity'**
+  String get permViewMemberActivity;
+
+  /// No description provided for @permViewMemberActivityHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'View the activity log and recent actions by teammates.'**
+  String get permViewMemberActivityHelp;
+
+  /// No description provided for @deskTabMemberActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity log'**
+  String get deskTabMemberActivity;
+
+  /// No description provided for @orgMemberActivityEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No activity recorded yet for this organization.'**
+  String get orgMemberActivityEmpty;
+
+  /// No description provided for @orgMemberActivityUnknownAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity'**
+  String get orgMemberActivityUnknownAction;
+
+  /// No description provided for @orgMemberLastActivity.
+  ///
+  /// In en, this message translates to:
+  /// **'Last activity'**
+  String get orgMemberLastActivity;
+
+  /// No description provided for @inviteMembersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Invite teammates'**
+  String get inviteMembersTitle;
+
+  /// No description provided for @inviteMembersBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Share this code with people joining from registration. It is the same public FAL / invite code for your organization.'**
+  String get inviteMembersBody;
+
+  /// No description provided for @inviteMembersShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share code'**
+  String get inviteMembersShare;
+
+  /// No description provided for @inviteMembersRenew.
+  ///
+  /// In en, this message translates to:
+  /// **'Generate new invite code'**
+  String get inviteMembersRenew;
+
+  /// No description provided for @inviteMembersRenewHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Generating a new code invalidates the previous one for join-by-code flows.'**
+  String get inviteMembersRenewHint;
+
+  /// No description provided for @inviteMembersQrCaption.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan to copy the code on another device.'**
+  String get inviteMembersQrCaption;
+
+  /// No description provided for @inviteMembersShareHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter this code when choosing “Join an existing organization” in sign-up.'**
+  String get inviteMembersShareHint;
+
+  /// No description provided for @reportsDeskServerSyncHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Team and billing figures in these templates will fill automatically once server analytics queries are connected. Export, print, and share work today; full platform operations console will roll out later under project policy.'**
+  String get reportsDeskServerSyncHint;
+
+  /// No description provided for @subscriptionsMenuHub.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscriptions & payments'**
+  String get subscriptionsMenuHub;
+
+  /// No description provided for @subscriptionsMenuCards.
+  ///
+  /// In en, this message translates to:
+  /// **'My saved cards'**
+  String get subscriptionsMenuCards;
+
+  /// No description provided for @subscriptionsMenuHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment history'**
+  String get subscriptionsMenuHistory;
+
+  /// No description provided for @subscriptionsMenuPlans.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription plans'**
+  String get subscriptionsMenuPlans;
+
+  /// No description provided for @subscriptionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscriptions & payments'**
+  String get subscriptionsTitle;
+
+  /// No description provided for @subscriptionsTabPlans.
+  ///
+  /// In en, this message translates to:
+  /// **'Plans'**
+  String get subscriptionsTabPlans;
+
+  /// No description provided for @subscriptionsTabPaymentMethods.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment methods'**
+  String get subscriptionsTabPaymentMethods;
+
+  /// No description provided for @subscriptionsTabHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get subscriptionsTabHistory;
+
+  /// No description provided for @subscriptionsTabTeam.
+  ///
+  /// In en, this message translates to:
+  /// **'Team seats'**
+  String get subscriptionsTabTeam;
+
+  /// No description provided for @subscriptionsTabUsage.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan usage'**
+  String get subscriptionsTabUsage;
+
+  /// No description provided for @subscriptionsTabUpgrade.
+  ///
+  /// In en, this message translates to:
+  /// **'Upgrade plan'**
+  String get subscriptionsTabUpgrade;
+
+  /// No description provided for @subscriptionsTabRenewFal.
+  ///
+  /// In en, this message translates to:
+  /// **'Renew FAL license'**
+  String get subscriptionsTabRenewFal;
+
+  /// No description provided for @subscriptionsOrgManageTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription'**
+  String get subscriptionsOrgManageTab;
+
+  /// No description provided for @subscriptionsBadgeExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription expired or ending soon'**
+  String get subscriptionsBadgeExpired;
+
+  /// No description provided for @subscriptionsSar.
+  ///
+  /// In en, this message translates to:
+  /// **'SAR'**
+  String get subscriptionsSar;
+
+  /// No description provided for @subscriptionsMonthly.
+  ///
+  /// In en, this message translates to:
+  /// **'Monthly'**
+  String get subscriptionsMonthly;
+
+  /// No description provided for @subscriptionsYearly.
+  ///
+  /// In en, this message translates to:
+  /// **'Yearly (20% off)'**
+  String get subscriptionsYearly;
+
+  /// No description provided for @subscriptionsSubscribeNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscribe now'**
+  String get subscriptionsSubscribeNow;
+
+  /// No description provided for @subscriptionsCurrentPlan.
+  ///
+  /// In en, this message translates to:
+  /// **'Current plan'**
+  String get subscriptionsCurrentPlan;
+
+  /// No description provided for @subscriptionsRenewsOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Renews on {date}'**
+  String subscriptionsRenewsOn(String date);
+
+  /// No description provided for @subscriptionsExpiredOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Ended on {date}'**
+  String subscriptionsExpiredOn(String date);
+
+  /// No description provided for @subscriptionsRenew.
+  ///
+  /// In en, this message translates to:
+  /// **'Renew'**
+  String get subscriptionsRenew;
+
+  /// No description provided for @subscriptionsCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel subscription'**
+  String get subscriptionsCancel;
+
+  /// No description provided for @subscriptionsUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited'**
+  String get subscriptionsUnlimited;
+
+  /// No description provided for @subscriptionsMembers.
+  ///
+  /// In en, this message translates to:
+  /// **'Members'**
+  String get subscriptionsMembers;
+
+  /// No description provided for @subscriptionsProperties.
+  ///
+  /// In en, this message translates to:
+  /// **'Properties'**
+  String get subscriptionsProperties;
+
+  /// No description provided for @subscriptionsAdsPerMonth.
+  ///
+  /// In en, this message translates to:
+  /// **'Ads / month'**
+  String get subscriptionsAdsPerMonth;
+
+  /// No description provided for @subscriptionsListingRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'Listing requests'**
+  String get subscriptionsListingRequests;
+
+  /// No description provided for @subscriptionsFalIncluded.
+  ///
+  /// In en, this message translates to:
+  /// **'FAL license included'**
+  String get subscriptionsFalIncluded;
+
+  /// No description provided for @subscriptionsSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'Support'**
+  String get subscriptionsSupport;
+
+  /// No description provided for @subscriptionsAddCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Add new card'**
+  String get subscriptionsAddCard;
+
+  /// No description provided for @subscriptionsCardSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Card saved'**
+  String get subscriptionsCardSaved;
+
+  /// No description provided for @subscriptionsCardDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Card removed'**
+  String get subscriptionsCardDeleted;
+
+  /// No description provided for @subscriptionsDefaultCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get subscriptionsDefaultCard;
+
+  /// No description provided for @subscriptionsSetDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Set default'**
+  String get subscriptionsSetDefault;
+
+  /// No description provided for @subscriptionsDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get subscriptionsDelete;
+
+  /// No description provided for @subscriptionsAddCardTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add payment card'**
+  String get subscriptionsAddCardTitle;
+
+  /// No description provided for @subscriptionsCardNumber.
+  ///
+  /// In en, this message translates to:
+  /// **'Card number'**
+  String get subscriptionsCardNumber;
+
+  /// No description provided for @subscriptionsCardHolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Cardholder name'**
+  String get subscriptionsCardHolder;
+
+  /// No description provided for @subscriptionsExpiry.
+  ///
+  /// In en, this message translates to:
+  /// **'Expiry (MM/YY or MM/YYYY)'**
+  String get subscriptionsExpiry;
+
+  /// No description provided for @subscriptionsCapsLockOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Caps Lock is on — card fields usually expect Latin letters.'**
+  String get subscriptionsCapsLockOn;
+
+  /// No description provided for @subscriptionsCardHolderLatinTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Latin characters only'**
+  String get subscriptionsCardHolderLatinTitle;
+
+  /// No description provided for @subscriptionsCardHolderLatinBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the cardholder name in English letters (as printed on the card). Arabic or Persian letters are not accepted for this field.'**
+  String get subscriptionsCardHolderLatinBody;
+
+  /// No description provided for @subscriptionsCardHolderLatinOk.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get subscriptionsCardHolderLatinOk;
+
+  /// No description provided for @subscriptionsMoyasarCardFieldHint.
+  ///
+  /// In en, this message translates to:
+  /// **'On this step, Moyasar collects card data securely. Use Latin letters for the name and Western digits (0–9) as on the card.'**
+  String get subscriptionsMoyasarCardFieldHint;
+
+  /// No description provided for @subscriptionsCvv.
+  ///
+  /// In en, this message translates to:
+  /// **'CVV'**
+  String get subscriptionsCvv;
+
+  /// No description provided for @subscriptionsCardLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Card label (optional)'**
+  String get subscriptionsCardLabel;
+
+  /// No description provided for @subscriptionsSaveCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Save card'**
+  String get subscriptionsSaveCard;
+
+  /// No description provided for @subscriptionsFieldRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get subscriptionsFieldRequired;
+
+  /// No description provided for @subscriptionsCheckoutTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Checkout summary'**
+  String get subscriptionsCheckoutTitle;
+
+  /// No description provided for @subscriptionsPay.
+  ///
+  /// In en, this message translates to:
+  /// **'Complete payment'**
+  String get subscriptionsPay;
+
+  /// No description provided for @subscriptionsPlanLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Plan'**
+  String get subscriptionsPlanLine;
+
+  /// No description provided for @subscriptionsPeriodLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Period'**
+  String get subscriptionsPeriodLine;
+
+  /// No description provided for @subscriptionsOriginalLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Original price'**
+  String get subscriptionsOriginalLine;
+
+  /// No description provided for @subscriptionsDiscountLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Discount'**
+  String get subscriptionsDiscountLine;
+
+  /// No description provided for @subscriptionsTotalLine.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get subscriptionsTotalLine;
+
+  /// No description provided for @subscriptionsPaymentMethod.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment method'**
+  String get subscriptionsPaymentMethod;
+
+  /// No description provided for @subscriptionsPaySavedCard.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved card'**
+  String get subscriptionsPaySavedCard;
+
+  /// No description provided for @subscriptionsPayNewCard.
+  ///
+  /// In en, this message translates to:
+  /// **'New card'**
+  String get subscriptionsPayNewCard;
+
+  /// No description provided for @subscriptionsApplePay.
+  ///
+  /// In en, this message translates to:
+  /// **'Apple Pay'**
+  String get subscriptionsApplePay;
+
+  /// No description provided for @subscriptionsMadaPay.
+  ///
+  /// In en, this message translates to:
+  /// **'Mada Pay'**
+  String get subscriptionsMadaPay;
+
+  /// No description provided for @subscriptionsPaymentSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment successful'**
+  String get subscriptionsPaymentSuccess;
+
+  /// No description provided for @subscriptionsPaymentFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Payment failed'**
+  String get subscriptionsPaymentFailed;
+
+  /// No description provided for @subscriptionsDownloadInvoice.
+  ///
+  /// In en, this message translates to:
+  /// **'Download invoice'**
+  String get subscriptionsDownloadInvoice;
+
+  /// No description provided for @subscriptionsInvoiceSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Invoice saved'**
+  String get subscriptionsInvoiceSaved;
+
+  /// No description provided for @subscriptionsFilterAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get subscriptionsFilterAll;
+
+  /// No description provided for @subscriptionsFilterSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Paid'**
+  String get subscriptionsFilterSuccess;
+
+  /// No description provided for @subscriptionsFilterPending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get subscriptionsFilterPending;
+
+  /// No description provided for @subscriptionsFilterFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get subscriptionsFilterFailed;
+
+  /// No description provided for @subscriptionsSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get subscriptionsSearch;
+
+  /// No description provided for @subscriptionsTxnRef.
+  ///
+  /// In en, this message translates to:
+  /// **'Transaction ref'**
+  String get subscriptionsTxnRef;
+
+  /// No description provided for @subscriptionsStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get subscriptionsStatus;
+
+  /// No description provided for @subscriptionsTeamTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Team & seats'**
+  String get subscriptionsTeamTitle;
+
+  /// No description provided for @subscriptionsSeatsUsed.
+  ///
+  /// In en, this message translates to:
+  /// **'Seats used'**
+  String get subscriptionsSeatsUsed;
+
+  /// No description provided for @subscriptionsAddMember.
+  ///
+  /// In en, this message translates to:
+  /// **'Add teammate'**
+  String get subscriptionsAddMember;
+
+  /// No description provided for @subscriptionsUpgradeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'You reached the seat limit — upgrade your plan.'**
+  String get subscriptionsUpgradeHint;
+
+  /// No description provided for @subscriptionsUpgradeCta.
+  ///
+  /// In en, this message translates to:
+  /// **'Upgrade plan'**
+  String get subscriptionsUpgradeCta;
+
+  /// No description provided for @subscriptionsUsageTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage'**
+  String get subscriptionsUsageTitle;
+
+  /// No description provided for @subscriptionsRenewFalBody.
+  ///
+  /// In en, this message translates to:
+  /// **'FAL display renewal is linked to your active subscription. Open organization settings to renew the public license code.'**
+  String get subscriptionsRenewFalBody;
+
+  /// No description provided for @subscriptionsOpenOrgSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open organization settings'**
+  String get subscriptionsOpenOrgSettings;
+
+  /// No description provided for @subscriptionsDetailsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Current subscription'**
+  String get subscriptionsDetailsTitle;
+
+  /// No description provided for @subscriptionsNoSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'No active subscription'**
+  String get subscriptionsNoSubscription;
+
+  /// No description provided for @subscriptionsOrgSubscriptionExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'Organization subscription is inactive. Renew to keep FAL renewal and desk features.'**
+  String get subscriptionsOrgSubscriptionExpired;
+
+  /// No description provided for @subscriptionsAuthenticateToPay.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm with biometrics'**
+  String get subscriptionsAuthenticateToPay;
+
+  /// No description provided for @subscriptionsBiometricFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Biometric authentication failed or cancelled'**
+  String get subscriptionsBiometricFailed;
+
+  /// No description provided for @subscriptionsYearlyDiscountNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Yearly billing includes a 20% discount vs monthly.'**
+  String get subscriptionsYearlyDiscountNote;
+
+  /// No description provided for @subscriptionsExtraSeats.
+  ///
+  /// In en, this message translates to:
+  /// **'Buy extra seats'**
+  String get subscriptionsExtraSeats;
+
+  /// No description provided for @subscriptionsSharePaymentLink.
+  ///
+  /// In en, this message translates to:
+  /// **'Share payment summary'**
+  String get subscriptionsSharePaymentLink;
+
+  /// No description provided for @subscriptionsSharePaymentSubject.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription payment'**
+  String get subscriptionsSharePaymentSubject;
+
+  /// No description provided for @subscriptionsCheckoutRefundPolicy.
+  ///
+  /// In en, this message translates to:
+  /// **'By paying, you confirm that the subscription activates for the selected plan and billing period. Subscription fees are not refundable once charged.'**
+  String get subscriptionsCheckoutRefundPolicy;
+
+  /// No description provided for @subscriptionsMarketingPaywallTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription required'**
+  String get subscriptionsMarketingPaywallTitle;
+
+  /// No description provided for @subscriptionsMarketingPaywallBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Marketing actions that affect contracts, permits, publishing, or listings require an active subscription. Open plans to subscribe, then you can continue immediately.'**
+  String get subscriptionsMarketingPaywallBody;
+
+  /// No description provided for @subscriptionsPaywallExpiredTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription inactive'**
+  String get subscriptionsPaywallExpiredTitle;
+
+  /// No description provided for @subscriptionsPaywallNoAutoRenewBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your paid subscription period has ended (by date and time). This action is blocked until you subscribe again. Your data remains; you can keep working within free-tier limits after closing this dialog.'**
+  String get subscriptionsPaywallNoAutoRenewBody;
+
+  /// No description provided for @subscriptionsPaywallAutoRenewFailBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic renewal could not charge your card (declined or insufficient funds). This action stays blocked until payment succeeds or you renew manually. Update your card or open plans to pay.'**
+  String get subscriptionsPaywallAutoRenewFailBody;
+
+  /// No description provided for @subscriptionsPaywallCloseLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Close'**
+  String get subscriptionsPaywallCloseLabel;
+
+  /// No description provided for @subscriptionsPaywallGoPlans.
+  ///
+  /// In en, this message translates to:
+  /// **'Plans & pay'**
+  String get subscriptionsPaywallGoPlans;
+
+  /// No description provided for @subscriptionsCancelEndTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel subscription'**
+  String get subscriptionsCancelEndTitle;
+
+  /// No description provided for @subscriptionsCancelEndBody.
+  ///
+  /// In en, this message translates to:
+  /// **'If you cancel, auto-renewal stops. Your benefits stay active until the end of the paid period ({date}).'**
+  String subscriptionsCancelEndBody(String date);
+
+  /// No description provided for @subscriptionsContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get subscriptionsContinue;
+
+  /// No description provided for @subscriptionsGoBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Go back'**
+  String get subscriptionsGoBack;
+
+  /// No description provided for @subscriptionsRetentionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'One-time loyalty offer'**
+  String get subscriptionsRetentionTitle;
+
+  /// No description provided for @subscriptionsRetentionBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Stay with us: get 20% off your next renewal if you keep your subscription now. This offer is shown only once.'**
+  String get subscriptionsRetentionBody;
+
+  /// No description provided for @subscriptionsRetentionStay.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep subscription'**
+  String get subscriptionsRetentionStay;
+
+  /// No description provided for @subscriptionsRetentionDecline.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue cancellation'**
+  String get subscriptionsRetentionDecline;
+
+  /// No description provided for @subscriptionsChurnTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Help us improve'**
+  String get subscriptionsChurnTitle;
+
+  /// No description provided for @subscriptionsChurnBody.
+  ///
+  /// In en, this message translates to:
+  /// **'What is the main reason you are cancelling? (optional)'**
+  String get subscriptionsChurnBody;
+
+  /// No description provided for @subscriptionsChurnSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get subscriptionsChurnSkip;
+
+  /// No description provided for @subscriptionsChurnSubmit.
+  ///
+  /// In en, this message translates to:
+  /// **'Submit & cancel'**
+  String get subscriptionsChurnSubmit;
+
+  /// No description provided for @subscriptionsChurnReasonPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'Price'**
+  String get subscriptionsChurnReasonPrice;
+
+  /// No description provided for @subscriptionsChurnReasonFeatures.
+  ///
+  /// In en, this message translates to:
+  /// **'Features / limits'**
+  String get subscriptionsChurnReasonFeatures;
+
+  /// No description provided for @subscriptionsChurnReasonSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'Support'**
+  String get subscriptionsChurnReasonSupport;
+
+  /// No description provided for @subscriptionsChurnReasonOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get subscriptionsChurnReasonOther;
+
+  /// No description provided for @subscriptionsChurnDetailHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Additional details (optional)'**
+  String get subscriptionsChurnDetailHint;
 }
 
 class _AppLocalizationsDelegate

@@ -26,4 +26,7 @@ class AppRoutes {
 
   /// إدارة الأجهزة (حدّ جهازين).
   static const String deviceManagement = '/deviceManagement';
+
+  /// محادثة عقد تسويق داخل لوحة المستخدم (عنوان الشريط الخارجي).
+  static const String listingContractChat = '/dashboard/listing-contract-chat';
 }

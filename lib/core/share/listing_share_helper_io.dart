@@ -3,13 +3,24 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 
+import '../listing/listing_media_urls.dart';
+
 Future<void> shareListingRich({
   required String text,
   String? imageHttpUrl,
   String? subject,
 }) async {
-  final u = imageHttpUrl?.trim();
-  if (u != null && u.isNotEmpty) {
+  final fallback = ListingMediaUrls.fallbackSharePreviewImageUrl();
+  final primary = imageHttpUrl?.trim();
+  final candidates = <String>[];
+  if (primary != null && primary.isNotEmpty) {
+    candidates.add(primary);
+  }
+  if (candidates.isEmpty || candidates.first != fallback) {
+    candidates.add(fallback);
+  }
+  for (final u in candidates) {
+    if (u.isEmpty) continue;
     try {
       final res = await http
           .get(Uri.parse(u))

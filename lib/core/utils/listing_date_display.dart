@@ -78,7 +78,8 @@ abstract final class ListingDateDisplay {
     final loc = isAr ? 'ar' : 'en';
     final d = toDisplayDateTime(value);
     try {
-      return DateFormat.yMMMd(loc).add_Hm().format(d);
+      // تاريخ + ساعة:دقيقة:ثانية — إحساس فوري فعلي
+      return DateFormat.yMMMd(loc).add_Hms().format(d);
     } catch (_) {
       return d.toIso8601String();
     }

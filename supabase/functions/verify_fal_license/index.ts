@@ -50,6 +50,30 @@ function mockKnown(licenseNo: string): FalPayload | null {
       source: "mock_registry",
     };
   }
+  // بيئة sandbox تجريبية للأرقام التي تبدأ بـ "9999" — تُستخدم في مرحلة التطوير
+  // فقط (التحقق الفعلي يعتمد على بوابة REGA الرسمية).
+  if (licenseNo.startsWith("9999")) {
+    const isMarketer = licenseNo[4] === "1";
+    return {
+      valid: true,
+      status: "active",
+      broker_name: isMarketer
+        ? "محمد بن عبدالله المسوّق"
+        : "مؤسسة الفلاني العقارية للوساطة",
+      email: "sandbox.fal@example.com",
+      mobile: "0500000000",
+      city: "الرياض",
+      district: "العليا",
+      region: "منطقة الرياض",
+      license_type: isMarketer
+        ? "رخصة فال — مسوّق عقاري فردي"
+        : "رخصة فال — منشأة (وساطة وتسويق)",
+      license_no: licenseNo,
+      license_status_text: "سارية (sandbox)",
+      end_date: "2027-12-31",
+      source: "sandbox",
+    };
+  }
   return null;
 }
 
@@ -112,8 +136,12 @@ function heuristicFromHtml(html: string, licenseNo: string): FalPayload {
 
 async function tryFetchRega(licenseNo: string): Promise<string | null> {
   const url = `https://aqari.rega.gov.sa/Inquires/Brokerage/Details/${licenseNo}`;
+  // مهلة قصوى 6 ثوانٍ — يكفي لاستجابة سريعة دون حبس المستخدم.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
   try {
     const res = await fetch(url, {
+      signal: controller.signal,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -125,6 +153,8 @@ async function tryFetchRega(licenseNo: string): Promise<string | null> {
     return await res.text();
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

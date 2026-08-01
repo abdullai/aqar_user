@@ -1,11 +1,12 @@
-﻿// lib/services/watermark_service.dart
-import 'dart:typed_data';
+﻿import 'dart:typed_data';
+
+import '../core/branding/app_branding.dart';
 import 'package:image/image.dart' as img;
 
 class WatermarkService {
   static Future<Uint8List> addTextWatermark(
     Uint8List inputBytes, {
-    String text = 'موثوق العقاري',
+    String text = AppBranding.brandNameAr,
     int margin = 16,
     int fontSize = 24, // 14/24/48 supported
     int opacity = 170, // 0..255
@@ -34,10 +35,9 @@ class WatermarkService {
       x: null, // center horizontally
       y: safeY + 1,
       color: img.ColorRgba8(0, 0, 0, (opacity * 0.55).round()),
-      blend: img.BlendMode.alpha,
     );
 
-    // Main text
+    // Main text (alpha من لون الخط — package:image 4.x لا يدعم blend في drawString)
     img.drawString(
       decoded,
       text,
@@ -45,7 +45,6 @@ class WatermarkService {
       x: null, // center horizontally
       y: safeY,
       color: img.ColorRgba8(255, 255, 255, opacity),
-      blend: img.BlendMode.alpha,
     );
 
     final out = img.encodeJpg(decoded, quality: 92);

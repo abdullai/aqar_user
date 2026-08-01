@@ -64,7 +64,7 @@ begin
     nullif(payload->>'title_ar', ''),
     nullif(payload->>'title_en', ''),
     nullif(new.title, ''),
-    'موثوق العقاري'
+    'موثوق لاين العقارية'
   );
 
   body_text := coalesce(

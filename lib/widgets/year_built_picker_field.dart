@@ -1,6 +1,8 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 
-/// اختيار سنة البناء: قائمة قابلة للتمرير + بحث (سنوات ميلادية من [minYear] إلى [maxYear]).
+/// اختيار سنة البناء: قائمة قابلة للتمرير + بحث.
+/// [maxYear] الافتراضي = السنة الميلادية الحالية (لا تُضاف السنة القادمة قبل رأس السنة).
 class YearBuiltPickerField extends StatelessWidget {
   final int? value;
   final ValueChanged<int?> onChanged;
@@ -8,6 +10,7 @@ class YearBuiltPickerField extends StatelessWidget {
   final bool isAr;
   final int minYear;
   final int maxYear;
+  final bool requiredField;
 
   YearBuiltPickerField({
     super.key,
@@ -17,6 +20,7 @@ class YearBuiltPickerField extends StatelessWidget {
     required this.isAr,
     this.minYear = 1900,
     int? maxYear,
+    this.requiredField = false,
   }) : maxYear = maxYear ?? DateTime.now().year;
 
   Future<void> _openSheet(BuildContext context) async {
@@ -57,7 +61,7 @@ class YearBuiltPickerField extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    TextField(
+                    AqarTextField(
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search),
@@ -111,13 +115,14 @@ class YearBuiltPickerField extends StatelessWidget {
                     ),
                     Row(
                       children: [
-                        TextButton(
-                          onPressed: () {
-                            onChanged(null);
-                            Navigator.pop(ctx);
-                          },
-                          child: Text(isAr ? 'بدون سنة' : 'Clear'),
-                        ),
+                        if (!requiredField)
+                          TextButton(
+                            onPressed: () {
+                              onChanged(null);
+                              Navigator.pop(ctx);
+                            },
+                            child: Text(isAr ? 'بدون سنة' : 'Clear'),
+                          ),
                         const Spacer(),
                         TextButton(
                           onPressed: () => Navigator.pop(ctx),
@@ -139,7 +144,9 @@ class YearBuiltPickerField extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final label = value == null
-        ? (isAr ? 'سنة البناء (اختياري)' : 'Year built (optional)')
+        ? (requiredField
+            ? (isAr ? 'سنة البناء (مطلوب)' : 'Year built (required)')
+            : (isAr ? 'سنة البناء (اختياري)' : 'Year built (optional)'))
         : (isAr ? 'سنة البناء: $value' : 'Year built: $value');
 
     return InkWell(
@@ -149,6 +156,9 @@ class YearBuiltPickerField extends StatelessWidget {
         decoration: InputDecoration(
           labelText: isAr ? 'سنة البناء' : 'Year built',
           suffixIcon: const Icon(Icons.edit_calendar_outlined),
+          errorText: requiredField && value == null && enabled
+              ? (isAr ? 'مطلوب' : 'Required')
+              : null,
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),

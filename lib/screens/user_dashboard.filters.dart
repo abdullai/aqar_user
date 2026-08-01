@@ -170,15 +170,30 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     }
   }
 
-  Future<Map<String, dynamic>> _loadCities() async {
-    if (_citiesCache != null) return _citiesCache!;
+  static bool _citiesExtraLoaded = false;
 
-    _citiesCache = <String, dynamic>{};
+  /// ملف `saudi_locations_extra.json` ≈900KB — تحميله + `json.decode` على الويب
+  /// يجمّد المتصفح بعد الدخول (يظهر «قيد التحميل» في Network).
+  Future<Map<String, dynamic>> _loadCities({bool includeExtra = true}) async {
+    if (_citiesCache != null) {
+      if (!includeExtra || _citiesExtraLoaded) {
+        return _citiesCache!;
+      }
+      if (kIsWeb) {
+        return _citiesCache!;
+      }
+    }
+
+    _citiesCache ??= <String, dynamic>{};
 
     Future<void> loadPath(String path) async {
       try {
         final jsonStr = await rootBundle.loadString(path);
-        final raw = json.decode(jsonStr);
+        // compute يعمل على isolate في الجوال؛ على الويب يبقى على نفس الـ event loop
+        // لذلك نؤجّل الملف الكبير عبر [_ensureCitiesExtraLoaded] فقط عند الحاجة.
+        WebBootstrapDiag.log('cities.decode', 'start $path');
+        final dynamic raw = await compute(decodeDashboardJsonString, jsonStr);
+        WebBootstrapDiag.log('cities.decode', 'done $path');
         if (raw is Map<String, dynamic>) {
           _citiesCache!.addAll(raw);
           return;
@@ -186,18 +201,43 @@ extension _UserDashboardStateFilters on _UserDashboardState {
         if (raw is List<dynamic>) {
           _ingestCityListIntoCache(raw, _citiesCache!);
         }
-      } catch (_) {}
+      } catch (e) {
+        WebBootstrapDiag.warn('cities.decode', '$path — $e');
+      }
     }
 
-    await loadPath('assets/data/saudi_locations.json');
-    await loadPath('assets/data/saudi_locations_extra.json');
-
+    if (_citiesCache!.isEmpty) {
+      await loadPath('assets/data/saudi_locations.json');
+    }
+    if (includeExtra && !_citiesExtraLoaded) {
+      await _ensureCitiesExtraLoaded();
+    }
     return _citiesCache!;
   }
 
-  Future<List<String>> loadCityKeys() async {
-    final data = await _loadCities();
-    return data.keys.map((e) => e.toString()).toList();
+  /// الملف الكبير (~900KB) عند الحاجة فقط (فلاتر متقدمة) — لا عند أول دخول.
+  Future<void> _ensureCitiesExtraLoaded() async {
+    if (_citiesExtraLoaded) return;
+    _citiesCache ??= <String, dynamic>{};
+    if (_citiesCache!.isEmpty) {
+      await _loadCities(includeExtra: false);
+    }
+    try {
+      final jsonStr =
+          await rootBundle.loadString('assets/data/saudi_locations_extra.json');
+      await _webYieldUi();
+      WebBootstrapDiag.log('cities.decode', 'start extra');
+      final raw = await compute(decodeDashboardJsonString, jsonStr);
+      WebBootstrapDiag.log('cities.decode', 'done extra');
+      if (raw is Map<String, dynamic>) {
+        _citiesCache!.addAll(raw);
+      } else if (raw is List<dynamic>) {
+        _ingestCityListIntoCache(raw, _citiesCache!);
+      }
+      _citiesExtraLoaded = true;
+    } catch (e) {
+      WebBootstrapDiag.warn('cities.decode', 'extra — $e');
+    }
   }
 
   String _cityLabelFromJson(String key) {
@@ -228,6 +268,89 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     }
 
     return row.toString();
+  }
+
+  /// مطابقة هرمية: المنطقة/المحافظة/الحي (إن طُلب) — تعمل على نص العنوان
+  /// والمدينة وأي حقل موقع مرتبط في `Property`. تُستدعى بعد _matchesCityFilter.
+  bool _matchesHierarchyFilters(Property p) {
+    final region = _norm(_regionFilter);
+    final gov = _norm(_governorateFilter);
+    final district = _norm(_districtFilter);
+    if (region.isEmpty && gov.isEmpty && district.isEmpty) return true;
+
+    String pRegion = '';
+    String pGov = '';
+    try {
+      pRegion = _norm((p as dynamic).region?.toString());
+    } catch (_) {}
+    try {
+      pGov = _norm((p as dynamic).governorate?.toString());
+    } catch (_) {}
+
+    final haystack = <String>[
+      _norm(p.city),
+      _norm(p.location),
+      _norm(p.addressLine),
+      _norm(p.locationText),
+      pRegion,
+      pGov,
+    ].where((e) => e.isNotEmpty).join(' | ');
+
+    bool matchOne(String needle) {
+      if (needle.isEmpty) return true;
+      if (haystack.contains(needle)) return true;
+      // مطابقة جزئية على المقاطع (مثلاً "ال" + "رياض").
+      for (final part in needle.split(' ')) {
+        if (part.length >= 3 && haystack.contains(part)) return true;
+      }
+      return false;
+    }
+
+    if (!matchOne(region)) return false;
+    if (!matchOne(gov)) return false;
+    if (!matchOne(district)) return false;
+    return true;
+  }
+
+  bool _matchesHierarchyFiltersForRequest(MarketPropertyRequestRow r) {
+    final region = _norm(_regionFilter);
+    final gov = _norm(_governorateFilter);
+    final district = _norm(_districtFilter);
+    if (region.isEmpty && gov.isEmpty && district.isEmpty) return true;
+
+    String dyn(String key) {
+      try {
+        final v = (r as dynamic).toJson?.call();
+        if (v is Map) {
+          final s = v[key]?.toString();
+          if (s != null) return _norm(s);
+        }
+      } catch (_) {}
+      return '';
+    }
+
+    final haystack = <String>[
+      _norm(r.city),
+      dyn('region'),
+      dyn('governorate'),
+      dyn('district'),
+      dyn('location_text'),
+      dyn('address_line'),
+    ].where((e) => e.isNotEmpty).join(' | ');
+
+    bool matchOne(String needle) {
+      if (needle.isEmpty) return true;
+      if (haystack.contains(needle)) return true;
+      for (final part in needle.split(' ')) {
+        if (part.length >= 3 && haystack.contains(part)) return true;
+      }
+      return false;
+    }
+
+    if (!matchOne(region)) return false;
+    if (!matchOne(gov)) return false;
+    if (!matchOne(district)) return false;
+    return true;
   }
 
   bool _matchesCityFilter(Property p, String cityFilterRaw) {
@@ -398,90 +521,112 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     }
     if (f == 'auction') {
       if (rentPurposes.contains(p)) return false;
-      return p == 'auction' || p == 'purchase' || p == 'sale' || p == 'buy';
+      return p == 'auction';
     }
     if (f == 'investment') {
       if (rentPurposes.contains(p)) return false;
-      return p == 'investment' || p == 'purchase' || p == 'sale' || p == 'buy';
+      return p == 'investment';
     }
     return true;
   }
 
   /// طلبات السوق في الرئيسية — نفس فلاتر البحث/المدينة/النوع/الغرض قدر الإمكان.
   List<MarketPropertyRequestRow> filterMarketRequests(
-    List<MarketPropertyRequestRow> src,
-  ) {
+    List<MarketPropertyRequestRow> src, {
+    /// «طلباتي»: لا تُخفِ الطلبات بعد صفقة/اختيار عرض — هي طلبات المستخدم نفسه.
+    bool forMySubmissions = false,
+  }) {
     final q = _searchQuery.trim();
     final cityFilter = _cityFilter.trim();
 
     final filtered = src.where((r) {
-      if (!ListingPermissionsHelper.shouldShowMarketRequestInPublicHome(
-        r.status,
-      )) {
+      if (!forMySubmissions &&
+          !ListingPermissionsHelper.shouldShowMarketRequestWithoutDeal(r)) {
         return false;
       }
-      if (!_isGuest &&
+      if (!forMySubmissions &&
+          !_isGuest &&
           _uid.isNotEmpty &&
           _marketRequestIdsWithMyPendingOffer.contains(r.id)) {
         return false;
       }
+      // الطلبات التي سحب المستخدم عرضه عليها مرتين تختفي نهائياً.
+      if (!_isGuest &&
+          _uid.isNotEmpty &&
+          _marketRequestIdsHiddenAfterTwoWithdrawals.contains(r.id)) {
+        return false;
+      }
       if (!_matchesCityFilterForRequest(r, cityFilter)) return false;
+      if (!_matchesHierarchyFiltersForRequest(r)) return false;
       if (!_matchesSearchForRequest(r, q)) return false;
       if (!_requestMatchesTypeFilter(r)) return false;
       if (!_requestMatchesPurposeFilter(r)) return false;
       if (!_matchesRequestPriceRange(r)) return false;
       if (!_matchesNumberRange(r.areaMinM2, _areaMinFilter, _areaMaxFilter)) {
+        return false;
+      }
+      if (_paidPriorityOnlyFilter &&
+          !InstantMarketRequestFeed.isPaidPriorityPin(r)) {
         return false;
       }
       return true;
     }).toList();
 
     int cmpDate(MarketPropertyRequestRow a, MarketPropertyRequestRow b) {
-      return b.sortTime.compareTo(a.sortTime);
+      return InstantMarketRequestFeed.compare(
+        a,
+        b,
+        viewerRegion: _regionFilter.trim().isNotEmpty
+            ? _regionFilter.trim()
+            : _cityFilter.trim(),
+        viewerLat: _myLat,
+        viewerLng: _myLng,
+      );
     }
 
     filtered.sort(cmpDate);
-    if (filtered.isNotEmpty || cityFilter.isEmpty || cityFilter == 'all') {
-      return filtered;
-    }
-
-    // Fallback silently in background: widen scope when city bucket is empty.
-    final expanded = src.where((r) {
-      if (!ListingPermissionsHelper.shouldShowMarketRequestInPublicHome(
-        r.status,
-      )) {
-        return false;
-      }
-      if (!_isGuest &&
-          _uid.isNotEmpty &&
-          _marketRequestIdsWithMyPendingOffer.contains(r.id)) {
-        return false;
-      }
-      if (!_matchesSearchForRequest(r, q)) return false;
-      if (!_requestMatchesTypeFilter(r)) return false;
-      if (!_requestMatchesPurposeFilter(r)) return false;
-      if (!_matchesRequestPriceRange(r)) return false;
-      if (!_matchesNumberRange(r.areaMinM2, _areaMinFilter, _areaMaxFilter)) {
-        return false;
-      }
-      return true;
-    }).toList();
-    expanded.sort(cmpDate);
-    return expanded;
+    return filtered;
   }
 
   /// خليط زمني: الأحدث أولاً (إعلانات + طلبات) عند تبويب «الكل» وترتيب «الأحدث».
   List<HomeMixedFeedEntry> buildMixedHomeTimeline(
     List<Property> listings,
     List<MarketPropertyRequestRow> requests, {
-    int limit = 200,
+    int? limit,
+    String? viewerRegion,
+    bool pinPaidRequests = true,
   }) {
+    final effectiveLimit = limit ??
+        (kIsWeb ? 40 : 120);
+    final region = (viewerRegion ?? _regionFilter).trim();
+    final viewer = region.isNotEmpty ? region : _cityFilter.trim();
     final out = <HomeMixedFeedEntry>[
       ...listings.map(HomeMixedFeedEntry.listing),
-      ...requests.map(HomeMixedFeedEntry.request),
+      ...requests.map(
+        (r) => HomeMixedFeedEntry.request(r, viewerRegion: viewer),
+      ),
     ];
-    out.sort((a, b) => b.sortAt.compareTo(a.sortAt));
-    if (out.length > limit) return out.sublist(0, limit);
+    // المستعجل/الفوري المدفوع أولاً في الرئيسية فقط (pinPaidRequests).
+    out.sort((a, b) {
+      if (pinPaidRequests) {
+        final aPaid = a.request != null &&
+            InstantMarketRequestFeed.isPaidPriorityPin(a.request!);
+        final bPaid = b.request != null &&
+            InstantMarketRequestFeed.isPaidPriorityPin(b.request!);
+        if (aPaid != bPaid) return aPaid ? -1 : 1;
+        if (aPaid && bPaid) {
+          return InstantMarketRequestFeed.compare(
+            a.request!,
+            b.request!,
+            viewerRegion: viewer,
+          );
+        }
+      }
+      return b.sortAt.compareTo(a.sortAt);
+    });
+    if (out.length > effectiveLimit) {
+      return out.sublist(0, effectiveLimit);
+    }
     return out;
   }
 
@@ -525,6 +670,9 @@ extension _UserDashboardStateFilters on _UserDashboardState {
 
     /// عند true (تبويب الرئيسية): إعلانات العقار المنشورة/العامة فقط؛ المسار الكامل في «صفحتي».
     bool homeDiscoveryListingCardsOnly = false,
+
+    /// تبويب «طلباتي/إعلاناتي»: لا تطبّق فلتر الظهور العام — أظهر كل ما يخصّ المستخدم.
+    bool includeMyPipelineListings = false,
   }) {
     final q = _searchQuery.trim();
     final cityFilter = _cityFilter.trim();
@@ -539,6 +687,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     final filtered = src.where((p) {
       if (cartPropIds != null && cartPropIds.contains(p.id)) return false;
       if (!_matchesCityFilter(p, cityFilter)) return false;
+      if (!_matchesHierarchyFilters(p)) return false;
       if (!_matchesSearch(p, q)) return false;
       if (_typeFilter != null && p.type != _typeFilter) return false;
       if (!PropertyListingDisplay.matchesPurposeFilter(p, _purposeFilter)) {
@@ -551,7 +700,10 @@ extension _UserDashboardStateFilters on _UserDashboardState {
       if (!_matchesNumberRange(p.area, _areaMinFilter, _areaMaxFilter)) {
         return false;
       }
-      if (!ListingPermissionsHelper.shouldShowInPublicHome(p)) return false;
+      if (!includeMyPipelineListings &&
+          !ListingPermissionsHelper.shouldShowInPublicHome(p)) {
+        return false;
+      }
       if (homeDiscoveryListingCardsOnly &&
           !ListingPermissionsHelper.shouldShowOnHomeDiscoveryCard(p)) {
         return false;
@@ -560,48 +712,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     }).toList();
 
     _applyLocalSorting(filtered, queryRaw: q);
-    if (filtered.isNotEmpty || cityFilter.isEmpty || cityFilter == 'all') {
-      return filtered;
-    }
-
-    // Fallback silently in background: show nearest matches when selected city has no data.
-    final expanded = src.where((p) {
-      if (cartPropIds != null && cartPropIds.contains(p.id)) return false;
-      if (!_matchesSearch(p, q)) return false;
-      if (_typeFilter != null && p.type != _typeFilter) return false;
-      if (!PropertyListingDisplay.matchesPurposeFilter(p, _purposeFilter)) {
-        return false;
-      }
-      if (!_matchesFurnishedFilter(p)) return false;
-      if (!_matchesNumberRange(p.price, _priceMinFilter, _priceMaxFilter)) {
-        return false;
-      }
-      if (!_matchesNumberRange(p.area, _areaMinFilter, _areaMaxFilter)) {
-        return false;
-      }
-      if (!ListingPermissionsHelper.shouldShowInPublicHome(p)) return false;
-      if (homeDiscoveryListingCardsOnly &&
-          !ListingPermissionsHelper.shouldShowOnHomeDiscoveryCard(p)) {
-        return false;
-      }
-      return true;
-    }).toList();
-
-    expanded.sort((a, b) {
-      final da = _distanceFor(a);
-      final db = _distanceFor(b);
-
-      final aInf = !da.isFinite;
-      final bInf = !db.isFinite;
-      if (aInf && bInf) return b.createdAt.compareTo(a.createdAt);
-      if (aInf) return 1;
-      if (bInf) return -1;
-
-      final cmp = da.compareTo(db);
-      if (cmp != 0) return cmp;
-      return b.createdAt.compareTo(a.createdAt);
-    });
-    return expanded;
+    return filtered;
   }
 
   /// فلتر «المخفية» المحلي: إما إظهار المخفية فقط أو إخفاؤها من الرئيسية.
@@ -636,29 +747,60 @@ extension _UserDashboardStateFilters on _UserDashboardState {
   List<MarketPropertyRequestRow> _applyHiddenFeedFilterToRequests(
     List<MarketPropertyRequestRow> list,
   ) {
+    bool completedRequest(MarketPropertyRequestRow r) {
+      final st = r.status.trim().toLowerCase();
+      if (r.completedAt != null) return true;
+      return st == 'completed' ||
+          st == 'closed' ||
+          st == 'sold' ||
+          st == 'cancelled' ||
+          st == 'canceled';
+    }
+
+    final active = list.where((r) => !completedRequest(r)).toList();
     if (_isGuest) {
       if (_homeShowHiddenOnly) return const [];
-      return list;
+      return active;
     }
     if (_homeShowHiddenOnly) {
-      return list.where((r) => _hiddenMarketRequestIds.contains(r.id)).toList();
+      return active.where((r) => _hiddenMarketRequestIds.contains(r.id)).toList();
     }
-    return list.where((r) => !_hiddenMarketRequestIds.contains(r.id)).toList();
+    return active.where((r) => !_hiddenMarketRequestIds.contains(r.id)).toList();
   }
 
   /// مصدر إعلانات الرئيسية: [_all] من استعلام الرئيسية (PostgREST + فلتر الحالات)،
   /// وللمستخدم المسجّل نُلحق من [\_mine] ما يحقق الظهور العام ولم يُرجَع في [_all]
   /// (مثلاً اختلاف حالة/حرف كبير/تأخر جلب الرئيسية عن «صفحتي»).
+  ///
+  /// قاعدة الملكية الموحَّدة لرؤية «صفحتي ≠ الرئيسية»:
+  /// - إعلانات المستخدم المعلن (`ownerId == uid`) لا تظهر له في الرئيسية —
+  ///   تظهر في تبويب «إعلاناتي/طلباتي» المجاور.
+  /// - إعلانات المسوّق الذي نشرها أو اختير لها (`publishedByMarketerId` /
+  ///   `selectedMarketerId`) كذلك لا تظهر له في الرئيسية.
   List<Property> _mergedHomePropertyPool() {
     final uid = _uid.trim();
-    final out = _isGuest || uid.isEmpty
-        ? List<Property>.from(_all)
-        : _all.where((p) => p.ownerId != uid).toList();
-    if (_isGuest) return out;
+    bool ownedByCurrentUser(Property p) {
+      if (uid.isEmpty) return false;
+      if (p.ownerId == uid) return true;
+      final pubBy = (p.publishedByMarketerId ?? '').trim();
+      if (pubBy.isNotEmpty && pubBy == uid) return true;
+      final selected = (p.selectedMarketerId ?? '').trim();
+      if (selected.isNotEmpty && selected == uid) return true;
+      return false;
+    }
+
+    if (_isGuest || uid.isEmpty) {
+      return List<Property>.from(_all);
+    }
+
+    // لا نُظهر إعلاناتك/منشوراتك في الرئيسية حتى لو كان الكتالوج كله ملكك —
+    // مكانها «طلباتي/إعلاناتي».
+    final out = _all.where((p) => !ownedByCurrentUser(p)).toList();
+
     final seen = out.map((p) => p.id).where((id) => id.isNotEmpty).toSet();
     for (final p in _mine) {
       if (p.id.isEmpty || seen.contains(p.id)) continue;
-      if (uid.isNotEmpty && p.ownerId == uid) continue;
+      if (ownedByCurrentUser(p)) continue;
       if (!ListingPermissionsHelper.shouldShowInPublicHome(p)) continue;
       seen.add(p.id);
       out.add(p);
@@ -666,12 +808,274 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     return out;
   }
 
+  /// إعلانات «يخصّني»: إعلانات أملكها كمعلن فرد + إعلانات نشرتُها كمسوّق نيابة
+  /// عن مالك. تُجمَع من [_mine] (المستعلَمة بـ `owner_id = uid`) و[_all]
+  /// (تجمّع الرئيسية الذي يحوي الإعلانات المنشورة علناً) دون تكرار.
+  List<Property> _propertiesOwnedOrPublishedByMe() {
+    final uid = _uid.trim();
+    if (uid.isEmpty) return const <Property>[];
+    final out = <String, Property>{};
+    for (final p in _mine) {
+      if (p.id.isEmpty) continue;
+      final pubBy = (p.publishedByMarketerId ?? '').trim();
+      final selected = (p.selectedMarketerId ?? '').trim();
+      final isOwnerOfRow = p.ownerId == uid;
+      final isMarketerOfRow = (pubBy.isNotEmpty && pubBy == uid) ||
+          (selected.isNotEmpty && selected == uid);
+      if (!isOwnerOfRow && !isMarketerOfRow) continue;
+      out[p.id] = p;
+    }
+    for (final p in _all) {
+      if (p.id.isEmpty || out.containsKey(p.id)) continue;
+      final pubBy = (p.publishedByMarketerId ?? '').trim();
+      final selected = (p.selectedMarketerId ?? '').trim();
+      final isOwnerOfRow = p.ownerId == uid;
+      final isMarketerOfRow = (pubBy.isNotEmpty && pubBy == uid) ||
+          (selected.isNotEmpty && selected == uid);
+      if (!isOwnerOfRow && !isMarketerOfRow) continue;
+      out[p.id] = p;
+    }
+    return out.values.toList(growable: false);
+  }
+
+  int _nestedDashboardFeedCacheKey() {
+    final uid = _uid.trim();
+    // لا تُدرج [_tabIndex] — تبديل التبويب كان يُبطل الكاش ويعيد فلترة كل القوائم
+    // على خيط الواجهة فيتجمّد التطبيق عند أي ضغط على شريط التنقل.
+    return Object.hash(
+      Object.hash(
+        _homeFeedDataEpoch,
+        uid,
+        _isGuest,
+        _searchQuery,
+        _cityFilter,
+        _regionFilter,
+        _governorateFilter,
+        _districtFilter,
+        _sortBy,
+        _typeFilter,
+        _purposeFilter,
+        _furnishedFilter,
+        _priceMinFilter,
+        _priceMaxFilter,
+        _areaMinFilter,
+        _areaMaxFilter,
+        // لا تُدرج [_homeFeedKind] — تبديل الكل/إعلانات/طلبات يجب ألا يعيد الفلترة.
+        _homeShowHiddenOnly,
+      ),
+      Object.hash(
+        _myLat,
+        _myLng,
+        _all.length,
+        _mine.length,
+        _marketHomeRequests.length,
+        _cart.length,
+        _myPendingMarketOffersForCart.length,
+        _marketRequestIdsWithMyPendingOffer.length,
+        _hiddenPropertyIds.length,
+        _hiddenMarketRequestIds.length,
+      ),
+    );
+  }
+
+  /// مايو: إعادة بناء كاش العرض متزامناً — بدون await/_webYieldUi.
+  void _rebuildNestedDashboardFeedCacheSync() {
+    final key = _nestedDashboardFeedCacheKey();
+    if (_nestedDashboardFeedCacheBuiltKey == key) return;
+
+    final uid = _uid.trim();
+    final homePropertyPool = _mergedHomePropertyPool();
+    _nestedDashboardHomePropertyPoolSize = homePropertyPool.length;
+
+    final filteredList = filterListDashboard(
+      homePropertyPool,
+      excludePropertiesInCart: !_isGuest && uid.isNotEmpty,
+      homeDiscoveryListingCardsOnly: true,
+    );
+    _nestedDashboardHomeItems = _applyHiddenFeedFilterToProperties(
+      filteredList,
+    );
+    _nestedDashboardPipelineL = (
+      server: homePropertyPool.length,
+      filtered: filteredList.length,
+      shown: _nestedDashboardHomeItems.length,
+    );
+
+    final publicRequests = _isGuest || uid.isEmpty
+        ? _marketHomeRequests
+        : _marketHomeRequests.where((r) => r.requesterId != uid).toList();
+    final filteredRequests = filterMarketRequests(publicRequests);
+    _nestedDashboardHomeRequests = _applyHiddenFeedFilterToRequests(
+      filteredRequests,
+    );
+    _nestedDashboardPipelineR = (
+      server: publicRequests.length,
+      filtered: filteredRequests.length,
+      shown: _nestedDashboardHomeRequests.length,
+    );
+
+    final mixedTimeline = _sortBy == 'latest'
+        ? buildMixedHomeTimeline(
+            _nestedDashboardHomeItems,
+            _nestedDashboardHomeRequests,
+          )
+        : const <HomeMixedFeedEntry>[];
+    _nestedDashboardMixedEntries = mixedTimeline;
+    _nestedDashboardMixedHomeCount =
+        mixedTimeline.isEmpty ? null : mixedTimeline.length;
+    _nestedDashboardMySubmissionsCount = buildMixedHomeTimeline(
+      filterListDashboard(_mine, excludePropertiesInCart: true),
+      _marketHomeRequests
+          .where((r) => r.requesterId == uid && uid.isNotEmpty)
+          .toList(),
+    ).length;
+    _nestedDashboardFeedCacheBuiltKey = key;
+  }
+
+  void _ensureNestedDashboardFeedCacheForBuild() {
+    _rebuildNestedDashboardFeedCacheSync();
+  }
+
+  void _scheduleNestedDashboardFeedCacheRebuild() {
+    _rebuildNestedDashboardFeedCacheSync();
+  }
+
+  Future<void> _runNestedDashboardFeedCacheRebuildAsync() async {
+    // حماية ضد الاستدعاء المباشر المتكرر من مسار الإقلاع (كان يسبب عاصفة setState).
+    if (_nestedDashboardFeedCacheRebuildRunning) {
+      WebBootstrapDiag.warn('feed.cache', 'skip overlapping run');
+      return;
+    }
+    _nestedDashboardFeedCacheRebuildRunning = true;
+    _nestedDashboardFeedCacheRebuildPending = true;
+    try {
+      await _webYieldUi();
+      if (!mounted) return;
+      final keyBefore = _nestedDashboardFeedCacheKey();
+      if (_nestedDashboardFeedCacheBuiltKey == keyBefore) return;
+
+      WebBootstrapDiag.start('feed.cache');
+      await _rebuildNestedDashboardFeedCacheIfStaleAsync();
+      WebBootstrapDiag.end(
+        'feed.cache',
+        'listings=${_nestedDashboardHomeItems.length} requests=${_nestedDashboardHomeRequests.length}',
+      );
+
+      if (!mounted) return;
+      if (_nestedDashboardFeedCacheKey() != keyBefore &&
+          _nestedDashboardFeedCacheBuiltKey != _nestedDashboardFeedCacheKey()) {
+        _scheduleNestedDashboardFeedCacheRebuild();
+        return;
+      }
+      // بعد إعادة بناء ناجحة يصبح BuiltKey == keyBefore — هذا متوقع.
+      // الشرط السابق كان `== keyBefore → return` فيمنع setState دائماً فتبقى
+      // الرئيسية فارغة رغم feed.pipeline shown>0 (سبب الشاشة البيضاء بعد الدخول).
+      if (mounted) {
+        WebBootstrapDiag.log(
+          'feed.paint',
+          'setState listings=${_nestedDashboardHomeItems.length} '
+              'requests=${_nestedDashboardHomeRequests.length} '
+              'mixed=${_nestedDashboardMixedEntries.length}',
+        );
+        // ويب: لا تهدم IndexedStack — feedSig الجديد يكفي لإعادة رسم الرئيسية عند الحاجة.
+        if (!kIsWeb) {
+          _webTabChildren = null;
+          _webTabChildrenFeedSig = -1;
+        }
+        setState(() {});
+      }
+    } finally {
+      _nestedDashboardFeedCacheRebuildRunning = false;
+      _nestedDashboardFeedCacheRebuildPending = false;
+    }
+  }
+
+  Future<void> _rebuildNestedDashboardFeedCacheIfStaleAsync() async {
+    final key = _nestedDashboardFeedCacheKey();
+    if (_nestedDashboardFeedCacheBuiltKey == key) return;
+
+    final uid = _uid.trim();
+    final homePropertyPool = _mergedHomePropertyPool();
+    _nestedDashboardHomePropertyPoolSize = homePropertyPool.length;
+    await _webYieldUi();
+    if (!mounted || _nestedDashboardFeedCacheKey() != key) return;
+
+    final filteredList = filterListDashboard(
+      homePropertyPool,
+      excludePropertiesInCart: !_isGuest && uid.isNotEmpty,
+      homeDiscoveryListingCardsOnly: true,
+    );
+    _nestedDashboardHomeItems = _applyHiddenFeedFilterToProperties(
+      filteredList,
+    );
+    _nestedDashboardPipelineL = (
+      server: homePropertyPool.length,
+      filtered: filteredList.length,
+      shown: _nestedDashboardHomeItems.length,
+    );
+    await _webYieldUi();
+    if (!mounted || _nestedDashboardFeedCacheKey() != key) return;
+
+    final publicRequests = _isGuest || uid.isEmpty
+        ? _marketHomeRequests
+        : _marketHomeRequests.where((r) => r.requesterId != uid).toList();
+    final filteredRequests = filterMarketRequests(publicRequests);
+    _nestedDashboardHomeRequests = _applyHiddenFeedFilterToRequests(
+      filteredRequests,
+    );
+    _nestedDashboardPipelineR = (
+      server: publicRequests.length,
+      filtered: filteredRequests.length,
+      shown: _nestedDashboardHomeRequests.length,
+    );
+    if (kIsWeb) {
+      WebBootstrapDiag.log(
+        'feed.pipeline',
+        'props pool=${_nestedDashboardPipelineL.server} '
+            'filt=${_nestedDashboardPipelineL.filtered} '
+            'shown=${_nestedDashboardPipelineL.shown} | '
+            'req server=${_nestedDashboardPipelineR.server} '
+            'filt=${_nestedDashboardPipelineR.filtered} '
+            'shown=${_nestedDashboardPipelineR.shown}',
+      );
+    }
+    await _webYieldUi();
+    if (!mounted || _nestedDashboardFeedCacheKey() != key) return;
+
+    // ابنِ التسليمة المختلطة دائماً عند latest — اختيار HomeFeedKind عرض فقط.
+    final mixedTimeline = _sortBy == 'latest'
+        ? buildMixedHomeTimeline(
+            _nestedDashboardHomeItems,
+            _nestedDashboardHomeRequests,
+          )
+        : const <HomeMixedFeedEntry>[];
+    _nestedDashboardMixedEntries = mixedTimeline;
+    _nestedDashboardMixedHomeCount =
+        mixedTimeline.isEmpty ? null : mixedTimeline.length;
+    _nestedDashboardMySubmissionsCount = buildMixedHomeTimeline(
+      filterListDashboard(_mine, excludePropertiesInCart: true),
+      _marketHomeRequests
+          .where((r) => r.requesterId == uid && uid.isNotEmpty)
+          .toList(),
+    ).length;
+    _nestedDashboardFeedCacheBuiltKey = key;
+  }
+
+  void _rebuildNestedDashboardFeedCacheIfStale() {
+    // مسار متزامن ثقيل — لا يُستدعى من build؛ التوجيه عبر الجدول المؤجّل فقط.
+    _scheduleNestedDashboardFeedCacheRebuild();
+  }
+
+  void _ensureNestedDashboardFeedCache() {
+    _rebuildNestedDashboardFeedCacheIfStale();
+  }
+
   /// أعداد تشخيصية للرئيسية: [server] بعد دمج [\_mine] الظاهر عالمياً، [filtered] بعد فلاتر الواجهة، [shown] بعد إخفاء الرئيسية.
   ({int server, int filtered, int shown}) _homePropertyFeedPipelineCounts() {
     final pool = _mergedHomePropertyPool();
     final filteredList = filterListDashboard(
       pool,
-      excludePropertiesInCart: false,
+      excludePropertiesInCart: !_isGuest && _uid.isNotEmpty,
       homeDiscoveryListingCardsOnly: true,
     );
     final shownList = _applyHiddenFeedFilterToProperties(filteredList);
@@ -698,11 +1102,16 @@ extension _UserDashboardStateFilters on _UserDashboardState {
 
   /// ترتيب إعلاناتي في تبويب «صفحتي» حسب [_sortBy] + نفس البحث/فلاتر الواجهة العلوية.
   List<Property> sortedMineForHub() {
+    // ويب أثناء التحميل: لا تُفلتر مئات الصفوف على خيط الواجهة.
+    if (kIsWeb && _loadingMine && _mine.isEmpty) {
+      return const <Property>[];
+    }
     final q = _searchQuery.trim();
     final cityFilter = _cityFilter.trim();
 
     final list = _mine.where((p) {
       if (!_matchesCityFilter(p, cityFilter)) return false;
+      if (!_matchesHierarchyFilters(p)) return false;
       if (!_matchesSearch(p, q)) return false;
       if (_typeFilter != null && p.type != _typeFilter) return false;
       if (!PropertyListingDisplay.matchesPurposeFilter(p, _purposeFilter)) {
@@ -839,23 +1248,6 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     list.sort(compareLatest);
   }
 
-  // =========================
-  // Cities dropdown options
-  // =========================
-
-  List<String> get _cityOptions {
-    final data = _citiesCache;
-
-    if (data == null || data.isEmpty) {
-      return const [''];
-    }
-
-    final keys = data.keys.map((e) => e.toString()).toList()
-      ..sort((a, b) => _cityLabel(a).compareTo(_cityLabel(b)));
-
-    return ['', ...keys];
-  }
-
   String _cityLabel(String v) {
     if (v.isEmpty || v == 'all') {
       return widget.isAr ? 'الكل' : 'All';
@@ -863,26 +1255,213 @@ extension _UserDashboardStateFilters on _UserDashboardState {
 
     return _cityLabelFromJson(v);
   }
+}
 
-  // =========================
-  // Nearby chip text
-  // =========================
+/// مسودة ورقة «بحث متقدم» — حفظ ديناميكي واستعادة عند إعادة فتح الورقة.
+class _DashboardAdvDraftHolder {
+  _DashboardAdvDraftHolder({
+    required this.query,
+    required this.city,
+    required this.type,
+    required this.purpose,
+    required this.furnished,
+    required this.priceMin,
+    required this.priceMax,
+    required this.areaMin,
+    required this.areaMax,
+    required this.sort,
+    required this.homeKind,
+    required this.hidden,
+    this.region = '',
+    this.governorate = '',
+    this.district = '',
+  });
 
-  String get _nearbyChipText {
-    if (_sortBy == 'nearest') {
-      if (_cityFilter == 'all' || _cityFilter.isEmpty) {
-        return widget.isAr ? 'الترتيب: الأقرب' : 'Sort: Nearest';
+  factory _DashboardAdvDraftHolder.fromState(_UserDashboardState s) {
+    return _DashboardAdvDraftHolder(
+      query: s._searchQuery,
+      city: s._cityFilter,
+      type: s._typeFilter,
+      purpose: s._purposeFilter,
+      furnished: s._furnishedFilter,
+      priceMin: s._priceMinFilter?.toStringAsFixed(0) ?? '',
+      priceMax: s._priceMaxFilter?.toStringAsFixed(0) ?? '',
+      areaMin: s._areaMinFilter?.toStringAsFixed(0) ?? '',
+      areaMax: s._areaMaxFilter?.toStringAsFixed(0) ?? '',
+      sort: s._sortBy,
+      homeKind: s._homeFeedKind,
+      hidden: s._homeShowHiddenOnly,
+      region: s._regionFilter,
+      governorate: s._governorateFilter,
+      district: s._districtFilter,
+    );
+  }
+
+  String query;
+  String city;
+  PropertyType? type;
+  String? purpose;
+  bool? furnished;
+  String priceMin;
+  String priceMax;
+  String areaMin;
+  String areaMax;
+  String sort;
+  HomeFeedKind homeKind;
+  bool hidden;
+
+  /// تدرّج الموقع — حقول نصّية بسيطة. عند اختيار «المدينة» يُسحب القيمة إلى
+  /// [city] أيضاً ليعمل فلتر المدينة الحالي. عند ترك «الحيّ» سيُلحَق نصُّه
+  /// بالاستعلام النصي [query] عند التطبيق ليبحث ضمن العنوان/الاسم.
+  String region;
+  String governorate;
+  String district;
+
+  void resetAll() {
+    query = '';
+    city = 'all';
+    type = null;
+    purpose = null;
+    furnished = null;
+    priceMin = '';
+    priceMax = '';
+    areaMin = '';
+    areaMax = '';
+    sort = 'latest';
+    homeKind = HomeFeedKind.all;
+    hidden = false;
+    region = '';
+    governorate = '';
+    district = '';
+  }
+
+  static PropertyType? _parseType(Object? o) {
+    if (o == null) return null;
+    final s = o.toString().trim().toLowerCase();
+    switch (s) {
+      case 'villa':
+        return PropertyType.villa;
+      case 'apartment':
+        return PropertyType.apartment;
+      case 'land':
+        return PropertyType.land;
+      default:
+        return null;
+    }
+  }
+
+  static HomeFeedKind _parseHomeKind(Object? o) {
+    final s = (o ?? '').toString().trim().toLowerCase();
+    switch (s) {
+      case 'listings':
+        return HomeFeedKind.listings;
+      case 'requests':
+        return HomeFeedKind.requests;
+      case 'all':
+      default:
+        return HomeFeedKind.all;
+    }
+  }
+
+  Future<void> mergePersistedIfAny() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw =
+          prefs.getString(AppConfig.prefDashboardAdvancedSearchDraftKey);
+      if (raw == null || raw.trim().isEmpty) return;
+      final dec = jsonDecode(raw);
+      if (dec is! Map) return;
+      final m = Map<String, dynamic>.from(dec);
+      if (m['q'] is String) query = m['q'] as String;
+      if (m['city'] is String) city = m['city'] as String;
+      if (m.containsKey('type')) type = _parseType(m['type']);
+      if (m.containsKey('purpose')) {
+        purpose = m['purpose']?.toString();
       }
+      if (m.containsKey('fur')) {
+        final f = m['fur'];
+        if (f is bool) {
+          furnished = f;
+        } else {
+          furnished = null;
+        }
+      }
+      if (m['priceMin'] is String) priceMin = m['priceMin'] as String;
+      if (m['priceMax'] is String) priceMax = m['priceMax'] as String;
+      if (m['areaMin'] is String) areaMin = m['areaMin'] as String;
+      if (m['areaMax'] is String) areaMax = m['areaMax'] as String;
+      if (m['sort'] is String) sort = m['sort'] as String;
+      if (m['homeKind'] is String) {
+        homeKind = _parseHomeKind(m['homeKind']);
+      }
+      if (m['hidden'] is bool) hidden = m['hidden'] as bool;
+      if (m['region'] is String) region = (m['region'] as String).trim();
+      if (m['governorate'] is String) {
+        governorate = (m['governorate'] as String).trim();
+      }
+      if (m['district'] is String) {
+        district = (m['district'] as String).trim();
+      }
+    } catch (_) {}
+  }
 
-      final name = _cityLabel(_cityFilter);
-      return widget.isAr ? 'الأقرب داخل: $name' : 'Nearest in: $name';
+  Map<String, dynamic> toJson() {
+    String? typeStr;
+    switch (type) {
+      case PropertyType.villa:
+        typeStr = 'villa';
+        break;
+      case PropertyType.apartment:
+        typeStr = 'apartment';
+        break;
+      case PropertyType.land:
+        typeStr = 'land';
+        break;
+      case null:
+        typeStr = null;
     }
+    return {
+      'q': query,
+      'city': city,
+      'type': typeStr,
+      'purpose': purpose,
+      'fur': furnished,
+      'priceMin': priceMin,
+      'priceMax': priceMax,
+      'areaMin': areaMin,
+      'areaMax': areaMax,
+      'sort': sort,
+      'homeKind': homeKind.name,
+      'hidden': hidden,
+      'region': region,
+      'governorate': governorate,
+      'district': district,
+    };
+  }
+}
 
-    if (_cityFilter == 'all' || _cityFilter.isEmpty) {
-      return widget.isAr ? 'كل المدن' : 'All cities';
-    }
+extension _UserDashboardAdvSearchDraft on _UserDashboardState {
+  void _scheduleAdvSearchDraftSave(_DashboardAdvDraftHolder sheet) {
+    _advancedSearchDraftTimer?.cancel();
+    _advancedSearchDraftTimer = Timer(const Duration(milliseconds: 420), () {
+      unawaited(_persistAdvSearchDraft(sheet));
+    });
+  }
 
-    final name = _cityLabel(_cityFilter);
-    return widget.isAr ? 'المدينة: $name' : 'City: $name';
+  Future<void> _persistAdvSearchDraft(_DashboardAdvDraftHolder sheet) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        AppConfig.prefDashboardAdvancedSearchDraftKey,
+        jsonEncode(sheet.toJson()),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _clearAdvSearchDraftPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(AppConfig.prefDashboardAdvancedSearchDraftKey);
+    } catch (_) {}
   }
 }

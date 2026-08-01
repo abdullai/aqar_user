@@ -1,7 +1,8 @@
-import 'dart:async' show unawaited;
+﻿import 'dart:async' show unawaited;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -9,14 +10,22 @@ import '../core/haptics/app_haptics.dart';
 import '../core/utils/chat_display_initials.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/property_type_catalog.dart';
+import '../core/subscription/app_subscription_gate.dart';
+import '../core/subscription/subscription_gate_helper.dart';
+import '../core/workflow/app_role_helper.dart';
 import '../core/utils/app_money.dart';
 import '../l10n/app_localizations.dart';
 import '../models/market_property_request_priority.dart';
 import '../models/market_property_request_row.dart';
 import '../navigation/chat_navigation.dart';
 import '../screens/create_market_property_request_page.dart';
+import '../services/individual_market_offer_service.dart';
 import '../services/market_request_offers_service.dart';
 import '../services/reservations_service.dart';
+import '../core/utils/users_profiles_safe_select.dart';
+import 'guest_participation_gate.dart';
+import 'instant_market_request_badge.dart';
+import 'marketer_policy_notice_card.dart';
 
 /// تفاصيل طلب السوق من الرئيسية + عروض + محادثة (بعد تطبيق SQL v20260411).
 Future<void> showMarketRequestHomeSheet({
@@ -27,6 +36,11 @@ Future<void> showMarketRequestHomeSheet({
   required String currentUserId,
   bool autoOpenSubmitOffer = false,
   VoidCallback? onDidChange,
+  VoidCallback? onGuestRequiresAuth,
+  Future<void> Function()? onGuestPayOfferUnlock,
+  Future<bool> Function()? onSubscriptionRequiredForOffer,
+  String? accountType,
+  String? organizationId,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -41,6 +55,11 @@ Future<void> showMarketRequestHomeSheet({
         currentUserId: currentUserId,
         autoOpenSubmitOffer: autoOpenSubmitOffer,
         onDidChange: onDidChange,
+        onGuestRequiresAuth: onGuestRequiresAuth,
+        onGuestPayOfferUnlock: onGuestPayOfferUnlock,
+        onSubscriptionRequiredForOffer: onSubscriptionRequiredForOffer,
+        accountType: accountType,
+        organizationId: organizationId,
       );
     },
   );
@@ -54,6 +73,11 @@ class _MarketRequestSheetBody extends StatefulWidget {
     required this.currentUserId,
     this.autoOpenSubmitOffer = false,
     this.onDidChange,
+    this.onGuestRequiresAuth,
+    this.onGuestPayOfferUnlock,
+    this.onSubscriptionRequiredForOffer,
+    this.accountType,
+    this.organizationId,
   });
 
   final MarketPropertyRequestRow row;
@@ -62,6 +86,14 @@ class _MarketRequestSheetBody extends StatefulWidget {
   final String currentUserId;
   final bool autoOpenSubmitOffer;
   final VoidCallback? onDidChange;
+  final VoidCallback? onGuestRequiresAuth;
+  final Future<void> Function()? onGuestPayOfferUnlock;
+
+  /// Lien vers le hub d'abonnements (paywall): يجب أن يُرجع `true` لو فعّل
+  /// المستخدم اشتراكاً مناسباً وعاد. الواجهة هنا تعيد فحص الحصة ثم تتابع تلقائياً.
+  final Future<bool> Function()? onSubscriptionRequiredForOffer;
+  final String? accountType;
+  final String? organizationId;
 
   @override
   State<_MarketRequestSheetBody> createState() =>
@@ -73,6 +105,8 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   List<Map<String, dynamic>> _offers = const [];
   String? _offersErr;
   bool _autoOfferPromptConsumed = false;
+  IndividualMarketOfferAllowance? _allowance;
+  int _myPriorWithdrawCount = 0;
 
   bool get _guest =>
       widget.currentUserId.isEmpty || widget.currentUserId == 'guest';
@@ -80,20 +114,108 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       widget.currentUserId.isNotEmpty &&
       widget.currentUserId != 'guest' &&
       widget.currentUserId == widget.row.requesterId;
-  bool get _hasMyActiveOffer {
-    if (_guest || _isOwner) return false;
-    return _offers.any((o) {
+  Map<String, dynamic>? get _myActiveOffer {
+    if (_guest || _isOwner) return null;
+    for (final o in _offers) {
       final uid = (o['offerer_id'] ?? '').toString().trim();
-      if (uid != widget.currentUserId) return false;
+      if (uid != widget.currentUserId) continue;
       final st = (o['status'] ?? '').toString().trim().toLowerCase();
-      return st.isEmpty || st == 'submitted' || st == 'pending';
-    });
+      if (st.isEmpty || st == 'submitted' || st == 'pending') return o;
+    }
+    return null;
   }
+
+  /// أي عرض لي على هذا الطلب (بما فيه المقبول/المختار).
+  Map<String, dynamic>? get _myOfferAny {
+    if (_guest || _isOwner) return null;
+    for (final o in _offers) {
+      final uid = (o['offerer_id'] ?? '').toString().trim();
+      if (uid == widget.currentUserId) return o;
+    }
+    return null;
+  }
+
+  bool get _hasMyActiveOffer => _myActiveOffer != null;
+
+  bool get _mySelectedForDeal {
+    final mine = _myOfferAny;
+    if (mine == null) return false;
+    final oid = (mine['id'] ?? '').toString().trim();
+    if (oid.isEmpty) return false;
+    final selected = (widget.row.selectedOfferId ?? '').trim();
+    if (selected.isNotEmpty && selected == oid) return true;
+    final st = (mine['status'] ?? '').toString().trim().toLowerCase();
+    return st == 'accepted' || st == 'approved' || st == 'selected';
+  }
+
+  bool get _myOfferAccepted => _mySelectedForDeal;
+
+  /// المراسلة ورقم صاحب الطلب فقط بعد اختيار صاحب الطلب لعرضك.
+  bool get _canContactRequester =>
+      !_guest && !_isOwner && _mySelectedForDeal;
+
+  String? _requesterPhone;
 
   @override
   void initState() {
     super.initState();
     unawaited(_reloadOffers());
+    unawaited(_reloadAllowance());
+    unawaited(_reloadPriorWithdrawCount());
+  }
+
+  Future<void> _loadRequesterPhoneIfSelected() async {
+    if (!_canContactRequester) {
+      if (_requesterPhone != null && mounted) {
+        setState(() => _requesterPhone = null);
+      }
+      return;
+    }
+    final rid = widget.row.requesterId.trim();
+    if (rid.isEmpty) return;
+    try {
+      final prof = await UsersProfilesSafeSelect.fetchProfileById(
+        widget.sb,
+        rid,
+        columnAttempts: const [
+          'user_id,phone',
+          'user_id',
+        ],
+      );
+      final phone = (prof?['phone'] ?? '').toString().trim();
+      if (!mounted) return;
+      setState(() => _requesterPhone = phone.isEmpty ? null : phone);
+    } catch (_) {}
+  }
+
+  Future<void> _reloadAllowance() async {
+    if (_guest || _isOwner) return;
+    try {
+      final allow = await IndividualMarketOfferService(widget.sb)
+          .currentAllowance(
+        accountType: widget.accountType,
+        organizationId: widget.organizationId,
+      );
+      if (!mounted) return;
+      setState(() => _allowance = allow);
+    } catch (_) {}
+  }
+
+  Future<void> _reloadPriorWithdrawCount() async {
+    if (_guest || _isOwner) return;
+    try {
+      final row = await widget.sb
+          .from('market_request_offer_user_withdrawals')
+          .select('withdrawn_count')
+          .eq('user_id', widget.currentUserId)
+          .eq('market_request_id', widget.row.id)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() {
+        _myPriorWithdrawCount =
+            int.tryParse('${row?['withdrawn_count'] ?? 0}') ?? 0;
+      });
+    } catch (_) {}
   }
 
   Future<void> _reloadOffers() async {
@@ -112,6 +234,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
         _offers = list;
         _loadingOffers = false;
       });
+      unawaited(_loadRequesterPhoneIfSelected());
       if (widget.autoOpenSubmitOffer &&
           !_autoOfferPromptConsumed &&
           !_guest &&
@@ -135,11 +258,21 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
 
   Future<bool> _ensureRequestInMyDeals({String? message}) async {
     if (_guest || _isOwner) return false;
+    // قبل تسجيل العرض/المراسلة نتحقق أن لدى المستخدم اشتراكاً بحصة كافية.
+    final allowed = await _ensureOfferAllowanceOrPaywall();
+    if (!allowed || !mounted) return false;
     try {
       final added = await MarketRequestOffersService(widget.sb).submitOffer(
         marketRequestId: widget.row.id,
         offerMessage: message,
       );
+      if (added &&
+          !widget.row.isInstantPaid &&
+          AppRoleHelper.isMarketingAccountType(widget.accountType)) {
+        unawaited(IndividualMarketOfferService(widget.sb)
+            .recordUsageOnSuccess(widget.row.id));
+        unawaited(_reloadAllowance());
+      }
       widget.onDidChange?.call();
       if (!mounted) return added;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -168,8 +301,21 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   Future<void> _openChat({String? counterpartyId}) async {
     if (_guest) return;
     try {
+      // لغير المالك: لا تُفتح المراسلة إلا بعد اختيار صاحب الطلب لعرضك.
       if (!_isOwner) {
-        await _ensureRequestInMyDeals();
+        if (!_canContactRequester) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                widget.isAr
+                    ? 'المراسلة ورقم التواصل يظهران بعد اختيار صاحب الطلب لعرضك.'
+                    : 'Chat and contact appear after the requester selects your offer.',
+              ),
+            ),
+          );
+          return;
+        }
       }
       final cid =
           await ReservationsService.getOrCreateMarketRequestConversation(
@@ -193,59 +339,195 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     }
   }
 
+  /// Paywall: قبل فتح حوار «تقديم عرض» نتحقق من حصة المستخدم.
+  /// لو لا اشتراك / الحصة 0 → نطلب من اللوحة الأم تحويله لـ «الاشتراكات والمدفوعات».
+  /// بعد عودته نُعيد فحص الحصة. إن نجح يُسمح بالمتابعة.
+  Future<bool> _ensureOfferAllowanceOrPaywall() async {
+    if (_guest || _isOwner) return false;
+    if (!AppRoleHelper.isMarketingAccountType(widget.accountType)) {
+      return true;
+    }
+    if (widget.row.isInstantPaid) return true;
+    // الإجراءات للمستخدم بعد سحبتين على نفس الطلب — السحب ممنوع وتقديم العرض أيضاً.
+    if (_myPriorWithdrawCount >= 2) {
+      _toast(widget.isAr
+          ? 'لقد سحبت عرضك على هذا الطلب مرتين سابقاً — لن يظهر لك مجدداً.'
+          : 'You withdrew your offer on this request twice before — it will not appear again.');
+      return false;
+    }
+    var allow = _allowance;
+    allow ??= await IndividualMarketOfferService(widget.sb).currentAllowance(
+      accountType: widget.accountType,
+      organizationId: widget.organizationId,
+    );
+    if (!mounted) return false;
+    if (allow.canSubmitNow) return true;
+
+    if (!mounted) return false;
+    final ok = await SubscriptionGateHelper.ensure(
+      context,
+      isAr: widget.isAr,
+      action: SubscriptionGateAction.completeMarketDeal,
+      onGoSubscribe: () async {
+        if (widget.onSubscriptionRequiredForOffer != null) {
+          await widget.onSubscriptionRequiredForOffer!();
+        }
+      },
+    );
+    if (!ok || !mounted) return false;
+    final refreshed = await IndividualMarketOfferService(widget.sb).currentAllowance(
+      accountType: widget.accountType,
+      organizationId: widget.organizationId,
+    );
+    if (!mounted) return false;
+    setState(() => _allowance = refreshed);
+    if (!refreshed.canSubmitNow) {
+      _toast(widget.isAr ? refreshed.shortStatusAr() : refreshed.shortStatusEn());
+      return false;
+    }
+    return true;
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _withdrawMyOffer() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: Text(widget.isAr ? 'حذف عرضي' : 'Withdraw my offer'),
+        content: Text(
+          widget.isAr
+              ? 'سيتم سحب عرضك وإعادة الطلب إلى الرئيسية مع ملاحظة أنك سبق وأن قدّمت عرضاً عليه. لا يمكن السحب لو اختارك صاحب الطلب لإتمام الصفقة، وبعد سحبتين على نفس الطلب لن يظهر لك مجدداً.'
+              : 'Your offer will be withdrawn and the request will return to Home with a note that you previously offered. Withdrawal is blocked if the requester selected you for the deal; after two withdrawals on the same request it will not show again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: Text(widget.isAr ? 'سحب العرض' : 'Withdraw'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final res = await IndividualMarketOfferService(widget.sb)
+        .withdrawMyOffer(widget.row.id);
+    if (!mounted) return;
+    final ok = res['ok'] == true;
+    if (!ok) {
+      final code = (res['error'] ?? '').toString();
+      _toast(widget.isAr
+          ? individualOfferShortReasonAr(code)
+          : 'Could not withdraw: $code');
+      return;
+    }
+    widget.onDidChange?.call();
+    await Future.wait([
+      _reloadOffers(),
+      _reloadPriorWithdrawCount(),
+    ]);
+    if (!mounted) return;
+    final isFinal = res['final'] == true;
+    _toast(isFinal
+        ? (widget.isAr
+            ? 'تم السحب. لن يظهر لك هذا الطلب مرة أخرى (الحد سحبتان لكل طلب).'
+            : 'Withdrawn. This request will no longer appear (limit: 2 withdrawals per request).')
+        : (widget.isAr
+            ? 'تم سحب عرضك. سيظهر الطلب في الرئيسية مع علامة «سبق أن قدّمت عرضاً».'
+            : 'Offer withdrawn. The request will reappear in Home with a "previously offered" marker.'));
+  }
+
   Future<void> _submitOfferDialog() async {
+    final allowed = await _ensureOfferAllowanceOrPaywall();
+    if (!allowed || !mounted) return;
     final msgCtrl = TextEditingController();
     final priceCtrl = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (dCtx) {
-        return AlertDialog(
-          title: Text(widget.isAr ? 'تقديم عرض' : 'Submit offer'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: msgCtrl,
-                  decoration: InputDecoration(
-                    labelText:
-                        widget.isAr ? 'رسالة (اختياري)' : 'Message (optional)',
-                  ),
-                  minLines: 2,
-                  maxLines: 4,
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: priceCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    ArabicDigitsToLatinFormatter(),
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: widget.isAr
-                        ? 'سعر مقترح (${AppMoney.saudiRiyalSignUnicode})'
-                        : 'Suggested price (SAR)',
-                  ),
-                ),
-              ],
+        final bottomInset = MediaQuery.viewInsetsOf(dCtx).bottom;
+        return AnimatedPadding(
+          padding: EdgeInsets.only(bottom: bottomInset),
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 24,
             ),
+            title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+            content: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AqarTextField(
+                    controller: msgCtrl,
+                    decoration: InputDecoration(
+                      labelText: widget.isAr
+                          ? 'رسالة (اختياري)'
+                          : 'Message (optional)',
+                    ),
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 10),
+                  AqarTextField(
+                    controller: priceCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      ArabicDigitsToLatinFormatter(),
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: widget.isAr
+                          ? 'سعر مقترح (${AppMoney.saudiRiyalSignUnicode})'
+                          : 'Suggested price (SAR)',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dCtx, false),
+                child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dCtx, true),
+                child: Text(widget.isAr ? 'إرسال' : 'Send'),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dCtx, false),
-              child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dCtx, true),
-              child: Text(widget.isAr ? 'إرسال' : 'Send'),
-            ),
-          ],
         );
       },
     );
     if (ok != true || !mounted) return;
+
+    if (!widget.row.isInstantPaid &&
+        AppRoleHelper.isMarketingAccountType(widget.accountType)) {
+      // تسجيل الحصة عند تأكيد الإرسال (حسابات التسويق فقط).
+      final usageRes = await IndividualMarketOfferService(widget.sb)
+          .recordUsageOnSuccess(widget.row.id);
+      if (!mounted) return;
+      if (usageRes['ok'] != true) {
+        final err = '${usageRes['error'] ?? ''}';
+        _toast(widget.isAr
+            ? individualOfferShortReasonAr(err)
+            : 'Quota: $err');
+        unawaited(_reloadAllowance());
+        return;
+      }
+      unawaited(_reloadAllowance());
+    }
 
     final svc = MarketRequestOffersService(widget.sb);
     final price = double.tryParse(
@@ -270,8 +552,8 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
             ),
             content: Text(
               widget.isAr
-                  ? 'شريكنا العقاري، لديك عرض نشط على هذا الطلب. يمكن للمهتمين الآخرين تقديم عروض إضافية. إذا احتجت تعديلاً استثنائياً يمكنك التواصل مع الإدارة من تبويب الدعم — وسنراجع الطلب وفق السياسة.'
-                  : 'You already have an active offer on this request. Others may still submit offers. If you need an exception (change or new offer), contact administration from the Support tab.',
+                  ? 'شريكنا العقاري، لديك صفقة نشطة على هذا الطلب. يمكن للمهتمين الآخرين إتمام صفقات إضافية. إذا احتجت تعديلاً استثنائياً يمكنك التواصل مع الإدارة من تبويب الدعم — وسنراجع الطلب وفق السياسة.'
+                  : 'You already have an active deal on this request. Others may still complete deals. If you need an exception (change or new deal), contact administration from the Support tab.',
             ),
             actions: [
               TextButton(
@@ -580,7 +862,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
           maxFractionDigits: 0,
         );
         budgetLine =
-            widget.isAr ? 'الميزانية: $sa – $sMax' : 'Budget: $sa – $sMax';
+            widget.isAr ? 'المبلغ المحدد: $sa – $sMax' : 'Specified amount: $sa – $sMax';
       } else {
         final v = (a ?? b)!;
         final sv = AppMoney.formatWithCurrencyCode(
@@ -588,7 +870,8 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
           isAr: widget.isAr,
           maxFractionDigits: 0,
         );
-        budgetLine = widget.isAr ? 'الميزانية: $sv' : 'Budget: $sv';
+        budgetLine =
+            widget.isAr ? 'المبلغ المحدد: $sv' : 'Specified amount: $sv';
       }
     }
 
@@ -604,9 +887,12 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
         left: 20,
         right: 20,
         top: 8,
-        bottom: MediaQuery.of(context).viewPadding.bottom + 20,
+        bottom: MediaQuery.of(context).viewPadding.bottom +
+            MediaQuery.of(context).viewInsets.bottom +
+            20,
       ),
       child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -658,8 +944,8 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                     Expanded(
                       child: Text(
                         widget.isAr
-                            ? 'يمكن لعدة مهتمين تقديم عروض. تُنشأ لكل طرف محادثة خاصة مع صاحب الطلب عبر «دردشة» — وليست غرفة جماعية واحدة.'
-                            : 'Multiple people can submit offers. Each party gets a private chat with the requester via «Chat» — there is no single group room.',
+                            ? 'يمكن لعدة مهتمين إتمام الصفقة. تُنشأ لكل طرف محادثة خاصة مع صاحب الطلب عبر «دردشة» — وليست غرفة جماعية واحدة.'
+                            : 'Multiple people can complete deals. Each party gets a private chat with the requester via «Chat» — there is no single group room.',
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
@@ -672,11 +958,59 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                 ),
               ),
             ),
+            if (_guest && !_isOwner && !isCompleted && !deletionRequested) ...[
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () async {
+                  final nav = Navigator.of(context);
+                  if (row.isInstantPaid) {
+                    final choice = await showGuestInstantDealAuthSheet(
+                      context: context,
+                      isAr: widget.isAr,
+                    );
+                    if (!mounted) return;
+                    if (choice == GuestAuthRequiredResult.login) {
+                      nav.pop();
+                      widget.onGuestRequiresAuth?.call();
+                    } else if (choice == GuestAuthRequiredResult.register) {
+                      nav.pop();
+                      if (!context.mounted) return;
+                      await Navigator.of(context, rootNavigator: true)
+                          .pushNamed('/register');
+                    }
+                    return;
+                  }
+                  final choice = await showGuestHomeOfferGateSheet(
+                    context: context,
+                    isAr: widget.isAr,
+                  );
+                  if (!mounted) return;
+                  if (choice == GuestHomeOfferGateResult.login) {
+                    nav.pop();
+                    widget.onGuestRequiresAuth?.call();
+                  } else if (choice == GuestHomeOfferGateResult.register) {
+                    nav.pop();
+                    if (!context.mounted) return;
+                    await Navigator.of(context, rootNavigator: true)
+                        .pushNamed('/register');
+                  } else if (choice == GuestHomeOfferGateResult.payOnce) {
+                    nav.pop();
+                    if (widget.onGuestPayOfferUnlock != null) {
+                      await widget.onGuestPayOfferUnlock!();
+                    }
+                  }
+                },
+                icon: const Icon(Icons.local_offer_outlined),
+                label: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+              ),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
+                if (row.isInstantPaid)
+                  InstantMarketRequestBadge(isAr: widget.isAr, compact: true),
                 Chip(
                   label: Text(
                     _priorityLabel(context, row.requestPriority),
@@ -707,7 +1041,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.payments_outlined, color: cs.primary),
-                title: Text(widget.isAr ? 'الميزانية' : 'Budget'),
+                title: Text(widget.isAr ? 'المبلغ المحدد' : 'Specified amount'),
                 subtitle: Text(budgetLine),
               ),
             if (areaLine != null)
@@ -733,34 +1067,137 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
               ),
             ],
             const SizedBox(height: 16),
-            if (!_guest && !_isOwner && !isCompleted && !deletionRequested) ...[
-              FilledButton.icon(
-                onPressed: () => unawaited(_openChat()),
-                icon: const Icon(Icons.chat_bubble_outline),
-                label: Text(
-                  widget.isAr ? 'مراسلة صاحب الطلب' : 'Message requester',
+            if (!_guest && !_isOwner && !deletionRequested) ...[
+              if (_canContactRequester) ...[
+                if ((_requesterPhone ?? '').trim().isNotEmpty) ...[
+                  _detailRow(
+                    context,
+                    label: widget.isAr ? 'رقم صاحب الطلب' : 'Requester phone',
+                    value: _requesterPhone!.trim(),
+                    icon: Icons.phone_outlined,
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                FilledButton.icon(
+                  onPressed: () => unawaited(_openChat()),
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: Text(
+                    widget.isAr ? 'مراسلة صاحب الطلب' : 'Message requester',
+                  ),
                 ),
-              ),
-              if (!_hasMyActiveOffer) ...[
+                const SizedBox(height: 8),
+              ],
+              if (!isCompleted && !_hasMyActiveOffer && !_mySelectedForDeal) ...[
+                if (_myPriorWithdrawCount == 1) ...[
+                  const SizedBox(height: 8),
+                  Material(
+                    color: cs.tertiaryContainer.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.history_toggle_off,
+                              color: cs.onTertiaryContainer),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              widget.isAr
+                                  ? 'سبق أن أتممت صفقة على هذا الطلب ثم حذفتها. يمكنك إتمام صفقة جديدة (يُحتسب من حصتك). الحذف الثاني نهائي ولن يظهر لك الطلب مجدداً.'
+                                  : 'You previously offered on this request and withdrew. You can offer again (counts toward your quota). A second withdrawal hides the request permanently.',
+                              style: TextStyle(
+                                color: cs.onTertiaryContainer,
+                                fontWeight: FontWeight.w800,
+                                height: 1.3,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: () => unawaited(_submitOfferDialog()),
+                  onPressed: _myPriorWithdrawCount >= 2
+                      ? null
+                      : () => unawaited(_submitOfferDialog()),
                   icon: const Icon(Icons.local_offer_outlined),
-                  label: Text(widget.isAr ? 'تقديم عرض' : 'Submit offer'),
+                  label: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
                 ),
-              ] else ...[
+                if (_allowance != null && _allowance!.hasSubscription) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.isAr
+                        ? _allowance!.shortStatusAr()
+                        : _allowance!.shortStatusEn(),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ] else if (!isCompleted &&
+                  (_hasMyActiveOffer || _mySelectedForDeal)) ...[
                 const SizedBox(height: 8),
+                // بدل الرسالة المختصرة — بطاقة سياسة كاملة للمسوّقين بعد تقديم
+                // العرض على الطلب: تشرح خطوات منع التواصل قبل القبول، التعاقد،
+                // ثم 72 ساعة لاستخراج التصاريح والنشر.
+                MarketerPolicyNoticeCard(
+                  isAr: widget.isAr,
+                  stageHint: _mySelectedForDeal
+                      ? MarketerPolicyStage.contractPending
+                      : MarketerPolicyStage.afterOffer,
+                ),
+                const SizedBox(height: 8),
+                if (_mySelectedForDeal)
+                  Material(
+                    color: Colors.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Text(
+                        widget.isAr
+                            ? 'تم اختيارك لإتمام الصفقة، لذلك زر حذف العرض معطّل التزاماً بحقوق صاحب الطلب.'
+                            : 'You were selected to complete this deal, so withdraw is disabled out of fairness to the requester.',
+                        style: TextStyle(
+                          color: Colors.green.shade800,
+                          fontWeight: FontWeight.w800,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  OutlinedButton.icon(
+                    onPressed: () => unawaited(_withdrawMyOffer()),
+                    icon: const Icon(Icons.delete_outline),
+                    label: Text(widget.isAr
+                        ? (_myPriorWithdrawCount >= 1
+                            ? 'حذف عرضي (الأخير — لن يظهر مجدداً)'
+                            : 'حذف عرضي')
+                        : (_myPriorWithdrawCount >= 1
+                            ? 'Withdraw (final — hides request)'
+                            : 'Withdraw my offer')),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: cs.error,
+                      side: BorderSide(color: cs.error.withValues(alpha: 0.5)),
+                    ),
+                  ),
+              ] else if (isCompleted && !_canContactRequester) ...[
                 Material(
-                  color: cs.secondaryContainer.withValues(alpha: 0.55),
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.65),
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Text(
                       widget.isAr
-                          ? 'لديك عرض نشط على هذا الطلب، لذلك لا يظهر زر تقديم عرض مرة أخرى.'
-                          : 'You already have an active offer on this request, so Submit offer is hidden.',
+                          ? 'تم إتمام الصفقة، ولا يمكن إتمام صفقة جديدة.'
+                          : 'The deal is completed; new offers are closed.',
                       style: TextStyle(
-                        color: cs.onSecondaryContainer,
+                        color: cs.onSurfaceVariant,
                         fontWeight: FontWeight.w800,
                         height: 1.35,
                       ),
@@ -770,20 +1207,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
               ],
             ] else if (!_guest &&
                 !_isOwner &&
-                (isCompleted || deletionRequested)) ...[
+                deletionRequested) ...[
               Material(
                 color: cs.surfaceContainerHighest.withValues(alpha: 0.65),
                 borderRadius: BorderRadius.circular(12),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Text(
-                    isCompleted
-                        ? (widget.isAr
-                            ? 'تم إتمام الصفقة، ولا يمكن تقديم عرض جديد.'
-                            : 'The deal is completed; new offers are closed.')
-                        : (widget.isAr
-                            ? 'هذا الطلب بانتظار حذف إداري، ولا يمكن تقديم عرض جديد.'
-                            : 'This request is pending admin deletion; new offers are closed.'),
+                    widget.isAr
+                        ? 'هذا الطلب بانتظار حذف إداري، ولا يمكن إتمام صفقة جديدة.'
+                        : 'This request is pending admin deletion; new offers are closed.',
                     style: TextStyle(
                       color: cs.onSurfaceVariant,
                       fontWeight: FontWeight.w800,

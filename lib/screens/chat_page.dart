@@ -1,8 +1,9 @@
-// lib/screens/chat_page.dart
+﻿// lib/screens/chat_page.dart
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:intl/intl.dart' show DateFormat;
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:provider/provider.dart';
@@ -17,12 +18,19 @@ import '../core/notifications/in_app_notifications.dart';
 import '../core/session/app_session.dart';
 import '../core/workflow/listing_workflow.dart';
 import '../l10n/app_localizations.dart';
+import '../services/chat_inbox_service.dart';
+import '../services/communication_hub_service.dart';
 import '../services/chat_peer_service.dart';
 import '../services/chat_presence_service.dart';
 import '../services/org_team_service.dart';
 import '../services/reservations_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/chat_peer_profile_sheet.dart';
+import '../widgets/inbox_bulk_toolbar.dart';
+import '../widgets/swipe_actions_tile.dart';
+import '../widgets/stable_select_chip.dart';
+import '../widgets/user_presence_strip.dart';
+import '../core/presence/presence_display_prefs.dart';
 
 enum ConversationKind { support, property, direct, agencyTeam, marketRequest }
 
@@ -58,6 +66,64 @@ String _fmtMsgTimeFromRow(Map<String, dynamic> m, {required bool isAr}) {
   }
   final dPart = DateFormat.yMMMd(isAr ? 'ar' : 'en').format(dt);
   return '$dPart · $t';
+}
+
+/// مطابقة رسالة تفاؤلية مع صف من الخادم لتجنّب التكرار عند وصول البث.
+bool chatOptimisticRowMatchesServer(
+  Map<String, dynamic> optimistic,
+  Map<String, dynamic> server,
+) {
+  final oid = (optimistic['id'] ?? '').toString().trim();
+  if (!oid.startsWith('__opt__')) return false;
+  final optPost = (optimistic['org_channel_post_id'] ?? '').toString().trim();
+  final srvPost = (server['org_channel_post_id'] ?? '').toString().trim();
+  if (optPost.isNotEmpty &&
+      srvPost.isNotEmpty &&
+      optPost == srvPost) {
+    return true;
+  }
+  if ((optimistic['sender_id'] ?? '').toString() !=
+      (server['sender_id'] ?? '').toString()) {
+    return false;
+  }
+  if ((optimistic['receiver_id'] ?? '').toString() !=
+      (server['receiver_id'] ?? '').toString()) {
+    return false;
+  }
+  final oc = (optimistic['content'] ?? '').toString().trim();
+  final sc = (server['content'] ?? '').toString().trim();
+  if (oc != sc) return false;
+  final ou = (optimistic['attachment_url'] ?? '').toString().trim();
+  final su = (server['attachment_url'] ?? '').toString().trim();
+  if (ou != su) return false;
+  final optMs = optimistic['_opt_ms'];
+  if (optMs is! int) return false;
+  final sdt = _parseMsgTs(server['created_at']);
+  if (sdt == null) return false;
+  final diff = sdt.millisecondsSinceEpoch - optMs;
+  return diff >= -5000 && diff < 120000;
+}
+
+/// دمج الرسائل التفاؤلية (الأحدث أولاً مثل بث Supabase).
+List<Map<String, dynamic>> chatMergeOptimisticIntoStream(
+  List<Map<String, dynamic>> streamRows,
+  List<Map<String, dynamic>> optimisticForConv,
+) {
+  if (optimisticForConv.isEmpty) return streamRows;
+  final matched = <String>{};
+  for (final r in streamRows) {
+    for (final o in optimisticForConv) {
+      if (chatOptimisticRowMatchesServer(o, r)) {
+        matched.add((o['id'] ?? '').toString());
+      }
+    }
+  }
+  final pending = optimisticForConv
+      .where((o) => !matched.contains((o['id'] ?? '').toString()))
+      .map(Map<String, dynamic>.from)
+      .toList();
+  if (pending.isEmpty) return streamRows;
+  return <Map<String, dynamic>>[...pending, ...streamRows];
 }
 
 String _chatInitialLetter(String name) {
@@ -171,9 +237,16 @@ class ChatPage extends StatefulWidget {
   /// طلب سوق (محادثة مع صاحب الطلب أو مع مقدّم عرض)
   final String? marketRequestId;
 
+  /// نص يُملأ في حقل الإرسال بعد اكتمال التهيئة (مثلاً تمهيد عربي من مسار التسويق).
+  final String? initialDraftMessage;
+
+  /// داخل [UserDashboard] / مركز تواصل بلا [AppBar] مزدوج: الشريط الخارجي للوحة يحمل العنوان والرجوع.
+  final bool embedInParentDashboardShell;
+
   const ChatPage({
     super.key,
     this.isAr = true,
+    this.embedInParentDashboardShell = false,
     this.conversationId,
     this.propertyId,
     this.reservationId,
@@ -182,6 +255,7 @@ class ChatPage extends StatefulWidget {
     this.kind,
     this.supportUserId,
     this.marketRequestId,
+    this.initialDraftMessage,
   });
 
   @override
@@ -193,6 +267,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   String get _uid => _sb.auth.currentUser?.id ?? '';
   bool get _isGuest => _uid.isEmpty;
+
+  /// فُتحت المحادثة مباشرة من شاشة خارجية (تصاريح، عقار، …) بدون قائمة داخلية.
+  bool get _openedDirectlyFromExternal =>
+      (widget.propertyId ?? '').trim().isNotEmpty ||
+      (widget.counterpartyId ?? '').trim().isNotEmpty ||
+      (widget.conversationId ?? '').trim().isNotEmpty ||
+      (widget.reservationId ?? '').trim().isNotEmpty ||
+      (widget.marketRequestId ?? '').trim().isNotEmpty;
 
   bool _booting = true;
   String? _bootError;
@@ -222,11 +304,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   // list refresh key
   int _listReloadTick = 0;
 
+  /// تظهر فور الإرسال ثم تُزال عند تأكيد الصف من الخادم أو عند الفشل.
+  final List<Map<String, dynamic>> _optimisticMessages =
+      <Map<String, dynamic>>[];
+
   /// kind الخام من `conversations.kind` (مثل `org_team_channel`).
   String? _activeConversationKindRaw;
 
   /// `conversations.org_id` عند قناة الفريق.
   String? _activeOrgId;
+
+  /// مالك المنشأة — صلاحيات حذف منشورات قناة الفريق.
+  bool _isOrgOwner = false;
 
   @override
   void initState() {
@@ -383,6 +472,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
+    if (!mounted) return;
+
     try {
       // 1) فتح مباشر عبر conversationId
       final directCid = (widget.conversationId ?? '').trim();
@@ -397,6 +488,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 .maybeSingle();
           },
         );
+
+        if (!mounted) return;
 
         if (conv == null) {
           throw Exception(
@@ -472,6 +565,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           title: widget.title,
         );
 
+        if (!mounted) return;
+
         setState(() {
           _activeConversationId = info.id;
           _activeKind = ConversationKind.property;
@@ -504,6 +599,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           title: widget.title,
         );
 
+        if (!mounted) return;
+
         setState(() {
           _activeConversationId = info.id;
           _activeKind = ConversationKind.support;
@@ -532,6 +629,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         }
 
         final info = await _ensureDirectConversationWithPeer(peer);
+
+        if (!mounted) return;
 
         setState(() {
           _activeConversationId = info.id;
@@ -565,6 +664,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           },
         );
 
+        if (!mounted) return;
+
         if (cid == null || cid.isEmpty) {
           throw Exception(widget.isAr
               ? 'لا يوجد اتصال أو تعذر فتح المحادثة'
@@ -581,6 +682,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 .maybeSingle();
           },
         );
+
+        if (!mounted) return;
 
         if (conv == null) {
           throw Exception(
@@ -636,6 +739,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           if (!_presenceStarted) {
             _presenceStarted = true;
             _schedulePresenceLoop();
+          }
+          final draft = widget.initialDraftMessage?.trim();
+          final cid = (_activeConversationId ?? '').trim();
+          if (draft != null &&
+              draft.isNotEmpty &&
+              cid.isNotEmpty &&
+              _tc.text.trim().isEmpty) {
+            setState(() => _tc.text = draft);
           }
         });
       }
@@ -703,6 +814,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
     }
 
+    if (!mounted) {
+      throw Exception(
+          widget.isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection');
+    }
+
     final inserted = await session.runNetworkGuarded<Map<String, dynamic>?>(
       context: context,
       action: () async {
@@ -762,8 +878,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     final marketerId =
         ReservationsService.marketerCounterpartyIdForPropertyChat(
-      Map<String, dynamic>.from(row),
-    );
+              Map<String, dynamic>.from(row),
+            ) ??
+            ((widget.counterpartyId ?? '').trim().isNotEmpty
+                ? (widget.counterpartyId ?? '').trim()
+                : null);
     if ((resolvedTitle ?? '').trim().isEmpty) {
       resolvedTitle = (row['title'] as String?)?.trim();
     }
@@ -778,6 +897,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       throw Exception(widget.isAr
           ? 'لا يمكن فتح دردشة مع نفسك'
           : 'Cannot open chat with yourself');
+    }
+
+    if (!mounted) {
+      throw Exception(
+          widget.isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection');
     }
 
     // محادثة واحدة لكل عقار لحسابك: أي صف property بنفس property_id تشارك فيه أنت.
@@ -804,6 +928,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         counterpartyId: other,
         title: t?.isNotEmpty == true ? t : resolvedTitle,
       );
+    }
+
+    if (!mounted) {
+      throw Exception(
+          widget.isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection');
     }
 
     final inserted = await session.runNetworkGuarded<Map<String, dynamic>?>(
@@ -852,6 +981,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             (widget.title ?? '').trim().isEmpty ? null : widget.title!.trim(),
       );
     }
+    if (!mounted) {
+      throw Exception(
+          widget.isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection');
+    }
     return _getOrCreateDirectConversationClient(trimmed, session);
   }
 
@@ -882,6 +1015,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         counterpartyId: other,
         title: (existing['title'] as String?)?.trim(),
       );
+    }
+
+    if (!mounted) {
+      throw Exception(
+          widget.isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection');
     }
 
     final titleStr = (widget.title ?? '').trim().isEmpty
@@ -938,6 +1076,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         : t;
 
     setState(() {
+      _optimisticMessages.clear();
       _activeConversationId = row.conversationId;
       _activeKind = kind;
       _activeConversationKindRaw = row.kind;
@@ -953,12 +1092,39 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       unawaited(_loadPeerProfile(otherId));
       _schedulePeerSeenPolling(otherId);
     }
+    unawaited(_resolveOrgOwnerFlag(row.orgId));
     unawaited(_markReadSafe());
+  }
+
+  Future<void> _resolveOrgOwnerFlag(String? orgId) async {
+    final oid = (orgId ?? '').trim();
+    if (oid.isEmpty) {
+      if (mounted) setState(() => _isOrgOwner = false);
+      return;
+    }
+    try {
+      final ctx = await OrgTeamService(_sb).myOrgContext();
+      final myOrg = (ctx?['org_id'] ?? '').toString().trim();
+      final isOwner = ctx?['is_owner'] == true;
+      if (mounted) {
+        setState(() => _isOrgOwner = myOrg == oid && isOwner);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isOrgOwner = false);
+    }
   }
 
   Future<void> _backToList() async {
     _peerSeenTimer?.cancel();
+    if (_openedDirectlyFromExternal) {
+      final nav = Navigator.of(context);
+      if (nav.canPop()) {
+        nav.pop();
+        return;
+      }
+    }
     setState(() {
+      _optimisticMessages.clear();
       _activeConversationId = null;
       _activeKind = null;
       _activeConversationKindRaw = null;
@@ -1024,9 +1190,27 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (trimmed.isEmpty) return;
 
       final session = context.read<AppSession>();
-      setState(() => _sending = true);
+      final optId = '__opt__${const Uuid().v4()}';
+      final optMs = DateTime.now().millisecondsSinceEpoch;
+      final optimisticRow = <String, dynamic>{
+        'id': optId,
+        'sender_id': _uid,
+        'receiver_id': _uid,
+        'conversation_id': cid,
+        'content': trimmed,
+        'created_at': DateTime.fromMillisecondsSinceEpoch(optMs, isUtc: true)
+            .toIso8601String(),
+        '_opt_ms': optMs,
+      };
+
+      setState(() {
+        _optimisticMessages.insert(0, optimisticRow);
+        _sending = true;
+        if (clearInput) _tc.clear();
+      });
+
       try {
-        final ok = await session.runNetworkGuarded<bool>(
+        final postId = await session.runNetworkGuarded<String?>(
           context: context,
           action: () async {
             return await OrgTeamService(_sb).insertOrgTeamChannelPost(
@@ -1035,8 +1219,57 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             );
           },
         );
-        if (ok != true || !mounted) return;
-        if (clearInput) _tc.clear();
+
+        if (postId == null || postId.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _optimisticMessages.removeWhere((m) => m['id'] == optId);
+            });
+            _showSnack(widget.isAr ? 'فشل الإرسال' : 'Send failed');
+          }
+          return;
+        }
+
+        if (mounted) {
+          setState(() {
+            final ix = _optimisticMessages.indexWhere((m) => m['id'] == optId);
+            if (ix != -1) {
+              final prev = Map<String, dynamic>.from(_optimisticMessages[ix]);
+              prev['org_channel_post_id'] = postId;
+              _optimisticMessages[ix] = prev;
+            }
+          });
+        }
+
+        if (mounted) {
+          try {
+            final myRow = await _sb
+                .from('messages')
+                .select(
+                  'id, sender_id, receiver_id, conversation_id, content, '
+                  'created_at, attachment_url, attachment_type, read_at, '
+                  'delivered_at, edited_at, deleted_for_everyone_at, '
+                  'org_channel_post_id',
+                )
+                .eq('conversation_id', cid)
+                .eq('org_channel_post_id', postId)
+                .eq('receiver_id', _uid)
+                .maybeSingle();
+            if (myRow != null && mounted) {
+              final real = Map<String, dynamic>.from(myRow);
+              setState(() {
+                _optimisticMessages.removeWhere(
+                  (m) =>
+                      (m['id'] ?? '').toString() == optId ||
+                      chatOptimisticRowMatchesServer(m, real),
+                );
+              });
+            }
+          } catch (_) {}
+        }
+
+        if (!mounted) return;
+
         unawaited(
           session.runNetworkGuarded<void>(
             context: context,
@@ -1050,6 +1283,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         );
       } catch (e) {
         if (mounted) {
+          setState(() {
+            _optimisticMessages.removeWhere((m) => m['id'] == optId);
+          });
           _showSnack(widget.isAr ? 'فشل الإرسال: $e' : 'Send failed: $e');
         }
       } finally {
@@ -1070,45 +1306,93 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final displayBody =
         trimmed.isNotEmpty ? trimmed : (widget.isAr ? 'مرفق' : 'Attachment');
 
-    setState(() => _sending = true);
+    final payload = <String, dynamic>{
+      'sender_id': _uid,
+      'receiver_id': receiverId,
+      'conversation_id': cid,
+      'content': trimmed.isEmpty ? ' ' : trimmed,
+    };
+    final au = attachmentUrl?.trim() ?? '';
+    final at = attachmentType?.trim().toLowerCase() ?? '';
+    if (au.isNotEmpty) {
+      payload['attachment_url'] = au;
+      if (at.isNotEmpty) payload['attachment_type'] = at;
+    }
+
+    final optId = '__opt__${const Uuid().v4()}';
+    final optMs = DateTime.now().millisecondsSinceEpoch;
+    final optimisticRow = <String, dynamic>{
+      'id': optId,
+      'sender_id': _uid,
+      'receiver_id': receiverId,
+      'conversation_id': cid,
+      'content': payload['content'],
+      if (payload.containsKey('attachment_url'))
+        'attachment_url': payload['attachment_url'],
+      if (payload.containsKey('attachment_type'))
+        'attachment_type': payload['attachment_type'],
+      'created_at': DateTime.fromMillisecondsSinceEpoch(optMs, isUtc: true)
+          .toIso8601String(),
+      '_opt_ms': optMs,
+    };
+
+    setState(() {
+      _optimisticMessages.insert(0, optimisticRow);
+      _sending = true;
+      if (clearInput) _tc.clear();
+    });
+
     try {
-      Future<bool> insertOnce(Map<String, dynamic> payload) async {
-        final res = await session.runNetworkGuarded<bool>(
+      Future<Map<String, dynamic>?> insertOnce(
+          Map<String, dynamic> pl) async {
+        return session.runNetworkGuarded<Map<String, dynamic>?>(
           context: context,
           action: () async {
-            await _sb.from('messages').insert(payload);
-            return true;
+            final row = await _sb
+                .from('messages')
+                .insert(pl)
+                .select(
+                  'id, sender_id, receiver_id, conversation_id, content, '
+                  'created_at, attachment_url, attachment_type, read_at, '
+                  'delivered_at, edited_at, deleted_for_everyone_at',
+                )
+                .maybeSingle();
+            if (row == null) return null;
+            return Map<String, dynamic>.from(row);
           },
         );
-        return res == true;
       }
 
-      final payload = <String, dynamic>{
-        'sender_id': _uid,
-        'receiver_id': receiverId,
-        'conversation_id': cid,
-        'content': trimmed.isEmpty ? ' ' : trimmed,
-      };
-      final au = attachmentUrl?.trim() ?? '';
-      final at = attachmentType?.trim().toLowerCase() ?? '';
-      if (au.isNotEmpty) {
-        payload['attachment_url'] = au;
-        if (at.isNotEmpty) payload['attachment_type'] = at;
-      }
-
-      var ok = await insertOnce(payload);
-      if (!ok && au.isNotEmpty) {
+      var inserted = await insertOnce(payload);
+      if (!mounted) return;
+      if (inserted == null && au.isNotEmpty) {
         payload.remove('attachment_url');
         payload.remove('attachment_type');
         if (trimmed.isEmpty) {
           payload['content'] = '${widget.isAr ? 'مرفق' : 'Attachment'}\n$au';
         }
-        ok = await insertOnce(payload);
+        inserted = await insertOnce(payload);
       }
 
-      if (!ok) return;
+      if (inserted == null) {
+        if (mounted) {
+          setState(() {
+            _optimisticMessages.removeWhere((m) => m['id'] == optId);
+          });
+          _showSnack(widget.isAr ? 'فشل الإرسال' : 'Send failed');
+        }
+        return;
+      }
 
-      if (clearInput) _tc.clear();
+      if (mounted) {
+        setState(() {
+          _optimisticMessages.removeWhere(
+            (m) =>
+                (m['id'] ?? '').toString() == optId ||
+                chatOptimisticRowMatchesServer(m, inserted!),
+          );
+        });
+      }
 
       try {
         await InAppNotificationWriter.insert(
@@ -1135,6 +1419,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         );
       } catch (_) {}
 
+      if (!mounted) return;
+
       unawaited(
         session.runNetworkGuarded<void>(
           context: context,
@@ -1147,7 +1433,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         ),
       );
     } catch (e) {
-      _showSnack(widget.isAr ? 'فشل الإرسال: $e' : 'Send failed: $e');
+      if (mounted) {
+        setState(() {
+          _optimisticMessages.removeWhere((m) => m['id'] == optId);
+        });
+        _showSnack(widget.isAr ? 'فشل الإرسال: $e' : 'Send failed: $e');
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -1274,7 +1565,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       builder: (ctx) {
         return AlertDialog(
           title: Text(widget.isAr ? 'مشاركة رقم' : 'Share a number'),
-          content: TextField(
+          content: AqarTextField(
             controller: phoneCtl,
             keyboardType: TextInputType.phone,
             decoration: InputDecoration(
@@ -1309,60 +1600,235 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   // WhatsApp-like: List via RPC
   // =========================
 
-  Future<List<_ChatListRow>> _loadChatList() async {
-    final session = context.read<AppSession>();
+  Future<List<_ChatListRow>> _loadChatList({bool archivedOnly = false}) async {
+    Future<List<_ChatListRow>> parse(dynamic res) async {
+      if (res == null) return <_ChatListRow>[];
+      final List data = (res is List) ? res : <dynamic>[];
+      final rows = data
+          .whereType<Map<String, dynamic>>()
+          .map(_ChatListRow.fromMap)
+          .where((r) => r.conversationId.trim().isNotEmpty)
+          .toList();
 
+      final ids = rows
+          .map((r) => r.otherUserId)
+          .whereType<String>()
+          .where((s) => s.isNotEmpty)
+          .toSet()
+          .toList();
+      if (ids.isEmpty) return rows;
+
+      final profiles = await ChatPeerService.fetchProfilesBatch(_sb, ids);
+      return rows.map((r) {
+        final oid = r.otherUserId ?? '';
+        final p = profiles[oid];
+        if (p == null) return r;
+        final av = (p['avatar_url'] ?? '').toString().trim();
+        final dn = ChatPeerService.displayName(p, widget.isAr);
+        final nameOk = (r.otherFullName ?? '').trim().isNotEmpty;
+        return _ChatListRow(
+          conversationId: r.conversationId,
+          kind: r.kind,
+          title: r.title,
+          otherUserId: r.otherUserId,
+          otherFullName: nameOk ? r.otherFullName : dn,
+          otherPhone: r.otherPhone,
+          otherAvatarUrl: av.isNotEmpty ? av : r.otherAvatarUrl,
+          lastMessage: r.lastMessage,
+          lastMessageAt: r.lastMessageAt,
+          unreadCount: r.unreadCount,
+          orgId: r.orgId,
+        );
+      }).toList();
+    }
+
+    Future<dynamic> rpc() => _sb.rpc('get_chat_list2', params: {
+          'p_limit': 80,
+          'p_archived_only': archivedOnly,
+        });
+
+    if (widget.embedInParentDashboardShell) {
+      try {
+        return await parse(await rpc());
+      } catch (_) {
+        return <_ChatListRow>[];
+      }
+    }
+
+    final session = context.read<AppSession>();
     final res = await session.runNetworkGuarded<dynamic>(
       context: context,
-      action: () async {
-        return await _sb.rpc('get_chat_list2', params: {'p_limit': 80});
-      },
+      action: rpc,
     );
-
-    if (res == null) return <_ChatListRow>[];
-
-    final List data = (res is List) ? res : <dynamic>[];
-    final rows = data
-        .whereType<Map<String, dynamic>>()
-        .map(_ChatListRow.fromMap)
-        .where((r) => r.conversationId.trim().isNotEmpty)
-        .toList();
-
-    final ids = rows
-        .map((r) => r.otherUserId)
-        .whereType<String>()
-        .where((s) => s.isNotEmpty)
-        .toSet()
-        .toList();
-    if (ids.isEmpty) return rows;
-
-    final profiles = await ChatPeerService.fetchProfilesBatch(_sb, ids);
-    return rows.map((r) {
-      final oid = r.otherUserId ?? '';
-      final p = profiles[oid];
-      if (p == null) return r;
-      final av = (p['avatar_url'] ?? '').toString().trim();
-      final dn = ChatPeerService.displayName(p, widget.isAr);
-      final nameOk = (r.otherFullName ?? '').trim().isNotEmpty;
-      return _ChatListRow(
-        conversationId: r.conversationId,
-        kind: r.kind,
-        title: r.title,
-        otherUserId: r.otherUserId,
-        otherFullName: nameOk ? r.otherFullName : dn,
-        otherPhone: r.otherPhone,
-        otherAvatarUrl: av.isNotEmpty ? av : r.otherAvatarUrl,
-        lastMessage: r.lastMessage,
-        lastMessageAt: r.lastMessageAt,
-        unreadCount: r.unreadCount,
-        orgId: r.orgId,
-      );
-    }).toList();
+    if (res != null) {
+      return parse(res);
+    }
+    try {
+      return await parse(await rpc());
+    } catch (_) {
+      return <_ChatListRow>[];
+    }
   }
 
   // =========================
   // UI
   // =========================
+
+  PreferredSizeWidget? _buildOuterAppBar() {
+    if (widget.embedInParentDashboardShell) return null;
+    final inThread = (_activeConversationId ?? '').isNotEmpty;
+    return AppBar(
+      title: inThread
+          ? _ChatAppBarLead(
+              name: _threadBarTitle(),
+              subtitle: _threadBarSubtitle(),
+              avatarUrl: _peerAvatarUrl,
+              isAr: widget.isAr,
+              currentUserId: _uid,
+              peerPresenceUserId: () {
+                final raw =
+                    (_activeConversationKindRaw ?? '').toLowerCase().trim();
+                if (raw == 'org_team_channel') return null;
+                final p = (_activeCounterpartyId ?? '').trim();
+                if (p.isEmpty || _uid.isEmpty || p == _uid) return null;
+                return p;
+              }(),
+              onTap: () {
+                final id = (_activeCounterpartyId ?? '').trim();
+                if (id.isEmpty) return;
+                showChatPeerProfileSheet(
+                  context: context,
+                  isAr: widget.isAr,
+                  userId: id,
+                  supabase: _sb,
+                );
+              },
+            )
+          : Text(_appTitle()),
+      leading: inThread
+          ? IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: _backToList,
+            )
+          : null,
+    );
+  }
+
+  Widget _buildChatMainContent() {
+    return _booting
+        ? const Center(child: AppLogoLoading())
+        : (_bootError != null)
+            ? _ErrorState(
+                isAr: widget.isAr,
+                text: _bootError!,
+                onRetry: () {
+                  setState(() {
+                    _booting = true;
+                    _bootError = null;
+                    _bootStarted = false;
+                  });
+                  _boot();
+                },
+              )
+            : (_activeConversationId ?? '').isEmpty
+                ? _ConversationsListRpc(
+                    key: ValueKey(_listReloadTick),
+                    isAr: widget.isAr,
+                    currentUserId: _uid,
+                    sb: _sb,
+                    load: _loadChatList,
+                    onOpen: _openConversationFromList,
+                    onInboxChanged: () {
+                      if (mounted) setState(() => _listReloadTick++);
+                    },
+                  )
+                : _ChatThread(
+                    isAr: widget.isAr,
+                    sb: _sb,
+                    conversationId: _activeConversationId!,
+                    currentUserId: _uid,
+                    isOrgOwner: _isOrgOwner,
+                    onSend: _sendMessage,
+                    onOpenedOrNewData: _markReadSafe,
+                    onAttachmentSelected: _onAttachmentMenu,
+                    attachmentsEnabled:
+                        (_activeConversationKindRaw ?? '')
+                                .toLowerCase()
+                                .trim() !=
+                            'org_team_channel',
+                    composerHint:
+                        (_activeConversationKindRaw ?? '')
+                                    .toLowerCase()
+                                    .trim() ==
+                                'org_team_channel'
+                            ? (widget.isAr
+                                ? 'اكتب منشوراً للفريق…'
+                                : 'Post to the team…')
+                            : null,
+                    controller: _tc,
+                    sending: _sending,
+                    optimisticMessages: _optimisticMessages,
+                  );
+  }
+
+  Widget? _buildEmbeddedThreadChrome() {
+    if (!widget.embedInParentDashboardShell) return null;
+    if ((_activeConversationId ?? '').isEmpty) return null;
+    // عند الفتح المباشر: سهم الرجوع الموحّد في شريط اللوحة الخارجي فقط.
+    final showInternalBack = !_openedDirectlyFromExternal;
+    return Material(
+      elevation: 1,
+      color: Theme.of(context).colorScheme.surface,
+      child: SafeArea(
+        bottom: false,
+        child: SizedBox(
+          height: kToolbarHeight,
+          child: Row(
+            children: [
+              if (showInternalBack)
+                IconButton(
+                  tooltip: widget.isAr ? 'قائمة المحادثات' : 'Chat list',
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  onPressed: _backToList,
+                )
+              else
+                const SizedBox(width: 8),
+              Expanded(
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: _ChatAppBarLead(
+                    name: _threadBarTitle(),
+                    subtitle: _threadBarSubtitle(),
+                    avatarUrl: _peerAvatarUrl,
+                    isAr: widget.isAr,
+                    currentUserId: _uid,
+                    peerPresenceUserId: () {
+                      final raw =
+                          (_activeConversationKindRaw ?? '').toLowerCase().trim();
+                      if (raw == 'org_team_channel') return null;
+                      final p = (_activeCounterpartyId ?? '').trim();
+                      if (p.isEmpty || _uid.isEmpty || p == _uid) return null;
+                      return p;
+                    }(),
+                    onTap: () {
+                      final id = (_activeCounterpartyId ?? '').trim();
+                      if (id.isEmpty) return;
+                      showChatPeerProfileSheet(
+                        context: context,
+                        isAr: widget.isAr,
+                        userId: id,
+                        supabase: _sb,
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1373,9 +1839,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return Directionality(
         textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
         child: Scaffold(
-          appBar: AppBar(
-            title: Text(widget.isAr ? 'الدردشة' : 'Chat'),
-          ),
+          appBar: widget.embedInParentDashboardShell
+              ? null
+              : AppBar(
+                  title: Text(widget.isAr ? 'الدردشة' : 'Chat'),
+                ),
           body: _NoInternetState(
             isAr: widget.isAr,
             onRetry: () {
@@ -1391,81 +1859,31 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
     }
 
+    final bodyCore = _buildChatMainContent();
+    final embeddedChrome = _buildEmbeddedThreadChrome();
+    final wrappedBody = embeddedChrome == null
+        ? bodyCore
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              embeddedChrome,
+              Expanded(child: bodyCore),
+            ],
+          );
+
+    if (widget.embedInParentDashboardShell &&
+        (_activeConversationId ?? '').isEmpty) {
+      return Directionality(
+        textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
+        child: wrappedBody,
+      );
+    }
+
     return Directionality(
       textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
-        appBar: AppBar(
-          title: (_activeConversationId ?? '').isNotEmpty
-              ? _ChatAppBarLead(
-                  name: _threadBarTitle(),
-                  subtitle: _threadBarSubtitle(),
-                  avatarUrl: _peerAvatarUrl,
-                  onTap: () {
-                    final id = (_activeCounterpartyId ?? '').trim();
-                    if (id.isEmpty) return;
-                    showChatPeerProfileSheet(
-                      context: context,
-                      isAr: widget.isAr,
-                      userId: id,
-                      supabase: _sb,
-                    );
-                  },
-                )
-              : Text(_appTitle()),
-          leading: (_activeConversationId ?? '').isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.arrow_back),
-                  onPressed: _backToList,
-                )
-              : null,
-        ),
-        body: _booting
-            ? const Center(child: AppLogoLoading())
-            : (_bootError != null)
-                ? _ErrorState(
-                    isAr: widget.isAr,
-                    text: _bootError!,
-                    onRetry: () {
-                      setState(() {
-                        _booting = true;
-                        _bootError = null;
-                        _bootStarted = false;
-                      });
-                      _boot();
-                    },
-                  )
-                : (_activeConversationId ?? '').isEmpty
-                    ? _ConversationsListRpc(
-                        key: ValueKey(_listReloadTick),
-                        isAr: widget.isAr,
-                        load: _loadChatList,
-                        onOpen: _openConversationFromList,
-                      )
-                    : _ChatThread(
-                        isAr: widget.isAr,
-                        sb: _sb,
-                        conversationId: _activeConversationId!,
-                        currentUserId: _uid,
-                        onSend: _sendMessage,
-                        onOpenedOrNewData: _markReadSafe,
-                        onAttachmentSelected: _onAttachmentMenu,
-                        attachmentsEnabled:
-                            (_activeConversationKindRaw ?? '')
-                                    .toLowerCase()
-                                    .trim() !=
-                                'org_team_channel',
-                        composerHint:
-                            (_activeConversationKindRaw ?? '')
-                                        .toLowerCase()
-                                        .trim() ==
-                                    'org_team_channel'
-                                ? (widget.isAr
-                                    ? 'اكتب منشوراً للفريق…'
-                                    : 'Post to the team…')
-                                : null,
-                        controller: _tc,
-                        sending: _sending,
-                      ),
+        appBar: _buildOuterAppBar(),
+        body: wrappedBody,
       ),
     );
   }
@@ -1524,7 +1942,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return _defaultTitleFor(ConversationKind.property);
   }
 
-  /// السطر الثاني: للعقار يظهر عنوان الإعلان + آخر ظهور؛ غير ذلك يبقى «آخر ظهور» فقط.
+  /// السطر الثاني: للعقار عنوان الإعلان فقط — حالة الاتصال (متصل/آخر ظهور)
+  /// يعرضها [UserPresenceStrip] بشكل أصغر ولحظي تحته (بدون تكرار).
   String? _threadBarSubtitle() {
     if ((_activeConversationKindRaw ?? '').toLowerCase().trim() ==
         'org_team_channel') {
@@ -1532,18 +1951,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           ? 'منشورات الأعضاء النشطين'
           : 'Posts to all active members';
     }
-    final seen = (_peerLastSeenLine ?? '').trim();
     if (_activeKind == ConversationKind.property) {
       final prop = (_activeTitle ?? '').trim();
       if (prop.isNotEmpty) {
         final pfx = widget.isAr ? 'العقار' : 'Listing';
-        if (seen.isNotEmpty) {
-          return '$pfx: $prop\n$seen';
-        }
         return '$pfx: $prop';
       }
     }
-    return seen.isEmpty ? null : seen;
+    return null;
   }
 }
 
@@ -1552,12 +1967,18 @@ class _ChatAppBarLead extends StatelessWidget {
   final String name;
   final String? subtitle;
   final String? avatarUrl;
+  final bool isAr;
+  final String currentUserId;
+  final String? peerPresenceUserId;
   final VoidCallback onTap;
 
   const _ChatAppBarLead({
     required this.name,
     this.subtitle,
     required this.avatarUrl,
+    required this.isAr,
+    required this.currentUserId,
+    this.peerPresenceUserId,
     required this.onTap,
   });
 
@@ -1565,6 +1986,10 @@ class _ChatAppBarLead extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final sub = (subtitle ?? '').trim();
+    final pid = (peerPresenceUserId ?? '').trim();
+    final uid = currentUserId.trim();
+    final showPresence =
+        pid.isNotEmpty && uid.isNotEmpty && pid != uid;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -1595,25 +2020,42 @@ class _ChatAppBarLead extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 17,
+                  // اسم الشريك: سطر واحد يتكيّف مع العرض بلا لف أو كسر.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.clip,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
                   if (sub.isNotEmpty)
                     Text(
                       sub,
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
                         color: cs.onSurfaceVariant,
                         height: 1.2,
+                      ),
+                    ),
+                  if (showPresence)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1),
+                      child: UserPresenceStrip(
+                        userId: pid,
+                        isAr: isAr,
+                        compact: true,
+                        surface: PresenceDisplaySurface.chat,
+                        showInfoButton: false,
                       ),
                     ),
                 ],
@@ -1656,7 +2098,7 @@ class _ChatListAvatar extends StatelessWidget {
     if (isSupport) {
       return CircleAvatar(
         radius: 26,
-        backgroundColor: Colors.blue.withOpacity(0.15),
+        backgroundColor: Colors.blue.withValues(alpha: 0.15),
         child: Icon(
           Icons.support_agent,
           color: Colors.blue.shade700,
@@ -1789,14 +2231,20 @@ class _ErrorState extends StatelessWidget {
 /// ✅ قائمة محادثات مثل واتساب (RPC get_chat_list2)
 class _ConversationsListRpc extends StatefulWidget {
   final bool isAr;
-  final Future<List<_ChatListRow>> Function() load;
+  final String currentUserId;
+  final SupabaseClient sb;
+  final Future<List<_ChatListRow>> Function({bool archivedOnly}) load;
   final Future<void> Function(_ChatListRow row) onOpen;
+  final VoidCallback? onInboxChanged;
 
   const _ConversationsListRpc({
     super.key,
     required this.isAr,
+    required this.currentUserId,
+    required this.sb,
     required this.load,
     required this.onOpen,
+    this.onInboxChanged,
   });
 
   @override
@@ -1805,20 +2253,195 @@ class _ConversationsListRpc extends StatefulWidget {
 
 class _ConversationsListRpcState extends State<_ConversationsListRpc> {
   late Future<List<_ChatListRow>> _future;
+  late final ChatInboxService _inboxSvc;
   _ChatInboxFilter _filter = _ChatInboxFilter.all;
+  ChatInboxSort _sort = ChatInboxSort.recent;
+  bool _showArchived = false;
+  bool _selectMode = false;
+  final Set<String> _selectedIds = {};
+  RealtimeChannel? _inboxChannel;
+  Timer? _reloadDebounce;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.load();
+    _inboxSvc = ChatInboxService(widget.sb);
+    _future = widget.load(archivedOnly: _showArchived);
+    _subscribeInboxRealtime();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _future = widget.load();
-    });
-    await _future;
+  @override
+  void dispose() {
+    _reloadDebounce?.cancel();
+    _inboxChannel?.unsubscribe();
+    super.dispose();
   }
+
+  void _subscribeInboxRealtime() {
+    final uid = widget.currentUserId.trim();
+    if (uid.isEmpty) return;
+    _inboxChannel = widget.sb
+        .channel('chat_inbox_rt_$uid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'messages',
+          callback: (_) => _scheduleReload(),
+        )
+        .subscribe();
+  }
+
+  void _scheduleReload() {
+    _reloadDebounce?.cancel();
+    _reloadDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) unawaited(_reload(silent: true));
+    });
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    final next = widget.load(archivedOnly: _showArchived);
+    if (!silent) {
+      setState(() {
+        _filter = _ChatInboxFilter.all;
+        _future = next;
+      });
+    } else if (mounted) {
+      setState(() => _future = next);
+    } else {
+      _future = next;
+    }
+    await next;
+    if (mounted) {
+      setState(() {});
+      widget.onInboxChanged?.call();
+    }
+  }
+
+  String _sortLabel() {
+    switch (_sort) {
+      case ChatInboxSort.recent:
+        return widget.isAr ? 'الأحدث' : 'Recent';
+      case ChatInboxSort.unreadFirst:
+        return widget.isAr ? 'غير المقروء' : 'Unread';
+      case ChatInboxSort.nameAz:
+        return widget.isAr ? 'الاسم' : 'Name';
+    }
+  }
+
+  Future<void> _pickSort() async {
+    final picked = await showModalBottomSheet<ChatInboxSort>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final s in ChatInboxSort.values)
+              ListTile(
+                leading: Icon(
+                  _sort == s ? Icons.radio_button_checked : Icons.radio_button_off,
+                ),
+                title: Text(switch (s) {
+                  ChatInboxSort.recent =>
+                    widget.isAr ? 'الأحدث أولاً' : 'Most recent',
+                  ChatInboxSort.unreadFirst =>
+                    widget.isAr ? 'غير المقروء أولاً' : 'Unread first',
+                  ChatInboxSort.nameAz =>
+                    widget.isAr ? 'حسب الاسم' : 'By name',
+                }),
+                onTap: () => Navigator.pop(ctx, s),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null && mounted) setState(() => _sort = picked);
+  }
+
+  Future<void> _markAllRead() async {
+    await CommunicationHubService.markEverythingRead(widget.sb);
+    if (!mounted) return;
+    await _reload();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(widget.isAr ? 'تمت قراءة الكل' : 'All marked as read'),
+      ),
+    );
+  }
+
+  void _toggleSelect(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  Future<void> _bulkArchive(List<_ChatListRow> swipable) async {
+    final ids = _selectedIds.isEmpty
+        ? swipable.map((r) => r.conversationId).toList()
+        : _selectedIds.toList();
+    for (final id in ids) {
+      try {
+        if (_showArchived) {
+          await _inboxSvc.unarchiveConversation(id);
+        } else {
+          await _inboxSvc.archiveConversation(id);
+        }
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedIds.clear();
+      _selectMode = false;
+    });
+    await _reload();
+  }
+
+  Future<void> _bulkDelete(List<_ChatListRow> swipable) async {
+    final ids = _selectedIds.isEmpty
+        ? swipable.map((r) => r.conversationId).toList()
+        : _selectedIds.toList();
+    for (final id in ids) {
+      try {
+        await _inboxSvc.deleteConversation(id);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectedIds.clear();
+      _selectMode = false;
+    });
+    await _reload();
+  }
+
+  Future<void> _swipeArchive(_ChatListRow r) async {
+    try {
+      if (_showArchived) {
+        await _inboxSvc.unarchiveConversation(r.conversationId);
+      } else {
+        await _inboxSvc.archiveConversation(r.conversationId);
+      }
+    } catch (_) {}
+    if (!mounted) return;
+    await _reload();
+  }
+
+  Future<void> _swipeDelete(_ChatListRow r) async {
+    try {
+      await _inboxSvc.deleteConversation(r.conversationId);
+    } catch (_) {}
+    if (!mounted) return;
+    await _reload();
+  }
+
+  bool _isTeamChannel(_ChatListRow r) =>
+      r.kind.toLowerCase().trim() == 'org_team_channel';
+
+  bool _canSwipeActions(_ChatListRow r) => !_isTeamChannel(r);
 
   bool _isAgencyKind(String raw) {
     final k = raw.toLowerCase().trim();
@@ -1867,7 +2490,17 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         }
 
         final rows = snap.data ?? const <_ChatListRow>[];
-        final filtered = rows.where(_rowMatches).toList();
+        final filtered = sortChatInboxRows<_ChatListRow>(
+          rows: rows.where(_rowMatches).toList(),
+          sort: _sort,
+          conversationId: (r) => r.conversationId,
+          unreadCount: (r) => r.unreadCount,
+          displayName: (r) =>
+              (r.otherFullName ?? r.title ?? r.kind).toString(),
+          lastMessageAt: (r) => r.lastMessageAt,
+        );
+        final swipable = filtered.where(_canSwipeActions).toList();
+        final touchSwipe = MediaQuery.sizeOf(context).width < 800;
 
         Widget filterBar() {
           String lab(_ChatInboxFilter f) {
@@ -1894,8 +2527,10 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
                   for (final f in _ChatInboxFilter.values)
                     Padding(
                       padding: const EdgeInsetsDirectional.only(end: 6),
-                      child: ChoiceChip(
-                        label: Text(lab(f)),
+                      child: StableSelectChip(
+                        label: lab(f),
+                        exclusive: true,
+                        showLeadingCheck: false,
                         selected: _filter == f,
                         onSelected: (_) => setState(() => _filter = f),
                       ),
@@ -1944,6 +2579,7 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         }
 
         if (filtered.isEmpty) {
+          final hasAny = rows.isNotEmpty;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -1952,15 +2588,37 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
                 child: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(
-                      widget.isAr
-                          ? 'لا محادثات في هذا القسم'
-                          : 'No conversations in this section',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color: cs.onSurfaceVariant,
-                            fontWeight: FontWeight.w700,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.isAr
+                              ? (hasAny
+                                  ? 'لا محادثات في هذا القسم — جرّب «الكل».'
+                                  : 'لا محادثات في هذا القسم')
+                              : (hasAny
+                                  ? 'No chats in this section — try All.'
+                                  : 'No conversations in this section'),
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        if (hasAny) ...[
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: () =>
+                                setState(() => _filter = _ChatInboxFilter.all),
+                            icon: const Icon(Icons.forum_outlined),
+                            label: Text(
+                              widget.isAr
+                                  ? 'عرض الكل (${rows.length})'
+                                  : 'Show all (${rows.length})',
+                            ),
                           ),
+                        ],
+                      ],
                     ),
                   ),
                 ),
@@ -1972,6 +2630,45 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            InboxActionsBar(
+              isAr: widget.isAr,
+              sortLabel: _sortLabel(),
+              onSortTap: _pickSort,
+              onMarkAllRead: _markAllRead,
+              showArchiveToggle: true,
+              archiveActive: _showArchived,
+              onToggleArchive: () {
+                setState(() {
+                  _showArchived = !_showArchived;
+                  _selectedIds.clear();
+                  _selectMode = false;
+                  _future = widget.load(archivedOnly: _showArchived);
+                });
+              },
+              selectMode: _selectMode,
+              onToggleSelectMode: () {
+                setState(() {
+                  _selectMode = !_selectMode;
+                  if (!_selectMode) _selectedIds.clear();
+                });
+              },
+            ),
+            if (_selectMode)
+              InboxBulkToolbar(
+                isAr: widget.isAr,
+                selectedCount: _selectedIds.length,
+                totalCount: swipable.length,
+                onSelectAll: () {
+                  setState(() {
+                    _selectedIds
+                      ..clear()
+                      ..addAll(swipable.map((e) => e.conversationId));
+                  });
+                },
+                onClearSelection: () => setState(() => _selectedIds.clear()),
+                onArchive: () => _bulkArchive(swipable),
+                onDelete: () => _bulkDelete(swipable),
+              ),
             filterBar(),
             Expanded(
               child: RefreshIndicator(
@@ -1982,7 +2679,7 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
                   itemCount: filtered.length,
                   separatorBuilder: (_, __) => Divider(
                     height: 1,
-                    indent: 76,
+                    indent: _selectMode ? 96 : 76,
                     color: cs.outlineVariant.withValues(alpha: 0.35),
                   ),
                   itemBuilder: (context, i) {
@@ -2041,21 +2738,44 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
                                             : 'Ad inquiry'));
 
                     final time = (r.lastMessageAt != null)
-                        ? _fmtTimeLocal(r.lastMessageAt!)
+                        ? _fmtListTime(r.lastMessageAt!)
                         : '';
 
                     final av = (r.otherAvatarUrl ?? '').trim();
+                    final selected = _selectedIds.contains(r.conversationId);
 
-                    return Material(
-                      color: cs.surface,
+                    Widget rowContent = Material(
+                      color: selected
+                          ? cs.primaryContainer.withValues(alpha: 0.25)
+                          : cs.surface,
                       child: InkWell(
-                        onTap: () => widget.onOpen(r),
+                        onTap: () {
+                          if (_selectMode && _canSwipeActions(r)) {
+                            _toggleSelect(r.conversationId);
+                            return;
+                          }
+                          widget.onOpen(r);
+                        },
+                        onLongPress: _selectMode || !_canSwipeActions(r)
+                            ? null
+                            : () => _toggleSelect(r.conversationId),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 10),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (_selectMode && _canSwipeActions(r))
+                                Padding(
+                                  padding:
+                                      const EdgeInsetsDirectional.only(end: 8),
+                                  child: Icon(
+                                    selected
+                                        ? Icons.check_circle
+                                        : Icons.circle_outlined,
+                                    color: selected ? cs.primary : cs.outline,
+                                  ),
+                                ),
                               _ChatListAvatar(
                                 isSupport: isSupport,
                                 isOrgTeamChannel: isOrgChannel,
@@ -2144,6 +2864,24 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
                                         ],
                                       ],
                                     ),
+                                    if ((r.otherUserId ?? '')
+                                            .trim()
+                                            .isNotEmpty &&
+                                        widget.currentUserId
+                                            .trim()
+                                            .isNotEmpty &&
+                                        (r.otherUserId ?? '').trim() !=
+                                            widget.currentUserId.trim() &&
+                                        !isOrgChannel) ...[
+                                      const SizedBox(height: 4),
+                                      UserPresenceStrip(
+                                        userId: (r.otherUserId ?? '').trim(),
+                                        isAr: widget.isAr,
+                                        compact: true,
+                                        surface: PresenceDisplaySurface.chat,
+                                        showInfoButton: false,
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -2151,6 +2889,33 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
                           ),
                         ),
                       ),
+                    );
+
+                    if (!_canSwipeActions(r) || _selectMode || !touchSwipe) {
+                      return rowContent;
+                    }
+
+                    return SwipeActionsTile(
+                      key: ValueKey('chat_swipe_${r.conversationId}'),
+                      actions: [
+                        SwipeAction(
+                          icon: _showArchived
+                              ? Icons.unarchive_outlined
+                              : Icons.archive_outlined,
+                          label: _showArchived
+                              ? (widget.isAr ? 'إرجاع' : 'Restore')
+                              : (widget.isAr ? 'أرشفة' : 'Archive'),
+                          color: cs.tertiary,
+                          onPressed: () => unawaited(_swipeArchive(r)),
+                        ),
+                        SwipeAction(
+                          icon: Icons.delete_outline,
+                          label: widget.isAr ? 'حذف' : 'Delete',
+                          color: cs.error,
+                          onPressed: () => unawaited(_swipeDelete(r)),
+                        ),
+                      ],
+                      child: rowContent,
                     );
                   },
                 ),
@@ -2160,6 +2925,23 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         );
       },
     );
+  }
+
+  String _fmtListTime(DateTime dt) {
+    final now = DateTime.now();
+    final local = dt.toLocal();
+    if (local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day) {
+      return _fmtTimeLocal(local);
+    }
+    final yesterday = now.subtract(const Duration(days: 1));
+    if (local.year == yesterday.year &&
+        local.month == yesterday.month &&
+        local.day == yesterday.day) {
+      return widget.isAr ? 'أمس' : 'Yesterday';
+    }
+    return DateFormat('d/M/yy').format(local);
   }
 
   String _fmtTimeLocal(DateTime dt) {
@@ -2209,6 +2991,8 @@ class _ChatThread extends StatefulWidget {
   /// تلميح الحقل (مثل قناة الفريق)؛ عند null يُستخدم النص الافتراضي.
   final String? composerHint;
   final bool sending;
+  final List<Map<String, dynamic>> optimisticMessages;
+  final bool isOrgOwner;
 
   const _ChatThread({
     required this.isAr,
@@ -2222,6 +3006,8 @@ class _ChatThread extends StatefulWidget {
     this.attachmentsEnabled = true,
     this.composerHint,
     required this.sending,
+    required this.optimisticMessages,
+    this.isOrgOwner = false,
   });
 
   @override
@@ -2239,6 +3025,43 @@ class _ChatThreadState extends State<_ChatThread> {
 
   final Set<String> _hiddenMessageIds = {};
   StreamSubscription<List<Map<String, dynamic>>>? _hidesSub;
+
+  /// اشتراك ثابت في رسائل المحادثة — لا يُنشأ داخل [build] حتى لا يُعاد الاتصال ويختفي النص.
+  late Stream<List<Map<String, dynamic>>> _messagesStream;
+
+  String? _lastProcessedVisibleSig;
+  int _scrollBumpGuardLen = 0;
+
+  Stream<List<Map<String, dynamic>>> _createMessagesStream() {
+    final cid = widget.conversationId.trim();
+    if (cid.isEmpty) {
+      return Stream.value(const <Map<String, dynamic>>[]);
+    }
+    return widget.sb
+        .from('messages')
+        .stream(primaryKey: const ['id'])
+        .eq('conversation_id', cid)
+        .order('created_at', ascending: false);
+  }
+
+  void _scheduleVisibleMessagesSideEffects(List<Map<String, dynamic>> visible) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final sig = visible.isEmpty
+          ? 'empty'
+          : '${visible.length}:${visible.first['id']}:${visible.last['id']}';
+      if (sig == _lastProcessedVisibleSig) return;
+      _lastProcessedVisibleSig = sig;
+      _onIncomingRowsSnapshot(visible);
+      _debouncedMarkRead();
+      if (visible.length > _scrollBumpGuardLen) {
+        _scrollBumpGuardLen = visible.length;
+        _scrollToBottom();
+      } else {
+        _scrollBumpGuardLen = visible.length;
+      }
+    });
+  }
 
   bool _msgWithinHours(Map<String, dynamic> m, int hours) {
     final dt = _parseMsgTs(m['created_at']);
@@ -2291,7 +3114,7 @@ class _ChatThreadState extends State<_ChatThread> {
   }
 
   Future<void> _onLongPressMessage({
-    required BuildContext context,
+    required BuildContext sheetContext,
     required Map<String, dynamic> m,
     required int visualIndex,
     required bool mine,
@@ -2305,14 +3128,72 @@ class _ChatThreadState extends State<_ChatThread> {
     final isChannelMirror =
         ocp != null && ocp.toString().trim().isNotEmpty;
     final isLatest = visualIndex == 0;
+    final canAdminDeleteChannel =
+        isChannelMirror && widget.isOrgOwner && deletedAt == null;
     final canEdit =
         mine && deletedAt == null && isLatest && !isChannelMirror;
     final canRevoke =
         mine && deletedAt == null && _msgWithinHours(m, 48) && !isChannelMirror;
 
+    if (canAdminDeleteChannel) {
+      final choice = await showModalBottomSheet<String>(
+        context: sheetContext,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.admin_panel_settings_outlined,
+                    color: Theme.of(ctx).colorScheme.error),
+                title: Text(
+                  widget.isAr ? 'حذف المنشور (مدير)' : 'Delete post (admin)',
+                  style: TextStyle(
+                    color: Theme.of(ctx).colorScheme.error,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                onTap: () => Navigator.pop(ctx, 'admin_delete'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: Text(widget.isAr ? 'إخفاء لي فقط' : 'Hide for me'),
+                onTap: () => Navigator.pop(ctx, 'hide_me'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.close_rounded),
+                title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+                onTap: () => Navigator.pop(ctx),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted) return;
+      if (choice == 'admin_delete') {
+        try {
+          await ChatInboxService(widget.sb)
+              .adminDeleteOrgChannelPost(ocp.toString().trim());
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(widget.isAr
+                    ? 'تعذّر حذف المنشور'
+                    : 'Could not delete post'),
+              ),
+            );
+          }
+        }
+        return;
+      }
+      if (choice == 'hide_me') await _hideMessageForMe(mid);
+      return;
+    }
+
     if (!mine) {
       final choice = await showModalBottomSheet<String>(
-        context: context,
+        context: sheetContext,
         showDragHandle: true,
         builder: (ctx) => SafeArea(
           child: Column(
@@ -2340,7 +3221,7 @@ class _ChatThreadState extends State<_ChatThread> {
     // رسائلي
     if (deletedAt != null) {
       final only = await showModalBottomSheet<String>(
-        context: context,
+        context: sheetContext,
         showDragHandle: true,
         builder: (ctx) => SafeArea(
           child: Column(
@@ -2367,7 +3248,7 @@ class _ChatThreadState extends State<_ChatThread> {
 
     if (!canEdit && !canRevoke) {
       final only = await showModalBottomSheet<String>(
-        context: context,
+        context: sheetContext,
         showDragHandle: true,
         builder: (ctx) => SafeArea(
           child: Column(
@@ -2393,7 +3274,7 @@ class _ChatThreadState extends State<_ChatThread> {
     }
 
     final choice = await showModalBottomSheet<String>(
-      context: context,
+      context: sheetContext,
       showDragHandle: true,
       builder: (ctx) {
         return SafeArea(
@@ -2442,13 +3323,14 @@ class _ChatThreadState extends State<_ChatThread> {
       return;
     }
     if (choice == 'edit') {
+      if (!sheetContext.mounted) return;
       final initial = (m['content'] ?? '').toString();
       final tc = TextEditingController(text: initial);
       final ok = await showDialog<bool>(
-        context: context,
+        context: sheetContext,
         builder: (ctx) => AlertDialog(
           title: Text(widget.isAr ? 'تعديل الرسالة' : 'Edit message'),
-          content: TextField(
+          content: AqarTextField(
             controller: tc,
             autofocus: true,
             minLines: 1,
@@ -2500,8 +3382,9 @@ class _ChatThreadState extends State<_ChatThread> {
       return;
     }
     if (choice == 'revoke') {
+      if (!sheetContext.mounted) return;
       final confirm = await showDialog<bool>(
-        context: context,
+        context: sheetContext,
         builder: (ctx) => AlertDialog(
           title: Text(widget.isAr ? 'حذف للجميع؟' : 'Delete for everyone?'),
           content: Text(
@@ -2544,6 +3427,7 @@ class _ChatThreadState extends State<_ChatThread> {
   @override
   void initState() {
     super.initState();
+    _messagesStream = _createMessagesStream();
     final uid = widget.currentUserId.trim();
     final cid = widget.conversationId.trim();
     if (uid.isNotEmpty && cid.isNotEmpty) {
@@ -2575,6 +3459,20 @@ class _ChatThreadState extends State<_ChatThread> {
     });
   }
 
+  @override
+  void didUpdateWidget(covariant _ChatThread oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationId != widget.conversationId ||
+        !identical(oldWidget.sb, widget.sb)) {
+      _messagesStream = _createMessagesStream();
+      _lastProcessedVisibleSig = null;
+      _scrollBumpGuardLen = 0;
+      _incomingSoundPrimed = false;
+      _lastTopMessageId = null;
+      unawaited(_loadHiddenForConversation());
+    }
+  }
+
   Future<void> _markIncomingDelivered() async {
     try {
       await widget.sb.rpc(
@@ -2594,11 +3492,7 @@ class _ChatThreadState extends State<_ChatThread> {
 
   void _scrollToBottom() {
     if (!_scroll.hasClients) return;
-    _scroll.animateTo(
-      0,
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
-    );
+    _scroll.jumpTo(0);
   }
 
   void _debouncedMarkRead() {
@@ -2629,9 +3523,10 @@ class _ChatThreadState extends State<_ChatThread> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final session = context.watch<AppSession>();
+    final hasInternet =
+        context.select<AppSession, bool>((s) => s.hasInternet);
 
-    if (!session.hasInternet) {
+    if (!hasInternet) {
       return Center(
           child: Text(widget.isAr ? 'لا يوجد إنترنت' : 'No internet'));
     }
@@ -2643,21 +3538,26 @@ class _ChatThreadState extends State<_ChatThread> {
               : 'Login to use chat'));
     }
 
-    final msgStream = widget.sb
-        .from('messages')
-        .stream(primaryKey: ['id'])
-        .eq('conversation_id', widget.conversationId)
-        .order('created_at', ascending: false);
-
     return Column(
       children: [
         Expanded(
           child: ColoredBox(
             color: _kWaChatBg,
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: msgStream,
+              key: ValueKey<String>(
+                  '${widget.conversationId.trim()}:${identityHashCode(widget.sb)}'),
+              stream: _messagesStream,
               builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
+                final waiting = snap.connectionState == ConnectionState.waiting;
+                final hasEmitted = snap.hasData;
+                final rows = snap.data ?? const <Map<String, dynamic>>[];
+                final cidTrim = widget.conversationId.trim();
+                final optFor = widget.optimisticMessages
+                    .where((m) =>
+                        (m['conversation_id'] ?? '').toString().trim() ==
+                        cidTrim)
+                    .toList();
+                if (waiting && !hasEmitted && optFor.isEmpty) {
                   return const Center(child: AppLogoLoading());
                 }
                 if (snap.hasError) {
@@ -2668,16 +3568,14 @@ class _ChatThreadState extends State<_ChatThread> {
                   );
                 }
 
-                final rows = snap.data ?? const <Map<String, dynamic>>[];
-                final visible = rows
+                final merged =
+                    chatMergeOptimisticIntoStream(rows, optFor);
+                final visible = merged
                     .where((r) =>
                         !_hiddenMessageIds.contains((r['id'] ?? '').toString()))
                     .toList();
 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!mounted) return;
-                  _onIncomingRowsSnapshot(visible);
-                });
+                _scheduleVisibleMessagesSideEffects(visible);
 
                 if (visible.isEmpty) {
                   return Center(
@@ -2692,13 +3590,6 @@ class _ChatThreadState extends State<_ChatThread> {
                     ),
                   );
                 }
-
-                // ✅ عند وصول بيانات جديدة: علّم كمقروء (debounced)
-                _debouncedMarkRead();
-
-                // scroll to bottom when new message arrives
-                WidgetsBinding.instance
-                    .addPostFrameCallback((_) => _scrollToBottom());
 
                 return ListView.builder(
                   controller: _scroll,
@@ -2718,6 +3609,8 @@ class _ChatThreadState extends State<_ChatThread> {
                         .trim()
                         .toLowerCase();
                     final mine = sender == widget.currentUserId;
+                    final mid = (m['id'] ?? '').toString();
+                    final isPendingLocal = mid.startsWith('__opt__');
                     final timeStr = _fmtMsgTimeFromRow(m, isAr: widget.isAr);
                     final readAt = _parseMsgTs(m['read_at']);
                     final deliveredAt = _parseMsgTs(m['delivered_at']);
@@ -2744,7 +3637,7 @@ class _ChatThreadState extends State<_ChatThread> {
                         borderRadius: br,
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.06),
+                            color: Colors.black.withValues(alpha: 0.06),
                             blurRadius: 2,
                             offset: const Offset(0, 1),
                           ),
@@ -2761,7 +3654,7 @@ class _ChatThreadState extends State<_ChatThread> {
                               widget.isAr
                                   ? 'حُذفت هذه الرسالة'
                                   : 'This message was deleted',
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 13,
                                 fontStyle: FontStyle.italic,
                                 fontWeight: FontWeight.w600,
@@ -2908,18 +3801,24 @@ class _ChatThreadState extends State<_ChatThread> {
                       ),
                     );
 
-                    return Align(
+                    return KeyedSubtree(
+                      key: ValueKey<String>(
+                          (m['id'] ?? 'idx_$i').toString()),
+                      child: Align(
                       alignment:
                           mine ? Alignment.centerRight : Alignment.centerLeft,
                       child: GestureDetector(
-                        onLongPress: () => _onLongPressMessage(
-                          context: context,
-                          m: m,
-                          visualIndex: i,
-                          mine: mine,
-                        ),
+                        onLongPress: isPendingLocal
+                            ? null
+                            : () => _onLongPressMessage(
+                                  sheetContext: context,
+                                  m: m,
+                                  visualIndex: i,
+                                  mine: mine,
+                                ),
                         child: bubble,
                       ),
+                    ),
                     );
                   },
                 );
@@ -2934,7 +3833,8 @@ class _ChatThreadState extends State<_ChatThread> {
             decoration: BoxDecoration(
               color: cs.surface,
               border: Border(
-                  top: BorderSide(color: cs.outlineVariant.withOpacity(0.6))),
+                  top: BorderSide(
+                      color: cs.outlineVariant.withValues(alpha: 0.6))),
             ),
             child: Row(
               children: [
@@ -2992,7 +3892,7 @@ class _ChatThreadState extends State<_ChatThread> {
                   ),
                 const SizedBox(width: 4),
                 Expanded(
-                  child: TextField(
+                  child: AqarTextField(
                     controller: widget.controller,
                     minLines: 1,
                     maxLines: 4,
@@ -3000,7 +3900,7 @@ class _ChatThreadState extends State<_ChatThread> {
                       hintText: widget.composerHint ??
                           (widget.isAr ? 'اكتب رسالة…' : 'Type a message…'),
                       filled: true,
-                      fillColor: cs.surfaceContainerHighest.withOpacity(0.6),
+                      fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.6),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
                         borderSide: BorderSide.none,
@@ -3014,11 +3914,11 @@ class _ChatThreadState extends State<_ChatThread> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  onPressed: (widget.sending || !session.hasInternet)
+                  onPressed: (widget.sending || !hasInternet)
                       ? null
                       : widget.onSend,
                   icon: widget.sending
-                      ? SizedBox(
+                      ? const SizedBox(
                           width: 22,
                           height: 22,
                           child: AppLogoLoading(compact: true, size: 20),

@@ -1,8 +1,13 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../models/market_property_request_row.dart';
 import '../../models/property.dart';
+import 'listing_media_urls.dart';
+import 'property_type_catalog.dart';
 
 /// عرض موحّد لغرض الإعلان على البطاقات والفلاتر.
 abstract final class PropertyListingDisplay {
@@ -24,6 +29,49 @@ abstract final class PropertyListingDisplay {
     final i = loc.indexOf(' - ');
     if (i > 0) return loc.substring(0, i).trim();
     return loc;
+  }
+
+  /// ترتيب أنيق: منطقة → محافظة → مدينة → حي (بدون فراغات/تكرار).
+  static List<String> locationHierarchyParts(Property p) {
+    final seen = <String>{};
+    final out = <String>[];
+    void add(String? raw) {
+      final v = (raw ?? '').trim();
+      if (v.isEmpty) return;
+      final key = v.toLowerCase();
+      if (seen.contains(key)) return;
+      seen.add(key);
+      out.add(v);
+    }
+
+    add(p.region);
+    add(p.province);
+    add(p.city);
+    add(p.location);
+    return out;
+  }
+
+  static List<String> locationHierarchyPartsForRequest(
+    MarketPropertyRequestRow r,
+  ) {
+    final seen = <String>{};
+    final out = <String>[];
+    void add(String? raw) {
+      final v = (raw ?? '').trim();
+      if (v.isEmpty) return;
+      final key = v.toLowerCase();
+      if (seen.contains(key)) return;
+      seen.add(key);
+      out.add(v);
+    }
+
+    add(r.regionLabel);
+    add(r.governorateLabel);
+    add(r.city);
+    for (final d in r.districts) {
+      add(d);
+    }
+    return out;
   }
 
   /// رمز الغرض للفلترة: sale | rent | auction | investment
@@ -272,21 +320,28 @@ abstract final class PropertyListingDisplay {
     return 'sale';
   }
 
-  static String _scaleOwnerDisplayNameParts(String raw, double cardWidth) {
-    final parts =
-        raw.split(RegExp(r'\s+')).where((e) => e.isNotEmpty).toList();
-    if (parts.isEmpty) return '';
-    var n = parts.length;
-    if (cardWidth < 240) {
-      n = 1;
-    } else if (cardWidth < 360) {
-      n = 2;
-    } else if (cardWidth < 480) {
-      n = 3;
-    }
-    final take = parts.length < n ? parts.length : n;
-    return parts.take(take).join(' ');
+  static List<String> _personNameTokens(String raw) {
+    return raw
+        .trim()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .split(' ')
+        .where((part) => part.isNotEmpty)
+        .toList(growable: false);
   }
+
+  /// يكيّف الاسم للبطاقة: يُفضَّل الاسم كاملاً؛ وعلى الشاشات الضيقة يُبقى
+  /// **ثلاثياً على الأقل** (إن وُجد) ويُصغَّر الخط عبر [FittedBox] في الواجهة.
+  ///
+  /// لا يُرجع الاسم الأول فقط — الاسم مهم للجذب (اسم أو معرّف).
+  static String scaleDisplayNameParts(String raw, double width) {
+    final normalized = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.isEmpty) return '';
+    // الاسم كاملاً دائماً (فرد / مكتب / مؤسسة / شركة) — الواجهة تلتف حتى 5 أسطر.
+    return normalized;
+  }
+
+  static String _scaleOwnerDisplayNameParts(String raw, double cardWidth) =>
+      scaleDisplayNameParts(raw, cardWidth);
 
   /// اسم المالك على البطاقة.
   ///
@@ -307,8 +362,7 @@ abstract final class PropertyListingDisplay {
     if (viewingAsPropertyOwner) {
       final raw = (p.ownerDisplayName ?? '').trim();
       if (raw.isEmpty) return isAr ? 'المعلن' : 'Advertiser';
-      final scaled = _scaleOwnerDisplayNameParts(raw, cardWidth);
-      return scaled.isNotEmpty ? scaled : (isAr ? 'المعلن' : 'Advertiser');
+      return raw;
     }
     if (showFullLegalNameOnCard) {
       final raw = (p.ownerDisplayName ?? '').trim();
@@ -320,8 +374,8 @@ abstract final class PropertyListingDisplay {
     }
     final raw = (p.ownerDisplayName ?? '').trim();
     if (raw.isEmpty) return isAr ? 'معلن' : 'Advertiser';
-    final scaled = _scaleOwnerDisplayNameParts(raw, cardWidth);
-    return scaled.isNotEmpty ? scaled : (isAr ? 'معلن' : 'Advertiser');
+    // الاسم كاملاً على البطاقة (فرد / جهة) — الواجهة تُقلّص بالتفاف حتى 3 أسطر.
+    return raw;
   }
 
   /// اسم المالك: كلمة واحدة / ثنتان / ثلاث حسب عرض البطاقة.
@@ -472,6 +526,276 @@ abstract final class PropertyListingDisplay {
     if (code.isEmpty) return '';
     return propertyTypeCodeLabel(code, isAr);
   }
+
+  // ---------------------------------------------------------------------------
+  // عناوين العرض: نوع + غرض + بـالمدينة (بدون «فيلا جدة للبيع»)
+  // ---------------------------------------------------------------------------
+
+  /// حرف جر عربي للمكان: جدة → بجدة، الرياض → بالرياض.
+  static String placeWithBi(String place) {
+    final p = place.trim();
+    if (p.isEmpty) return '';
+    return 'ب$p';
+  }
+
+  static String purposeBitShort(Property p, bool isAr) {
+    final key = purposeFilterKey(p);
+    if (isAr) {
+      return switch (key) {
+        'rent' => 'للإيجار',
+        'auction' => 'للمزاد',
+        'investment' => 'للاستثمار',
+        _ => 'للبيع',
+      };
+    }
+    return switch (key) {
+      'rent' => 'for rent',
+      'auction' => 'for auction',
+      'investment' => 'for investment',
+      _ => 'for sale',
+    };
+  }
+
+  static String typeLabelForProperty(Property p, bool isAr) {
+    final key = p.listingTypeKey.trim().isNotEmpty
+        ? p.listingTypeKey
+        : p.type.name;
+    return PropertyTypeCatalog.label(key, isAr);
+  }
+
+  /// «فيلا للبيع بجدة» / «Villa for sale in Jeddah».
+  static String composeListingHeadline({
+    required String typeLabel,
+    required String purposeBit,
+    required String city,
+    String? district,
+    required bool isAr,
+    bool asRequest = false,
+  }) {
+    final type = typeLabel.trim();
+    final purpose = purposeBit.trim();
+    final cityT = city.trim();
+    final dist = (district ?? '').trim();
+    final place = dist.isNotEmpty &&
+            dist.toLowerCase() != cityT.toLowerCase()
+        ? (cityT.isEmpty ? dist : '$cityT — $dist')
+        : cityT;
+    if (isAr) {
+      final core = [
+        if (asRequest) 'مطلوب',
+        if (type.isNotEmpty) type,
+        if (purpose.isNotEmpty) purpose,
+      ].join(' ');
+      if (place.isEmpty) return core.trim();
+      return '$core ${placeWithBi(place)}'.trim();
+    }
+    final core = [
+      if (asRequest) 'Wanted:',
+      if (type.isNotEmpty) type,
+      if (purpose.isNotEmpty) purpose,
+    ].join(' ');
+    if (place.isEmpty) return core.trim();
+    return '$core in $place'.trim();
+  }
+
+  /// عنوان بطاقة إعلان: يفضّل تركيباً مرتّباً إن وُجد النوع/الغرض/المدينة.
+  static String displayListingTitle(Property p, bool isAr) {
+    final type = typeLabelForProperty(p, isAr);
+    final purpose = purposeBitShort(p, isAr);
+    final city = cityLine(p);
+    final district = (p.location ?? '').trim();
+    final composed = composeListingHeadline(
+      typeLabel: type,
+      purposeBit: purpose,
+      city: city == '-' ? '' : city,
+      district: district.isNotEmpty &&
+              district.toLowerCase() != city.toLowerCase()
+          ? district
+          : null,
+      isAr: isAr,
+    );
+    final raw = p.title.trim();
+    if (raw.isEmpty) return composed;
+    if (type.isEmpty) return normalizePlacePrepositions(raw, isAr: isAr);
+    // عنوان خام يخلط المدينة بين النوع والغرض → استبدل بالتركيب الأنيق.
+    if (_titleLooksScrambled(raw, type: type, city: city, isAr: isAr)) {
+      return composed.isNotEmpty ? composed : normalizePlacePrepositions(raw, isAr: isAr);
+    }
+    return normalizePlacePrepositions(raw, isAr: isAr);
+  }
+
+  static String displayRequestTitle(
+    MarketPropertyRequestRow r,
+    bool isAr,
+  ) {
+    final type = PropertyTypeCatalog.label(r.propertyType, isAr);
+    final purpose = r.purpose == 'rent'
+        ? (isAr ? 'للإيجار' : 'for rent')
+        : (isAr ? 'للشراء' : 'to buy');
+    final city = r.city.trim();
+    String? district;
+    for (final d in r.districts) {
+      final t = d.trim();
+      if (t.isNotEmpty) {
+        district = t;
+        break;
+      }
+    }
+    return composeListingHeadline(
+      typeLabel: type,
+      purposeBit: purpose,
+      city: city,
+      district: district,
+      isAr: isAr,
+      asRequest: true,
+    );
+  }
+
+  /// استبدال «في المدينة» بـ «بالمدينة» عند العرض العربي.
+  static String normalizePlacePrepositions(String title, {required bool isAr}) {
+    var t = title.trim();
+    if (!isAr || t.isEmpty) return t;
+    t = t.replaceAllMapped(
+      RegExp(r'\s+في\s+(\S+)'),
+      (m) => ' ${placeWithBi(m.group(1)!)}',
+    );
+    return t.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+  }
+
+  static bool _titleLooksScrambled(
+    String raw, {
+    required String type,
+    required String city,
+    required bool isAr,
+  }) {
+    if (!isAr) return false;
+    final c = city.trim();
+    if (c.isEmpty || c == '-' || type.isEmpty) return false;
+    final lower = raw;
+    final ti = lower.indexOf(type);
+    final ci = lower.indexOf(c);
+    if (ti < 0 || ci < 0) return false;
+    // نوع … مدينة … غرض (المدينة بين النوع والغرض).
+    final purposeMarks = ['للبيع', 'للإيجار', 'للمزاد', 'للاستثمار', 'للشراء'];
+    var purposeIdx = -1;
+    for (final m in purposeMarks) {
+      final i = lower.indexOf(m);
+      if (i >= 0 && (purposeIdx < 0 || i < purposeIdx)) purposeIdx = i;
+    }
+    if (purposeIdx < 0) return false;
+    return ti < ci && ci < purposeIdx;
+  }
+
+  /// أجزاء الموقع مع استبعاد ما يظهر أصلاً في العنوان (تفادي التكرار).
+  static List<String> locationPartsWithoutTitleEcho(
+    List<String> parts,
+    String title,
+  ) {
+    final t = title.trim().toLowerCase();
+    if (t.isEmpty) return parts;
+    return parts.where((p) {
+      final v = p.trim();
+      if (v.isEmpty) return false;
+      final low = v.toLowerCase();
+      if (t.contains(low)) return false;
+      // بجدة / في جدة
+      if (t.contains('ب$low') || t.contains('في $low')) return false;
+      return true;
+    }).toList(growable: false);
+  }
+
+  /// شارات إضافية بدل تكرار المدينة: مفروش / مواقف / مرافق.
+  static List<String> diversifySpecChips(
+    Property p,
+    bool isAr, {
+    int max = 3,
+  }) {
+    final out = <String>[];
+    void add(String s) {
+      final t = s.trim();
+      if (t.isEmpty || out.contains(t) || out.length >= max) return;
+      out.add(t);
+    }
+
+    if (p.furnished == true) {
+      add(isAr ? 'مفروش' : 'Furnished');
+    } else if (p.furnished == false) {
+      add(isAr ? 'غير مفروش' : 'Unfurnished');
+    }
+    final park = p.parkingSpots;
+    if (park != null && park > 0) {
+      add(isAr ? '$park موقف' : '$park parking');
+    }
+    final am = p.amenities;
+    if (am != null) {
+      const keysAr = <String, String>{
+        'pool': 'مسبح',
+        'elevator': 'مصعد',
+        'garden': 'حديقة',
+        'maid_room': 'غرفة خادمة',
+        'ac': 'تكييف',
+        'security': 'حراسة',
+        'gym': 'نادي رياضي',
+        'balcony': 'شرفة',
+        'kitchen': 'مطبخ',
+      };
+      const keysEn = <String, String>{
+        'pool': 'Pool',
+        'elevator': 'Elevator',
+        'garden': 'Garden',
+        'maid_room': 'Maid room',
+        'ac': 'A/C',
+        'security': 'Security',
+        'gym': 'Gym',
+        'balcony': 'Balcony',
+        'kitchen': 'Kitchen',
+      };
+      for (final e in am.entries) {
+        if (e.value != true) continue;
+        final k = e.key.trim().toLowerCase();
+        add(isAr ? (keysAr[k] ?? k) : (keysEn[k] ?? k));
+        if (out.length >= max) break;
+      }
+    }
+    for (final u in usageBadgeTuples(p, isAr)) {
+      add(u.$2);
+      if (out.length >= max) break;
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------------------
+  // وسائط الإعلان / طلب السوق — مصدر موحّد [ListingMediaUrls]
+  // ---------------------------------------------------------------------------
+
+  static List<String> propertyCardImagePaths(Property p) =>
+      ListingMediaUrls.propertyCardImagePaths(p);
+
+  static bool propertyUsesSmartDefaultCover(Property p) =>
+      ListingMediaUrls.propertyUsesSmartDefaultCover(p);
+
+  static bool marketRequestUsesSmartDefaultCover(MarketPropertyRequestRow r) =>
+      ListingMediaUrls.marketRequestUsesSmartDefaultCover(r);
+
+  static String get defaultListingThumbAsset => ListingMediaUrls.defaultThumbAsset;
+
+  static String? propertyHeroNetworkUrl(Property p, SupabaseClient sb) =>
+      ListingMediaUrls.propertyImageNetworkUrl(p, sb);
+
+  static String? marketRequestCoverNetworkUrl(
+    MarketPropertyRequestRow r,
+    SupabaseClient sb,
+  ) =>
+      ListingMediaUrls.marketRequestCoverNetworkUrl(r, sb);
+
+  static String propertySharePreviewUrl(Property p, SupabaseClient sb) =>
+      ListingMediaUrls.propertySharePreviewHttpUrl(p, sb);
+
+  static String marketRequestSharePreviewUrl(
+    MarketPropertyRequestRow r,
+    SupabaseClient sb,
+  ) =>
+      ListingMediaUrls.marketRequestSharePreviewHttpUrl(r, sb);
 }
 
 class _PurposeTokens {

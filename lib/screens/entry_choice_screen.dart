@@ -3,17 +3,25 @@ import 'dart:async' show unawaited;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart'; // langNotifier + keys
+import '../core/branding/app_branding.dart';
+import '../core/branding/branding_logo_image.dart';
 import '../core/session/app_session.dart';
 import '../core/session/web_session_ttl.dart';
 import '../core/theme/app_appearance_bridge.dart';
 
 // ✅ Internet guard
 import '../services/connectivity_guard.dart';
+import '../core/navigation/post_auth_navigation.dart';
+import '../core/auth/auth_local_sign_out.dart';
+import '../services/fast_login_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_about_credits.dart';
+import '../widgets/session_identity_panel.dart';
 
 class EntryChoiceScreen extends StatefulWidget {
   const EntryChoiceScreen({super.key});
@@ -35,11 +43,13 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
   String? _profileFullName;
   String? _profileError;
 
+  String _packageVersionLine = '';
+
   SupabaseClient get _sb => Supabase.instance.client;
 
   Map<String, String> _t(String lang) {
     final ar = <String, String>{
-      'app': 'موثوق العقاري',
+      'app': AppBranding.displayName(isAr: true),
       'choose': 'اختر طريقة الدخول',
       'asUser': 'الدخول كمستخدم',
       'asGuest': 'الدخول كضيف',
@@ -51,7 +61,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
       'errorLoadingProfile': 'خطأ في تحميل البيانات',
     };
     final en = <String, String>{
-      'app': 'Motawoq Real Estate',
+      'app': AppBranding.displayName(isAr: false),
       'choose': 'Choose how to continue',
       'asUser': 'Continue as user',
       'asGuest': 'Continue as guest',
@@ -75,8 +85,19 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadPackageVersionLine());
       _loadProfileIfSignedIn();
     });
+  }
+
+  Future<void> _loadPackageVersionLine() async {
+    try {
+      final p = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _packageVersionLine = '${p.version} (${p.buildNumber})';
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadProfileIfSignedIn() async {
@@ -184,10 +205,10 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
 
     if (!mounted) return;
     unawaited(touchWebGuestActivity());
-    Navigator.of(context).pushNamedAndRemoveUntil(
-      '/userDashboard',
-      (r) => false,
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(PostAuthNavigation.openDashboard(context));
+    });
   }
 
   Future<void> _continueAsUser() async {
@@ -214,7 +235,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     }
 
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/userDashboard', (r) => false);
+    unawaited(PostAuthNavigation.openDashboard(context));
   }
 
   Future<void> _signOutHere() async {
@@ -227,7 +248,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     final appSession = context.read<AppSession>();
 
     try {
-      await _sb.auth.signOut();
+      await AuthLocalSignOut.signOutLocal(_sb);
     } catch (e, st) {
       debugPrint('EntryChoice signOut error: $e');
       debugPrint('$st');
@@ -303,24 +324,52 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               _header(
-                                appName: tr['app']!,
+                                context: context,
+                                appName: AppBranding.displayNameForContext(
+                                  context,
+                                  isAr: !_isEnglish,
+                                ),
                                 subtitle: tr['choose']!,
                                 cs: cs,
                                 isDark: isDark,
                               ),
                               SizedBox(height: isNarrow ? 20 : 24),
                               if (showSignedBox) ...[
-                                _signedBox(
-                                  cs: cs,
-                                  isDark: isDark,
-                                  tr: tr,
-                                  onLogout: _signOutHere,
-                                  loading: _loadingProfile,
-                                  username: _profileUsername,
-                                  fullName: _profileFullName,
-                                  error: _profileError,
+                                SessionIdentityPanel(
+                                  isAr: !_isEnglish,
+                                  displayName: (_profileFullName ?? '').trim().isNotEmpty
+                                      ? _profileFullName!.trim()
+                                      : (tr['signed'] ?? ''),
+                                  maskedId: FastLoginService.maskNationalId(
+                                    _profileUsername,
+                                  ),
+                                  headline: _isEnglish
+                                      ? 'Session active'
+                                      : 'جلسة مفعّلة',
+                                  statusLabel: _loadingProfile
+                                      ? tr['loadingProfile']
+                                      : (_profileError != null
+                                          ? tr['errorLoadingProfile']
+                                          : (_isEnglish
+                                              ? 'Choose how to continue'
+                                              : 'اختر طريقة المتابعة')),
+                                  accent: primary,
+                                  compact: isNarrow,
                                 ),
-                                SizedBox(height: isNarrow ? 20 : 24),
+                                Align(
+                                  alignment: AlignmentDirectional.centerEnd,
+                                  child: TextButton(
+                                    onPressed: _signOutHere,
+                                    child: Text(
+                                      tr['logout']!,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 12.5,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(height: isNarrow ? 12 : 16),
                               ],
                               Wrap(
                                 spacing: 16,
@@ -346,6 +395,49 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                                     accent: primary,
                                     filled: false,
                                     onTap: _goGuest,
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Flexible(
+                                    child: _packageVersionLine.isEmpty
+                                        ? const SizedBox.shrink()
+                                        : SelectableText(
+                                            _isEnglish
+                                                ? '${kIsWeb ? 'Web' : 'Mobile app'} — Version: $_packageVersionLine'
+                                                : '${kIsWeb ? 'منصّة ويب' : 'تطبيق جوّال'} — الإصدار: $_packageVersionLine',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w800,
+                                              color: cs.onSurfaceVariant,
+                                            ),
+                                          ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Material(
+                                    color: primary.withOpacity(
+                                        isDark ? 0.22 : 0.12),
+                                    shape: const CircleBorder(),
+                                    clipBehavior: Clip.antiAlias,
+                                    child: InkWell(
+                                      onTap: () => AppAboutCredits.show(
+                                        context,
+                                        isAr: !_isEnglish,
+                                        versionLine: _packageVersionLine,
+                                      ),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(6),
+                                        child: Icon(
+                                          Icons.priority_high_rounded,
+                                          size: 18,
+                                          color: primary,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -459,6 +551,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
   }
 
   Widget _header({
+    required BuildContext context,
     required String appName,
     required String subtitle,
     required ColorScheme cs,
@@ -467,42 +560,31 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     return Column(
       children: [
         Container(
-          height: 102,
+          height: 128,
           alignment: Alignment.center,
-          child: Image.asset(
-            'assets/logo.png',
+          child: BrandingLogoImage(
+            height: 128,
+            width: 128,
             fit: BoxFit.contain,
             filterQuality: FilterQuality.high,
-            errorBuilder: (_, __, ___) {
-              return Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: primary.withOpacity(isDark ? 0.18 : 0.08),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(color: primary.withOpacity(0.18)),
-                ),
-                child: const Icon(
-                  Icons.home_work_outlined,
-                  size: 44,
-                  color: primary,
-                ),
-              );
-            },
+            errorIcon: Icons.home_work_outlined,
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          appName,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w900,
-            color: cs.onSurface,
-            letterSpacing: 0.2,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            appName,
+            style: TextStyle(
+              fontSize: AppBranding.titleFontSize(context),
+              fontWeight: FontWeight.w900,
+              color: cs.onSurface,
+              letterSpacing: 0.2,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            softWrap: false,
           ),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
         ),
         const SizedBox(height: 3),
         Text(

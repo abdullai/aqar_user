@@ -398,3 +398,9 @@ enabled = true
 # Keep provider secrets server-side and validate inputs inside the function.
 verify_jwt = false
 entrypoint = "./functions/nafath_session/index.ts"
+
+# Called by Moyasar servers (no Supabase JWT). Lock down via MOYASAR_WEBHOOK_SECRET.
+[functions.moyasar-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/moyasar-webhook/index.ts"

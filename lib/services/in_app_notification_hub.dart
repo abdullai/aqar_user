@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../core/branding/app_branding.dart';
+import '../core/notifications/hub_workflow_sound.dart';
 import '../core/notifications/in_app_notification_catalog.dart';
 import '../core/notifications/in_app_notification_sound.dart';
 import '../core/notifications/workflow_toast_sound.dart';
@@ -27,29 +29,37 @@ class InAppNotificationPayload {
   });
 
   String titleForLang(String lang) {
+    final isAr = lang.toLowerCase() != 'en';
     final en = titleEn.trim().isNotEmpty;
     final ar = titleAr.trim().isNotEmpty;
     if (lang == 'en') {
-      if (en) return titleEn;
-      if (ar) return titleAr;
+      if (en) return AppBranding.normalizeUserFacing(titleEn, isAr: false);
+      if (ar) return AppBranding.normalizeUserFacing(titleAr, isAr: true);
     } else {
-      if (ar) return titleAr;
-      if (en) return titleEn;
+      if (ar) return AppBranding.normalizeUserFacing(titleAr, isAr: true);
+      if (en) return AppBranding.normalizeUserFacing(titleEn, isAr: false);
     }
-    return (rawRow['title'] ?? rawRow['type'] ?? 'Notification').toString();
+    return AppBranding.normalizeUserFacing(
+      (rawRow['title'] ?? rawRow['type'] ?? 'Notification').toString(),
+      isAr: isAr,
+    );
   }
 
   String bodyForLang(String lang) {
+    final isAr = lang.toLowerCase() != 'en';
     final en = bodyEn.trim().isNotEmpty;
     final ar = bodyAr.trim().isNotEmpty;
     if (lang == 'en') {
-      if (en) return bodyEn;
-      if (ar) return bodyAr;
+      if (en) return AppBranding.normalizeUserFacing(bodyEn, isAr: false);
+      if (ar) return AppBranding.normalizeUserFacing(bodyAr, isAr: true);
     } else {
-      if (ar) return bodyAr;
-      if (en) return bodyEn;
+      if (ar) return AppBranding.normalizeUserFacing(bodyAr, isAr: true);
+      if (en) return AppBranding.normalizeUserFacing(bodyEn, isAr: false);
     }
-    return (rawRow['message'] ?? rawRow['body'] ?? '').toString();
+    return AppBranding.normalizeUserFacing(
+      (rawRow['message'] ?? rawRow['body'] ?? '').toString(),
+      isAr: isAr,
+    );
   }
 
   factory InAppNotificationPayload.fromRecord(Map<String, dynamic> row) {
@@ -86,10 +96,10 @@ class InAppNotificationPayload {
     return InAppNotificationPayload(
       id: (row['id'] ?? '').toString(),
       type: (row['type'] ?? '').toString(),
-      titleAr: titleAr,
-      titleEn: titleEn,
-      bodyAr: bodyAr,
-      bodyEn: bodyEn,
+      titleAr: AppBranding.normalizeUserFacing(titleAr, isAr: true),
+      titleEn: AppBranding.normalizeUserFacing(titleEn, isAr: false),
+      bodyAr: AppBranding.normalizeUserFacing(bodyAr, isAr: true),
+      bodyEn: AppBranding.normalizeUserFacing(bodyEn, isAr: false),
       rawRow: Map<String, dynamic>.from(row),
     );
   }
@@ -161,6 +171,14 @@ class InAppNotificationHub {
     _presentNextQueued();
   }
 
+  /// تفريغ كامل عند الخروج / تبديل الحساب — لا تُعرض إشعارات الجلسة السابقة.
+  static void clearQueueAndToast() {
+    _queue.clear();
+    toast.value = null;
+    _debounceId = null;
+    _debounceAt = null;
+  }
+
   static void _presentNextQueued() {
     if (_queue.isEmpty || toast.value != null) return;
     final next = _queue.removeAt(0);
@@ -206,9 +224,37 @@ class InAppNotificationHub {
       }
     } else {
       toast.value = payload;
-      playInAppNotificationChime();
+      // v8: إشعارات «last_call»/«expired_72h» تُشغّل نغمة تنبيه أقوى.
+      _playSoundForPayload(payload);
     }
     onInboxInvalidate?.call();
+  }
+
+  static void _playSoundForPayload(InAppNotificationPayload payload) {
+    try {
+      final t = payload.type.toLowerCase();
+      final dataRaw = payload.rawRow['data'];
+      Map<String, dynamic>? data;
+      if (dataRaw is Map) {
+        data = Map<String, dynamic>.from(dataRaw);
+      } else if (dataRaw is String && dataRaw.isNotEmpty) {
+        try {
+          final parsed = jsonDecode(dataRaw);
+          if (parsed is Map) data = Map<String, dynamic>.from(parsed);
+        } catch (_) {}
+      }
+      final soundHint = (data?['sound'] ?? '').toString().toLowerCase();
+      // last_call أو expired_72h → استخدم نغمة الـpermitWarning (الأبرز).
+      if (soundHint == 'last_call' ||
+          t.contains('last_call') ||
+          t.contains('expired_72h') ||
+          t.contains('permit.expired') ||
+          t.contains('contract.expired')) {
+        playHubWorkflowSound(HubWorkflowSoundKind.permitWarning);
+        return;
+      }
+    } catch (_) {}
+    playInAppNotificationChime();
   }
 
   static IconData iconForType(String type, {String entityType = ''}) {

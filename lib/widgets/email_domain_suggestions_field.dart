@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 /// After typing `@`, shows common domains the user can tap to complete the address.
 class EmailDomainSuggestionsField extends StatefulWidget {
@@ -66,7 +67,7 @@ class _EmailDomainSuggestionsFieldState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
+        AqarTextField(
           controller: widget.controller,
           readOnly: widget.readOnly,
           keyboardType: TextInputType.emailAddress,

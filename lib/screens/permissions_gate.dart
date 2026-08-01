@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/notification_service.dart';
+import '../core/branding/branding_logo_image.dart';
 import '../widgets/app_logo_loading.dart';
 
 const String kPrefPermissionsGateDone = 'permissions_gate_done';
@@ -204,18 +205,12 @@ class _PermissionsGateState extends State<PermissionsGate> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 8),
-                    Container(
+                    BrandingLogoImage(
                       width: 72,
                       height: 72,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0F766E).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(
-                        Icons.verified_outlined,
-                        size: 34,
-                        color: Color(0xFF0F766E),
-                      ),
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                      errorIcon: Icons.verified_outlined,
                     ),
                     const SizedBox(height: 16),
                     Text(

@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
@@ -61,21 +62,21 @@ class _CreateListingRequestPageState extends State<CreateListingRequestPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextField(
+                  AqarTextField(
                     controller: _title,
                     decoration: InputDecoration(
                       labelText: t.listingRequestFieldTitleLabel,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
+                  AqarTextField(
                     controller: _city,
                     decoration: InputDecoration(
                       labelText: t.listingRequestFieldCityLabel,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
+                  AqarTextField(
                     controller: _lat,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
@@ -84,7 +85,7 @@ class _CreateListingRequestPageState extends State<CreateListingRequestPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
+                  AqarTextField(
                     controller: _lng,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),

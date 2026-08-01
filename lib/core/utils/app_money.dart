@@ -13,6 +13,13 @@ class AppMoney {
   /// رمز الريال في يونيكود (للنصوص/المشاركة حيث لا يُعرض SVG).
   static const String saudiRiyalSignUnicode = '\u{20C1}';
 
+  /// لعرض الواجهة كنص فقط: عربي → ر.س، إنجليزي → SAR.
+  /// لا تستخدم U+20C1 هنا — Cairo/Noto لا يغطيانه فيظهر مربع □.
+  /// للواجهة المرئية فضّل [AppMoneyLine] (SVG بجانب الرقم).
+  static String sarUiSuffix({required bool isAr}) {
+    return isAr ? 'ر.س' : 'SAR';
+  }
+
   /// تقريب مبلغ بالريال (منزلتان عشريتان افتراضياً).
   static double roundSar(double value, {int fractionDigits = 2}) {
     if (value.isNaN || value.isInfinite) return value;
@@ -56,7 +63,29 @@ class AppMoney {
       maxFractionDigits: maxFractionDigits,
     );
     if (code == 'SAR') {
-      return isAr ? '$fmt $saudiRiyalSignUnicode' : '$fmt SAR';
+      // عربي: الرمز على يسار الرقم (من منظور المستخدم) عبر بادئة LTR.
+      return isAr
+          ? '\u200E${sarUiSuffix(isAr: true)} $fmt'
+          : '$fmt ${sarUiSuffix(isAr: false)}';
+    }
+    return '$fmt $code';
+  }
+
+  /// CSV / Excel — نص «ريال» بدلاً من رمز يونيكود (Excel لا يعرضه).
+  static String formatForExport(
+    double amount, {
+    required bool isAr,
+    String currencyCode = 'SAR',
+    int maxFractionDigits = 2,
+  }) {
+    final fmt = formatNumber(
+      amount,
+      isAr: isAr,
+      maxFractionDigits: maxFractionDigits,
+    );
+    final code = currencyCode.trim().toUpperCase();
+    if (code == 'SAR') {
+      return isAr ? '\u200Eر.س $fmt' : '$fmt SAR';
     }
     return '$fmt $code';
   }
@@ -111,55 +140,31 @@ class AppMoneyLine extends StatelessWidget {
       ),
     );
 
-    /// عربي: رقم ثم رمز الريال في سطر واحد (بدون انعكاس RTL يضع الرمز قبل المبلغ).
-    if (isAr) {
-      final gap = fontSize * 0.38;
-      return FittedBox(
-        fit: BoxFit.scaleDown,
-        alignment: Alignment.centerRight,
-        child: Text.rich(
-          TextSpan(
-            style: mergedStyle,
-            children: [
-              TextSpan(text: fmt),
-              WidgetSpan(
-                alignment: PlaceholderAlignment.middle,
-                child: Padding(
-                  padding: EdgeInsets.only(left: gap),
-                  child: SaudiRiyalSymbolIcon(
-                    size: fontSize * 1.02,
-                    color: symColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          maxLines: 1,
-        ),
-      );
-    }
+    // رقم + رمز الريال في Row (آمن على الويب؛ تجنّب WidgetSpan).
+    // دائماً LTR داخل الصف: الرمز على يسار المستخدم ثم الرقم.
+    final amountText = Text(
+      fmt,
+      style: mergedStyle,
+      maxLines: 1,
+      softWrap: false,
+    );
+    final symbol = SaudiRiyalSymbolIcon(
+      size: fontSize * 1.02,
+      color: symColor,
+    );
+    final gap = SizedBox(width: fontSize * 0.32);
 
     return FittedBox(
       fit: BoxFit.scaleDown,
-      alignment: Alignment.centerLeft,
+      alignment: isAr ? Alignment.centerRight : Alignment.centerLeft,
       child: Directionality(
         textDirection: ui.TextDirection.ltr,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              fmt,
-              style: mergedStyle,
-              maxLines: 1,
-              softWrap: false,
-            ),
-            SizedBox(width: fontSize * 0.38),
-            SaudiRiyalSymbolIcon(
-              size: fontSize * 1.02,
-              color: symColor,
-            ),
-          ],
+          children: isAr
+              ? [symbol, gap, amountText]
+              : [amountText, gap, Text('SAR', style: mergedStyle)],
         ),
       ),
     );

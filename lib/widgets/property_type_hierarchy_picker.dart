@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../core/listing/property_type_catalog.dart';
 import '../core/listing/property_type_custom_registry.dart';
@@ -149,7 +150,7 @@ class _PropertyTypeHierarchyPickerState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
+        AqarTextField(
           controller: _searchCtrl,
           enabled: !widget.saving,
           onChanged: (v) => setState(() => _searchQuery = v),
@@ -252,7 +253,7 @@ class _PropertyTypeHierarchyPickerState
           ),
         ),
         const SizedBox(height: 6),
-        TextField(
+        AqarTextField(
           controller: _customAr,
           enabled: !widget.saving,
           textInputAction: TextInputAction.next,
@@ -261,7 +262,7 @@ class _PropertyTypeHierarchyPickerState
           ),
         ),
         const SizedBox(height: 8),
-        TextField(
+        AqarTextField(
           controller: _customEn,
           enabled: !widget.saving,
           textInputAction: TextInputAction.done,

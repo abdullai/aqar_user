@@ -299,6 +299,28 @@ class ReservationsService {
   // 3) السلة (حجوزاتي) + conversationId لكل عنصر
   // ===========================================================================
 
+  /// هل لدى المستخدم حجزاً نشطاً (صفقة) على هذا الإعلان؟
+  static Future<bool> userHasActiveReservationForProperty({
+    required String userId,
+    required String propertyId,
+  }) async {
+    final uid = userId.trim();
+    final pid = propertyId.trim();
+    if (uid.isEmpty || pid.isEmpty) return false;
+    try {
+      final res = await _sb
+          .from('reservations')
+          .select('id')
+          .eq('user_id', uid)
+          .eq('property_id', pid)
+          .inFilter('status', ['pending', 'paid'])
+          .limit(1);
+      return (res as List).isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// ✅ سلة المستخدم
   static Future<List<ReservationItem>> loadMyCart(String userId) async {
     final res = await _sb

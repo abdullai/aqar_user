@@ -6,6 +6,10 @@ mixin MarketingStateMixin on State<UserDashboard> {
   // =========================================================
   bool get _isGuest;
 
+  /// اسم التحية من الكاش — يظهر فوراً قبل اكتمال جلب الملف الشخصي.
+  /// يُعرَّف هنا لأن [MarketingStateMixin] يمسحه عند تسجيل الخروج.
+  String _greetingNameCache = '';
+
   // =========================================================
   // Account role state
   // =========================================================
@@ -17,16 +21,20 @@ mixin MarketingStateMixin on State<UserDashboard> {
   bool _orgNavIsOwner = false;
   Map<String, dynamic>? _orgMembershipPermissions;
 
+  /// مسوّق/مكتب/مؤسسة/شركة/وكالة — تبويبات «صفحتي» السبعة (سوق، عروض، تعاقد، تصريح، منشور…).
+  /// لا يشترط [verified]؛ التحقق يُطبَّق عند **تقديم عرض** وليس عند عرض التبويبات.
+  bool get _usesMarketerMyPageHub {
+    if (_isGuest) return false;
+    return _isMarketingAccountType;
+  }
+
   bool get _isMarketerRole {
     if (_isGuest) return false;
     if (!_verified) return false;
-
-    final role = _accountType.trim().toLowerCase();
-
-    return role == 'marketer' ||
-        role == 'office' ||
-        role == 'company' ||
-        role == 'institution';
+    // مسوّق، مكتب، مؤسسة، شركة، وكالة — نفس تبويبات «صفحتي» ومسار السوق/العروض.
+    return AppRoleHelper.isMarketingRole(
+      AppRoleHelper.fromAccountType(_accountType),
+    );
   }
 
   /// جهات تسويق (مكتب/مسوق/…) — للتنقل والسلة: يُخفى دون الاعتماد على verified.
@@ -50,14 +58,15 @@ mixin MarketingStateMixin on State<UserDashboard> {
   /// تبويب «إدارتي» في الشريط السفلي (لوحة المنشأة/المسوّق/المعلن الفردي).
   bool get _showBottomNavMyDeskSlot {
     if (_isGuest) return false;
-    if (!_accountRoleLoaded || !_orgNavResolved) return false;
+    // قبل اكتمال الصلاحيات: أظهر التبويب (كان الإخفاء المبكر يجمّد النقرة بعد الدخول).
+    if (!_accountRoleLoaded || !_orgNavResolved) return true;
     return _middleNavDeskLike;
   }
 
   /// تبويب + في الشريط السفلي (إضافة إعلان/طلب) — يعتمد على الصلاحيات وليس على نوع الحساب وحده.
   bool get _showBottomNavAddSlot {
-    if (_isGuest) return false;
-    if (!_accountRoleLoaded || !_orgNavResolved) return false;
+    if (_isGuest) return true;
+    if (!_accountRoleLoaded || !_orgNavResolved) return true;
 
     if (_orgNavIsOwner) return true;
     if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
@@ -83,21 +92,36 @@ mixin MarketingStateMixin on State<UserDashboard> {
     return AppRoleHelper.orgPermissionsOpenDeskShell(_orgMembershipPermissions);
   }
 
-  bool get _isOwner => !_isGuest && !_isMarketerRole;
-
   // =========================================================
   // Sub tab controllers
   // =========================================================
   TabController? _ownerTabsCtrl;
   TabController? _marketerTabsCtrl;
 
+  /// تبديل «كمسوّق / كمعن» — طول ثابت 2؛ لا يُعاد إنشاؤه مع دلاء المسوّق/المالك.
+  TabController? _marketerPublisherRoleTabsCtrl;
+
+  /// آخر تبويب فرعي تمت زيارته داخل «صفحتي» — لإعادة فتحه عند الرجوع للتبويب
+  /// من تبويب رئيسي آخر (الرئيسية/السلة/الدعم…). نُحدّثها عبر Listener على كل من
+  /// `_ownerTabsCtrl` و`_marketerTabsCtrl` ونحفظها في `SharedPreferences` أيضاً
+  /// لتذكّرها بين الجلسات.
+  int _lastOwnerSubTabIndex = 0;
+  int _lastMarketerSubTabIndex = 0;
+  bool _subTabIndicesPrefsRestored = false;
+
+  static const String _kPrefOwnerSubTabIndex = 'dash_owner_sub_tab_index_v1';
+  static const String _kPrefMarketerSubTabIndex =
+      'dash_marketer_sub_tab_index_v1';
+
   // =========================================================
   // Owner listing requests (طلبات التسويق — المصدر قبل النشر)
   // =========================================================
-  bool _loadingRequests = false;
-  String? _errorRequests;
-
   List<Map<String, dynamic>> _ownerListingRequests = <Map<String, dynamic>>[];
+
+  /// true أثناء جلب صفوف [listing_requests] للمالك من قاعدة البيانات.
+  /// بدونها تبويبات «صفحتي» للمعلن الفردي تعرض «لا يوجد» قبل اكتمال التحميل،
+  /// فيشاهد المستخدم: فاضي → سكيلتون قصير → فاضي مع أن لديه طلبات فعلية.
+  bool _loadingOwnerRequests = false;
 
   // =========================================================
   // Marketer buckets
@@ -111,16 +135,20 @@ mixin MarketingStateMixin on State<UserDashboard> {
   List<Map<String, dynamic>> _mkPermits = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _mkPublished = <Map<String, dynamic>>[];
 
-  // =========================================================
-  // Convenience counts
-  // =========================================================
-  int get _marketerInvitesCount => _mkInvites.length;
-  int get _marketerOffersCount => _mkOffers.length;
-  int get _marketerContractsCount => _mkContracts.length;
-  int get _marketerPermitsCount => _mkPermits.length;
-  int get _marketerPublishedCount => _mkPublished.length;
+  /// طلبات أخفاها المسوّق من «السوق العقاري» بعد إلغاء عرضه.
+  Set<String> _marketerHiddenMarketRequestIds = {};
 
-  bool get _hasOwnerRequestsData => _ownerListingRequests.isNotEmpty;
+  /// بطاقات مفسوخ/ملغى أخفاها المسوّق يدوياً من صفحتي.
+  Set<String> _marketerDismissedCancelledIds = {};
+
+  /// طلبات استُنفدت فيها محاولات «إتاحة فرصة» (حد 4) لهذا المستخدم.
+  Set<String> _exhaustedOpportunityRequestIds = {};
+
+  /// عدّاد «إتاحة فرصة» لكل طلب (للشارة/التلميح على بطاقة المالك).
+  Map<String, int> _opportunityGrantCountsByRequestId = {};
+
+  /// 0 = صفحتي كمسوّق، 1 = صفحتي كمعلن (طلبات طرحها للسوق).
+  int _marketerPublisherHubMode = 0;
 
   bool get _hasMarketingData =>
       _mkInvites.isNotEmpty ||
@@ -129,17 +157,69 @@ mixin MarketingStateMixin on State<UserDashboard> {
       _mkPermits.isNotEmpty ||
       _mkPublished.isNotEmpty;
 
-  bool get _hasMarketingAnyError =>
-      (_errorRequests?.trim().isNotEmpty == true) ||
-      (_errorMarketing?.trim().isNotEmpty == true);
+  bool get _hasOwnerRequestsData => _ownerListingRequests.isNotEmpty;
 
-  // =========================================================
-  // Reset helpers
-  // =========================================================
+  /// شارة قائمة الاشتراكات (منتهٍ أو يقترب من الانتهاء).
+  int _subscriptionMenuBadge = 0;
+
+  bool get _showBottomNavMyAdsSlot {
+    if (_isGuest) return true;
+    if (!_accountRoleLoaded || !_orgNavResolved) return true;
+    if (_orgNavIsOwner) return true;
+    if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
+    if (AppRoleHelper.isStandaloneMarketer(_accountType)) return true;
+    return OrgPermissionManager.can(
+          _orgMembershipPermissions,
+          OrgPermissionKeys.addAds,
+        ) ||
+        OrgPermissionManager.can(
+          _orgMembershipPermissions,
+          OrgPermissionKeys.manageTeam,
+        ) ||
+        OrgPermissionManager.can(
+          _orgMembershipPermissions,
+          OrgPermissionKeys.viewAnalytics,
+        );
+  }
+
+  bool get _showBottomNavMySubmissionsSlot {
+    if (_isGuest) return true;
+    if (!_accountRoleLoaded || !_orgNavResolved) return true;
+    if (_orgNavIsOwner) return true;
+    if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
+    if (AppRoleHelper.isStandaloneMarketer(_accountType)) return true;
+    return OrgPermissionManager.can(
+      _orgMembershipPermissions,
+      OrgPermissionKeys.addListingRequests,
+    );
+  }
+
+  bool get _canPlusSheetAddProperty {
+    if (_isGuest) return false;
+    if (!_accountRoleLoaded || !_orgNavResolved) return true;
+    if (_orgNavIsOwner) return true;
+    if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
+    if (AppRoleHelper.isStandaloneMarketer(_accountType)) return true;
+    return OrgPermissionManager.can(
+      _orgMembershipPermissions,
+      OrgPermissionKeys.addProperties,
+    );
+  }
+
+  bool get _canPlusSheetAddRequest {
+    if (_isGuest) return false;
+    if (!_accountRoleLoaded || !_orgNavResolved) return true;
+    if (_orgNavIsOwner) return true;
+    if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
+    if (AppRoleHelper.isStandaloneMarketer(_accountType)) return true;
+    return OrgPermissionManager.can(
+      _orgMembershipPermissions,
+      OrgPermissionKeys.addListingRequests,
+    );
+  }
   void _resetOwnerRequestBuckets() {
     _ownerListingRequests = <Map<String, dynamic>>[];
-    _loadingRequests = false;
-    _errorRequests = null;
+    _loadingOwnerRequests = false;
   }
 
   void _resetMarketerBuckets() {
@@ -161,21 +241,32 @@ mixin MarketingStateMixin on State<UserDashboard> {
       _marketerTabsCtrl?.dispose();
     } catch (_) {}
 
+    try {
+      _marketerPublisherRoleTabsCtrl?.dispose();
+    } catch (_) {}
+
     _ownerTabsCtrl = null;
     _marketerTabsCtrl = null;
+    _marketerPublisherRoleTabsCtrl = null;
   }
 
   void _clearMarketingStateOnLogout() {
     unawaited(AccountRoleCache.clear());
+    unawaited(DashboardGreetingCache.clear());
+    _greetingNameCache = '';
     _accountType = 'user';
     _verified = false;
     _accountRoleLoaded = false;
     _orgNavResolved = false;
     _orgNavIsOwner = false;
     _orgMembershipPermissions = null;
+    _subscriptionMenuBadge = 0;
 
     _resetOwnerRequestBuckets();
     _resetMarketerBuckets();
+    _exhaustedOpportunityRequestIds = {};
+    _opportunityGrantCountsByRequestId = {};
+    _marketerPublisherHubMode = 0;
     _disposeMarketingTabControllers();
   }
 }

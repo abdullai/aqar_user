@@ -1,3 +1,4 @@
+import '../../models/market_property_request_row.dart';
 import '../../models/property.dart';
 import 'app_role_helper.dart';
 import 'listing_workflow_stage.dart';
@@ -105,28 +106,12 @@ class ListingPermissionsHelper {
     return property.isActive;
   }
 
-  /// بطاقة إعلان في **تبويب الرئيسية** فقط: ما بعد مسلك النشر/العرض للعموم.
-  /// مراحل العقود والتصاريح و«انتظار المسوّقين» تبقى في «صفحتي» ولا تُعرض في شبكة الرئيسية.
+  /// بطاقة إعلان في **تبويب الرئيسية** — مطابقة لاستعلام الخادم
+  /// ([propertiesHomeFeedOrFilter] + [shouldShowInPublicHome]).
+  /// الشرط السابق على `publishedAt`/مرحلة published فقط كان يخفي صفوفاً
+  /// بحالة `active`/`live`/`available` رغم وصولها من PostgREST.
   static bool shouldShowOnHomeDiscoveryCard(Property property) {
-    if (!shouldShowInPublicHome(property)) return false;
-    final s = _stage(property);
-    if (const {
-      ListingWorkflowStage.published,
-      ListingWorkflowStage.reserved,
-    }.contains(s)) {
-      return true;
-    }
-    // خمول 72 ساعة بعد إعلان منشور سابقًا — وليس معاينة draft بلا published_at.
-    if (s == ListingWorkflowStage.inactive72h &&
-        property.publishedAt != null &&
-        !_completedDealStatusHints.contains(property.normalizedStatus)) {
-      return true;
-    }
-    if (property.publishedAt != null &&
-        !_completedDealStatusHints.contains(property.normalizedStatus)) {
-      return true;
-    }
-    return false;
+    return shouldShowInPublicHome(property);
   }
 
   /// حالات تعني انتهاء الصفقة / إخراج الإعلان من الرئيسية حتى لو بقي workflow قديماً.
@@ -171,6 +156,16 @@ class ListingPermissionsHelper {
       'completed',
       'sold',
     }.contains(s);
+  }
+
+  /// طلب سوق بلا صفقة نشطة — للضيف والمستخدمين في الرئيسية.
+  static bool shouldShowMarketRequestWithoutDeal(
+    MarketPropertyRequestRow r,
+  ) {
+    if (!shouldShowMarketRequestInPublicHome(r.status)) return false;
+    if ((r.selectedOfferId ?? '').trim().isNotEmpty) return false;
+    if (r.completedAt != null) return false;
+    return true;
   }
 
   static bool canAddToCart({

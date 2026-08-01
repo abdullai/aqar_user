@@ -1,4 +1,4 @@
-// lib/screens/login_screen.dart
+﻿// lib/screens/login_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:aqar_user/l10n/app_localizations.dart';
 import 'package:aqar_user/main.dart';
@@ -17,47 +18,39 @@ import 'package:aqar_user/models.dart';
 import 'package:aqar_user/services/ads_service.dart';
 import 'package:aqar_user/services/auth_service.dart';
 import 'package:aqar_user/theme.dart';
+import 'package:aqar_user/widgets/app_busy_indicator.dart';
 import 'package:aqar_user/widgets/app_logo_loading.dart';
 import 'package:aqar_user/widgets/inline_property_video.dart';
 import 'package:aqar_user/widgets/field_group_frame.dart';
+import 'package:aqar_user/widgets/app_about_credits.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 
+import '../core/branding/app_branding.dart';
+import '../core/branding/branding_logo_image.dart';
+import '../core/input/caps_lock_probe.dart';
 import '../core/config/app_config.dart';
 import '../core/input/password_arabic_script_guard.dart';
 import '../core/session/app_session.dart';
+import '../core/session/web_session_ttl.dart';
 import '../core/theme/app_appearance_bridge.dart';
 import '../core/session/return_after_auth.dart';
 import '../core/utils/profile_greeting_from_row.dart';
+import '../core/utils/compound_display_name.dart';
 import '../services/connectivity_guard.dart';
+import '../services/session_manager.dart';
 import '../services/fast_login_service.dart';
 import '../services/profile_compliance_service.dart';
 import '../services/user_install_session_service.dart';
+import '../core/navigation/post_auth_navigation.dart';
 import '../core/government/nafath_models.dart';
+import '../core/haptics/app_haptics.dart';
 import '../services/nafath_auth_service.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'verify_screen.dart';
 
-/// تمرير داخل بطاقة الدخول بنفس السلوك الذكي العام.
-class _LoginScrollBehavior extends MaterialScrollBehavior {
-  @override
-  Widget buildScrollbar(
-    BuildContext context,
-    Widget child,
-    ScrollableDetails details,
-  ) {
-    if (AqarScrollBehavior.isCompactTouchLike(context)) return child;
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final alwaysVisible =
-        AqarScrollBehavior.isLargeScreenScrollbarVisible(context);
-    return Scrollbar(
-      controller: details.controller,
-      thumbVisibility: alwaysVisible,
-      trackVisibility: alwaysVisible,
-      thickness: alwaysVisible ? 8 : 5,
-      radius: const Radius.circular(8),
-      scrollbarOrientation:
-          rtl ? ScrollbarOrientation.right : ScrollbarOrientation.left,
-      child: child,
-    );
-  }
+/// تمرير داخل بطاقة الدخول — بدون شريط (حتى على الويب/سطح المكتب).
+class _LoginScrollBehavior extends AqarAuthScrollBehavior {
+  const _LoginScrollBehavior();
 }
 
 class LoginScreen extends StatefulWidget {
@@ -68,7 +61,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen>
-    with SingleTickerProviderStateMixin, RouteAware {
+    with TickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
   static const Color _bankColor = Color(0xFF0F766E);
 
   // ✅ سياسة محاولات الدخول (محليًا)
@@ -83,6 +76,9 @@ class _LoginScreenState extends State<LoginScreen>
 
   final FocusNode _usernameFocus = FocusNode();
   final FocusNode _passwordFocus = FocusNode();
+  final ScrollController _loginScrollCtrl = ScrollController();
+  final GlobalKey _usernameFieldKey = GlobalKey();
+  final GlobalKey _passwordFieldKey = GlobalKey();
 
   bool rememberMe = false;
   bool fastLogin = false;
@@ -96,20 +92,31 @@ class _LoginScreenState extends State<LoginScreen>
   bool isBusy = false;
   bool _nafathBusy = false;
 
+  /// مشغول موحّد: عند الضغط على تسجيل الدخول أو نفاذ تُعطَّل كل
+  /// الخيارات الأخرى (نسيت كلمة المرور، الدخول السريع، إنشاء حساب،
+  /// الدخول كضيف) لتفادي التضارب.
+  bool get _busy => isBusy || _nafathBusy;
+
   // CAPTCHA
   bool showCaptcha = false;
   String captchaText = '';
   String userCaptchaInput = '';
 
   // Ads
-  final PageController _adsController = PageController();
-  int _adsIndex = 0;
   List<AdItem> _ads = [];
 
   // Remember-me masking
   String? _storedUsername;
+
+  /// اسم الظهور الرباعي/المركّب عند تفعيل «تذكرني» — يظهر بدل حقل الرقم.
+  String? _rememberDisplayName;
+  bool _showRememberedIdentityChip = false;
   bool _maskedPrefillActive = false;
   bool _usernameEdited = false;
+
+  /// حقل مخفي ثابت لمدير كلمات المرور عند عرض بطاقة الاسم (لا يُنشأ في كل بناء).
+  late final TextEditingController _autofillUsernameMirror =
+      TextEditingController();
 
   // brute-force محلي
   Map<String, int> _failedAttempts = {};
@@ -120,12 +127,48 @@ class _LoginScreenState extends State<LoginScreen>
   bool _checkingUsername = false;
   bool _usernameExists = false;
   bool _usernameCheckDone = false;
+  String? _lastUsernameRpcChecked;
+  bool? _lastUsernameRpcExists;
 
-  // Animation
-  late final AnimationController _pulseCtrl;
-  late final Animation<double> _pulse;
+  // اهتزاز خفيف عند خطأ حقول الدخول
+  late final AnimationController _shakeCtrl;
+  late final Animation<Offset> _shakeAnim;
+  late final AnimationController _enterCtrl;
+  late final Animation<double> _enterFade;
+  late final Animation<Offset> _enterSlide;
+
+  String? _usernameError;
+  String? _passwordError;
+  bool _capsLockPassword = false;
+  bool _pendingCapsUi = false;
+  Timer? _capsUiDebounce;
+
+  /// آخر حرف لاتيني مكتوب: true=كبير → يظهر السهم، false=صغير → يختفي.
+  bool? _lastLatinWasUpper;
+
+  /// عند فشل lockModes على ويب الجوال: حالة يدوية بعد ضغط Caps Lock.
+  bool? _capsLockLatched;
+  bool _didAutoAdvanceToPassword = false;
+  Timer? _capsResyncTimer;
+
+  /// ويب سطح المكتب (ويندوز/ماك/لينكس).
+  bool get _desktopWebCapsTextMode {
+    if (!kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux;
+  }
+
+  /// ويب سطح المكتب العريض (>=700): نص Caps تحت الحقل.
+  /// الجوال / ويب الجوال / التطبيق / الشاشات الصغيرة: سهم بجانب القفل فقط.
+  bool _useCapsTextUnderField(BuildContext context) {
+    if (!_desktopWebCapsTextMode) return false;
+    return MediaQuery.sizeOf(context).width >= 700;
+  }
 
   DateTime? _lastPasswordArabicDialogAt;
+
+  String _packageVersionLine = '';
 
   bool get _isAr => langNotifier.value != 'en';
 
@@ -156,6 +199,186 @@ class _LoginScreenState extends State<LoginScreen>
 
   double _font(BuildContext context, double desktop, double mobile) =>
       _isSmallUi(context) ? mobile : desktop;
+
+  void _notePasswordLatinCase(String text) {
+    for (var i = text.length - 1; i >= 0; i--) {
+      final c = text.codeUnitAt(i);
+      if (c >= 65 && c <= 90) {
+        _lastLatinWasUpper = true;
+        return;
+      }
+      if (c >= 97 && c <= 122) {
+        _lastLatinWasUpper = false;
+        return;
+      }
+    }
+  }
+
+  bool? _readHardwareCaps() {
+    try {
+      return HardwareKeyboard.instance.lockModesEnabled
+          .contains(KeyboardLockMode.capsLock);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// يستنتج Caps من حرف + Shift (موثوق على الويب بعد أول ضغطة).
+  bool? _capsFromKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return null;
+    final ch = event.character;
+    if (ch == null || ch.length != 1) return null;
+    final cu = ch.codeUnitAt(0);
+    final isUpper = cu >= 65 && cu <= 90;
+    final isLower = cu >= 97 && cu <= 122;
+    if (!isUpper && !isLower) return null;
+    final shift = HardwareKeyboard.instance.isShiftPressed;
+    // بدون Shift: حرف كبير ⇒ Caps ON، صغير ⇒ OFF.
+    // مع Shift: العكس (Shift+Caps يعطي صغيراً).
+    if (!shift) return isUpper;
+    return isLower;
+  }
+
+  void _applyCapsLockState(bool caps, {bool clearLatch = false}) {
+    if (clearLatch) _capsLockLatched = null;
+    if (!mounted || caps == _capsLockPassword) return;
+    // ويب ويندوز/سطح المكتب: ثبّت النص تحت الحقل (تجنّب وميض probe/resync).
+    if (_desktopWebCapsTextMode) {
+      _pendingCapsUi = caps;
+      _capsUiDebounce?.cancel();
+      _capsUiDebounce = Timer(const Duration(milliseconds: 140), () {
+        if (!mounted) return;
+        if (_pendingCapsUi == _capsLockPassword) return;
+        setState(() => _capsLockPassword = _pendingCapsUi);
+      });
+      return;
+    }
+    setState(() => _capsLockPassword = caps);
+  }
+
+  void _syncCapsLockFromHardware({bool preferHardware = false}) {
+    if (preferHardware) {
+      _capsLockLatched = null;
+    }
+
+    final browser = probeBrowserCapsLock();
+    final hardware = _readHardwareCaps();
+
+    // ويب سطح المكتب: اعتمد DOM + استدلال الأحرف فقط (lockModes يُومض النص).
+    if (_desktopWebCapsTextMode) {
+      if (browser != null) {
+        _applyCapsLockState(browser);
+        return;
+      }
+      if (_lastLatinWasUpper != null) {
+        _applyCapsLockState(_lastLatinWasUpper!);
+      }
+      return;
+    }
+
+    // لا تُصفّر الحالة عند التركيز قبل أي حدث لوحة — Caps قد يكون شغال مسبقاً.
+    if (browser == null &&
+        hardware == null &&
+        _capsLockLatched == null &&
+        _lastLatinWasUpper == null) {
+      return;
+    }
+
+    var caps = false;
+    if (browser != null) {
+      caps = browser;
+    } else if (hardware != null) {
+      caps = hardware;
+    } else if (_capsLockLatched != null) {
+      caps = _capsLockLatched!;
+    } else if (_lastLatinWasUpper == true) {
+      caps = true;
+    }
+
+    // مصدر حقيقي يفوز دائماً (لا يطغى عليه استدلال حرف صغير).
+    if (browser == true || hardware == true) {
+      caps = true;
+    } else if (browser == false || hardware == false) {
+      caps = false;
+      if (_lastLatinWasUpper == true && browser == null && hardware == false) {
+        // لوحات جوال ناعمة قد تُبلّغ lockModes=false مع حرف كبير.
+        caps = true;
+      }
+    }
+
+    _applyCapsLockState(caps);
+  }
+
+  void _scheduleCapsResync() {
+    _capsResyncTimer?.cancel();
+    // ويب سطح المكتب: أقل إعادة مزامنة لتقليل وميض النص.
+    final delays = _desktopWebCapsTextMode
+        ? <int>[50, 180, 450]
+        : <int>[0, 16, 48, 120, 280, 500, 900];
+    var i = 0;
+    void tick() {
+      if (!mounted) return;
+      _syncCapsLockFromHardware(preferHardware: true);
+      i++;
+      if (i >= delays.length) return;
+      _capsResyncTimer = Timer(Duration(milliseconds: delays[i]), tick);
+    }
+
+    tick();
+  }
+
+  bool _loginHardwareCapsKeyHandler(KeyEvent event) {
+    if (!_passwordFocus.hasFocus &&
+        event.logicalKey != LogicalKeyboardKey.capsLock) {
+      // حدّث كاش DOM حتى لو الحقل غير مركّز (مهم عند دخول الحقل وCaps شغال مسبقاً).
+      if (kIsWeb && (event is KeyDownEvent || event is KeyUpEvent)) {
+        probeBrowserCapsLock();
+      }
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.capsLock) {
+      if (event is KeyDownEvent) {
+        final hardwareOn = _readHardwareCaps() ?? false;
+        final browserOn = probeBrowserCapsLock();
+        // بدّل التوقّع يدوياً إن تأخرت المنصة؛ يُصحَّح بعد الإطار من المصدر الحقيقي.
+        if (browserOn == null && _readHardwareCaps() == null) {
+          _capsLockLatched = !(_capsLockPassword || hardwareOn);
+        } else {
+          _capsLockLatched = null;
+        }
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _syncCapsLockFromHardware(preferHardware: true);
+        _scheduleCapsResync();
+      });
+      return false;
+    }
+
+    final inferred = _capsFromKeyEvent(event);
+    if (inferred != null) {
+      _lastLatinWasUpper = inferred;
+      _capsLockLatched = null;
+      _applyCapsLockState(inferred);
+      return false;
+    }
+
+    if (event is KeyDownEvent || event is KeyUpEvent) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _syncCapsLockFromHardware();
+      });
+    }
+    return false;
+  }
+
+  Future<void> _shakeCredentialsGroup() async {
+    if (!mounted) return;
+    AppHaptics.light();
+    try {
+      await _shakeCtrl.forward(from: 0);
+    } catch (_) {}
+    if (mounted) _shakeCtrl.reset();
+  }
 
   void _showLoginError(String message) {
     if (!mounted) return;
@@ -203,6 +426,8 @@ class _LoginScreenState extends State<LoginScreen>
     Widget? suffixIcon,
     int hintMaxLines = 1,
     double? hintFontSize,
+    BoxConstraints? prefixIconConstraints,
+    BoxConstraints? suffixIconConstraints,
   }) {
     final radius = BorderRadius.circular(12);
     final side = BorderSide(color: _fieldOutline, width: 1.6);
@@ -213,6 +438,8 @@ class _LoginScreenState extends State<LoginScreen>
       labelText: hasLabel ? labelText : null,
       floatingLabelBehavior:
           hasLabel ? FloatingLabelBehavior.auto : FloatingLabelBehavior.never,
+      floatingLabelAlignment: FloatingLabelAlignment.start,
+      alignLabelWithHint: false,
       labelStyle: TextStyle(
         color: _textSecondary,
         fontWeight: FontWeight.w800,
@@ -236,9 +463,11 @@ class _LoginScreenState extends State<LoginScreen>
       counterText: '',
       contentPadding: const EdgeInsetsDirectional.fromSTEB(14, 16, 14, 16),
       prefixIcon: prefixIcon,
-      prefixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+      prefixIconConstraints: prefixIconConstraints ??
+          const BoxConstraints(minWidth: 46, minHeight: 46),
       suffixIcon: suffixIcon,
-      suffixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 46),
+      suffixIconConstraints: suffixIconConstraints ??
+          const BoxConstraints(minWidth: 46, minHeight: 46),
       border: OutlineInputBorder(borderRadius: radius),
       enabledBorder: OutlineInputBorder(
         borderRadius: radius,
@@ -269,21 +498,33 @@ class _LoginScreenState extends State<LoginScreen>
     return ok;
   }
 
+  Future<void> _loadPackageVersionLineForLogin() async {
+    try {
+      final p = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _packageVersionLine = '${p.version} (${p.buildNumber})';
+      });
+    } catch (_) {}
+  }
+
   // =======================
   // ✅ انتظار الجلسة بعد login
   // =======================
-  Future<Session?> _waitForSession({int tries = 28}) async {
+  Future<Session?> _waitForSession({int tries = 20}) async {
     final sb = Supabase.instance.client;
     for (int i = 0; i < tries; i++) {
       final s = sb.auth.currentSession;
       if (s != null) return s;
-      if (i == 2 || i == 10) {
+      if (i == 2 || i == 8) {
         try {
-          final res = await sb.auth.refreshSession();
+          final res = await sb.auth
+              .refreshSession()
+              .timeout(const Duration(seconds: 6));
           if (res.session != null) return res.session;
         } catch (_) {}
       }
-      await Future.delayed(const Duration(milliseconds: 120));
+      await Future.delayed(const Duration(milliseconds: 55));
     }
     return sb.auth.currentSession;
   }
@@ -292,28 +533,53 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
 
-    _pulseCtrl = AnimationController(
+    _shakeCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 950),
+      duration: const Duration(milliseconds: 380),
     );
-    _pulse = Tween<double>(begin: 0.96, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    _shakeAnim = TweenSequence<Offset>([
+      TweenSequenceItem(
+        tween: Tween(begin: Offset.zero, end: const Offset(-9, 0)),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: const Offset(-9, 0), end: const Offset(9, 0)),
+        weight: 1.2,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: const Offset(9, 0), end: const Offset(-6, 0)),
+        weight: 1,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: const Offset(-6, 0), end: Offset.zero),
+        weight: 1,
+      ),
+    ]).animate(CurvedAnimation(parent: _shakeCtrl, curve: Curves.easeOutCubic));
+
+    _enterCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
     );
-    _pulseCtrl.repeat(reverse: true);
+    _enterFade = CurvedAnimation(parent: _enterCtrl, curve: Curves.easeOut);
+    _enterSlide = Tween<Offset>(
+      begin: const Offset(0, 0.035),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _enterCtrl, curve: Curves.easeOutCubic));
+    _enterCtrl.forward();
 
     _generateCaptcha();
-    _loadAds();
+    unawaited(_loadAds());
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      unawaited(SessionManager.scrubStaleOtpFlagsWithoutSession());
+      unawaited(_loadPackageVersionLineForLogin());
       if (!mounted) return;
       await _ensureInternetOrAlert();
       if (!mounted) return;
       await _loadPreferences();
       if (!mounted) return;
-      // على الويب (خصوصاً متصفحات الجوال) طلب التركيز فوراً يتسبب بفتح/إغلاق لوحة المفاتيح.
-      if (!kIsWeb) {
-        _applyInitialFocus();
-      }
+      _applyInitialFocus();
     });
 
     _usernameController.addListener(() {
@@ -330,19 +596,72 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
+      // بعد 10 أرقام: الانتقال فوراً لحقل كلمة المرور (جوال/ويب/ويندوز).
+      if (sanitized.length == 10) {
+        if (!_didAutoAdvanceToPassword) {
+          _didAutoAdvanceToPassword = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            if (_sanitizeUsernameInput(_usernameController.text).length != 10) {
+              return;
+            }
+            _passwordFocus.requestFocus();
+          });
+        }
+      } else {
+        _didAutoAdvanceToPassword = false;
+      }
+
       _checkUsernameExistsDebounced();
       // لا setState هنا على كل حرف: على Flutter Web يعيد بناء الحقول ويقطع التركيز/الكيبورد.
       // تحديث أيقونة التحقق يأتي من مسار _checkUsernameExistsDebounced و RPC.
+      if ((_usernameError ?? '').isNotEmpty) {
+        setState(() => _usernameError = null);
+      }
+    });
+
+    _passwordController.addListener(() {
+      if ((_passwordError ?? '').isNotEmpty) {
+        setState(() => _passwordError = null);
+      }
+    });
+
+    _passwordFocus.addListener(() {
+      if (_passwordFocus.hasFocus) {
+        _scrollLoginFieldIntoView(_passwordFieldKey);
+        // لا تمسح الـ latch قبل قراءة حقيقية — Caps قد يكون شغال مسبقاً.
+        refreshBrowserCapsLockCache();
+        probeBrowserCapsLock();
+        _syncCapsLockFromHardware(preferHardware: true);
+        _scheduleCapsResync();
+      } else {
+        // عند مغادرة الحقل أعد المزامنة دون إجبار إخفاء الإشارة.
+        _syncCapsLockFromHardware();
+      }
+    });
+    // يفعّل مستمع DOM مبكراً على الويب.
+    refreshBrowserCapsLockCache();
+    probeBrowserCapsLock();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncCapsLockFromHardware(preferHardware: true);
     });
 
     _usernameFocus.addListener(() {
-      if (_usernameFocus.hasFocus && _maskedPrefillActive && !_usernameEdited) {
-        _usernameEdited = true;
-        _usernameController.clear();
-        _resetDbFlags();
-        setState(() {});
+      if (_usernameFocus.hasFocus) {
+        _scrollLoginFieldIntoView(_usernameFieldKey);
       }
     });
+
+    HardwareKeyboard.instance.addHandler(_loginHardwareCapsKeyHandler);
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    if (!_usernameFocus.hasFocus && !_passwordFocus.hasFocus) return;
+    final key = _passwordFocus.hasFocus ? _passwordFieldKey : _usernameFieldKey;
+    _scrollLoginFieldIntoView(key);
   }
 
   @override
@@ -362,6 +681,35 @@ class _LoginScreenState extends State<LoginScreen>
     unawaited(_loadPreferences());
   }
 
+  void _scrollLoginFieldIntoView(GlobalKey key) {
+    // ويب الجوال: تمريرة واحدة كافية — التكرار مع SoftKeyboardEnsureVisible كان يهز الحقل.
+    void run([int attempt = 0]) {
+      if (!mounted) return;
+      final ctx = key.currentContext;
+      if (ctx == null) {
+        if (attempt < 2) {
+          Future<void>.delayed(const Duration(milliseconds: 100), () {
+            run(attempt + 1);
+          });
+        }
+        return;
+      }
+      final inset = MediaQuery.viewInsetsOf(context).bottom;
+      if (inset < 8 && attempt == 0) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: inset > 0 ? 0.14 : 0.28,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    Future<void>.delayed(const Duration(milliseconds: 90), run);
+    if (kIsWeb) {
+      Future<void>.delayed(const Duration(milliseconds: 280), () => run(1));
+    }
+  }
+
   @override
   void dispose() {
     if (_routeAwareSubscribed) {
@@ -369,12 +717,18 @@ class _LoginScreenState extends State<LoginScreen>
       _routeAwareSubscribed = false;
     }
     _userCheckDebounce?.cancel();
-    _pulseCtrl.dispose();
-    _adsController.dispose();
+    _capsResyncTimer?.cancel();
+    _capsUiDebounce?.cancel();
+    _shakeCtrl.dispose();
+    _enterCtrl.dispose();
+    _loginScrollCtrl.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _autofillUsernameMirror.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
+    HardwareKeyboard.instance.removeHandler(_loginHardwareCapsKeyHandler);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -431,12 +785,22 @@ class _LoginScreenState extends State<LoginScreen>
   // =======================
   Future<void> _ensureNotGuestMode() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(AppConfig.prefGuestModeKey, false);
-      await prefs.setString(AppConfig.prefEntryModeKey, 'user');
-      await prefs.remove('is_guest');
-      await prefs.remove('guest');
-    } catch (_) {}
+      if (mounted) {
+        await context.read<AppSession>().prepareForUserLogin();
+      } else {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(AppConfig.prefGuestModeKey, false);
+        await prefs.setString(AppConfig.prefEntryModeKey, 'user');
+        await prefs.remove(AppConfig.prefGuestLegacyIsGuestKey);
+        await prefs.remove(AppConfig.prefGuestLegacyGuestKey);
+      }
+    } catch (_) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(AppConfig.prefGuestModeKey, false);
+        await prefs.setString(AppConfig.prefEntryModeKey, 'user');
+      } catch (_) {}
+    }
   }
 
   Future<void> _setGuestModePrefs() async {
@@ -444,8 +808,8 @@ class _LoginScreenState extends State<LoginScreen>
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(AppConfig.prefGuestModeKey, true);
       await prefs.setString(AppConfig.prefEntryModeKey, 'guest');
-      await prefs.setBool('is_guest', true);
-      await prefs.setBool('guest', true);
+      await prefs.setBool(AppConfig.prefGuestLegacyIsGuestKey, true);
+      await prefs.setBool(AppConfig.prefGuestLegacyGuestKey, true);
     } catch (_) {}
   }
 
@@ -465,6 +829,8 @@ class _LoginScreenState extends State<LoginScreen>
     _checkingUsername = false;
     _usernameExists = false;
     _usernameCheckDone = false;
+    _lastUsernameRpcChecked = null;
+    _lastUsernameRpcExists = null;
   }
 
   bool _looksLikeUsername10Digits(String s) => RegExp(r'^\d{10}$').hasMatch(s);
@@ -488,11 +854,22 @@ class _LoginScreenState extends State<LoginScreen>
       return;
     }
 
-    _userCheckDebounce = Timer(const Duration(milliseconds: 450), () async {
+    _userCheckDebounce = Timer(const Duration(milliseconds: 550), () async {
       if (!mounted) return;
+      if (_lastUsernameRpcChecked == u && _lastUsernameRpcExists != null) {
+        setState(() {
+          _usernameExists = _lastUsernameRpcExists!;
+          _checkingUsername = false;
+          _usernameCheckDone = true;
+        });
+        return;
+      }
+
       setState(() => _checkingUsername = true);
 
       final exists = await _usernameExistsRpc(u);
+      _lastUsernameRpcChecked = u;
+      _lastUsernameRpcExists = exists;
 
       if (!mounted) return;
       setState(() {
@@ -508,7 +885,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
     setState(() {
       _ads = loaded.where((a) => a.enabled).toList();
-      if (_adsIndex >= _ads.length) _adsIndex = 0;
     });
   }
 
@@ -520,11 +896,24 @@ class _LoginScreenState extends State<LoginScreen>
     if (kIsWeb) fastLogin = false;
 
     var quick = false;
-    if (!kIsWeb) {
-      try {
+    try {
+      final hasSession = Supabase.instance.client.auth.currentSession != null;
+      if (hasSession) {
         quick = await FastLoginService.hasAnyLockEnabled();
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
+
+    String? resumeName;
+    String? resumeUser;
+    try {
+      final resume = await FastLoginService.getResumeAccount();
+      resumeName = (resume.displayName ?? '').trim();
+      resumeUser = FastLoginService.normalizeDigits(
+        (resume.username ?? '').trim(),
+      );
+      if (resumeUser.length < 10) resumeUser = null;
+      if ((resumeName ?? '').isEmpty) resumeName = null;
+    } catch (_) {}
 
     final savedLang =
         prefs.getString(AppConfig.prefLangKey) ?? langNotifier.value;
@@ -549,8 +938,31 @@ class _LoginScreenState extends State<LoginScreen>
       final u =
           _sanitizeUsernameInput((prefs.getString('username') ?? '').trim());
       _storedUsername = u.isEmpty ? null : u;
+      final dn = (prefs.getString('rememberDisplayName') ?? '').trim();
+      _rememberDisplayName =
+          dn.isEmpty ? null : CompoundDisplayName.normalize(dn);
       if ((_storedUsername ?? '').isNotEmpty) {
-        _applyMaskedUsernamePrefill();
+        _showRememberedIdentityChip = (_rememberDisplayName ?? '').isNotEmpty;
+        _syncAutofillUsernameMirror();
+        if (!_showRememberedIdentityChip) {
+          _applyMaskedUsernamePrefill();
+        } else {
+          _maskedPrefillActive = true;
+          _usernameEdited = false;
+          _usernameController.clear();
+        }
+      }
+    } else {
+      // بدون تذكرني: لا تملأ اسم المستخدم من التخزين أو الاستئناف.
+      await prefs.remove('username');
+      await prefs.remove('rememberDisplayName');
+      _storedUsername = null;
+      _rememberDisplayName = null;
+      _showRememberedIdentityChip = false;
+      _maskedPrefillActive = false;
+      _syncAutofillUsernameMirror();
+      if (_usernameController.text.trim().isNotEmpty && !_usernameEdited) {
+        _usernameController.clear();
       }
     }
 
@@ -578,6 +990,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!rememberMe) {
       await prefs.remove('username');
+      await prefs.remove('rememberDisplayName');
       if (prefs.containsKey('password')) {
         await prefs.remove('password');
       }
@@ -588,6 +1001,10 @@ class _LoginScreenState extends State<LoginScreen>
     if (_looksLikeUsername10Digits(real)) {
       await prefs.setString('username', real);
       _storedUsername = real;
+    }
+    final dn = (_rememberDisplayName ?? '').trim();
+    if (dn.isNotEmpty) {
+      await prefs.setString('rememberDisplayName', dn);
     }
 
     if (prefs.containsKey('password')) {
@@ -622,11 +1039,22 @@ class _LoginScreenState extends State<LoginScreen>
     final u = _storedUsername ?? '';
     _maskedPrefillActive = true;
     _usernameEdited = false;
+    _syncAutofillUsernameMirror();
 
     if (u.isNotEmpty) {
       _usernameController.text = _maskNationalIdLast4(u);
       _usernameController.selection =
           TextSelection.collapsed(offset: _usernameController.text.length);
+    }
+  }
+
+  void _syncAutofillUsernameMirror() {
+    final u = (_storedUsername ?? '').trim();
+    if (_autofillUsernameMirror.text != u) {
+      _autofillUsernameMirror.value = TextEditingValue(
+        text: u,
+        selection: TextSelection.collapsed(offset: u.length),
+      );
     }
   }
 
@@ -702,11 +1130,21 @@ class _LoginScreenState extends State<LoginScreen>
 
   // ✅ فتح شاشة الدخول السريع
   Future<void> _openQuickLogin() async {
-    if (kIsWeb) return;
     final okNet = await _ensureInternetOrAlert();
     if (!mounted) return;
     ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
+
+    if (Supabase.instance.client.auth.currentSession == null) {
+      final loc = AppLocalizations.of(context);
+      if (loc == null) return;
+      _showLoginError(
+        _isAr
+            ? 'الجلسة غير متاحة. سجّل الدخول بكلمة المرور.'
+            : 'Session unavailable. Sign in with your password.',
+      );
+      return;
+    }
 
     final u = (_getRealUsername() ?? '').trim();
     final normalized = _normalizeNumbers(u).trim();
@@ -753,10 +1191,36 @@ class _LoginScreenState extends State<LoginScreen>
     final username = (_getRealUsername() ?? '').trim();
     final password = _passwordController.text;
 
-    if (username.isEmpty || password.isEmpty) {
-      _showLoginError(t.allFieldsRequired);
+    if (username.isEmpty) {
+      setState(() {
+        _usernameError = _isAr ? 'هذا الحقل إجباري' : 'This field is required';
+        _passwordError = password.isEmpty
+            ? (_isAr ? 'هذا الحقل إجباري' : 'This field is required')
+            : null;
+      });
+      await _shakeCredentialsGroup();
+      if (!mounted) return;
+      _usernameFocus.requestFocus();
       return;
     }
+
+    if (password.isEmpty) {
+      setState(() {
+        _usernameError = null;
+        _passwordError = _isAr
+            ? 'أدخل كلمة المرور للمتابعة'
+            : 'Enter your password to continue';
+      });
+      await _shakeCredentialsGroup();
+      if (!mounted) return;
+      _passwordFocus.requestFocus();
+      return;
+    }
+
+    setState(() {
+      _usernameError = null;
+      _passwordError = null;
+    });
 
     await _ensureNotGuestMode();
     if (mounted) {
@@ -766,7 +1230,13 @@ class _LoginScreenState extends State<LoginScreen>
     final u = _normalizeNumbers(username).trim();
 
     if (!_looksLikeUsername10Digits(u)) {
-      _showLoginError(t.loginIdentifierMustBe10);
+      setState(() {
+        _usernameError = t.loginIdentifierMustBe10;
+        _passwordError = null;
+      });
+      await _shakeCredentialsGroup();
+      if (!mounted) return;
+      _usernameFocus.requestFocus();
       await _updateFailedAttemptsLocal(u);
       return;
     }
@@ -788,6 +1258,48 @@ class _LoginScreenState extends State<LoginScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     setState(() => isBusy = true);
+    // نافذة منبثقة فوق شاشة الدخول — بلا صفحة بيضاء وسيطة.
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.38),
+      builder: (ctx) {
+        return PopScope(
+          canPop: false,
+          child: Center(
+            child: Material(
+              elevation: 10,
+              borderRadius: BorderRadius.circular(18),
+              color: Theme.of(ctx).colorScheme.surface,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 26,
+                      height: 26,
+                      child: CircularProgressIndicator(strokeWidth: 2.6),
+                    ),
+                    const SizedBox(width: 14),
+                    Flexible(
+                      child: Text(
+                        _isAr ? 'جاري تسجيل الدخول…' : 'Signing in…',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
 
     final lang = langNotifier.value == 'en' ? 'en' : 'ar';
 
@@ -799,7 +1311,13 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
 
+    void dismissLoginOverlay() {
+      final nav = Navigator.of(context, rootNavigator: true);
+      if (nav.canPop()) nav.pop();
+    }
+
     if (!result.ok) {
+      dismissLoginOverlay();
       if (result.locked) {
         setState(() => isBusy = false);
         _showLoginError(
@@ -821,6 +1339,7 @@ class _LoginScreenState extends State<LoginScreen>
     final uid = session?.user.id;
 
     if (uid == null || uid.isEmpty) {
+      dismissLoginOverlay();
       setState(() => isBusy = false);
       _showLoginError(
         _isAr
@@ -832,12 +1351,17 @@ class _LoginScreenState extends State<LoginScreen>
 
     await _resetFailedAttemptsLocal(u);
 
-    if (rememberMe) {
-      _storedUsername = u;
-      await _savePreferences();
+    if (!rememberMe) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('username');
+        await prefs.remove('rememberDisplayName');
+      } catch (_) {}
+      _storedUsername = null;
+      _rememberDisplayName = null;
     }
 
-    TextInput.finishAutofillContext(shouldSave: true);
+    TextInput.finishAutofillContext(shouldSave: rememberMe);
     await _clearOtpVerifiedForCurrentSession();
 
     final known = await UserInstallSessionService.isCurrentInstallRegistered();
@@ -875,25 +1399,7 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
 
-    bool otpOk = false;
-    try {
-      otpOk = await AuthService.requestOtp(u);
-    } catch (_) {
-      otpOk = false;
-    }
-
-    if (!otpOk) {
-      setState(() => isBusy = false);
-      _showLoginError(
-        _isAr
-            ? 'تعذر إرسال رمز التحقق. حاول مرة أخرى.'
-            : 'Failed to send OTP. Please try again.',
-      );
-      return;
-    }
-
     String? prefetchFullName;
-    DateTime? prefetchLastLogin;
     final au = Supabase.instance.client.auth.currentUser;
     if (au != null) {
       final mn =
@@ -901,14 +1407,19 @@ class _LoginScreenState extends State<LoginScreen>
       if (mn != null && mn.isNotEmpty) {
         prefetchFullName = mn;
       }
-      if (au.lastSignInAt != null) {
-        prefetchLastLogin =
-            ProfileGreetingFromRow.lastSignInFromAuthString(au.lastSignInAt);
+    }
+
+    if (rememberMe) {
+      _storedUsername = u;
+      final dn = (prefetchFullName ?? '').trim();
+      if (dn.isNotEmpty) {
+        _rememberDisplayName = CompoundDisplayName.normalize(dn);
       }
+      await _savePreferences();
     }
 
     final args = <String, dynamic>{
-      'next': '/userDashboard',
+      'next': kIsWeb ? '/' : '/userDashboard',
       'nextArgs': <String, dynamic>{},
       'username': u,
       'deviceId': deviceId,
@@ -918,19 +1429,30 @@ class _LoginScreenState extends State<LoginScreen>
     if (prefetchFullName != null && prefetchFullName.trim().isNotEmpty) {
       args['fullName'] = prefetchFullName.trim();
     }
-    if (prefetchLastLogin != null) {
-      args['lastLogin'] = prefetchLastLogin;
-    }
+
+    // إرسال الرمز دون انتظار — الانتقال لشاشة التحقق فوري؛ الشاشة تكمل الجلب إن لزم.
+    unawaited(AuthService.requestOtpWithMessage(u));
 
     if (!mounted) return;
 
-    setState(() => isBusy = false);
+    // أغلق نافذة التحميل ثم انتقل لرمز التحقق مباشرة (بلا شاشة بيضاء).
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    if (rootNav.canPop()) rootNav.pop();
 
-    Navigator.pushReplacementNamed(
-      context,
-      '/verify',
-      arguments: args,
+    // أبقِ نافذة «جاري تسجيل الدخول» فوق شاشة الدخول — بلا شاشة بيضاء وسيطة.
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder<void>(
+        settings: RouteSettings(name: '/verify', arguments: args),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            const VerifyScreen(),
+        transitionDuration: const Duration(milliseconds: 120),
+        reverseTransitionDuration: Duration.zero,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
     );
+    // لا تُفرّغ isBusy قبل الانتقال — كانت تُظهر وميض تحميل أبيض.
   }
 
   Future<void> _startNafathLogin() async {
@@ -1135,25 +1657,44 @@ class _LoginScreenState extends State<LoginScreen>
                   final w = c.maxWidth;
 
                   // تمرير عمودي دائماً يحسّن الجوال + الويب مع لوحة المفاتيح.
-                  final allowVerticalScroll = true;
+                  const allowVerticalScroll = true;
                   final showAdsSide = w >= 980;
 
                   if (showAdsSide) {
                     final adsW = (w * 0.52).clamp(520.0, 860.0);
-                    final loginW = (w - adsW).clamp(440.0, 640.0);
 
                     return Row(
                       children: [
-                        SizedBox(
-                          width: loginW,
-                          child: Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(22),
-                              child: _loginCard(
-                                maxWidth: 600,
-                                borderRadius: 20,
-                                t: t,
-                                allowVerticalScroll: allowVerticalScroll,
+                        Expanded(
+                          child: DecoratedBox(
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Color(0xFF0B4D47),
+                                  _bankColor,
+                                  Color(0xFF0A3D38),
+                                ],
+                              ),
+                            ),
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 22,
+                                ),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 600,
+                                  ),
+                                  child: _loginCard(
+                                    maxWidth: 600,
+                                    borderRadius: 20,
+                                    t: t,
+                                    allowVerticalScroll: allowVerticalScroll,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -1168,18 +1709,31 @@ class _LoginScreenState extends State<LoginScreen>
                   final padV = tightWeb ? 6.0 : 18.0;
                   final cardMax =
                       tightWeb ? (w - padH * 2).clamp(260.0, 900.0) : 600.0;
+                  final kb = MediaQuery.viewInsetsOf(context).bottom;
 
-                  return Align(
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(padH, padV, padH, padV),
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: cardMax),
-                        child: _loginCard(
-                          maxWidth: cardMax,
-                          borderRadius: 18,
-                          t: t,
-                          allowVerticalScroll: allowVerticalScroll,
+                  return ScrollConfiguration(
+                    behavior: const _LoginScrollBehavior(),
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      physics: const ClampingScrollPhysics(),
+                      padding: EdgeInsets.fromLTRB(
+                        padH,
+                        padV,
+                        padH,
+                        padV + kb + 24,
+                      ),
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(maxWidth: cardMax),
+                          child: _loginCard(
+                            maxWidth: cardMax,
+                            borderRadius: 18,
+                            t: t,
+                            // التمرير الخارجي يرفع الحقول فوق لوحة المفاتيح.
+                            allowVerticalScroll: false,
+                          ),
                         ),
                       ),
                     ),
@@ -1201,441 +1755,400 @@ class _LoginScreenState extends State<LoginScreen>
     required bool allowVerticalScroll,
   }) {
     final cardColor = _isLight
-        ? Colors.white.withOpacity(0.95)
-        : const Color(0xFF171A22).withOpacity(0.95);
+        ? Colors.white.withValues(alpha: 0.95)
+        : const Color(0xFF171A22).withValues(alpha: 0.95);
 
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _topBarUnified(t: t),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.verified_user, size: 16, color: _successColor),
-            const SizedBox(width: 6),
-            Text(
-              _isAr ? 'تسجيل دخول آمن' : 'Secure Login',
-              style: TextStyle(
-                fontSize: _font(context, 12, 11),
-                color: _successColor,
-                fontWeight: FontWeight.w900,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+    final content = Theme(
+      data: Theme.of(context).copyWith(
+        textSelectionTheme: TextSelectionThemeData(
+          // تظليل فاتح واضح — لا يطمس النص (كان الأخضر الثقيل يخفي الحروف).
+          selectionColor: _isLight
+              ? const Color(0xFF93C5FD).withValues(alpha: 0.55)
+              : const Color(0xFF38BDF8).withValues(alpha: 0.40),
+          selectionHandleColor:
+              _isLight ? const Color(0xFF2563EB) : const Color(0xFF38BDF8),
+          cursorColor: _bankColor,
         ),
-        const SizedBox(height: 4),
-        LayoutBuilder(
-          builder: (context, lc) {
-            final narrow = lc.maxWidth < 420;
-            final logoDim =
-                kIsWeb ? (narrow ? 132.0 : 120.0) : (narrow ? 120.0 : 112.0);
-            return ScaleTransition(
-              scale: _pulse,
-              child: Image.asset(
-                'assets/logo.png',
-                height: logoDim,
-                width: logoDim,
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.apartment_rounded,
-                  size: logoDim * 0.65,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _topBarUnified(t: t),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.verified_user, size: 16, color: _successColor),
+              const SizedBox(width: 6),
+              Text(
+                _isAr ? 'تسجيل دخول آمن' : 'Secure Login',
+                style: TextStyle(
+                  fontSize: _font(context, 12, 11),
+                  color: _successColor,
+                  fontWeight: FontWeight.w900,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          LayoutBuilder(
+            builder: (context, lc) {
+              final dim = AppBranding.loginHeroLogoSize(context);
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Center(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _bankColor.withValues(alpha: 0.14),
+                          blurRadius: 28,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                    child: BrandingLogoImage(
+                      width: dim,
+                      height: dim,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                      errorIcon: Icons.apartment_rounded,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                AppBranding.welcomeHeadline(context, isAr: _isAr),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
                   color: _textPrimary,
+                  height: 1.2,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.visible,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                t.signInToContinue,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _textSecondary,
+                  fontWeight: FontWeight.w800,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // هوية الجلسة المفعّلة تُعرض في شاشة «مستخدم / ضيف» فقط — ليس فوق حقول الدخول.
+          AnimatedBuilder(
+            animation: _shakeAnim,
+            builder: (context, child) => Transform.translate(
+              offset: _shakeAnim.value,
+              child: child,
+            ),
+            child: FieldGroupFrame(
+              title: t.fieldGroupCredentialsTitle,
+              titleTextAlign: TextAlign.center,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              child: AutofillGroup(
+                child: FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(1),
+                        child: _buildUsernameField(t: t),
+                      ),
+                      const SizedBox(height: 10),
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: _buildPasswordField(t: t),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            );
-          },
-        ),
-        const SizedBox(height: 4),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              t.welcomeTrustedAqar,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w900,
-                color: _textPrimary,
-                height: 1.2,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.visible,
             ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              t.signInToContinue,
-              style: TextStyle(
-                fontSize: 14,
-                color: _textSecondary,
-                fontWeight: FontWeight.w800,
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 1,
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        FieldGroupFrame(
-          title: t.fieldGroupCredentialsTitle,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-          child: AutofillGroup(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildUsernameField(t: t),
+          if (showCaptcha) ...[
+            const SizedBox(height: 16),
+            _buildCaptchaSection(t: t),
+          ],
+          const SizedBox(height: 8),
+          _buildForgotRememberRow(t: t),
+          const SizedBox(height: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_showQuickLoginEntry) ...[
                 const SizedBox(height: 10),
-                _buildPasswordField(t: t),
-              ],
-            ),
-          ),
-        ),
-        if (showCaptcha) ...[
-          const SizedBox(height: 16),
-          _buildCaptchaSection(t: t),
-        ],
-        const SizedBox(height: 10),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: TextButton(
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _busy ? null : _openQuickLogin,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Ink(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        gradient: LinearGradient(
+                          begin: AlignmentDirectional.topStart,
+                          end: AlignmentDirectional.bottomEnd,
+                          colors: [
+                            _bankColor.withValues(alpha: 0.14),
+                            _bankColor.withValues(alpha: 0.04),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: _bankColor.withValues(alpha: 0.35),
+                          width: 1.2,
+                        ),
                       ),
-                      onPressed: () async {
-                        final okNet = await _ensureInternetOrAlert();
-                        if (!mounted) return;
-                        ConnectivityGuard.showOfflineSnackIfNeeded(
-                            context, okNet);
-                        if (!okNet) return;
-                        Navigator.pushNamed(context, '/resetPassword');
-                      },
-                      child: Text(
-                        t.forgotUsernameOrPassword,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.start,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: _font(context, 13.5, 12),
-                          color: _bankColor,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _bankColor.withValues(alpha: 0.16),
+                              ),
+                              child: const Icon(
+                                Icons.fingerprint_rounded,
+                                color: _bankColor,
+                                size: 28,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    t.quickLogin,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: _font(context, 15, 14),
+                                      color: _textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    t.quickLoginSubtitle,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: _font(context, 12, 11),
+                                      color: _textSecondary,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: _textSecondary.withValues(alpha: 0.85),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Checkbox(
-                      value: rememberMe,
-                      onChanged: (v) async {
-                        final newVal = v ?? false;
-                        setState(() => rememberMe = newVal);
-
-                        if (!newVal) {
-                          _maskedPrefillActive = false;
-                          _storedUsername = null;
-                          _usernameEdited = false;
-                          _usernameController.clear();
-                          _resetDbFlags();
-                          await _savePreferences();
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted) _usernameFocus.requestFocus();
-                          });
-                          return;
-                        }
-
-                        final curU = (_getRealUsername() ?? '').trim();
-                        _storedUsername = curU.isEmpty ? null : curU;
-
-                        if ((_storedUsername ?? '').isNotEmpty) {
-                          _applyMaskedUsernamePrefill();
-                        }
-                        await _savePreferences();
-                        _checkUsernameExistsDebounced();
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) _passwordFocus.requestFocus();
-                        });
-                      },
-                    ),
-                    ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: _isSmallUi(context) ? 140 : 160,
-                      ),
-                      child: Text(
-                        t.rememberMe,
-                        style: TextStyle(
-                          color: _textPrimary,
-                          fontSize: _font(context, 13, 12),
+              ],
+            ],
+          ),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _bankColor,
+                foregroundColor: Colors.white,
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: _busy ? null : _login,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 120),
+                child: isBusy
+                    ? AppBusyIndicator.button(
+                        key: const ValueKey('loading'),
+                        label: _isAr ? 'جاري تسجيل الدخول' : 'Signing in…',
+                      )
+                    : Text(
+                        t.userSignIn,
+                        key: const ValueKey('text'),
+                        style: const TextStyle(
+                          fontSize: 16,
                           fontWeight: FontWeight.w900,
                         ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ],
-                ),
-              ],
+              ),
             ),
-            if (!kIsWeb && _showQuickLoginEntry) ...[
-              const SizedBox(height: 10),
+          ),
+          const SizedBox(height: 8),
+          _buildNafathLoginButton(),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _bankColor,
+                foregroundColor: Colors.white,
+                elevation: 3,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: (isBusy || _nafathBusy)
+                  ? null
+                  : () {
+                      try {
+                        Navigator.pushNamed(context, '/register');
+                      } catch (_) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              _isAr
+                                  ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
+                                  : 'Register screen is not enabled yet',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+              child: Text(
+                _isAr ? 'إنشاء حساب جديد' : 'Create new account',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _bankColor,
+                backgroundColor: Colors.white,
+                side: BorderSide(color: _fieldOutline, width: 1.8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: (isBusy || _nafathBusy)
+                  ? null
+                  : () async {
+                      final okNet = await _ensureInternetOrAlert();
+                      if (!mounted) return;
+                      ConnectivityGuard.showOfflineSnackIfNeeded(
+                          context, okNet);
+                      if (!okNet) return;
+
+                      await context.read<AppSession>().setGuest();
+                      if (!mounted) return;
+                      await _setGuestModePrefs();
+                      if (!mounted) return;
+                      unawaited(
+                        syncSessionAppearanceNotifiers?.call() ??
+                            Future.value(),
+                      );
+                      unawaited(touchWebGuestActivity());
+
+                      if (!mounted) return;
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!context.mounted) return;
+                        unawaited(PostAuthNavigation.openDashboard(context));
+                      });
+                    },
+              child: Text(
+                _isAr ? 'الدخول كضيف' : 'Continue as guest',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 16,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: _packageVersionLine.isEmpty
+                    ? const SizedBox.shrink()
+                    : SelectableText(
+                        _isAr
+                            ? '${kIsWeb ? 'منصّة ويب' : 'تطبيق جوّال'} — الإصدار: $_packageVersionLine'
+                            : '${kIsWeb ? 'Web' : 'Mobile app'} — Version: $_packageVersionLine',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: _textSecondary,
+                          height: 1.25,
+                        ),
+                      ),
+              ),
               Material(
-                color: Colors.transparent,
+                color: _bankColor.withValues(alpha: _isLight ? 0.12 : 0.22),
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
                 child: InkWell(
-                  onTap: isBusy ? null : _openQuickLogin,
-                  borderRadius: BorderRadius.circular(16),
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      gradient: LinearGradient(
-                        begin: AlignmentDirectional.topStart,
-                        end: AlignmentDirectional.bottomEnd,
-                        colors: [
-                          _bankColor.withValues(alpha: 0.14),
-                          _bankColor.withValues(alpha: 0.04),
-                        ],
-                      ),
-                      border: Border.all(
-                        color: _bankColor.withValues(alpha: 0.35),
-                        width: 1.2,
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: _bankColor.withValues(alpha: 0.16),
-                            ),
-                            child: Icon(
-                              Icons.fingerprint_rounded,
-                              color: _bankColor,
-                              size: 28,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  t.quickLogin,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: _font(context, 15, 14),
-                                    color: _textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  t.quickLoginSubtitle,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: _font(context, 12, 11),
-                                    color: _textSecondary,
-                                    height: 1.25,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            color: _textSecondary.withValues(alpha: 0.85),
-                          ),
-                        ],
-                      ),
+                  onTap: () => AppAboutCredits.show(
+                    context,
+                    isAr: _isAr,
+                    versionLine: _packageVersionLine,
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.all(6),
+                    child: Icon(
+                      Icons.priority_high_rounded,
+                      size: 18,
+                      color: _bankColor,
                     ),
                   ),
                 ),
               ),
             ],
-          ],
-        ),
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _bankColor,
-              foregroundColor: Colors.white,
-              elevation: 3,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: (isBusy || _nafathBusy) ? null : _login,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: isBusy
-                  ? Row(
-                      key: const ValueKey('loading'),
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: AppLogoLoading(compact: true, size: 20),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          _isAr ? 'جارٍ الدخول...' : 'Signing in...',
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                      ],
-                    )
-                  : Text(
-                      t.userSignIn,
-                      key: const ValueKey('text'),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _bankColor,
-              side: BorderSide(color: _fieldOutline, width: 1.8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: (isBusy || _nafathBusy)
-                ? null
-                : () {
-                    try {
-                      Navigator.pushNamed(context, '/passwordSetup');
-                    } catch (_) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            _isAr
-                                ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
-                                : 'Register screen is not enabled yet',
-                          ),
-                        ),
-                      );
-                    }
-                  },
-            child: Text(
-              _isAr ? 'إنشاء حساب جديد' : 'Create new account',
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: _font(context, 15, 13.5),
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          height: 48,
-          child: OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _bankColor,
-              side: BorderSide(color: _bankColor.withValues(alpha: 0.55)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: (isBusy || _nafathBusy) ? null : _startNafathLogin,
-            icon: _nafathBusy
-                ? SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: AppLogoLoading(compact: true, size: 18),
-                  )
-                : Icon(Icons.verified_user_outlined, color: _bankColor),
-            label: Text(
-              _nafathBusy
-                  ? (_isAr ? 'جاري الاتصال…' : 'Connecting…')
-                  : (_isAr ? 'الدخول عبر نفاذ' : 'Sign in with Nafath'),
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: _font(context, 15, 13.5),
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          height: 46,
-          child: OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: _bankColor.withOpacity(0.55)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: (isBusy || _nafathBusy)
-                ? null
-                : () async {
-                    final okNet = await _ensureInternetOrAlert();
-                    if (!mounted) return;
-                    ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
-                    if (!okNet) return;
-
-                    await context.read<AppSession>().setGuest();
-                    if (!mounted) return;
-                    await _setGuestModePrefs();
-                    if (!mounted) return;
-                    unawaited(
-                      syncSessionAppearanceNotifiers?.call() ?? Future.value(),
-                    );
-
-                    if (!mounted) return;
-                    Navigator.pushNamedAndRemoveUntil(
-                      context,
-                      '/userDashboard',
-                      (r) => false,
-                    );
-                  },
-            icon: const Icon(Icons.person_outline),
-            label: Text(
-              _isAr ? 'الدخول كضيف' : 'Continue as guest',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
 
     final child = Padding(
@@ -1644,26 +2157,36 @@ class _LoginScreenState extends State<LoginScreen>
           ? ScrollConfiguration(
               behavior: _LoginScrollBehavior(),
               child: SingleChildScrollView(
+                controller: _loginScrollCtrl,
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
                 physics: const ClampingScrollPhysics(),
                 clipBehavior: Clip.hardEdge,
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+                ),
                 child: content,
               ),
             )
           : content,
     );
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: maxWidth),
-      child: Card(
-        elevation: 10,
-        shadowColor: Colors.black.withOpacity(0.18),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(borderRadius),
+    return FadeTransition(
+      opacity: _enterFade,
+      child: SlideTransition(
+        position: _enterSlide,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: Card(
+            elevation: 10,
+            shadowColor: Colors.black.withValues(alpha: 0.18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(borderRadius),
+            ),
+            color: cardColor,
+            child: child,
+          ),
         ),
-        color: cardColor,
-        child: child,
       ),
     );
   }
@@ -1722,7 +2245,7 @@ class _LoginScreenState extends State<LoginScreen>
               width: 34,
               height: 34,
               decoration: BoxDecoration(
-                color: _bankColor.withOpacity(_isLight ? 0.10 : 0.18),
+                color: _bankColor.withValues(alpha: _isLight ? 0.10 : 0.18),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: _bankColor, size: 18),
@@ -1779,7 +2302,7 @@ class _LoginScreenState extends State<LoginScreen>
                     boxShadow: [
                       BoxShadow(
                         blurRadius: 24,
-                        color: Colors.black.withOpacity(0.22),
+                        color: Colors.black.withValues(alpha: 0.22),
                         offset: const Offset(0, 14),
                       ),
                     ],
@@ -1856,7 +2379,7 @@ class _LoginScreenState extends State<LoginScreen>
                     boxShadow: [
                       BoxShadow(
                         blurRadius: 24,
-                        color: Colors.black.withOpacity(0.22),
+                        color: Colors.black.withValues(alpha: 0.22),
                         offset: const Offset(0, 14),
                       ),
                     ],
@@ -1947,11 +2470,11 @@ class _LoginScreenState extends State<LoginScreen>
     required VoidCallback onTap,
   }) {
     final bg = selected
-        ? _bankColor.withOpacity(_isLight ? 0.10 : 0.18)
+        ? _bankColor.withValues(alpha: _isLight ? 0.10 : 0.18)
         : Colors.transparent;
 
     final border = selected
-        ? _bankColor.withOpacity(0.6)
+        ? _bankColor.withValues(alpha: 0.6)
         : (_isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A));
 
     return InkWell(
@@ -2002,15 +2525,263 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ✅ حقل الهوية / الإقامة
+  Widget _buildForgotRememberRow({required AppLocalizations t}) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      final okNet = await _ensureInternetOrAlert();
+                      if (!mounted) return;
+                      ConnectivityGuard.showOfflineSnackIfNeeded(
+                          context, okNet);
+                      if (!okNet) return;
+                      Navigator.pushNamed(context, '/resetPassword');
+                    },
+              child: Text(
+                t.forgotUsernameOrPassword,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.start,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: _font(context, 13.5, 12),
+                  color: _bankColor,
+                ),
+              ),
+            ),
+          ),
+        ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(
+              value: rememberMe,
+              onChanged: _busy
+                  ? null
+                  : (v) async {
+                      final newVal = v ?? false;
+                      setState(() => rememberMe = newVal);
+
+                      if (!newVal) {
+                        _maskedPrefillActive = false;
+                        _storedUsername = null;
+                        _rememberDisplayName = null;
+                        _showRememberedIdentityChip = false;
+                        _usernameEdited = false;
+                        _usernameController.clear();
+                        _syncAutofillUsernameMirror();
+                        _resetDbFlags();
+                        await _savePreferences();
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted) _usernameFocus.requestFocus();
+                        });
+                        return;
+                      }
+
+                      final curU = (_getRealUsername() ?? '').trim();
+                      _storedUsername = curU.isEmpty ? null : curU;
+                      _syncAutofillUsernameMirror();
+
+                      if ((_storedUsername ?? '').isNotEmpty) {
+                        if ((_rememberDisplayName ?? '').isNotEmpty) {
+                          _showRememberedIdentityChip = true;
+                          _maskedPrefillActive = true;
+                          _usernameController.clear();
+                        } else {
+                          _applyMaskedUsernamePrefill();
+                        }
+                      }
+                      await _savePreferences();
+                      _checkUsernameExistsDebounced();
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) _passwordFocus.requestFocus();
+                      });
+                    },
+            ),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: _isSmallUi(context) ? 140 : 160,
+              ),
+              child: Text(
+                t.rememberMe,
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: _font(context, 13, 12),
+                  fontWeight: FontWeight.w900,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// زر نفاذ — عرض كامل، خلفية بيضاء (تحت تسجيل الدخول).
+  Widget _buildNafathLoginButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _bankColor,
+          backgroundColor: Colors.white,
+          side: BorderSide(color: _fieldOutline, width: 1.8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        onPressed: (isBusy || _nafathBusy) ? null : _startNafathLogin,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _nafathBusy
+              ? Row(
+                  key: const ValueKey('nafath_loading'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: AppLogoLoading(compact: true, size: 20),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      _isAr ? 'جاري الاتصال…' : 'Connecting…',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ],
+                )
+              : Row(
+                  key: const ValueKey('nafath_idle'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.verified_user_outlined, color: _bankColor),
+                    const SizedBox(width: 8),
+                    Text(
+                      _isAr ? 'نفاذ' : 'Nafath',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
+
+  // ✅ حقل الهوية / الإقامة — أو بطاقة الاسم الرباعي عند «تذكرني».
   Widget _buildUsernameField({required AppLocalizations t}) {
+    if (_showRememberedIdentityChip &&
+        (_rememberDisplayName ?? '').trim().isNotEmpty &&
+        (_storedUsername ?? '').isNotEmpty) {
+      final cs = Theme.of(context).colorScheme;
+      return Column(
+        key: _usernameFieldKey,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: cs.primaryContainer.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: _busy
+                  ? null
+                  : () {
+                      setState(() {
+                        _showRememberedIdentityChip = false;
+                        _applyMaskedUsernamePrefill();
+                      });
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) _usernameFocus.requestFocus();
+                      });
+                    },
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.person_rounded, color: cs.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            _isAr ? 'مرحباً بعودتك' : 'Welcome back',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w800,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _rememberDisplayName!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 15.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () {
+                              setState(() {
+                                _showRememberedIdentityChip = false;
+                                _applyMaskedUsernamePrefill();
+                              });
+                            },
+                      child: Text(
+                        _isAr ? 'تغيير' : 'Change',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          color: cs.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // حقل مخفي لمدير كلمات مرور المتصفح/الجهاز (username).
+          Offstage(
+            offstage: true,
+            child: AqarTextField(
+              controller: _autofillUsernameMirror,
+              autofillHints: const [AutofillHints.username],
+            ),
+          ),
+        ],
+      );
+    }
+
     final raw = _getRealUsername()?.trim() ?? '';
     final normalized = _normalizeNumbers(raw).trim();
     final is10 = _looksLikeUsername10Digits(normalized);
 
     Widget? suffix;
     if (_checkingUsername) {
-      suffix = SizedBox(
+      suffix = const SizedBox(
         width: 44,
         height: 44,
         child: Center(
@@ -2043,9 +2814,10 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     return Column(
+      key: _usernameFieldKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
+        AqarTextField(
           controller: _usernameController,
           focusNode: _usernameFocus,
           keyboardType: TextInputType.number,
@@ -2059,14 +2831,15 @@ class _LoginScreenState extends State<LoginScreen>
           textInputAction: TextInputAction.next,
           onSubmitted: (_) => _passwordFocus.requestFocus(),
           autofillHints: const [AutofillHints.username],
+          cursorColor: _bankColor,
           style: TextStyle(
             color: _textPrimary,
             fontWeight: FontWeight.w900,
             fontSize: 16,
           ),
           decoration: _loginFieldDecoration(
-            labelText: t.loginIdentifierFieldLabel,
-            hintText: null,
+            labelText: _isAr ? 'اسم المستخدم' : 'Username',
+            hintText: t.loginUsernameFieldHelper,
             prefixIcon: Icon(Icons.badge_outlined, color: _iconColor),
             suffixIcon: suffix,
           ),
@@ -2075,58 +2848,230 @@ class _LoginScreenState extends State<LoginScreen>
               _usernameEdited = true;
               _usernameController.clear();
               _resetDbFlags();
-              setState(() {});
+            }
+            if (!_usernameFocus.hasFocus) {
+              _usernameFocus.requestFocus();
             }
           },
         ),
+        if ((_usernameError ?? '').isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 4, end: 4),
+            child: Text(
+              _usernameError!,
+              style: TextStyle(
+                color: _errorColor,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 
   // ✅ كلمة المرور
   Widget _buildPasswordField({required AppLocalizations t}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TextField(
-          controller: _passwordController,
-          focusNode: _passwordFocus,
-          obscureText: obscurePassword,
-          keyboardType:
-              kIsWeb ? TextInputType.text : TextInputType.visiblePassword,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => _login(),
-          autofillHints: const [AutofillHints.password],
-          enableSuggestions: false,
-          autocorrect: false,
-          inputFormatters: passwordArabicGuardFormatters(
-            onArabicScriptBlocked: _schedulePasswordArabicDialog,
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    // ويب سطح المكتب العريض: نص تحت الحقل. جوال/ضيق/تطبيق: سهم فقط بجانب القفل.
+    final useCapsText = _useCapsTextUnderField(context);
+    final showCapsGlyph = _capsLockPassword && !useCapsText;
+    final showCapsText = _capsLockPassword && useCapsText;
+    final capsColor =
+        _isLight ? const Color(0xFFB45309) : const Color(0xFFFBBF24);
+
+    Widget eyeButton() => IconButton(
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+          icon: Icon(
+            obscurePassword ? Icons.visibility : Icons.visibility_off,
+            color: _iconColor,
           ),
-          style: TextStyle(
-            color: _textPrimary,
-            fontWeight: FontWeight.w900,
-            fontSize: 16,
-          ),
-          decoration: _loginFieldDecoration(
-            labelText: t.loginPasswordFieldShortLabel,
-            hintText: null,
-            hintFontSize: 16,
-            prefixIcon: Icon(Icons.lock_outline, color: _iconColor),
-            suffixIcon: ExcludeFocus(
-              child: IconButton(
-                icon: Icon(
-                  obscurePassword ? Icons.visibility : Icons.visibility_off,
-                  color: _iconColor,
+          onPressed: () => setState(() => obscurePassword = !obscurePassword),
+          tooltip: obscurePassword
+              ? (_isAr ? 'إظهار' : 'Show')
+              : (_isAr ? 'إخفاء' : 'Hide'),
+        );
+
+    Widget capsGlyph() => Tooltip(
+          message: _isAr ? 'أحرف كبيرة مفعّلة (Caps Lock)' : 'Caps Lock is on',
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Material(
+              color: capsColor.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {},
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: capsColor.withValues(alpha: 0.6)),
+                  ),
+                  child: Icon(
+                    Icons.arrow_upward_rounded,
+                    size: 18,
+                    color: capsColor,
+                  ),
                 ),
-                onPressed: () =>
-                    setState(() => obscurePassword = !obscurePassword),
-                tooltip: obscurePassword
-                    ? (_isAr ? 'إظهار' : 'Show')
-                    : (_isAr ? 'إخفاء' : 'Hide'),
               ),
             ),
           ),
+        );
+
+    final lockIcon = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Icon(Icons.lock_outline, color: _iconColor),
+    );
+
+    // العين في جهة، والقفل + السهم في الجهة المقابلة (لا يتكرّر السهم).
+    late final Widget prefixIcon;
+    late final Widget suffixIcon;
+    late final BoxConstraints prefixConstraints;
+    late final BoxConstraints suffixConstraints;
+
+    if (rtl) {
+      // العين يمين (prefix)، القفل/السهم يسار (suffix).
+      prefixIcon = eyeButton();
+      prefixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
+      if (showCapsGlyph) {
+        suffixIcon = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [capsGlyph(), lockIcon],
+        );
+        suffixConstraints = const BoxConstraints(minWidth: 78, minHeight: 46);
+      } else {
+        suffixIcon = lockIcon;
+        suffixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
+      }
+    } else {
+      // القفل/السهم يسار، العين يمين.
+      if (showCapsGlyph) {
+        prefixIcon = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [lockIcon, capsGlyph()],
+        );
+        prefixConstraints = const BoxConstraints(minWidth: 78, minHeight: 46);
+      } else {
+        prefixIcon = lockIcon;
+        prefixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
+      }
+      suffixIcon = eyeButton();
+      suffixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
+    }
+
+    return Column(
+      key: _passwordFieldKey,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Focus(
+          onKeyEvent: (node, event) {
+            final inferred = _capsFromKeyEvent(event);
+            if (inferred != null) {
+              _lastLatinWasUpper = inferred;
+              _applyCapsLockState(inferred, clearLatch: true);
+            } else {
+              _syncCapsLockFromHardware();
+            }
+            return KeyEventResult.ignored;
+          },
+          child: AqarTextField(
+            controller: _passwordController,
+            focusNode: _passwordFocus,
+            obscureText: obscurePassword,
+            keyboardType:
+                kIsWeb ? TextInputType.text : TextInputType.visiblePassword,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _login(),
+            autofillHints: const [AutofillHints.password],
+            enableSuggestions: false,
+            autocorrect: false,
+            cursorColor: _bankColor,
+            inputFormatters: passwordArabicGuardFormatters(
+              onArabicScriptBlocked: _schedulePasswordArabicDialog,
+            ),
+            style: TextStyle(
+              color: _textPrimary,
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+            ),
+            decoration: _loginFieldDecoration(
+              labelText: t.loginPasswordFieldShortLabel,
+              hintText: null,
+              hintFontSize: 16,
+              prefixIcon: prefixIcon,
+              suffixIcon: suffixIcon,
+              prefixIconConstraints: prefixConstraints,
+              suffixIconConstraints: suffixConstraints,
+            ),
+            onTap: () {
+              if (!_passwordFocus.hasFocus) {
+                _passwordFocus.requestFocus();
+              }
+              _syncCapsLockFromHardware(preferHardware: true);
+              _scheduleCapsResync();
+              _scrollLoginFieldIntoView(_passwordFieldKey);
+            },
+            onChanged: (v) {
+              _notePasswordLatinCase(v);
+              // ويب ويندوز/سطح المكتب: يظهر تنبيه Caps مع حرف كبير ويختفي مع صغير.
+              // الجوال: السهم يتبع نفس المنطق مع تفضيل مصدر العتاد عند التعارض.
+              if (_lastLatinWasUpper == true) {
+                _applyCapsLockState(true, clearLatch: true);
+              } else if (_lastLatinWasUpper == false) {
+                final shift = HardwareKeyboard.instance.isShiftPressed;
+                if (shift) {
+                  // Shift + حرف صغير ⇒ Caps Lock مفعّل.
+                  _applyCapsLockState(true, clearLatch: true);
+                } else {
+                  // حرف صغير بدون Shift ⇒ Caps OFF (نص ويندوز أو سهم الجوال).
+                  _applyCapsLockState(false, clearLatch: true);
+                }
+              } else {
+                _syncCapsLockFromHardware();
+              }
+            },
+          ),
         ),
+        if (showCapsText) ...[
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 4, end: 4),
+            child: Text(
+              _isAr
+                  ? 'تنبيه: لوحة المفاتيح على أحرف كبيرة (Caps Lock).'
+                  : 'Note: Caps Lock is on.',
+              style: TextStyle(
+                color: capsColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
+        if ((_passwordError ?? '').isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: 4, end: 4),
+            child: Text(
+              _passwordError!,
+              style: TextStyle(
+                color: _errorColor,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                height: 1.25,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -2208,7 +3153,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
+          AqarTextField(
             onChanged: (value) => setState(() => userCaptchaInput = value),
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -2324,8 +3269,6 @@ class _LoginScreenState extends State<LoginScreen>
                                   : const Color(0xFFCBD5E1),
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          _dots(),
                         ],
                       ),
                     ),
@@ -2355,54 +3298,22 @@ class _LoginScreenState extends State<LoginScreen>
       );
     }
 
+    final item = _ads.first;
+    final title = _isAr ? item.titleAr : item.titleEn;
+    final subtitle = _isAr ? item.subtitleAr : item.subtitleEn;
+
     return SizedBox(
       height: 560,
-      child: PageView.builder(
-        controller: _adsController,
-        itemCount: _ads.length,
-        onPageChanged: (i) => setState(() => _adsIndex = i),
-        itemBuilder: (context, index) {
-          final item = _ads[index];
-          final title = _isAr ? item.titleAr : item.titleEn;
-          final subtitle = _isAr ? item.subtitleAr : item.subtitleEn;
-
-          return _PhoneMockup(
-            theme: _currentTheme,
-            title: title,
-            subtitle: subtitle,
-            imageAsset: item.assetImage,
-            imageNetworkUrl: item.imageUrl,
-            videoUrl: item.bestVideoUrl(),
-            isAr: _isAr,
-            adId: item.id,
-          );
-        },
+      child: _PhoneMockup(
+        theme: _currentTheme,
+        title: title,
+        subtitle: subtitle,
+        imageAsset: item.assetImage,
+        imageNetworkUrl: item.imageUrl,
+        videoUrl: item.bestVideoUrl(),
+        isAr: _isAr,
+        adId: item.id,
       ),
-    );
-  }
-
-  Widget _dots() {
-    if (_ads.isEmpty) return const SizedBox.shrink();
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(_ads.length, (i) {
-        final active = i == _adsIndex;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 220),
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          height: 8,
-          width: active ? 20 : 8,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(99),
-            color: active
-                ? _bankColor
-                : (_isLight
-                    ? const Color(0xFFBFD0FF)
-                    : const Color(0xFF2B3A6B)),
-          ),
-        );
-      }),
     );
   }
 
@@ -2412,7 +3323,7 @@ class _LoginScreenState extends State<LoginScreen>
       height: 260,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
       ),
     );
   }
@@ -2480,7 +3391,7 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
             child: Icon(
               Icons.shield_rounded,
               size: 100,
-              color: Colors.white.withOpacity(0.06),
+              color: Colors.white.withValues(alpha: 0.06),
             ),
           ),
           Padding(
@@ -2489,12 +3400,13 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Align(
-                  alignment: isAr ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment:
+                      isAr ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.22),
+                      color: Colors.white.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -2504,7 +3416,9 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
                             size: 14, color: Colors.white),
                         const SizedBox(width: 4),
                         Text(
-                          isAr ? 'موثوق' : 'Verified',
+                          isAr
+                              ? AppBranding.shortNameAr
+                              : AppBranding.shortNameEn,
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w800,
@@ -2524,7 +3438,7 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
                     boxShadow: [
                       BoxShadow(
                         blurRadius: 12,
-                        color: Colors.black.withOpacity(0.12),
+                        color: Colors.black.withValues(alpha: 0.12),
                         offset: const Offset(0, 4),
                       ),
                     ],
@@ -2575,7 +3489,8 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0F766E).withOpacity(0.12),
+                              color: const Color(0xFF0F766E)
+                                  .withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
@@ -2621,8 +3536,7 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
     final bgBot = isLight ? const Color(0xFFDCE8FF) : const Color(0xFF1A2744);
     final textMain =
         isLight ? const Color(0xFF0B1220) : const Color(0xFFE2E8F0);
-    final textDim =
-        isLight ? const Color(0xFF475569) : const Color(0xFF94A3B8);
+    final textDim = isLight ? const Color(0xFF475569) : const Color(0xFF94A3B8);
 
     return Container(
       width: double.infinity,
@@ -2650,7 +3564,7 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
                   boxShadow: [
                     BoxShadow(
                       blurRadius: 8,
-                      color: Colors.black.withOpacity(0.06),
+                      color: Colors.black.withValues(alpha: 0.06),
                       offset: const Offset(0, 2),
                     ),
                   ],
@@ -2681,7 +3595,8 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.lock_rounded, size: 13, color: Colors.white.withOpacity(0.95)),
+                    Icon(Icons.lock_rounded,
+                        size: 13, color: Colors.white.withValues(alpha: 0.95)),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
@@ -2704,7 +3619,8 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.forum_rounded, size: 14, color: _PhoneMockup._bankColor),
+                const Icon(Icons.forum_rounded,
+                    size: 14, color: _PhoneMockup._bankColor),
                 const SizedBox(width: 6),
                 Text(
                   isAr ? 'محادثات دون مغادرة التطبيق' : 'In-app messaging',
@@ -2724,8 +3640,7 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
 
   Widget _explore() {
     final cardBg = isLight ? Colors.white : const Color(0xFF1B2640);
-    final border =
-        isLight ? const Color(0xFFE2E8F0) : const Color(0xFF2D3F66);
+    final border = isLight ? const Color(0xFFE2E8F0) : const Color(0xFF2D3F66);
 
     Widget miniCard() {
       return Expanded(
@@ -2748,19 +3663,18 @@ class _MawthuqLoginSideIllustration extends StatelessWidget {
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                         colors: [
-                          const Color(0xFF0F766E).withOpacity(0.35),
-                          const Color(0xFF0A4D68).withOpacity(0.5),
+                          const Color(0xFF0F766E).withValues(alpha: 0.35),
+                          const Color(0xFF0A4D68).withValues(alpha: 0.5),
                         ],
                       ),
                     ),
                     child: Align(
-                      alignment:
-                          isAr ? Alignment.topRight : Alignment.topLeft,
+                      alignment: isAr ? Alignment.topRight : Alignment.topLeft,
                       child: Container(
                         margin: const EdgeInsets.all(4),
                         padding: const EdgeInsets.all(2),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.92),
+                          color: Colors.white.withValues(alpha: 0.92),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -3005,7 +3919,7 @@ class _PhoneMockup extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 blurRadius: 30,
-                color: Colors.black.withOpacity(0.18),
+                color: Colors.black.withValues(alpha: 0.18),
                 offset: const Offset(0, 18),
               ),
             ],

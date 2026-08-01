@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../core/branding/app_branding.dart';
+
 /// طبقة ردع بسيطة ضد الالتقاط السريع — ليست تشفيراً ولا حماية كاملة.
 class ListingWatermarkOverlay extends StatelessWidget {
   const ListingWatermarkOverlay({
     super.key,
     required this.traceId,
     this.isAr = true,
-    /// عند التعيين يُستبدل عنوان «موثوق العقاري» (مثلاً لطلبات التسوّق).
+    /// عند التعيين يُستبدل عنوان العلامة (مثلاً لطلبات التسوّق).
     this.headline,
   });
 
@@ -21,7 +23,7 @@ class ListingWatermarkOverlay extends StatelessWidget {
     final head = (headline ?? '').trim();
     final base = head.isNotEmpty
         ? head
-        : (isAr ? 'موثوق العقاري' : 'Verified listing');
+        : (isAr ? AppBranding.brandNameAr : 'Verified listing');
     final label = t.isEmpty ? base : '$base · $t';
 
     return Positioned.fill(

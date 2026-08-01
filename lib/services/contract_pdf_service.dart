@@ -1,16 +1,19 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/branding/app_branding.dart';
+import '../core/branding/branding_pdf.dart';
+import '../core/pdf/pdf_readable_qr.dart';
 import '../core/share/app_listing_links.dart';
 
 /// توليد PDF لعقد تسويق: نص كامل (عربي عند توفر الخط)، رقم العقد، التواريخ، QR للتحقق، توقيعان.
 class ContractPdfService {
   static const String _arabicFontAsset = 'assets/fonts/arabic_pdf_regular.ttf';
-  static const String _platformLogoAsset = 'assets/logo.png';
 
   /// يبنى الرابط من [AppListingLinks.contractVerifyWebUri] ويُمرَّر كنص للـ QR.
   static Future<Uint8List> buildListingContractFullPdf({
@@ -21,6 +24,8 @@ class ContractPdfService {
     String? marketerSignedAtIso,
     Uint8List? marketerSignaturePng,
     Uint8List? ownerSignaturePng,
+    /// رمز التحقق الظاهر في QR مع رقم العقد (يُخزَّن في `listing_contracts.verify_public_token`).
+    String? verifyQrToken,
   }) async {
     pw.Font? arabicFont;
     try {
@@ -30,10 +35,18 @@ class ContractPdfService {
       arabicFont = null;
     }
 
-    final verifyUri = AppListingLinks.contractVerifyWebUri(
-      contractId,
-      lang: isAr ? 'ar' : 'en',
-    );
+    final lang = isAr ? 'ar' : 'en';
+    final verifyUri = kIsWeb
+        ? AppListingLinks.contractVerifyWebUri(
+            contractId,
+            lang: lang,
+            verifyToken: verifyQrToken,
+          )
+        : AppListingLinks.contractVerifyAppUri(
+            contractId,
+            lang: lang,
+            verifyToken: verifyQrToken,
+          );
     final verifyUrl = verifyUri.toString();
     final now = DateTime.now().toLocal();
     final issuedDate =
@@ -45,7 +58,7 @@ class ContractPdfService {
     final verifyLabel = isAr
         ? 'التحقق من صحة العقد (امسح الرمز)'
         : 'Verify authenticity (scan)';
-    final platformName = isAr ? 'منصة عقار موثوق' : 'Aqar Mawthuq Platform';
+    final platformName = AppBranding.legalName(isAr: isAr);
 
     final signedLine = _formatSignedDateLine(
       isAr: isAr,
@@ -72,13 +85,7 @@ class ContractPdfService {
         ownerSig = null;
       }
     }
-    pw.ImageProvider? logo;
-    try {
-      final logoData = await rootBundle.load(_platformLogoAsset);
-      logo = pw.MemoryImage(logoData.buffer.asUint8List());
-    } catch (_) {
-      logo = null;
-    }
+    pw.ImageProvider? logo = await loadBrandingPdfLogo();
 
     final baseStyle = pw.TextStyle(
       font: arabicFont,
@@ -93,16 +100,109 @@ class ContractPdfService {
     final small = pw.TextStyle(font: arabicFont, fontSize: 9);
     const fallback = pw.TextStyle(fontSize: 10, lineSpacing: 1.15);
 
-    final doc = pw.Document();
+    final doc = pw.Document(
+      title: isAr
+          ? 'عقد تسويق عقاري - $contractId'
+          : 'Real Estate Marketing Contract - $contractId',
+      author: platformName,
+      creator: platformName,
+      producer: platformName,
+      subject: isAr
+          ? 'وثيقة عقد موقّعة رقمياً — قابلة للتحقق عبر QR'
+          : 'Digitally signed contract — verifiable via QR',
+      keywords:
+          'contract,signed,immutable,verify,$contractId,${verifyQrToken ?? ''}',
+    );
+
+    // علامة مائية ظاهرة على كل صفحة + ترويسة وذيل ثابت يوحيان بأن الملف
+    // وثيقة رسمية موقَّعة ولا يجوز تعديلها. أي تعديل لاحق يجعل QR التحقق
+    // يكشف أن النسخة المُعدَّلة لا تطابق الأصل المخزَّن على الخادم.
+    pw.Widget tamperWatermark() {
+      return pw.Center(
+        child: pw.Opacity(
+          opacity: 0.08,
+          child: pw.Transform.rotate(
+            angle: -0.6,
+            child: pw.Text(
+              isAr
+                  ? 'موقَّع رقمياً — غير قابل للتعديل'
+                  : 'DIGITALLY SIGNED — DO NOT EDIT',
+              style: pw.TextStyle(
+                font: arabicFont,
+                fontSize: 56,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.grey700,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final pageTheme = pw.PageTheme(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(44),
+      textDirection: isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
+      theme: arabicFont != null
+          ? pw.ThemeData.withFont(base: arabicFont, bold: arabicFont)
+          : null,
+      buildBackground: (ctx) => pw.FullPage(
+        ignoreMargins: true,
+        child: tamperWatermark(),
+      ),
+    );
 
     doc.addPage(
       pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(44),
-        theme: arabicFont != null
-            ? pw.ThemeData.withFont(base: arabicFont, bold: arabicFont)
-            : null,
-        textDirection: isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
+        pageTheme: pageTheme,
+        header: (ctx) => pw.Container(
+          alignment: pw.Alignment.center,
+          margin: const pw.EdgeInsets.only(bottom: 6),
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.grey200,
+            borderRadius: pw.BorderRadius.circular(4),
+          ),
+          child: pw.Text(
+            isAr
+                ? '$platformName — وثيقة موقَّعة رقمياً • $idLabel: $contractId'
+                : '$platformName — Digitally signed document • $idLabel: $contractId',
+            style: pw.TextStyle(
+              font: arabicFont,
+              fontSize: 8,
+              color: PdfColors.grey800,
+            ),
+          ),
+        ),
+        footer: (ctx) => pw.Column(
+          mainAxisSize: pw.MainAxisSize.min,
+          children: [
+            pw.Divider(color: PdfColors.grey400, thickness: 0.5),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  isAr
+                      ? 'صفحة ${ctx.pageNumber} من ${ctx.pagesCount} • أي تعديل يبطل التحقق عبر QR'
+                      : 'Page ${ctx.pageNumber} of ${ctx.pagesCount} • Any edit invalidates QR verification',
+                  style: pw.TextStyle(
+                    font: arabicFont,
+                    fontSize: 7.5,
+                    color: PdfColors.grey700,
+                  ),
+                ),
+                pw.Text(
+                  verifyUrl,
+                  style: pw.TextStyle(
+                    font: arabicFont,
+                    fontSize: 7,
+                    color: PdfColors.blueGrey700,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
         build: (ctx) {
           final out = <pw.Widget>[
             pw.Center(
@@ -146,9 +246,36 @@ class ContractPdfService {
             pw.SizedBox(height: 12),
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text('$idLabel: $contractId', style: small),
-                pw.Text('$dateLabel: $issuedDate', style: small),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        isAr ? 'الهوية: مستخدم مسجّل في المنصة' : 'Identity: registered platform user',
+                        style: small,
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text('$idLabel: $contractId', style: small),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('$dateLabel: $issuedDate', style: small),
+                    if (verifyQrToken != null) ...[
+                      if (verifyQrToken.trim().length >= 8)
+                        pw.Text(
+                          '${isAr ? 'رمز التحقق' : 'Verify ref'}: '
+                          '${verifyQrToken.trim().substring(0, 8)}…',
+                          style: small,
+                        ),
+                    ],
+                  ],
+                ),
               ],
             ),
             pw.Divider(color: PdfColors.grey500, thickness: 0.7),
@@ -220,23 +347,22 @@ class ContractPdfService {
                     sig: ownerSig,
                     small: small,
                     isAr: isAr,
+                    stampFont: arabicFont,
                   ),
                 ),
                 pw.SizedBox(width: 12),
                 pw.Container(
-                  width: 116,
-                  child: pw.Column(
-                    children: [
-                      pw.BarcodeWidget(
-                        barcode: pw.Barcode.qrCode(),
-                        data: verifyUrl,
-                        width: 92,
-                        height: 92,
-                      ),
-                      pw.SizedBox(height: 5),
-                      pw.Text(verifyLabel,
-                          style: small, textAlign: pw.TextAlign.center),
-                    ],
+                  width: 140,
+                  child: pdfReadableQrBlock(
+                    data: verifyUrl,
+                    isAr: isAr,
+                    font: arabicFont,
+                    fontBold: arabicFont,
+                    size: 100,
+                    title: verifyLabel,
+                    hint: isAr
+                        ? 'امسح للتحقق من العقد'
+                        : 'Scan to verify contract',
                   ),
                 ),
                 pw.SizedBox(width: 12),
@@ -247,6 +373,7 @@ class ContractPdfService {
                     sig: marketerSig,
                     small: small,
                     isAr: isAr,
+                    stampFont: arabicFont,
                   ),
                 ),
               ],
@@ -268,6 +395,7 @@ class ContractPdfService {
     required String label,
     required pw.TextStyle small,
     required bool isAr,
+    pw.Font? stampFont,
     pw.ImageProvider? sig,
   }) {
     return pw.Container(
@@ -286,6 +414,17 @@ class ContractPdfService {
             pw.Image(sig, width: 150, height: 64, fit: pw.BoxFit.contain)
           else
             pw.Container(height: 64),
+          pw.SizedBox(height: 6),
+          pw.Text(
+            isAr
+                ? 'تم التحقق والتوقيع عبر ${AppBranding.legalName(isAr: true)}'
+                : 'Verified & signed via ${AppBranding.legalName(isAr: false)}',
+            style: pw.TextStyle(
+              font: stampFont,
+              fontSize: 7.5,
+              color: PdfColors.grey700,
+            ),
+          ),
           pw.Container(height: 0.7, color: PdfColors.grey600),
         ],
       ),
@@ -299,6 +438,7 @@ class ContractPdfService {
     String? contractSnippet,
     Uint8List? marketerSignaturePng,
     Uint8List? ownerSignaturePng,
+    String? verifyQrToken,
   }) {
     return buildListingContractFullPdf(
       contractId: contractId,
@@ -308,6 +448,7 @@ class ContractPdfService {
       marketerSignedAtIso: null,
       marketerSignaturePng: marketerSignaturePng,
       ownerSignaturePng: ownerSignaturePng,
+      verifyQrToken: verifyQrToken,
     );
   }
 

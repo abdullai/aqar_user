@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/network/supabase_interceptor.dart';
+
 import '../core/contracts/marketing_contract_template.dart';
 import '../core/notifications/in_app_notifications.dart';
 import '../core/utils/profile_greeting_from_row.dart';
@@ -98,7 +100,11 @@ class MarketingFlowService {
   ) async {
     if (ids.isEmpty) return const {};
     final uniq = ids.toSet().toList();
-    return UsersProfilesSafeSelect.fetchProfilesByIds(sb, uniq);
+    return UsersProfilesSafeSelect.fetchProfilesByIds(
+      sb,
+      uniq,
+      columnAttempts: UsersProfilesSafeSelect.structuredLegalNameColumns,
+    );
   }
 
   String _contractEntityTypeLabel(Map<String, dynamic>? row, bool isAr) {
@@ -174,24 +180,38 @@ class MarketingFlowService {
     Map<String, dynamic>? payloadJson,
   }) async {
     final uid = _uidOrThrow();
-    final inserted = await sb
-        .from('listing_requests')
-        .insert({
-          'owner_id': uid,
-          'title': title,
-          'city': city,
-          'lat': lat,
-          'lng': lng,
-          'status': 'new',
-          // طلب جديد: إقرار تنظيمي تلقائي (لا يُشترط توثيق مسوّق لطلب الإعلان).
-          'owner_regulatory_ack_at': DateTime.now().toUtc().toIso8601String(),
-          if (payloadJson != null) 'payload_json': payloadJson,
-        })
-        .select('id')
-        .single();
-
-    final map = _asMap(inserted);
-    return map['id'] as String;
+    final payload = <String, dynamic>{
+      'owner_id': uid,
+      'title': title,
+      'city': city,
+      'lat': lat,
+      'lng': lng,
+      'status': 'new',
+      'owner_regulatory_ack_at': DateTime.now().toUtc().toIso8601String(),
+      if (payloadJson != null) 'payload_json': payloadJson,
+    };
+    try {
+      final inserted = await sb
+          .from('listing_requests')
+          .insert(payload)
+          .select('id,listing_request_public_code')
+          .single();
+      return _asMap(inserted)['id'] as String;
+    } catch (e) {
+      final msg = e.toString().toLowerCase();
+      if (msg.contains('listing_request_public_code') &&
+          (msg.contains('column') ||
+              msg.contains('schema') ||
+              msg.contains('could not find'))) {
+        final inserted = await sb
+            .from('listing_requests')
+            .insert(payload)
+            .select('id')
+            .single();
+        return _asMap(inserted)['id'] as String;
+      }
+      rethrow;
+    }
   }
 
   /// إقرار تنظيمي لطلبات قديمة (owner_regulatory_ack_at كان NULL) — مرة واحدة.
@@ -209,7 +229,7 @@ class MarketingFlowService {
     final rows = await sb
         .from('listing_requests')
         .select(
-          'id,title,city,status,created_at,selected_marketer_id,contract_id,permits_due_at',
+          'id,listing_request_public_code,title,city,status,created_at,selected_marketer_id,contract_id,permits_due_at',
         )
         .eq('owner_id', uid)
         .order('created_at', ascending: false);
@@ -221,7 +241,7 @@ class MarketingFlowService {
     final row = await sb
         .from('listing_requests')
         .select(
-          'id,owner_id,title,city,lat,lng,status,workflow_stage,selected_offer_id,selected_marketer_id,contract_id,permits_due_at,created_at',
+          'id,owner_id,listing_request_public_code,title,city,lat,lng,status,workflow_stage,selected_offer_id,selected_marketer_id,contract_id,permits_due_at,created_at',
         )
         .eq('id', requestId)
         .maybeSingle();
@@ -244,7 +264,14 @@ class MarketingFlowService {
         .eq('request_id', requestId)
         .order('created_at', ascending: false);
 
-    return _asListOfMaps(rows);
+    return _asListOfMaps(rows).where((o) {
+      final st = (o['status'] ?? '').toString().toLowerCase().trim();
+      return !const {
+        'owner_rejected',
+        'rejected',
+        'declined',
+      }.contains(st);
+    }).toList();
   }
 
   /// عروض الطلب مع محاولة جلب اسم المسوق من `users_profiles` (آمن إن اختلفت الأعمدة).
@@ -323,29 +350,88 @@ class MarketingFlowService {
           if (requestStatus.isNotEmpty) '_request_status': requestStatus,
           if (selectedOfferId.isNotEmpty) '_selected_offer_id': selectedOfferId,
         };
-      }).where((m) {
-        final st = (m['status'] ?? '').toString().toLowerCase().trim();
-        final requestSt =
-            (m['_request_status'] ?? '').toString().toLowerCase().trim();
-        final selectedOfferId =
-            (m['_selected_offer_id'] ?? '').toString().trim();
-        final offerId = (m['id'] ?? '').toString().trim();
-        if (requestSt == 'completed' &&
-            selectedOfferId.isNotEmpty &&
-            selectedOfferId != offerId) {
-          return false;
+      }).where((m) => _marketOfferRowIsActiveForCart(m)).toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// عروض منتهية/مرفوضة أو فاز بها غيرك — لإظهارها في «صفقاتي» مع إخفاء محلي.
+  Future<List<Map<String, dynamic>>> myArchivedMarketRequestOffers() async {
+    final uid = sb.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) return const [];
+
+    try {
+      dynamic rows;
+      try {
+        rows = await sb
+            .from('market_request_offers')
+            .select(
+              'id,market_request_id,status,created_at,message,price_offer,'
+              'market_property_requests(title,status,selected_offer_id)',
+            )
+            .eq('offerer_id', uid)
+            .order('created_at', ascending: false)
+            .limit(80);
+      } catch (_) {
+        rows = await sb
+            .from('market_request_offers')
+            .select(
+              'id,market_request_id,status,created_at,message,price_offer',
+            )
+            .eq('offerer_id', uid)
+            .order('created_at', ascending: false)
+            .limit(80);
+      }
+
+      final list = _asListOfMaps(rows);
+      return list.map((m) {
+        final nested = m['market_property_requests'];
+        String title = '';
+        String requestStatus = '';
+        String selectedOfferId = '';
+        if (nested is Map) {
+          title = (nested['title'] ?? '').toString().trim();
+          requestStatus = (nested['status'] ?? '').toString().trim();
+          selectedOfferId =
+              (nested['selected_offer_id'] ?? '').toString().trim();
         }
-        return st.isEmpty ||
-            st == 'submitted' ||
-            st == 'pending' ||
-            st == 'accepted' ||
-            st == 'approved' ||
-            st == 'selected' ||
-            st == 'completed';
+        return {
+          ...m,
+          if (title.isNotEmpty) '_request_title': title,
+          if (requestStatus.isNotEmpty) '_request_status': requestStatus,
+          if (selectedOfferId.isNotEmpty) '_selected_offer_id': selectedOfferId,
+        };
+      }).where((m) {
+        // العروض المسحوبة من قِبل المستخدم نفسه: لا تظهر في الأرشيف
+        // (طلب «حذف وإرجاع للرئيسية» في «صفقاتي» يعني الإزالة من السلة).
+        final st = (m['status'] ?? '').toString().toLowerCase().trim();
+        if (st == 'withdrawn') return false;
+        return !_marketOfferRowIsActiveForCart(m);
       }).toList(growable: false);
     } catch (_) {
       return const [];
     }
+  }
+
+  static bool _marketOfferRowIsActiveForCart(Map<String, dynamic> m) {
+    final st = (m['status'] ?? '').toString().toLowerCase().trim();
+    final requestSt =
+        (m['_request_status'] ?? '').toString().toLowerCase().trim();
+    final selectedOfferId = (m['_selected_offer_id'] ?? '').toString().trim();
+    final offerId = (m['id'] ?? '').toString().trim();
+    if (requestSt == 'completed' &&
+        selectedOfferId.isNotEmpty &&
+        selectedOfferId != offerId) {
+      return false;
+    }
+    return st.isEmpty ||
+        st == 'submitted' ||
+        st == 'pending' ||
+        st == 'accepted' ||
+        st == 'approved' ||
+        st == 'selected' ||
+        st == 'completed';
   }
 
   /// صف واحد من `market_property_requests` (مثلاً فتح الطلب من السلة بعد إخفائه عن الرئيسية).
@@ -365,20 +451,20 @@ class MarketingFlowService {
     const selFull = 'id,title,description,purpose,property_type,city,districts,'
         'budget_min,budget_max,area_min_m2,created_at,updated_at,'
         'requester_id,show_requester_name,requester_public_name,'
-        'cover_image_storage_path,request_priority,details_json,status,'
+        'cover_image_storage_path,default_cover_used,request_priority,details_json,status,'
         'request_public_code,edit_count,max_edits,deletion_requested_at,'
         'completed_at,selected_offer_id';
     const selMid = 'id,title,description,purpose,property_type,city,districts,'
         'budget_min,budget_max,area_min_m2,created_at,updated_at,'
         'requester_id,show_requester_name,requester_public_name,'
-        'cover_image_storage_path,request_priority,status,'
+        'cover_image_storage_path,default_cover_used,request_priority,status,'
         'request_public_code,edit_count,max_edits,deletion_requested_at,'
         'completed_at,selected_offer_id';
     const selLegacy =
         'id,title,description,purpose,property_type,city,districts,'
         'budget_min,budget_max,area_min_m2,created_at,updated_at,'
         'requester_id,show_requester_name,requester_public_name,'
-        'cover_image_storage_path,status';
+        'cover_image_storage_path,default_cover_used,status';
 
     Future<Map<String, dynamic>?> one(String cols) async {
       final row = await sb
@@ -418,6 +504,10 @@ class MarketingFlowService {
           rethrow;
         }
       }
+      if (m == null) {
+        // عارض قدّم عرضاً: قد تمنع RLS القراءة المباشرة بعد اختفاء الطلب من الرئيسية.
+        m = await _marketPropertyRequestViaMyOffer(clean);
+      }
       if (m == null) return null;
       final uid = (m['requester_id'] ?? '').toString().trim();
       if (uid.isNotEmpty) {
@@ -429,6 +519,63 @@ class MarketingFlowService {
         if (url.isNotEmpty) m['requester_avatar_url'] = url;
       }
       return m;
+    } catch (_) {
+      try {
+        return await _marketPropertyRequestViaMyOffer(clean);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  /// جلب طلب السوق عبر عرض المستخدم الحالي (تجاوز قيود قراءة الصف العام).
+  Future<Map<String, dynamic>?> _marketPropertyRequestViaMyOffer(
+    String requestId,
+  ) async {
+    final uid = sb.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) return null;
+    const nestedCols =
+        'id,title,description,purpose,property_type,city,districts,'
+        'budget_min,budget_max,area_min_m2,created_at,updated_at,'
+        'requester_id,show_requester_name,requester_public_name,'
+        'cover_image_storage_path,default_cover_used,status,'
+        'request_public_code,selected_offer_id';
+    const nestedLegacy =
+        'id,title,description,purpose,property_type,city,districts,'
+        'budget_min,budget_max,area_min_m2,created_at,updated_at,'
+        'requester_id,show_requester_name,requester_public_name,'
+        'cover_image_storage_path,default_cover_used,status';
+    try {
+      dynamic row;
+      try {
+        row = await sb
+            .from('market_request_offers')
+            .select(
+              'market_request_id,'
+              'market_property_requests($nestedCols)',
+            )
+            .eq('offerer_id', uid)
+            .eq('market_request_id', requestId)
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+      } catch (_) {
+        row = await sb
+            .from('market_request_offers')
+            .select(
+              'market_request_id,'
+              'market_property_requests($nestedLegacy)',
+            )
+            .eq('offerer_id', uid)
+            .eq('market_request_id', requestId)
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+      }
+      if (row is! Map) return null;
+      final nested = row['market_property_requests'];
+      if (nested is! Map) return null;
+      return Map<String, dynamic>.from(nested);
     } catch (_) {
       return null;
     }
@@ -443,6 +590,45 @@ class MarketingFlowService {
         .maybeSingle();
     if (row == null) return null;
     return _asMap(row);
+  }
+
+  /// أحدث طلب تسويق مرتبط بمعرّف معاينة العقار (يخضع لـ RLS: المالك أو المسوّق المرتبط).
+  Future<Map<String, dynamic>?> listingRequestSummaryForPreviewProperty(
+    String previewPropertyId,
+  ) async {
+    final pid = previewPropertyId.trim();
+    if (pid.isEmpty) return null;
+    try {
+      final row = await sb
+          .from('listing_requests')
+          .select(
+            'id,owner_id,workflow_stage,status,contract_id,preview_property_id,'
+            'contract_started_at,selected_marketer_id,selected_offer_id',
+          )
+          .eq('preview_property_id', pid)
+          .order('updated_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      if (row == null) return null;
+      return _asMap(row);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// عدد العروض على الطلب (للمالك عبر RLS).
+  Future<int> ownerOffersCountForRequest(String requestId) async {
+    final rid = requestId.trim();
+    if (rid.isEmpty) return 0;
+    try {
+      final rows = await sb.from('listing_offers').select('id').eq(
+            'request_id',
+            rid,
+          );
+      return _asListOfMaps(rows).length;
+    } catch (_) {
+      return 0;
+    }
   }
 
   /// عقود التسويق المرتبطة بالطلب (للمالك — يعتمد RLS).
@@ -540,17 +726,106 @@ class MarketingFlowService {
     };
   }
 
-  /// أحدث عقار مرتبط بالطلب (رقم الإعلان، السعر، صورة الغلاف).
+  /// حزمة واحدة لشاشة التتبع: للمالك نفس [ownerRequestActivityBundle]،
+  /// وللمسوّق عروضه وعقوده على الطلب فقط.
+  Future<Map<String, dynamic>> getRequestTrackingBundle(
+    String requestId, {
+    required String viewerUserId,
+    bool preferArabicNames = true,
+  }) async {
+    final rid = requestId.trim();
+    final vid = viewerUserId.trim();
+    if (rid.isEmpty || vid.isEmpty) {
+      return {
+        'viewerRole': 'unknown',
+        'request': null,
+        'offers': <Map<String, dynamic>>[],
+        'invites': <Map<String, dynamic>>[],
+        'contracts': <Map<String, dynamic>>[],
+        'linkedProperty': null,
+      };
+    }
+    final req = await ownerListingRequestSnapshot(rid);
+    if (req == null) {
+      return {
+        'viewerRole': 'unknown',
+        'request': null,
+        'offers': <Map<String, dynamic>>[],
+        'invites': <Map<String, dynamic>>[],
+        'contracts': <Map<String, dynamic>>[],
+        'linkedProperty': null,
+      };
+    }
+    final ownerId = (req['owner_id'] ?? '').toString().trim();
+    if (ownerId == vid) {
+      final b = await ownerRequestActivityBundle(rid);
+      return {...b, 'viewerRole': 'owner'};
+    }
+
+    final allOffers = await ownerOffers(rid);
+    final mine = allOffers
+        .where((o) => (o['marketer_id'] ?? '').toString().trim() == vid)
+        .toList();
+    final ids = mine
+        .map((e) => (e['marketer_id'] ?? '').toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+    final byUser = ids.isEmpty
+        ? await _usersProfilesByIds([vid])
+        : await _usersProfilesByIds(ids);
+    final enriched = mine.map((o) {
+      final mid = (o['marketer_id'] ?? '').toString();
+      final prof = byUser[mid];
+      return {
+        ...o,
+        '_marketer_display_name':
+            _marketerDisplayName(prof, preferArabic: preferArabicNames),
+        '_marketer_account_type': (prof?['account_type'] ?? '').toString(),
+        '_marketer_phone': (prof?['phone'] ?? '').toString().trim(),
+      };
+    }).toList();
+
+    final contractsAll = await contractsForListingRequest(rid);
+    final mineContracts = contractsAll
+        .where((c) => (c['marketer_id'] ?? '').toString().trim() == vid)
+        .toList();
+
+    return {
+      'viewerRole': 'marketer',
+      'request': req,
+      'offers': enriched,
+      'contracts': mineContracts,
+      'invites': <Map<String, dynamic>>[],
+      'linkedProperty': await linkedPropertyForListingRequest(rid),
+    };
+  }
+
+  /// أحدث عقار مرتبط بالطلب (رقم الإعلان، السعر، صورة الغلاف، الصك).
   Future<Map<String, dynamic>?> linkedPropertyForListingRequest(
     String requestId,
   ) async {
+    const propSelect =
+        'id,price,listing_public_code,title,city,location,address_line,area,'
+        'property_type,purpose,deed_number,deed_date,deed_issuer,'
+        'default_cover_used,property_images(path,file_name,sort_order)';
     try {
+      final req = await ownerListingRequestSnapshot(requestId);
+      final previewId =
+          (req?['preview_property_id'] ?? '').toString().trim();
+      if (previewId.isNotEmpty) {
+        try {
+          final byPreview = await sb
+              .from('properties')
+              .select(propSelect)
+              .eq('id', previewId)
+              .maybeSingle();
+          if (byPreview != null) return _asMap(byPreview);
+        } catch (_) {}
+      }
       final rows = await sb
           .from('properties')
-          .select(
-            'id,price,listing_public_code,title,city,location,address_line,'
-            'property_images(path,file_name,sort_order)',
-          )
+          .select(propSelect)
           .eq('request_id', requestId)
           .order('created_at', ascending: false)
           .limit(1);
@@ -581,11 +856,7 @@ class MarketingFlowService {
     required String offerId,
     required bool isAr,
   }) async {
-    final req = await sb
-        .from('listing_requests')
-        .select('owner_id,title,city,selected_marketer_id')
-        .eq('id', requestId)
-        .maybeSingle();
+    final req = await _safeFetchRequestForContract(requestId);
     final offer = await sb
         .from('listing_offers')
         .select('price,notes,marketer_id')
@@ -605,6 +876,7 @@ class MarketingFlowService {
           .toString(),
       isAr: isAr,
     );
+    final pricing = _contractListingPricing(req);
     final body = MarketingContractTemplate.build(
       isAr: isAr,
       contractId: contractId,
@@ -619,6 +891,12 @@ class MarketingFlowService {
       marketerLicenseNo: parties.marketerLicenseNo,
       offerNotes: notes.isEmpty ? null : notes,
       signatureDateIso: now.toIso8601String().split('T').first,
+      listingEnteredPrice: pricing.enteredPrice,
+      listingPriceIncludesVat: pricing.priceIncludesVat,
+      listingVatRate: pricing.vatRate,
+      listingCommissionKind: pricing.commissionKind,
+      listingCommissionRate: pricing.commissionRate,
+      listingCommissionAmount: pricing.commissionAmount,
     );
 
     await sb.from('listing_contracts').update({
@@ -645,7 +923,7 @@ class MarketingFlowService {
         .from('listing_contracts')
         .select(
           'id,request_id,owner_id,marketer_id,offer_id,status,'
-          'contract_text,contract_pdf_url,'
+          'contract_text,contract_pdf_url,verify_public_token,'
           'owner_signed_at,marketer_signed_at,sent_at,returned_at,returned_reason,'
           'cancelled_at,cancelled_reason,created_at,updated_at',
         )
@@ -654,6 +932,25 @@ class MarketingFlowService {
 
     if (row == null) return null;
     return _asMap(row);
+  }
+
+  /// يتحقق من تطابق [token] مع عمود `verify_public_token` (للـ QR).
+  Future<bool> assertListingContractVerifyToken({
+    required String contractId,
+    required String token,
+  }) async {
+    try {
+      final res = await sb.rpc(
+        'assert_listing_contract_verify_token',
+        params: {
+          'p_contract_id': contractId,
+          'p_token': token,
+        },
+      );
+      return res == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> sendListingContractToOwner(String contractId) async {
@@ -932,26 +1229,44 @@ class MarketingFlowService {
   // ----------------------------
   /// هل للمسوق الحالي عرض نشط في جولة الطلب الحالية؟
   Future<bool> marketerHasLiveOfferForRequestRound(String requestId) async {
+    final row = await marketerLiveOfferRowForRequestRound(requestId);
+    return row != null;
+  }
+
+  /// صف العرض النشط للمسوّق الحالي في الجولة الحالية (إن وُجد).
+  ///
+  /// يُرجع `null` إن لم يكن للمسوّق عرض ضمن الجولة الحالية، وإلا يُرجع صفّاً
+  /// مختصراً يحوي: `id`, `status`, `round_no`, `created_at`, `last_call_at`,
+  /// `last_call_count`, `expires_at` لاستخدامه في واجهات «إشعار آخر»
+  /// و«حالة عرضك».
+  Future<Map<String, dynamic>?> marketerLiveOfferRowForRequestRound(
+    String requestId,
+  ) async {
     final uid = _uidOrThrow();
     final req = await sb
         .from('listing_requests')
-        .select('marketing_round')
+        .select('marketing_round,selected_marketer_id')
         .eq('id', requestId)
         .maybeSingle();
     final round =
         (req == null) ? 1 : ((req['marketing_round'] as num?)?.toInt() ?? 1);
+
     final rows = await sb
         .from('listing_offers')
-        .select('id,round_no')
+        .select(
+          'id,status,round_no,created_at,updated_at,'
+          'last_call_at,last_call_count,expires_at',
+        )
         .eq('request_id', requestId)
         .eq('marketer_id', uid)
-        .inFilter('status', ['submitted', 'pending']);
+        .inFilter('status', ['submitted', 'pending'])
+        .order('created_at', ascending: false);
     final list = _asListOfMaps(rows);
     for (final o in list) {
       final rno = (o['round_no'] as num?)?.toInt() ?? 1;
-      if (rno == round) return true;
+      if (rno == round) return o;
     }
-    return false;
+    return null;
   }
 
   Future<String> marketerSubmitOffer({
@@ -959,6 +1274,12 @@ class MarketingFlowService {
     required double price,
     required String notes,
   }) async {
+    String parseRes(dynamic res) {
+      if (res is String) return res;
+      if (res is Map && res['id'] != null) return res['id'].toString();
+      return res.toString();
+    }
+
     try {
       final res = await sb.rpc(
         'submit_listing_offer',
@@ -968,25 +1289,50 @@ class MarketingFlowService {
           'p_notes': notes,
         },
       );
-      if (res is String) return res;
-      if (res is Map && res['id'] != null) return res['id'].toString();
-      return res.toString();
-    } catch (_) {
-      final res = await sb.rpc('marketer_submit_offer', params: {
-        'p_request_id': requestId,
-        'p_price': price,
-        'p_notes': notes,
-      });
-      if (res is String) return res;
-      if (res is Map && res['id'] != null) return res['id'].toString();
-      return res.toString();
+      return parseRes(res);
+    } on PostgrestException catch (e) {
+      if (SupabaseRequestInterceptor.isConflict(e)) {
+        throw const ListingOfferConflictException();
+      }
+      try {
+        final res = await sb.rpc('marketer_submit_offer', params: {
+          'p_request_id': requestId,
+          'p_price': price,
+          'p_notes': notes,
+        });
+        return parseRes(res);
+      } on PostgrestException catch (e2) {
+        if (SupabaseRequestInterceptor.isConflict(e2)) {
+          throw const ListingOfferConflictException();
+        }
+        rethrow;
+      }
     }
+  }
+
+  /// سحب عرض المسوّق يدوياً (حالة `withdrawn`) — يُزال من تبويب «عروضي» بعد التحديث.
+  Future<void> marketerWithdrawListingOffer(String offerId) async {
+    final uid = _uidOrThrow();
+    await sb.from('listing_offers').update({
+      'status': 'withdrawn',
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', offerId).eq('marketer_id', uid);
   }
 
   /// قبول عرض (تحديث مرحلة الطلب) دون مسار العقد الكامل.
   Future<void> acceptListingOfferById(String offerId) async {
     // الإشعار يُنشأ داخل RPC `accept_listing_offer` (لا تكرار من Dart).
     await sb.rpc('accept_listing_offer', params: {'p_offer_id': offerId});
+  }
+
+  /// طلبات وُقِفَ فيها المسوّق عن إنشاء العقد بعد ٧٢ ساعة من قبول العرض — يُنفَّذ في الخادم.
+  Future<int> syncExpiredContractCreationWindows() async {
+    try {
+      final raw = await sb.rpc('sync_expired_accepted_offer_contract_windows');
+      if (raw is int) return raw;
+      if (raw is num) return raw.toInt();
+    } catch (_) {}
+    return 0;
   }
 
   /// إعادة طرح طلب تسويق (listing_requests).
@@ -1173,27 +1519,99 @@ class MarketingFlowService {
   // ----------------------------
   Future<List<Map<String, dynamic>>> myInAppNotifications() async {
     final uid = _uidOrThrow();
-    try {
+    const cols =
+        'id,username,user_id,type,title,body,data,created_at,is_read';
+    Future<List<Map<String, dynamic>>> pullByUserId() async {
       final rows = await sb
           .from('in_app_notifications')
-          .select('id,username,type,title,body,data,created_at,is_read')
-          .eq('user_id', uid)
-          .order('created_at', ascending: false);
-      return _asListOfMaps(rows);
-    } catch (_) {
-      final rows = await sb
-          .from('in_app_notifications')
-          .select('id,username,type,title,body,data,created_at')
+          .select(cols)
           .eq('user_id', uid)
           .order('created_at', ascending: false);
       return _asListOfMaps(rows);
     }
+
+    Future<List<Map<String, dynamic>>> pullByUsername(String username) async {
+      final rows = await sb
+          .from('in_app_notifications')
+          .select(cols)
+          .eq('username', username)
+          .order('created_at', ascending: false);
+      return _asListOfMaps(rows);
+    }
+
+    try {
+      var list = await pullByUserId();
+      if (list.isEmpty) {
+        try {
+          final prof = await sb
+              .from('users_profiles')
+              .select('username')
+              .eq('user_id', uid)
+              .maybeSingle();
+          final un = (prof?['username'] ?? '').toString().trim();
+          if (un.isNotEmpty) {
+            list = await pullByUsername(un);
+          }
+        } catch (_) {}
+      } else {
+        // دمج صفوف قديمة مربوطة بـ username فقط (بدون user_id).
+        try {
+          final prof = await sb
+              .from('users_profiles')
+              .select('username')
+              .eq('user_id', uid)
+              .maybeSingle();
+          final un = (prof?['username'] ?? '').toString().trim();
+          if (un.isNotEmpty) {
+            final byName = await pullByUsername(un);
+            final seen = list.map((e) => '${e['id']}').toSet();
+            for (final r in byName) {
+              final id = '${r['id']}';
+              if (id.isNotEmpty && !seen.contains(id)) {
+                list.add(r);
+                seen.add(id);
+              }
+            }
+            list.sort((a, b) {
+              final ta = DateTime.tryParse('${a['created_at']}') ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
+              final tb = DateTime.tryParse('${b['created_at']}') ??
+                  DateTime.fromMillisecondsSinceEpoch(0);
+              return tb.compareTo(ta);
+            });
+          }
+        } catch (_) {}
+      }
+      return list;
+    } catch (_) {
+      try {
+        return await pullByUserId();
+      } catch (_) {
+        final rows = await sb
+            .from('in_app_notifications')
+            .select('id,username,type,title,body,data,created_at')
+            .eq('user_id', uid)
+            .order('created_at', ascending: false);
+        return _asListOfMaps(rows);
+      }
+    }
   }
 
   /// إشعارات صندوق الوارد داخل التطبيق — بدون رموز OTP/تحقق حتى لا تختلط بالعمليات.
-  Future<List<Map<String, dynamic>>> myInAppNotificationsInbox() async {
+  /// [includeArchived] = true لإظهار المؤرشَفة (تبويب «الأرشيف»).
+  /// [archivedOnly] = true لجلب المؤرشَفة فقط.
+  Future<List<Map<String, dynamic>>> myInAppNotificationsInbox({
+    bool includeArchived = false,
+    bool archivedOnly = false,
+  }) async {
     final all = await myInAppNotifications();
-    return all.where((r) => !isSecurityNoiseNotificationRow(r)).toList();
+    return all.where((r) {
+      if (isSecurityNoiseNotificationRow(r)) return false;
+      final arch = isArchivedNotificationRow(r);
+      if (archivedOnly) return arch;
+      if (!includeArchived && arch) return false;
+      return true;
+    }).toList();
   }
 
   static bool isSecurityNoiseNotificationRow(Map<String, dynamic> row) {
@@ -1218,8 +1636,6 @@ class MarketingFlowService {
       final m = Map<String, dynamic>.from(data);
       final dr = (m['deep_route'] ?? '').toString().toLowerCase();
       if (dr.contains('otp') || dr.contains('verify')) return true;
-      final cat = (m['category'] ?? '').toString().toLowerCase();
-      if (cat == 'security' || cat == 'auth') return true;
     }
     final title = (row['title'] ?? '').toString().toLowerCase();
     final body = (row['body'] ?? '').toString().toLowerCase();
@@ -1228,10 +1644,125 @@ class MarketingFlowService {
     return false;
   }
 
+  /// غير مقروء — يدعم bool / null / نص.
+  static bool isUnreadNotificationRow(Map<String, dynamic> row) {
+    final v = row['is_read'];
+    if (v == null) return true;
+    if (v is bool) return !v;
+    final s = v.toString().toLowerCase().trim();
+    return s != 'true' && s != '1';
+  }
+
+  /// يظهر في القائمة الرئيسية (بدون OTP وبدون الأرشيف).
+  static bool isVisibleInMainInbox(Map<String, dynamic> row) {
+    if (isSecurityNoiseNotificationRow(row)) return false;
+    if (isArchivedNotificationRow(row)) return false;
+    return true;
+  }
+
+  /// يُحسب في شارة الجرس (غير مقروء + ظاهر في الصندوق).
+  static bool countsForInboxUnreadBadge(Map<String, dynamic> row) {
+    return isVisibleInMainInbox(row) && isUnreadNotificationRow(row);
+  }
+
   Future<void> deleteInAppNotification(String id) async {
     final sid = id.trim();
     if (sid.isEmpty) return;
     await sb.from('in_app_notifications').delete().eq('id', sid);
+  }
+
+  /// أرشفة إشعار بدون حذفه: نضع علامة `archived: true` داخل `data` JSON. لا يتطلّب
+  /// عموداً مخصّصاً في قاعدة البيانات؛ يتم تصفية الصفوف المؤرشَفة في طبقة العرض.
+  /// عند توفّر عمود `is_archived` لاحقاً يمكن استبدال التحديث بالتوازي.
+  Future<void> archiveInAppNotification(String id) async {
+    final sid = id.trim();
+    if (sid.isEmpty) return;
+    final uid = _uidOrThrow();
+    try {
+      final row = await sb
+          .from('in_app_notifications')
+          .select('data')
+          .eq('id', sid)
+          .eq('user_id', uid)
+          .maybeSingle();
+      Map<String, dynamic> dataMap = const <String, dynamic>{};
+      final raw = row?['data'];
+      if (raw is Map) {
+        dataMap = Map<String, dynamic>.from(raw);
+      } else if (raw is String && raw.trim().isNotEmpty) {
+        try {
+          final j = jsonDecode(raw);
+          if (j is Map) dataMap = Map<String, dynamic>.from(j);
+        } catch (_) {}
+      }
+      dataMap['archived'] = true;
+      dataMap['archived_at'] = DateTime.now().toUtc().toIso8601String();
+      await sb
+          .from('in_app_notifications')
+          .update({
+            'data': dataMap,
+            'is_read': true,
+          })
+          .eq('id', sid)
+          .eq('user_id', uid);
+    } catch (_) {
+      // fallback: على الأقل علِّمه مقروءاً حتى يخرج من عدّاد الجرس.
+      try {
+        await sb
+            .from('in_app_notifications')
+            .update({'is_read': true})
+            .eq('id', sid)
+            .eq('user_id', uid);
+      } catch (_) {}
+    }
+  }
+
+  /// إلغاء الأرشفة (إعادة الإشعار للظهور في «الكل»).
+  Future<void> unarchiveInAppNotification(String id) async {
+    final sid = id.trim();
+    if (sid.isEmpty) return;
+    final uid = _uidOrThrow();
+    try {
+      final row = await sb
+          .from('in_app_notifications')
+          .select('data')
+          .eq('id', sid)
+          .eq('user_id', uid)
+          .maybeSingle();
+      Map<String, dynamic> dataMap = const <String, dynamic>{};
+      final raw = row?['data'];
+      if (raw is Map) {
+        dataMap = Map<String, dynamic>.from(raw);
+      } else if (raw is String && raw.trim().isNotEmpty) {
+        try {
+          final j = jsonDecode(raw);
+          if (j is Map) dataMap = Map<String, dynamic>.from(j);
+        } catch (_) {}
+      }
+      dataMap.remove('archived');
+      dataMap.remove('archived_at');
+      await sb
+          .from('in_app_notifications')
+          .update({'data': dataMap})
+          .eq('id', sid)
+          .eq('user_id', uid);
+    } catch (_) {}
+  }
+
+  /// قاعدة موحَّدة لاكتشاف الإشعارات المؤرشَفة لاستخدامها في طبقات الفلترة.
+  static bool isArchivedNotificationRow(Map<String, dynamic> row) {
+    dynamic data = row['data'];
+    if (data is String && data.trim().isNotEmpty) {
+      try {
+        data = jsonDecode(data);
+      } catch (_) {}
+    }
+    if (data is Map) {
+      final v = data['archived'];
+      if (v == true) return true;
+      if (v is String && v.toLowerCase() == 'true') return true;
+    }
+    return false;
   }
 
   Future<void> markNotificationRead(String id) async {
@@ -1309,12 +1840,12 @@ class MarketingFlowService {
       final list = _asListOfMaps(rows);
       var n = 0;
       for (final r in list) {
-        if (!isSecurityNoiseNotificationRow(r)) n++;
+        if (countsForInboxUnreadBadge(r)) n++;
       }
       return n;
     } catch (_) {
       final inbox = await myInAppNotificationsInbox();
-      return inbox.length;
+      return inbox.where(countsForInboxUnreadBadge).length;
     }
   }
 
@@ -1413,6 +1944,18 @@ class MarketingFlowService {
     } catch (_) {}
   }
 
+  /// السماح لمسوّق مرفوض بإعادة رؤية الطلب في «السوق» عند تفعيل الخيار من واجهة المالك.
+  Future<void> ownerSetAllowPreviousMarketersRetry({
+    required String requestId,
+    required bool allow,
+  }) async {
+    final uid = _uidOrThrow();
+    await sb.from('listing_requests').update({
+      'allow_previous_marketers_retry': allow,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    }).eq('id', requestId).eq('owner_id', uid);
+  }
+
   /// نص العقد للمعاينة قبل الموافقة (بدون استدعاء `owner_select_offer`).
   Future<String> ownerMarketingContractDraftText({
     required String requestId,
@@ -1421,11 +1964,7 @@ class MarketingFlowService {
   }) async {
     final uid = _uidOrThrow();
 
-    final req = await sb
-        .from('listing_requests')
-        .select('owner_id,title,city')
-        .eq('id', requestId)
-        .maybeSingle();
+    final req = await _safeFetchRequestForContract(requestId);
     if (req == null) throw Exception('Request not found');
     if ((req['owner_id'] ?? '').toString().trim() != uid) {
       throw Exception('Not allowed');
@@ -1458,6 +1997,7 @@ class MarketingFlowService {
       marketerId: (offer['marketer_id'] ?? '').toString(),
       isAr: isAr,
     );
+    final pricing = _contractListingPricing(req);
 
     return MarketingContractTemplate.build(
       isAr: isAr,
@@ -1472,6 +2012,12 @@ class MarketingFlowService {
       marketerLicenseNo: parties.marketerLicenseNo,
       offerNotes: notes.isEmpty ? null : notes,
       signatureDateIso: dateStr,
+      listingEnteredPrice: pricing.enteredPrice,
+      listingPriceIncludesVat: pricing.priceIncludesVat,
+      listingVatRate: pricing.vatRate,
+      listingCommissionKind: pricing.commissionKind,
+      listingCommissionRate: pricing.commissionRate,
+      listingCommissionAmount: pricing.commissionAmount,
     );
   }
 
@@ -1582,11 +2128,8 @@ class MarketingFlowService {
       throw Exception('Invalid marketer on offer');
     }
 
-    final req = await sb
-        .from('listing_requests')
-        .select('owner_id,title,city,contract_id')
-        .eq('id', requestId)
-        .maybeSingle();
+    final req = await _safeFetchRequestForContract(requestId,
+        extraColumns: const ['contract_id']);
     if (req == null) throw Exception('Request not found');
     if ((req['owner_id'] ?? '').toString().trim() != uid) {
       throw Exception('Not allowed');
@@ -1624,6 +2167,7 @@ class MarketingFlowService {
       marketerId: marketerId,
       isAr: isAr,
     );
+    final pricing = _contractListingPricing(req);
 
     var contractId = (req['contract_id'] ?? '').toString().trim();
     var body = MarketingContractTemplate.build(
@@ -1640,6 +2184,12 @@ class MarketingFlowService {
       marketerLicenseNo: parties.marketerLicenseNo,
       offerNotes: notes.isEmpty ? null : notes,
       signatureDateIso: dateStr,
+      listingEnteredPrice: pricing.enteredPrice,
+      listingPriceIncludesVat: pricing.priceIncludesVat,
+      listingVatRate: pricing.vatRate,
+      listingCommissionKind: pricing.commissionKind,
+      listingCommissionRate: pricing.commissionRate,
+      listingCommissionAmount: pricing.commissionAmount,
     );
 
     if (contractId.isNotEmpty) {
@@ -1681,6 +2231,12 @@ class MarketingFlowService {
         marketerLicenseNo: parties.marketerLicenseNo,
         offerNotes: notes.isEmpty ? null : notes,
         signatureDateIso: dateStr,
+        listingEnteredPrice: pricing.enteredPrice,
+        listingPriceIncludesVat: pricing.priceIncludesVat,
+        listingVatRate: pricing.vatRate,
+        listingCommissionKind: pricing.commissionKind,
+        listingCommissionRate: pricing.commissionRate,
+        listingCommissionAmount: pricing.commissionAmount,
       );
       await sb.from('listing_contracts').update({
         'contract_text': body,
@@ -1718,6 +2274,7 @@ class MarketingFlowService {
       // لا تستخدم القيمة "contract" هنا حتى لا تُخلط مع enum قاعدة البيانات عند أي مسار خادم.
       'status': ListingStatus.pendingMarketer,
       'main_tab': 'my_ads',
+      WorkflowNotificationKeys.myAdsSubTab: '2',
       WorkflowNotificationKeys.deepRoute: InAppDeepRoutes.listingRequestStatus,
       'title_ar': 'عقد تسويق بانتظار توقيعك',
       'title_en': 'Marketing contract awaiting your signature',
@@ -1759,7 +2316,7 @@ class MarketingFlowService {
     }
   }
 
-  Future<void> sendListingContractMessage({
+  Future<Map<String, dynamic>?> sendListingContractMessage({
     required String contractId,
     required String body,
     String messageType = 'chat',
@@ -1767,25 +2324,33 @@ class MarketingFlowService {
     final uid = _uidOrThrow();
     final cid = contractId.trim();
     final t = body.trim();
-    if (cid.isEmpty || t.isEmpty) return;
-    await sb.from('listing_contract_messages').insert({
-      'contract_id': cid,
-      'sender_id': uid,
-      'body': t,
-      'message_type': messageType,
-    });
+    if (cid.isEmpty || t.isEmpty) return null;
+    Map<String, dynamic>? inserted;
+    try {
+      final row = await sb.from('listing_contract_messages').insert({
+        'contract_id': cid,
+        'sender_id': uid,
+        'body': t,
+        'message_type': messageType,
+      }).select('id, contract_id, sender_id, body, message_type, created_at').maybeSingle();
+      if (row != null) {
+        inserted = Map<String, dynamic>.from(row);
+      }
+    } catch (_) {
+      return null;
+    }
     try {
       final c = await sb
           .from('listing_contracts')
           .select('owner_id,marketer_id,request_id')
           .eq('id', cid)
           .maybeSingle();
-      if (c == null) return;
+      if (c == null) return inserted;
       final oid = (c['owner_id'] ?? '').toString().trim();
       final mid = (c['marketer_id'] ?? '').toString().trim();
       final rid = (c['request_id'] ?? '').toString().trim();
       final target = uid == oid ? mid : oid;
-      if (target.isEmpty || rid.isEmpty) return;
+      if (target.isEmpty || rid.isEmpty) return inserted;
       final typeLabel = messageType == 'chat' ? 'chat' : messageType;
       await InAppNotificationWriter.insert(
         sb,
@@ -1808,6 +2373,7 @@ class MarketingFlowService {
         entityId: cid,
       );
     } catch (_) {}
+    return inserted;
   }
 
   Future<void> notifyMarketerOfferAccepted({
@@ -2051,4 +2617,128 @@ class MarketingFlowService {
       );
     }
   }
+
+  // ----------------------------
+  // Contract helpers (pricing for v9 invoice section)
+  // ----------------------------
+  //
+  // — `_safeFetchRequestForContract`: يحاول جلب أعمدة الفوترة الجديدة (v9) من
+  //   `listing_requests`. إن كان الترحيل لم يطبَّق على البيئة (الأعمدة غير
+  //   موجودة) يعود لاختيار الأعمدة الأساسية فقط حتى لا ينكسر بناء العقد.
+  // — `_contractListingPricing`: يستخرج قيم الفوترة من الصف بشكل آمن مع قيم
+  //   افتراضية متوافقة مع السلوك القديم.
+  Future<Map<String, dynamic>?> _safeFetchRequestForContract(
+    String requestId, {
+    List<String> extraColumns = const [],
+  }) async {
+    const baseCols = [
+      'owner_id',
+      'title',
+      'city',
+      'selected_marketer_id',
+    ];
+    const pricingCols = [
+      'price',
+      'price_includes_vat',
+      'vat_rate',
+      'marketing_commission_kind',
+      'marketing_commission_rate',
+      'marketing_commission_amount',
+      'listing_guidance',
+    ];
+    final fullSel =
+        {...baseCols, ...extraColumns, ...pricingCols}.join(',');
+    try {
+      return await sb
+          .from('listing_requests')
+          .select(fullSel)
+          .eq('id', requestId)
+          .maybeSingle();
+    } catch (_) {
+      final fallbackSel = {...baseCols, ...extraColumns}.join(',');
+      try {
+        return await sb
+            .from('listing_requests')
+            .select(fallbackSel)
+            .eq('id', requestId)
+            .maybeSingle();
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  _ContractListingPricing _contractListingPricing(Map<String, dynamic> req) {
+    double? toD(Object? v) {
+      if (v is num) return v.toDouble();
+      if (v is String) {
+        final s = v.trim();
+        if (s.isEmpty) return null;
+        return double.tryParse(s);
+      }
+      return null;
+    }
+
+    bool? toB(Object? v) {
+      if (v is bool) return v;
+      if (v is num) return v != 0;
+      if (v is String) {
+        final s = v.trim().toLowerCase();
+        if (s.isEmpty) return null;
+        if (s == 'true' || s == '1' || s == 'yes') return true;
+        if (s == 'false' || s == '0' || s == 'no') return false;
+      }
+      return null;
+    }
+
+    // أولاً نقرأ من الأعمدة المخصّصة، ثم من JSONB كنسخة احتياطية.
+    final guidance = req['listing_guidance'];
+    final guidanceMap = guidance is Map
+        ? Map<String, dynamic>.from(guidance)
+        : <String, dynamic>{};
+    final pricingMap = guidanceMap['pricing'] is Map
+        ? Map<String, dynamic>.from(guidanceMap['pricing'] as Map)
+        : const <String, dynamic>{};
+
+    final entered = toD(req['price']) ?? toD(pricingMap['entered_price']);
+    final inclVat = toB(req['price_includes_vat']) ??
+        toB(pricingMap['price_includes_vat']);
+    final vRate = toD(req['vat_rate']) ?? toD(pricingMap['vat_rate']);
+    final kind = (req['marketing_commission_kind'] ??
+            pricingMap['marketing_commission_kind'] ??
+            'none')
+        .toString();
+    final cRate = toD(req['marketing_commission_rate']) ??
+        toD(pricingMap['marketing_commission_rate']);
+    final cAmt = toD(req['marketing_commission_amount']) ??
+        toD(pricingMap['marketing_commission_amount']);
+
+    return _ContractListingPricing(
+      enteredPrice: entered,
+      priceIncludesVat: inclVat,
+      vatRate: vRate,
+      commissionKind: kind,
+      commissionRate: cRate,
+      commissionAmount: cAmt,
+    );
+  }
+}
+
+/// قيم الفوترة الخفيفة المُستخرَجة من صف الطلب لتوليد قسم الفاتورة في العقد.
+class _ContractListingPricing {
+  final double? enteredPrice;
+  final bool? priceIncludesVat;
+  final double? vatRate;
+  final String commissionKind;
+  final double? commissionRate;
+  final double? commissionAmount;
+
+  const _ContractListingPricing({
+    required this.enteredPrice,
+    required this.priceIncludesVat,
+    required this.vatRate,
+    required this.commissionKind,
+    required this.commissionRate,
+    required this.commissionAmount,
+  });
 }

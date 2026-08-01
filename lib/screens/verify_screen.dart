@@ -18,10 +18,14 @@ import '../core/security/screen_protection.dart';
 
 import 'package:provider/provider.dart';
 import '../core/session/app_session.dart';
+import '../core/auth/auth_signed_out_navigation_guard.dart';
+import '../core/auth/auth_local_sign_out.dart';
 import '../core/theme/app_appearance_bridge.dart';
 import '../core/session/return_after_auth.dart';
+import '../core/session/web_auth_tab_guard.dart';
 
 import '../core/config/app_config.dart';
+import '../main.dart' show suspendAutoLock;
 
 import '../services/fast_login_service.dart';
 import '../services/notification_service.dart';
@@ -30,8 +34,14 @@ import '../services/profile_compliance_service.dart';
 import '../services/connectivity_guard.dart';
 import '../services/user_install_session_service.dart';
 import '../services/user_session_coordination_service.dart';
+import '../core/navigation/post_auth_navigation.dart';
+import '../routes.dart';
+import '../services/compliance_audit_service.dart';
+import '../services/session_tracking_service.dart';
 import '../core/input/input_normalizers.dart';
+import '../core/auth/login_security_db.dart';
 import '../core/utils/profile_greeting_from_row.dart';
+import '../core/utils/compound_display_name.dart';
 import '../core/haptics/app_haptics.dart';
 
 import 'package:sms_autofill/sms_autofill.dart';
@@ -40,6 +50,7 @@ import '../core/notifications/app_sound_coordinator.dart';
 
 import '../widgets/app_logo_loading.dart';
 import '../widgets/field_group_frame.dart';
+import '../theme.dart' show AqarAuthScrollBehavior;
 
 enum OtpSource { inApp, dev }
 
@@ -87,7 +98,7 @@ class _VerifyScreenState extends State<VerifyScreen>
   late final Animation<double> _pulseAnimation;
 
   // ✅ NEXT ROUTE
-  String _nextRoute = '/userDashboard';
+  String _nextRoute = kIsWeb ? '/' : '/userDashboard';
   Map<String, dynamic> _nextArgs = <String, dynamic>{};
 
   String _fullName = '';
@@ -98,6 +109,7 @@ class _VerifyScreenState extends State<VerifyScreen>
   /// يطابق users_profiles.username وقيمة in_app_notifications.username بعد RPC التوحيد.
   String _profileUsername = '';
   String _deviceId = '';
+  String? _avatarUrl;
 
   bool _argsRead = false;
   bool _expectedFromArgs = false;
@@ -128,11 +140,6 @@ class _VerifyScreenState extends State<VerifyScreen>
   String? _restApiFailureHint;
 
   StreamSubscription<String>? _smsCodeSub;
-
-  // ✅ Cache للتحقق من صحة الرمز
-  String? _lastValidCode;
-  DateTime? _lastValidCodeTime;
-  static const Duration _validCodeCacheDuration = Duration(minutes: 2);
 
   String get _notifUsername => _profileUsername.trim().isNotEmpty
       ? _profileUsername.trim()
@@ -182,7 +189,18 @@ class _VerifyScreenState extends State<VerifyScreen>
   @override
   void initState() {
     super.initState();
+    // Prevent web auto-lock/sign-out during OTP or Chrome password checkup.
+    suspendAutoLock.value = true;
     WidgetsBinding.instance.addObserver(this);
+
+    _otpFocus.onKeyEvent = (node, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter;
+      if (!isEnter) return KeyEventResult.ignored;
+      unawaited(_pasteOtpFromClipboard());
+      return KeyEventResult.handled;
+    };
 
     // ✅ تهيئة Animation
     _pulseController = AnimationController(
@@ -207,7 +225,7 @@ class _VerifyScreenState extends State<VerifyScreen>
   Future<void> _boot({bool forceRefetch = false}) async {
     await Future.wait([
       _enableScreenProtection(),
-      _safeAsync(() => NotificationService.init()),
+      if (!kIsWeb) _safeAsync(() => NotificationService.init()),
     ]);
 
     await _resolveProfileUsername();
@@ -228,32 +246,34 @@ class _VerifyScreenState extends State<VerifyScreen>
     }
 
     await _checkLockedStatusAndExitIfNeeded();
-    await _loadProfileFromDbIfNeeded();
     _listenOtpNotifications();
     unawaited(_startSmsUserConsentListen());
-    await _loadPersistedTimerStateOnly();
-    _startOrResumeTimer();
-
-    if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
-      onIncomingOtp(
-        _expectedCode,
-        source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
-      );
-      return;
-    }
-
-    if (forceRefetch) {
-      await _requestOtpFromServer(force: true);
+    // اطلب الرمز فوراً بالتوازي مع تحميل الملف — لا تنتظر الترحيب.
+    final otpKickoff = () async {
+      if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
+        onIncomingOtp(
+          _expectedCode,
+          source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
+        );
+        return;
+      }
+      await _requestOtpFromServer(force: forceRefetch);
       await _waitForFirstOtpOrFetchFallback();
+    }();
+    await Future.wait([
+      _loadProfileFromDbIfNeeded(),
+      _loadPersistedTimerStateOnly(),
+      otpKickoff,
+    ]);
+    _startOrResumeTimer();
+    if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
       return;
     }
-
-    await _requestOtpFromServer(force: false);
-    await _waitForFirstOtpOrFetchFallback();
   }
 
   @override
   void dispose() {
+    suspendAutoLock.value = false;
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _removeBanner();
@@ -292,12 +312,6 @@ class _VerifyScreenState extends State<VerifyScreen>
   Future<void> _safeAsync(Future<dynamic> Function() fn) async {
     try {
       await fn();
-    } catch (_) {}
-  }
-
-  void _safeVoid(void Function() fn) {
-    try {
-      fn();
     } catch (_) {}
   }
 
@@ -358,6 +372,15 @@ class _VerifyScreenState extends State<VerifyScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!mounted) return;
 
+    // Web: Chrome Password Manager sets inactive briefly — keep session, skip mask.
+    if (kIsWeb) {
+      if (state == AppLifecycleState.resumed) {
+        setState(() => _privacyMask = false);
+        _startOrResumeTimer(recalcOnly: true);
+      }
+      return;
+    }
+
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
       setState(() => _privacyMask = true);
@@ -377,7 +400,9 @@ class _VerifyScreenState extends State<VerifyScreen>
     _expectedFromArgs = fromArgs.isNotEmpty;
     _expectedCode = _expectedFromArgs ? fromArgs : '';
 
-    _nextRoute = (args['next'] as String?) ?? _nextRoute;
+    _nextRoute = PostAuthNavigation.resolveDashboardRoute(
+      (args['next'] as String?) ?? _nextRoute,
+    );
 
     final na = args['nextArgs'];
     _nextArgs =
@@ -409,9 +434,7 @@ class _VerifyScreenState extends State<VerifyScreen>
         if (code != null && timeStr != null) {
           final time = DateTime.tryParse(timeStr);
           if (time != null &&
-              DateTime.now().difference(time) < _validCodeCacheDuration) {
-            _lastValidCode = code;
-            _lastValidCodeTime = time;
+              DateTime.now().difference(time) < const Duration(minutes: 2)) {
             return;
           }
         }
@@ -428,8 +451,6 @@ class _VerifyScreenState extends State<VerifyScreen>
         await prefs.setString('last_valid_otp_$keyU', code);
         await prefs.setString('last_valid_otp_time_$keyU', now);
       }
-      _lastValidCode = code;
-      _lastValidCodeTime = DateTime.now();
     } catch (_) {}
   }
 
@@ -758,7 +779,7 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (!await _ensureInternetOrShow()) return;
     if (_expectedCode.trim().isNotEmpty) return;
 
-    const delays = <int>[250, 650, 1200, 1800, 2600];
+    const delays = <int>[80, 200, 450, 800, 1300];
     for (final ms in delays) {
       await Future<void>.delayed(Duration(milliseconds: ms));
       if (!mounted) return;
@@ -809,6 +830,8 @@ class _VerifyScreenState extends State<VerifyScreen>
 
   Future<void> _fetchLatestOtpNotificationAndApply() async {
     try {
+      // بلا جلسة: لا تطلب الجدول المحمي (كان يظهر 401 على /login بعد سقوط الجلسة).
+      if (Supabase.instance.client.auth.currentSession == null) return;
       // الاعتماد على RLS: الصفوف المرئية فقط هي التي username يطابق users_profiles.
       // تجنّب .eq('username', …) لأن أي اختلاف بسيط عن القيمة المخزنة يعيد صفراً ولا يظهر الرمز.
       final rows = await Supabase.instance.client
@@ -869,7 +892,8 @@ class _VerifyScreenState extends State<VerifyScreen>
       return;
     }
 
-    for (var i = 0; i < candidates.length; i++) {
+    final listenCount = kIsWeb ? 1 : candidates.length;
+    for (var i = 0; i < listenCount; i++) {
       final u = candidates[i];
       final ch = Supabase.instance.client
           .channel('verify_otp_inserts_${u}_${hashCode}_$i')
@@ -1263,7 +1287,7 @@ class _VerifyScreenState extends State<VerifyScreen>
   }
 
   void _applyIncomingCode(String text, {required bool fromUserAction}) {
-    final only = text.replaceAll(RegExp(r'\D'), '');
+    final only = digitsOnly(normalizeAsciiDigits(text));
     if (only.isEmpty) return;
 
     final raw = only.length >= _otpLen ? only.substring(0, _otpLen) : only;
@@ -1371,10 +1395,12 @@ class _VerifyScreenState extends State<VerifyScreen>
           if (t.isEmpty || tried.contains(t)) return false;
           tried.add(t);
           try {
-            final v = await Supabase.instance.client.rpc(
-              'verify_inapp_otp',
-              params: {'p_username': t, 'p_code': c},
-            );
+            final v = await Supabase.instance.client
+                .rpc(
+                  'verify_inapp_otp',
+                  params: {'p_username': t, 'p_code': c},
+                )
+                .timeout(const Duration(seconds: 12));
             return (v is bool) ? v : (v?.toString() == 'true');
           } catch (_) {
             return false;
@@ -1461,45 +1487,18 @@ class _VerifyScreenState extends State<VerifyScreen>
       await prefs.setBool(AppConfig.prefGuestModeKey, false);
       await prefs.setString(AppConfig.prefEntryModeKey, 'user');
       await prefs.setBool(_otpVerifiedKey(uid), true);
+      if (kIsWeb) {
+        await WebAuthTabGuard.establishBinding(uid);
+      }
 
-      await _safeAsync(() => NotificationService.clearOtpNotifications());
+      unawaited(ComplianceAuditService.instance.log('otp.verified', {
+        'source': 'verify_screen',
+      }));
 
       if (!mounted) return;
       final appSession = context.read<AppSession>();
       await appSession.setUser(uid);
       appSession.schedulePostAuthHomeWarmup();
-
-      await ProfileComplianceService.tryUploadPendingSignupSignature(sb);
-
-      final deviceSlot =
-          await UserInstallSessionService.registerDeviceSlotAfterSignIn();
-      if (!mounted) return;
-      if (!deviceSlot.ok && deviceSlot.code == 'device_limit') {
-        Navigator.of(context).pushNamedAndRemoveUntil(
-          '/deviceManagement',
-          (r) => false,
-          arguments: <String, dynamic>{'mandatory': true},
-        );
-        return;
-      }
-
-      final sessionHints =
-          await UserInstallSessionService.sessionHintsForBump();
-      await UserSessionCoordinationService.afterSignIn(
-        uid,
-        cityHint: sessionHints.city,
-        deviceLabel: sessionHints.label,
-      );
-
-      try {
-        final display = _greetingDisplayName();
-
-        await FastLoginService.saveUserContext(
-          uid: uid,
-          usernameNationalId: _username.trim(),
-          displayName: display.isNotEmpty ? display : null,
-        );
-      } catch (_) {}
 
       _timer?.cancel();
       _removeBanner();
@@ -1509,7 +1508,7 @@ class _VerifyScreenState extends State<VerifyScreen>
       var route = _nextRoute;
       Map<String, dynamic>? lockedArgs;
       if (tuple != null) {
-        route = tuple.route;
+        route = PostAuthNavigation.resolveDashboardRoute(tuple.route);
         lockedArgs = ReturnAfterAuth.decodeArgsJson(tuple.argsJson);
       }
 
@@ -1519,19 +1518,97 @@ class _VerifyScreenState extends State<VerifyScreen>
         'username': _username,
         'deviceId': _deviceId,
         'fullName': _fullName,
-        'lastLogin': _lastLogin,
       };
 
       if (!mounted) return;
 
-      Navigator.of(context).pushNamedAndRemoveUntil(
+      // فتح اللوحة فوراً — باقي العمل (جهاز، تتبع، إشعارات) في الخلفية
+      // حتى لا تتجمّد شاشة الرمز أو المتصفح بالكامل على Chrome/Edge.
+      await PostAuthNavigation.openRouteReplacingStack(
+        context,
         route,
-        (r) => false,
         arguments: nextArgs,
       );
+
+      unawaited(_finishPostOtpBackgroundWork(
+        uid: uid,
+        sb: sb,
+        username: _username.trim(),
+        displayName: _greetingDisplayName(),
+      ));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  /// بعد الانتقال للوحة — لا يُعطّل واجهة رمز التحقق أو المتصفح.
+  Future<void> _finishPostOtpBackgroundWork({
+    required String uid,
+    required SupabaseClient sb,
+    required String username,
+    required String displayName,
+  }) async {
+    try {
+      await _safeAsync(
+        () => NotificationService.clearOtpNotifications(),
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {}
+
+    try {
+      await ProfileComplianceService.tryUploadPendingSignupSignature(sb)
+          .timeout(const Duration(seconds: 12));
+    } catch (_) {}
+
+    try {
+      if (!kIsWeb) {
+        final deviceSlot = await UserInstallSessionService
+            .registerDeviceSlotAfterSignIn()
+            .timeout(const Duration(seconds: 12));
+        if (!deviceSlot.ok && deviceSlot.code == 'device_limit') {
+          final ctx =
+              UserSessionCoordinationService.navigatorKey?.currentContext;
+          if (ctx != null && ctx.mounted) {
+            await PostAuthNavigation.openRouteReplacingStack(
+              ctx,
+              AppRoutes.deviceManagement,
+              arguments: <String, dynamic>{'mandatory': true},
+            );
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    try {
+      final sessionHints =
+          await UserInstallSessionService.sessionHintsForBump()
+              .timeout(const Duration(seconds: 8));
+      await UserSessionCoordinationService.afterSignIn(
+        uid,
+        cityHint: sessionHints.city,
+        deviceLabel: sessionHints.label,
+      ).timeout(const Duration(seconds: 10));
+    } catch (_) {}
+
+    try {
+      await SessionTrackingService.recordLoginStart(
+        sb,
+        loginMethod: 'otp',
+      ).timeout(const Duration(seconds: 8));
+    } catch (_) {}
+
+    try {
+      await LoginSecurityDb.recordVerifiedLoginAfterOtp(sb)
+          .timeout(const Duration(seconds: 8));
+    } catch (_) {}
+
+    try {
+      await FastLoginService.saveUserContext(
+        uid: uid,
+        usernameNationalId: username,
+        displayName: displayName.isNotEmpty ? displayName : null,
+      ).timeout(const Duration(seconds: 6));
+    } catch (_) {}
   }
 
   Future<void> _resendCode() async {
@@ -1580,6 +1657,9 @@ class _VerifyScreenState extends State<VerifyScreen>
     }
 
     if (signOut) {
+      if (!mounted) return;
+      final appSession = context.read<AppSession>();
+      AuthSignedOutNavigationGuard.enter();
       try {
         final sb = Supabase.instance.client;
         final uid = sb.auth.currentUser?.id;
@@ -1587,21 +1667,35 @@ class _VerifyScreenState extends State<VerifyScreen>
           final prefs = await SharedPreferences.getInstance();
           await prefs.remove(_otpVerifiedKey(uid));
         }
-        await sb.auth.signOut();
+        if (!mounted) {
+          AuthSignedOutNavigationGuard.scheduleLeave();
+          return;
+        }
+        // يُعلَم وضع الضيف في التخزين قبل انتهاء الجلسة حتى لا يتعارض مستمع signedOut مع التوجيه.
+        try {
+          await appSession.setGuest();
+        } catch (_) {}
+
+        try {
+          await AuthLocalSignOut.signOutLocal(sb);
+        } catch (_) {}
       } catch (_) {}
 
-      try {
-        await context.read<AppSession>().setGuest();
-      } catch (_) {}
       unawaited(syncSessionAppearanceNotifiers?.call() ?? Future.value());
     }
 
-    if (!mounted) return;
+    if (!mounted) {
+      if (signOut) AuthSignedOutNavigationGuard.scheduleLeave();
+      return;
+    }
 
     Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
       '/login',
       (r) => false,
     );
+    if (signOut) {
+      AuthSignedOutNavigationGuard.scheduleLeave();
+    }
   }
 
   Future<void> _resolveProfileUsername() async {
@@ -1638,10 +1732,7 @@ class _VerifyScreenState extends State<VerifyScreen>
 
   Future<void> _loadProfileFromDbIfNeeded() async {
     Map<String, dynamic>? row;
-    const selectCols = 'username,'
-        'first_name_ar,second_name_ar,third_name_ar,fourth_name_ar,'
-        'first_name_en,second_name_en,third_name_en,fourth_name_en,'
-        'full_name_ar,full_name_en,full_name,office_name,last_login_at';
+    const selectCols = LoginSecurityDb.usersProfilesSelectForVerifyGreeting;
 
     try {
       final sb = Supabase.instance.client;
@@ -1705,21 +1796,36 @@ class _VerifyScreenState extends State<VerifyScreen>
         if (last != null) {
           _lastLogin = _latestOf(_lastLogin, last);
         }
+        final av = (row['avatar_url'] ?? '').toString().trim();
+        if (av.isNotEmpty) _avatarUrl = av;
       });
+      if (display != null && display.trim().isNotEmpty) {
+        unawaited(_persistRememberDisplayNameIfNeeded(display.trim()));
+      }
     }
 
     await _applyAuthUserFallback();
   }
 
-  /// عند عدم وجود users_profiles أو فشل RLS: الاسم وآخر دخول من جلسة Auth.
+  Future<void> _persistRememberDisplayNameIfNeeded(String displayName) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final remember = prefs.getBool('rememberMe') ?? false;
+      if (!remember) return;
+      final normalized = CompoundDisplayName.normalize(displayName);
+      if (normalized.isEmpty) return;
+      await prefs.setString('rememberDisplayName', normalized);
+    } catch (_) {}
+  }
+
+  /// عند عدم وجود users_profiles أو فشل RLS: الاسم من جلسة Auth فقط.
+  /// لا نستخدم [User.lastSignInAt] لسطر «آخر دخول» لأنه يعكس جلسة كلمة المرور الحالية قبل إكمال OTP.
   Future<void> _applyAuthUserFallback() async {
     final u = Supabase.instance.client.auth.currentUser;
     if (u == null || !mounted) return;
 
     final metaName =
         ProfileGreetingFromRow.displayNameFromAuthMetadata(u.userMetadata);
-    final lastAuth =
-        ProfileGreetingFromRow.lastSignInFromAuthString(u.lastSignInAt);
 
     setState(() {
       if (metaName != null && metaName.isNotEmpty) {
@@ -1729,9 +1835,6 @@ class _VerifyScreenState extends State<VerifyScreen>
             _fullName.isEmpty || _looksLikeNumericLoginIdentifier(_fullName);
         if (badDisplay) _displayName = metaName;
         if (badFull) _fullName = metaName;
-      }
-      if (lastAuth != null) {
-        _lastLogin = _latestOf(_lastLogin, lastAuth);
       }
     });
   }
@@ -1749,26 +1852,51 @@ class _VerifyScreenState extends State<VerifyScreen>
     required Color color,
     required double fontSize,
   }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: color),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: AlignmentDirectional.centerStart,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: (fontSize + 4).clamp(14.0, 18.0), color: color),
+          const SizedBox(width: 8),
+          Text(
             text,
-            softWrap: true,
+            maxLines: 1,
+            softWrap: false,
             overflow: TextOverflow.visible,
             style: TextStyle(
               color: color,
               fontWeight: FontWeight.w800,
               fontSize: fontSize,
-              height: 1.25,
+              height: 1.2,
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  Future<void> _pasteOtpFromClipboard({bool silent = false}) async {
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      final raw = digitsOnly(normalizeAsciiDigits(data?.text ?? ''));
+      if (raw.isEmpty) {
+        if (!silent) {
+          _toast(_isAr ? 'لا يوجد رمز في الحافظة' : 'Clipboard has no code');
+        }
+        return;
+      }
+      AppHaptics.selection();
+      _applyIncomingCode(raw, fromUserAction: true);
+      if (!silent) {
+        _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
+      }
+    } catch (_) {
+      if (!silent) {
+        _toast(_isAr ? 'تعذر اللصق' : 'Paste failed');
+      }
+    }
   }
 
   Widget _otpBoxes({required bool isDark, required double fontSize}) {
@@ -1814,7 +1942,17 @@ class _VerifyScreenState extends State<VerifyScreen>
             animationType: AnimationType.fade,
             animationDuration: const Duration(milliseconds: 120),
             inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
+              TextInputFormatter.withFunction((oldValue, newValue) {
+                final normalized =
+                    digitsOnly(normalizeAsciiDigits(newValue.text));
+                final clipped = normalized.length > _otpLen
+                    ? normalized.substring(0, _otpLen)
+                    : normalized;
+                return TextEditingValue(
+                  text: clipped,
+                  selection: TextSelection.collapsed(offset: clipped.length),
+                );
+              }),
               LengthLimitingTextInputFormatter(_otpLen),
             ],
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1836,7 +1974,7 @@ class _VerifyScreenState extends State<VerifyScreen>
               fontSize: fontSize + 4,
             ),
             onChanged: (v) {
-              final only = v.replaceAll(RegExp(r'\D'), '');
+              final only = digitsOnly(normalizeAsciiDigits(v));
               setState(() {
                 _otp =
                     only.length > _otpLen ? only.substring(0, _otpLen) : only;
@@ -1851,7 +1989,8 @@ class _VerifyScreenState extends State<VerifyScreen>
               _maybeAutoSubmit();
             },
             beforeTextPaste: (text) {
-              final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
+              final only =
+                  digitsOnly(normalizeAsciiDigits(text ?? ''));
               if (only.isEmpty) return true;
               AppHaptics.selection();
               _applyIncomingCode(only, fromUserAction: true);
@@ -2001,28 +2140,68 @@ class _VerifyScreenState extends State<VerifyScreen>
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: FutureBuilder<void>(
         future: _bootFuture,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return Scaffold(
-              backgroundColor: bg,
-              body: const Center(child: AppLogoLoading()),
-            );
-          }
-
+        builder: (context, _) {
+          // لا تحجب حقول الرمز — أظهر الواجهة فوراً؛ الإرسال يعمل في الخلفية.
           return PopScope(
             canPop: false,
-            onPopInvoked: (_) => _goToLogin(signOut: true, clearOtp: true),
-            child: Scaffold(
+            // Do not sign out on incidental pop (Chrome password overlay / focus loss).
+            // Explicit back buttons still call _goToLogin.
+            onPopInvokedWithResult: (didPop, _) {
+              if (didPop) return;
+            },
+            child: ScrollConfiguration(
+              behavior: const AqarAuthScrollBehavior(),
+              child: Scaffold(
               backgroundColor: bg,
               resizeToAvoidBottomInset: true,
               body: SafeArea(
                 child: Stack(
                   children: [
+                    // بدون شريط تحميل يحجب الواجهة — الرمز يظهر فور الجاهزية.
                     LayoutBuilder(
                       builder: (context, c) {
                         final w = c.maxWidth;
-                        final isSmall = w < 360;
-                        final isTiny = w < 320;
+                        // جوالات / شاشات ضيقة: الدرع أو الصورة أعلى التحية.
+                        final isSmall = w < 520;
+                        final isTiny = w < 360;
+
+                        Widget verifyAvatar({required double size}) {
+                          final av = (_avatarUrl ?? '').trim();
+                          return AnimatedBuilder(
+                            animation: _pulseAnimation,
+                            builder: (context, child) {
+                              return Transform.scale(
+                                scale: 1.0 + (_pulseAnimation.value * 0.1),
+                                child: Container(
+                                  width: size,
+                                  height: size,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary
+                                        .withValues(alpha: 0.12),
+                                    shape: BoxShape.circle,
+                                    image: av.isEmpty
+                                        ? null
+                                        : DecorationImage(
+                                            image: NetworkImage(av),
+                                            fit: BoxFit.cover,
+                                          ),
+                                  ),
+                                  child: av.isNotEmpty
+                                      ? null
+                                      : Icon(
+                                          Icons.verified_user_rounded,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          size: size * 0.48,
+                                        ),
+                                ),
+                              );
+                            },
+                          );
+                        }
 
                         return Center(
                           child: SingleChildScrollView(
@@ -2065,71 +2244,77 @@ class _VerifyScreenState extends State<VerifyScreen>
                                             ),
                                         ],
                                       ),
+                                      if (isSmall) ...[
+                                        Center(
+                                          child: verifyAvatar(
+                                            size: isTiny ? 56.0 : 68.0,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 14),
+                                      ],
                                       Row(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
-                                          AnimatedBuilder(
-                                            animation: _pulseAnimation,
-                                            builder: (context, child) {
-                                              return Transform.scale(
-                                                scale: 1.0 +
-                                                    (_pulseAnimation.value *
-                                                        0.1),
-                                                child: Container(
-                                                  width: isTiny ? 40 : 44,
-                                                  height: isTiny ? 40 : 44,
-                                                  decoration: BoxDecoration(
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .primary
-                                                        .withOpacity(0.12),
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            14),
-                                                  ),
-                                                  child: Icon(
-                                                    Icons.verified_user_rounded,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .primary,
-                                                    size: isTiny ? 22 : 24,
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                          const SizedBox(width: 12),
+                                          if (!isSmall) ...[
+                                            verifyAvatar(size: 44),
+                                            const SizedBox(width: 12),
+                                          ],
                                           Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                _singleLineGreeting(
-                                                  greeting: _greeting(),
-                                                  name: displayName,
-                                                  color: titleColor,
-                                                  fontSize: nameSize,
+                                            child: Container(
+                                              width: double.infinity,
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: isTiny ? 10 : 12,
+                                                vertical: isTiny ? 8 : 10,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: isDark
+                                                    ? Colors.white
+                                                        .withValues(alpha: 0.04)
+                                                    : Colors.black
+                                                        .withValues(alpha: 0.03),
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                                border: Border.all(
+                                                  color: isDark
+                                                      ? Colors.white
+                                                          .withValues(
+                                                              alpha: 0.14)
+                                                      : Colors.black
+                                                          .withValues(
+                                                              alpha: 0.10),
                                                 ),
-                                                const SizedBox(height: 8),
-                                                _infoRow(
-                                                  icon: Icons
-                                                      .calendar_today_rounded,
-                                                  text: _todayLine(),
-                                                  color: subColor,
-                                                  fontSize: bodySize,
-                                                ),
-                                                const SizedBox(height: 8),
-                                                _infoRow(
-                                                  icon: Icons.login_rounded,
-                                                  text: (_isAr
-                                                          ? 'آخر تسجيل دخول: '
-                                                          : 'Last login: ') +
-                                                      _lastLoginLine(),
-                                                  color: subColor,
-                                                  fontSize: bodySize,
-                                                ),
-                                              ],
+                                              ),
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  _singleLineGreeting(
+                                                    greeting: _greeting(),
+                                                    name: displayName,
+                                                    color: titleColor,
+                                                    fontSize: nameSize,
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  _infoRow(
+                                                    icon: Icons
+                                                        .calendar_today_rounded,
+                                                    text: _todayLine(),
+                                                    color: subColor,
+                                                    fontSize: bodySize,
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  _infoRow(
+                                                    icon: Icons.login_rounded,
+                                                    text: (_isAr
+                                                            ? 'آخر تسجيل دخول: '
+                                                            : 'Last login: ') +
+                                                        _lastLoginLine(),
+                                                    color: subColor,
+                                                    fontSize: bodySize,
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -2240,12 +2425,40 @@ class _VerifyScreenState extends State<VerifyScreen>
                                           vertical: 14,
                                           horizontal: 12,
                                         ),
-                                        child: Directionality(
-                                          textDirection: TextDirection.ltr,
-                                          child: _otpBoxes(
-                                            isDark: isDark,
-                                            fontSize: bodySize,
-                                          ),
+                                        child: Column(
+                                          children: [
+                                            Directionality(
+                                              textDirection: TextDirection.ltr,
+                                              child: _otpBoxes(
+                                                isDark: isDark,
+                                                fontSize: bodySize,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Align(
+                                              alignment: Alignment.center,
+                                              child: TextButton.icon(
+                                                onPressed: _offline
+                                                    ? null
+                                                    : () => unawaited(
+                                                          _pasteOtpFromClipboard(),
+                                                        ),
+                                                icon: const Icon(
+                                                  Icons.content_paste_rounded,
+                                                  size: 18,
+                                                ),
+                                                label: Text(
+                                                  _isAr
+                                                      ? 'لصق الرمز'
+                                                      : 'Paste code',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w900,
+                                                    fontSize: bodySize,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                       if (_error) ...[
@@ -2348,6 +2561,7 @@ class _VerifyScreenState extends State<VerifyScreen>
                   ],
                 ),
               ),
+            ),
             ),
           );
         },

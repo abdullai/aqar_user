@@ -9,13 +9,13 @@ class AppLocalizationsAr extends AppLocalizations {
   AppLocalizationsAr([String locale = 'ar']) : super(locale);
 
   @override
-  String get appTitle => 'تطبيق موثوق العقاري';
+  String get appTitle => 'تطبيق موثوق لاين العقاري';
 
   @override
   String get welcomeTitle => 'مرحباً بك';
 
   @override
-  String get welcomeTrustedAqar => 'مرحباً بك في موثوق العقاري';
+  String get welcomeTrustedAqar => 'مرحبا بكم في تطبيق موثوق لاين العقاري';
 
   @override
   String get signInToContinue => 'سجّل الدخول للمتابعة';
@@ -104,14 +104,14 @@ class AppLocalizationsAr extends AppLocalizations {
       'الويب: نغمة من الأصول. الهاتف/اللوحي: اهتزاز خفيف ونقرة نظام (بدون ملف WAV). منفصلة عن شريط الإشعارات الداخلي وأصوات الدفع.';
 
   @override
-  String get legalTermsCoachTitle => 'الشروط والخصوصية';
+  String get legalTermsCoachTitle => 'الشروط والأحكام';
 
   @override
   String get legalTermsCoachBody =>
-      'يمكنك مراجعة الشروط وسياسة الخصوصية من الإعدادات في أي وقت. قد يُطلب القبول عند تسجيل الدخول.';
+      'اطّلع على الشروط والأحكام عبر الرابط، ثم أشّر على مربع الإقرار للمتابعة. لن تظهر هذه الرسالة مرة أخرى بعد التأكيد.';
 
   @override
-  String get legalTermsCoachOk => 'حسناً';
+  String get legalTermsCoachOk => 'تم الإطلاع والمتابعة';
 
   @override
   String get fieldGroupCredentialsTitle => 'بيانات الدخول';
@@ -203,7 +203,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get mapPickerOpenExternalMaps => 'فتح في تطبيق الخرائط';
 
   @override
-  String get welcomeDashboardBannerTitle => 'مرحباً بك في موثوق العقاري';
+  String get welcomeDashboardBannerTitle => 'مرحباً بك في موثوق لاين العقارية';
 
   @override
   String get welcomeDashboardBannerBody =>
@@ -216,12 +216,10 @@ class AppLocalizationsAr extends AppLocalizations {
   String get usernameHint10Digits => 'الرقم المميز (10 أرقام)';
 
   @override
-  String get loginUsernameFieldHelper =>
-      'هوية/إقامة، رخصة فال، أو الرقم الوطني الموحّد 700… (10 أرقام)';
+  String get loginUsernameFieldHelper => 'أدخل رقم الهوية / الإقامة 10 أرقام';
 
   @override
-  String get loginIdentifierFieldLabel =>
-      'الهوية أو السجل الموحّد أو رخصة فال — 10 أرقام';
+  String get loginIdentifierFieldLabel => 'اسم المستخدم';
 
   @override
   String get loginPasswordFieldLabel => 'أدخل كلمة المرور';
@@ -375,7 +373,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get marketerTabInvites => '🏢 السوق العقاري';
 
   @override
-  String get marketerTabAwaitingOwner => '⏳ بانتظار موافقة المالك · التعاقد';
+  String get marketerTabAwaitingOwner => '✅ إصدار التصريح';
 
   @override
   String get marketerTabMyOffers => '💼 عروضي';
@@ -690,7 +688,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get legalTermsFallbackBody =>
-      'تعذر تحميل نص الشروط والخصوصية من الخادم. بمتابعتك فإنك توافق على استخدام «موثوق العقاري» وفق الأنظمة المعمول بها في المملكة العربية السعودية بما في ذلك قواعد حماية البيانات الشخصية حيث تنطبق، وتقديم معلومات صحيحة، واستخدام الإعلانات والمراسلة بمسؤولية. للاطلاع على النص الكامل تواصل مع الدعم أو أعد المحاولة لاحقاً.';
+      'تعذر تحميل نص الشروط والخصوصية من الخادم. بمتابعتك فإنك توافق على استخدام «مؤسسة موثوق لاين العقارية» وفق الأنظمة المعمول بها في المملكة العربية السعودية بما في ذلك قواعد حماية البيانات الشخصية حيث تنطبق، وتقديم معلومات صحيحة، واستخدام الإعلانات والمراسلة بمسؤولية. للاطلاع على النص الكامل تواصل مع الدعم أو أعد المحاولة لاحقاً.';
 
   @override
   String get permissionsGateTitle => 'قبل أن نبدأ';
@@ -873,8 +871,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get postAuthChecking => 'جاري التحقق من الحساب…';
 
   @override
-  String get loginIdentifierFieldHint =>
-      'هوية/إقامة، رخصة فال، أو الرقم الوطني الموحّد 700… (10 أرقام)';
+  String get loginIdentifierFieldHint => 'ادخل رقم الهوية / الاقامة (10) أرقام';
 
   @override
   String get loginEnterIdentifierFirst =>
@@ -1081,10 +1078,10 @@ class AppLocalizationsAr extends AppLocalizations {
       'رقمك العمومي (10 أرقام) — المكاتب والفرق';
 
   @override
-  String get onboardingWelcomeTitleApp => 'تطبيق موثوق العقاري';
+  String get onboardingWelcomeTitleApp => 'تطبيق موثوق لاين العقاري';
 
   @override
-  String get onboardingWelcomeTitleWeb => 'منصة موثوق العقاري الإلكترونية';
+  String get onboardingWelcomeTitleWeb => 'مؤسسة موثوق لاين العقارية';
 
   @override
   String get onboardingWelcomeBodyApp =>
@@ -1092,7 +1089,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get onboardingWelcomeBodyWeb =>
-      'يسعدنا وجودك على منصة موثوق العقاري الإلكترونية. سواء كنت تعمل بشكل مستقل، أو تمثّل مكتباً، أو شركة، أو مؤسسة، ففريقنا في خدمتك ليجعل تجربتك سلسة ويضع اهتمامك في المقدمة. نتمنى لك استكشافاً مريحاً.';
+      'يسعدنا وجودك على منصة مؤسسة موثوق لاين العقارية. سواء كنت تعمل بشكل مستقل، أو تمثّل مكتباً، أو شركة، أو مؤسسة، ففريقنا في خدمتك ليجعل تجربتك سلسة ويضع اهتمامك في المقدمة. نتمنى لك استكشافاً مريحاً.';
 
   @override
   String get onboardingHomeTitle => 'الرئيسية';
@@ -1390,6 +1387,40 @@ class AppLocalizationsAr extends AppLocalizations {
   String get securityClearOtherDevices => 'مسح الأجهزة الأخرى';
 
   @override
+  String get securityDeviceColBrowser => 'المتصفح / الجهاز';
+
+  @override
+  String get securityDeviceColPlatform => 'المنصة';
+
+  @override
+  String get securityDeviceColLocation => 'الموقع';
+
+  @override
+  String get securityDeviceColLastSignIn => 'آخر دخول';
+
+  @override
+  String get securityDeviceColRegistered => 'تاريخ التسجيل';
+
+  @override
+  String get securityDeviceColStatus => 'الحالة';
+
+  @override
+  String get securityDeviceStatusCurrent => 'هذا الجهاز';
+
+  @override
+  String get securityDeviceUnknownBrowser => 'جهاز غير معروف';
+
+  @override
+  String get securityDeviceRemoveAction => 'حذف';
+
+  @override
+  String get securityDeviceOtpSent => 'تم إرسال رمز التحقق';
+
+  @override
+  String get securityDeviceOtpResendWait =>
+      'انتظر انتهاء العداد قبل إعادة الإرسال';
+
+  @override
   String get securityRetryContinue => 'متابعة بعد التحديث';
 
   @override
@@ -1400,6 +1431,35 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get settingsSectionSessionHistory => 'سجل تسجيل الدخول';
+
+  @override
+  String get settingsSectionAccountHub => 'الحساب والجولة التعريفية';
+
+  @override
+  String get settingsReplayDashboardTourTitle =>
+      'إعادة جولة التبويبات التعريفية';
+
+  @override
+  String get settingsReplayDashboardTourSubtitle =>
+      'تمرّ على الرئيسية و«صفحتي» وغيرها خطوة بخطوة. تبدأ عند العودة للوحة التحكم.';
+
+  @override
+  String get settingsReplayDashboardTourSnackbar =>
+      'ستبدأ الجولة عند الرجوع للوحة التحكم.';
+
+  @override
+  String get settingsOpenSwitchAccountTitle => 'تبديل الحساب';
+
+  @override
+  String get settingsOpenSwitchAccountSubtitle =>
+      'اختر ملفاً آخر سبق استخدامه على هذا الجهاز.';
+
+  @override
+  String get settingsOpenSessionHistoryTitle => 'سجل الجلسات التفصيلي';
+
+  @override
+  String get settingsOpenSessionHistorySubtitle =>
+      'فتح شاشة سجل تسجيل الدخول الكامل.';
 
   @override
   String get settingsDevicesFooterHint =>
@@ -1630,7 +1690,27 @@ class AppLocalizationsAr extends AppLocalizations {
   String get listingReportReasonHarassment => 'سلوك غير لائق بعد التواصل';
 
   @override
+  String get listingReportReasonFraudFinancial =>
+      'احتيال أو ابتزاز أو مطالبة غير قانونية بالدفع';
+
+  @override
+  String get listingReportReasonIllegalContent =>
+      'محتوى غير قانوني أو نشاط إجرامي خطير';
+
+  @override
+  String get listingReportReasonPrivacyViolation =>
+      'خرق خصوصية أو إساءة استخدام بيانات شخصية';
+
+  @override
   String get listingReportReasonOther => 'سبب آخر (اكتب تفاصيلك)';
+
+  @override
+  String get listingReportLegalDetailsLabel =>
+      'شرح قانوني/واقعي (مطلوب لهذا الاختيار)';
+
+  @override
+  String get listingReportLegalDetailsRequired =>
+      'أضف شرحاً واضحاً (30 حرفاً على الأقل) للسبب المحدد.';
 
   @override
   String get inAppNotifListingReportTitle => 'بلاغ على إعلانك';
@@ -1716,4 +1796,712 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get inboxSearchHint => 'بحث في الإشعارات…';
+
+  @override
+  String get registerTitle => 'إنشاء حساب';
+
+  @override
+  String get registerSubtitle => 'اختر نوع الحساب ثم أكمل التسجيل.';
+
+  @override
+  String get registerAccountTypeHeading => 'نوع الحساب';
+
+  @override
+  String get accountKindIndividual => 'مستخدم عادي (تصفح)';
+
+  @override
+  String get accountKindOffice => 'مكتب عقاري (حتى 3 أعضاء)';
+
+  @override
+  String get accountKindInstitution => 'مؤسسة عقارية (حتى 6 أعضاء)';
+
+  @override
+  String get accountKindCompany => 'شركة عقارية (حتى 12 عضوًا)';
+
+  @override
+  String get registerContinue => 'المتابعة للتسجيل';
+
+  @override
+  String get accountKindIndependentAdvertiser => 'مستقل (فرد / معلن)';
+
+  @override
+  String get accountKindMarketer => 'مسوق عقاري';
+
+  @override
+  String get registerOrgModeSectionTitle => 'إعداد المنشأة';
+
+  @override
+  String get registerOrgModeCreate => 'إنشاء منشأة جديدة (أنت المالك والمدير)';
+
+  @override
+  String get registerOrgModeJoin => 'الانضمام إلى منشأة موجودة';
+
+  @override
+  String get registerInviteCodeLabel => 'رقم المنشأة أو رمز الدعوة (فال)';
+
+  @override
+  String get registerInviteCodeHint => 'أدخل الرمز الذي أعطاك إيّاه المدير';
+
+  @override
+  String get registerLookupOrg => 'عرض بيانات المنشأة';
+
+  @override
+  String get registerOrgPreviewTitle => 'تأكيد المنشأة';
+
+  @override
+  String registerOrgPreviewFal(String code) {
+    return 'رمز العرض: $code';
+  }
+
+  @override
+  String get registerInviteInvalid =>
+      'لم يُعثر على الرمز. تأكد مع المدير وحاول مرة أخرى.';
+
+  @override
+  String get registerInviteContinueRequiresPreview =>
+      'يُرجى عرض بيانات المنشأة قبل المتابعة.';
+
+  @override
+  String get registerSignupJoinPendingSnackbar =>
+      'تم إنشاء الحساب. بعد تسجيل الدخول يُرسَل طلب الانضمام للمدير للموافقة عليه.';
+
+  @override
+  String get registerPendingJoinIntro => 'طلب انضمام عبر التسجيل.';
+
+  @override
+  String get registerJoinFlowHint =>
+      'بعد إتمام التسجيل وتسجيل الدخول يُرسَل طلب الانضمام إلى مدير المنشأة للموافقة.';
+
+  @override
+  String get orgBrowseTitle => 'المنشآت';
+
+  @override
+  String get orgBrowseEmpty => 'لا توجد منشآت بعد.';
+
+  @override
+  String get orgJoinSubmit => 'طلب الانضمام';
+
+  @override
+  String get orgJoinMessageHint => 'رسالة اختيارية';
+
+  @override
+  String get orgProfileTitle => 'المنشأة';
+
+  @override
+  String orgMembersCount(int count) {
+    return '$count أعضاء';
+  }
+
+  @override
+  String orgFalBadge(String code) {
+    return 'فال $code';
+  }
+
+  @override
+  String get orgSetupTitle => 'تم إنشاء المنشأة';
+
+  @override
+  String orgSetupFalLine(String code) {
+    return 'رخصة العرض: $code';
+  }
+
+  @override
+  String get orgSettingsTitle => 'إعدادات المنشأة';
+
+  @override
+  String get orgRenewFal => 'تجديد رخصة فال المعروضة';
+
+  @override
+  String get orgBuySeats => 'شراء مقاعد إضافية';
+
+  @override
+  String get orgAssignPermissionsTitle => 'صلاحيات العضو';
+
+  @override
+  String get permManageTeam => 'إدارة الفريق';
+
+  @override
+  String get permAddProperties => 'إضافة عقارات';
+
+  @override
+  String get permAddAds => 'إضافة إعلانات';
+
+  @override
+  String get permViewMarket => 'السوق';
+
+  @override
+  String get permViewProfile => 'صفحتي';
+
+  @override
+  String get permAccessChat => 'الدردشات';
+
+  @override
+  String get permEditOrgSettings => 'إعدادات المنشأة';
+
+  @override
+  String get permViewAnalytics => 'الإحصائيات';
+
+  @override
+  String get orgListingOrgTap => 'المنشأة';
+
+  @override
+  String get manageMembersTitle => 'إدارة الأعضاء';
+
+  @override
+  String get tabActiveMembers => 'نشطون';
+
+  @override
+  String get tabBanned => 'محظورون';
+
+  @override
+  String get tabAlumni => 'مغادرون';
+
+  @override
+  String get tabLeaveRequests => 'طلبات الخروج';
+
+  @override
+  String get orgRejectReasonHint => 'سبب اختياري (يظهر لمقدم الطلب)';
+
+  @override
+  String get deskTabTeamDashboard => 'لوحة الفريق';
+
+  @override
+  String get deskTabRolesPermissions => 'الصلاحيات';
+
+  @override
+  String get deskTabTeamAnalytics => 'إحصائيات';
+
+  @override
+  String get deskTabReportsDesk => 'تقارير وتصدير';
+
+  @override
+  String get deskTabAnalyticsReports => 'التقارير';
+
+  @override
+  String get appBarOrgJoinRequestsTooltip => 'طلبات انضمام معلّقة';
+
+  @override
+  String get orgTeamDeskTitle => 'إدارتي — المنشأة';
+
+  @override
+  String get orgStatActiveMembers => 'أعضاء نشطون';
+
+  @override
+  String get orgStatPendingJoin => 'طلبات معلّقة';
+
+  @override
+  String get orgStatOrgListings => 'عقارات الفريق';
+
+  @override
+  String get orgStatOrgAds => 'إعلانات الفريق';
+
+  @override
+  String get orgLeaderboardTitle => 'ترتيب الأعضاء';
+
+  @override
+  String get orgLeaderboardProps => 'عقارات';
+
+  @override
+  String get orgLeaderboardAds => 'إعلانات';
+
+  @override
+  String get orgLeaderboardRank => 'الترتيب';
+
+  @override
+  String get orgRolesPickMember => 'اختر زميلاً';
+
+  @override
+  String get orgRolesEditPermissions => 'تعديل الصلاحيات';
+
+  @override
+  String get orgExportReport => 'تصدير التقرير';
+
+  @override
+  String get orgExportCsv => 'مشاركة ملخص CSV';
+
+  @override
+  String get orgAnalyticsEmpty => 'لا بيانات إحصائية بعد.';
+
+  @override
+  String get organalyticsSoldRented => 'مباع / مؤجر (تقديري)';
+
+  @override
+  String get organalyticsScore => 'الدرجة';
+
+  @override
+  String get permManageTeamHelp =>
+      'قبول أو رفض طلبات الانضمام، تعديل الصلاحيات، الحظر أو الإزالة.';
+
+  @override
+  String get permAddPropertiesHelp => 'إنشاء ونشر عقارات جديدة باسم المنشأة.';
+
+  @override
+  String get permAddAdsHelp =>
+      'إنشاء إعلانات جانبية أو ترويجية حيث تسمح صلاحيتك.';
+
+  @override
+  String get permViewMarketHelp => 'فتح تبويب السوق العقاري العام.';
+
+  @override
+  String get permViewProfileHelp => 'الوصول إلى صفحتك الشخصية داخل التطبيق.';
+
+  @override
+  String get permAccessChatHelp =>
+      'استخدام دردشة الفريق والرسائل المباشرة بين الأعضاء.';
+
+  @override
+  String get permEditOrgSettingsHelp =>
+      'تعديل بيانات المنشأة والهوية وإعدادات لوحة الإدارة.';
+
+  @override
+  String get permViewAnalyticsHelp =>
+      'عرض لوحات الفريق والرسوم البيانية والتقارير.';
+
+  @override
+  String get permAddListingRequests => 'طلبات عقارية';
+
+  @override
+  String get permAddListingRequestsHelp =>
+      'إضافة طلبات شراء أو إيجار تظهر في خليط الرئيسية.';
+
+  @override
+  String get permEditProperties => 'تعديل العقارات';
+
+  @override
+  String get permEditPropertiesHelp => 'تعديل أو حذف أي عقار تابع للمنشأة.';
+
+  @override
+  String get permManageSubscription => 'إدارة الاشتراك';
+
+  @override
+  String get permManageSubscriptionHelp =>
+      'شراء مقاعد إضافية، تجديد رمز العرض، وإدارة الباقة.';
+
+  @override
+  String get permExportData => 'تصدير البيانات';
+
+  @override
+  String get permExportDataHelp =>
+      'تصدير ملخصات الفريق إلى CSV أو مشاركة تقارير من التحليلات.';
+
+  @override
+  String get permInviteMembers => 'دعوة أعضاء';
+
+  @override
+  String get permInviteMembersHelp =>
+      'عرض رمز الدعوة/فال وتجديده ليتمكن الزملاء من الانضمام.';
+
+  @override
+  String get permManageChatRooms => 'إدارة الدردشات';
+
+  @override
+  String get permManageChatRoomsHelp => 'إنشاء غرف دردشة للفريق وتعيين مشرفين.';
+
+  @override
+  String get permViewMemberActivity => 'نشاط الأعضاء';
+
+  @override
+  String get permViewMemberActivityHelp =>
+      'عرض سجل النشاط وآخر أفعال زملاء الفريق.';
+
+  @override
+  String get deskTabMemberActivity => 'سجل النشاط';
+
+  @override
+  String get orgMemberActivityEmpty => 'لا سجلات نشاط لهذه المنشأة بعد.';
+
+  @override
+  String get orgMemberActivityUnknownAction => 'نشاط';
+
+  @override
+  String get orgMemberLastActivity => 'آخر نشاط';
+
+  @override
+  String get inviteMembersTitle => 'دعوة أعضاء';
+
+  @override
+  String get inviteMembersBody =>
+      'شارك هذا الرمز مع من ينضم من شاشة التسجيل. وهو نفس رمز فال/الدعوة العام للمنشأة.';
+
+  @override
+  String get inviteMembersShare => 'مشاركة الرمز';
+
+  @override
+  String get inviteMembersRenew => 'إنشاء رمز دعوة جديد';
+
+  @override
+  String get inviteMembersRenewHint =>
+      'إنشاء رمز جديد يلغي سريان الرمز السابق لمسار الانضمام بالرمز.';
+
+  @override
+  String get inviteMembersQrCaption => 'امسح للنقل السريع إلى جهاز آخر.';
+
+  @override
+  String get inviteMembersShareHint =>
+      'أدخل هذا الرمز عند اختيار «الانضمام إلى منشأة موجودة» في التسجيل.';
+
+  @override
+  String get reportsDeskServerSyncHint =>
+      'أرقام الفريق والفوترة في القوالب تُحدّث تلقائياً عند ربط استعلامات الخادم. التصدير والطباعة والمشاركة تعمل الآن؛ إدارة المنصّة الشاملة تُفعّل لاحقاً مع سياسات المشروع.';
+
+  @override
+  String get subscriptionsMenuHub => 'الاشتراكات والمدفوعات';
+
+  @override
+  String get subscriptionsMenuCards => 'بطاقاتي المحفوظة';
+
+  @override
+  String get subscriptionsMenuHistory => 'سجل المدفوعات';
+
+  @override
+  String get subscriptionsMenuPlans => 'باقات الاشتراك';
+
+  @override
+  String get subscriptionsTitle => 'الاشتراكات والمدفوعات';
+
+  @override
+  String get subscriptionsTabPlans => 'باقات الاشتراك';
+
+  @override
+  String get subscriptionsTabPaymentMethods => 'بطاقات الدفع';
+
+  @override
+  String get subscriptionsTabHistory => 'سجل المدفوعات';
+
+  @override
+  String get subscriptionsTabTeam => 'مقاعد الفريق';
+
+  @override
+  String get subscriptionsTabUsage => 'استهلاك الباقة';
+
+  @override
+  String get subscriptionsTabUpgrade => 'ترقية الباقة';
+
+  @override
+  String get subscriptionsTabRenewFal => 'تجديد رخصة فال';
+
+  @override
+  String get subscriptionsOrgManageTab => 'إدارة الاشتراك';
+
+  @override
+  String get subscriptionsBadgeExpired => 'الاشتراك منتهٍ أو يقترب من الانتهاء';
+
+  @override
+  String get subscriptionsSar => 'ريال';
+
+  @override
+  String get subscriptionsMonthly => 'شهرياً';
+
+  @override
+  String get subscriptionsYearly => 'سنوياً (خصم ٢٠٪)';
+
+  @override
+  String get subscriptionsSubscribeNow => 'اشترك الآن';
+
+  @override
+  String get subscriptionsCurrentPlan => 'الباقة الحالية';
+
+  @override
+  String subscriptionsRenewsOn(String date) {
+    return 'يتجدد في $date';
+  }
+
+  @override
+  String subscriptionsExpiredOn(String date) {
+    return 'انتهى في $date';
+  }
+
+  @override
+  String get subscriptionsRenew => 'جدّد الاشتراك';
+
+  @override
+  String get subscriptionsCancel => 'إلغاء الاشتراك';
+
+  @override
+  String get subscriptionsUnlimited => 'غير محدود';
+
+  @override
+  String get subscriptionsMembers => 'عدد الأعضاء';
+
+  @override
+  String get subscriptionsProperties => 'عدد العقارات';
+
+  @override
+  String get subscriptionsAdsPerMonth => 'إعلانات / شهر';
+
+  @override
+  String get subscriptionsListingRequests => 'طلبات إدراج';
+
+  @override
+  String get subscriptionsFalIncluded => 'رخصة فال متضمنة';
+
+  @override
+  String get subscriptionsSupport => 'الدعم الفني';
+
+  @override
+  String get subscriptionsAddCard => 'إضافة بطاقة جديدة';
+
+  @override
+  String get subscriptionsCardSaved => 'تم حفظ البطاقة';
+
+  @override
+  String get subscriptionsCardDeleted => 'تم حذف البطاقة';
+
+  @override
+  String get subscriptionsDefaultCard => 'افتراضي';
+
+  @override
+  String get subscriptionsSetDefault => 'تعيين افتراضي';
+
+  @override
+  String get subscriptionsDelete => 'حذف';
+
+  @override
+  String get subscriptionsAddCardTitle => 'إضافة بطاقة دفع';
+
+  @override
+  String get subscriptionsCardNumber => 'رقم البطاقة';
+
+  @override
+  String get subscriptionsCardHolder => 'اسم حامل البطاقة';
+
+  @override
+  String get subscriptionsExpiry => 'تاريخ الانتهاء (شهر/سنة)';
+
+  @override
+  String get subscriptionsCapsLockOn =>
+      'مفتاح الأحرف الكبيرة (Caps Lock) مفعّل — حقول البطاقة تتوقع غالباً أحرفاً لاتينية.';
+
+  @override
+  String get subscriptionsCardHolderLatinTitle => 'أحرف لاتينية فقط';
+
+  @override
+  String get subscriptionsCardHolderLatinBody =>
+      'اكتب اسم حامل البطاقة بالإنجليزية كما على البطاقة. لا يُقبل العربي أو الفارسي في هذا الحقل.';
+
+  @override
+  String get subscriptionsCardHolderLatinOk => 'حسناً';
+
+  @override
+  String get subscriptionsMoyasarCardFieldHint =>
+      'في هذه الخطوة تجمع «ميسّر» بيانات البطاقة بشكل آمن. استخدم أحرفاً لاتينية للاسم وأرقاماً إنجليزية (0–9) كما على البطاقة.';
+
+  @override
+  String get subscriptionsCvv => 'رمز الحماية CVV';
+
+  @override
+  String get subscriptionsCardLabel => 'تسمية البطاقة (اختياري)';
+
+  @override
+  String get subscriptionsSaveCard => 'حفظ البطاقة';
+
+  @override
+  String get subscriptionsFieldRequired => 'مطلوب';
+
+  @override
+  String get subscriptionsCheckoutTitle => 'ملخص الخدمة';
+
+  @override
+  String get subscriptionsPay => 'إتمام الدفع';
+
+  @override
+  String get subscriptionsPlanLine => 'الباقة';
+
+  @override
+  String get subscriptionsPeriodLine => 'المدة';
+
+  @override
+  String get subscriptionsOriginalLine => 'السعر الأصلي';
+
+  @override
+  String get subscriptionsDiscountLine => 'الخصم';
+
+  @override
+  String get subscriptionsTotalLine => 'الإجمالي';
+
+  @override
+  String get subscriptionsPaymentMethod => 'طريقة الدفع';
+
+  @override
+  String get subscriptionsPaySavedCard => 'بطاقة محفوظة';
+
+  @override
+  String get subscriptionsPayNewCard => 'بطاقة جديدة';
+
+  @override
+  String get subscriptionsApplePay => 'Apple Pay';
+
+  @override
+  String get subscriptionsMadaPay => 'Mada Pay';
+
+  @override
+  String get subscriptionsPaymentSuccess => 'تم الدفع بنجاح';
+
+  @override
+  String get subscriptionsPaymentFailed => 'فشل الدفع';
+
+  @override
+  String get subscriptionsDownloadInvoice => 'تنزيل الفاتورة';
+
+  @override
+  String get subscriptionsInvoiceSaved => 'تم حفظ الفاتورة';
+
+  @override
+  String get subscriptionsFilterAll => 'الكل';
+
+  @override
+  String get subscriptionsFilterSuccess => 'ناجحة';
+
+  @override
+  String get subscriptionsFilterPending => 'معلقة';
+
+  @override
+  String get subscriptionsFilterFailed => 'فاشلة';
+
+  @override
+  String get subscriptionsSearch => 'بحث';
+
+  @override
+  String get subscriptionsTxnRef => 'رقم العملية';
+
+  @override
+  String get subscriptionsStatus => 'الحالة';
+
+  @override
+  String get subscriptionsTeamTitle => 'إدارة أعضاء الفريق';
+
+  @override
+  String get subscriptionsSeatsUsed => 'المقاعد المستخدمة';
+
+  @override
+  String get subscriptionsAddMember => 'إضافة عضو جديد';
+
+  @override
+  String get subscriptionsUpgradeHint =>
+      'وصلت للحد الأقصى للمقاعد — رقِّ الباقة.';
+
+  @override
+  String get subscriptionsUpgradeCta => 'ترقية الباقة';
+
+  @override
+  String get subscriptionsUsageTitle => 'استهلاك الباقة';
+
+  @override
+  String get subscriptionsRenewFalBody =>
+      'تجديد عرض رخصة فال مرتبط باشتراك نشط. افتح إعدادات المنشأة لتجديد الرمز العام.';
+
+  @override
+  String get subscriptionsOpenOrgSettings => 'فتح إعدادات المنشأة';
+
+  @override
+  String get subscriptionsDetailsTitle => 'تفاصيل الاشتراك الحالي';
+
+  @override
+  String get subscriptionsNoSubscription => 'لا يوجد اشتراك نشط';
+
+  @override
+  String get subscriptionsOrgSubscriptionExpired =>
+      'اشتراك المنشأة غير نشط. جدّد للحفاظ على تجديد فال وميزات لوحة الإدارة.';
+
+  @override
+  String get subscriptionsAuthenticateToPay => 'تأكيد بالبصمة';
+
+  @override
+  String get subscriptionsBiometricFailed => 'فشل التحقق بالبصمة أو تم الإلغاء';
+
+  @override
+  String get subscriptionsYearlyDiscountNote =>
+      'الفوترة السنوية تشمل خصم ٢٠٪ مقارنة بالشهري.';
+
+  @override
+  String get subscriptionsExtraSeats => 'شراء مقاعد إضافية';
+
+  @override
+  String get subscriptionsSharePaymentLink => 'مشاركة ملخص الدفع';
+
+  @override
+  String get subscriptionsSharePaymentSubject => 'دفع اشتراك';
+
+  @override
+  String get subscriptionsCheckoutRefundPolicy =>
+      'بإتمام الدفع فإنك تؤكد أن الاشتراك يصبح ساري المفعول للباقة والمدة المختارة. لا يُسترد مبلغ الاشتراك بعد إتمام الدفع وفق سياسة الخدمة.';
+
+  @override
+  String get subscriptionsMarketingPaywallTitle => 'يلزم اشتراك';
+
+  @override
+  String get subscriptionsMarketingPaywallBody =>
+      'إجراءات التسويق المرتبطة بالعقود أو التراخيص أو النشر أو إنشاء الإعلانات تتطلب اشتراكاً فعّالاً. اختر باقة وأكمل الدفع، ثم يمكنك المتابعة فوراً.';
+
+  @override
+  String get subscriptionsPaywallExpiredTitle => 'الاشتراك غير فعّال';
+
+  @override
+  String get subscriptionsPaywallNoAutoRenewBody =>
+      'انتهت فترة الاشتراك المدفوعة (بالتاريخ والوقت). لا يُسمح بهذا الإجراء حتى تجدّد الاشتراك. تبقى بياناتك كما هي ويمكنك المتابعة ضمن حدود الباقة المجانية بعد الإغلاق.';
+
+  @override
+  String get subscriptionsPaywallAutoRenewFailBody =>
+      'تعذّر خصم رسوم التجديد التلقائي (رفض البنك أو عدم كفاية الرصيد). لا يُسمّح بهذا الإجراء حتى ينجح الدفع أو تُجدّد يدوياً. حدّث البطاقة أو افتح الباقات للدفع.';
+
+  @override
+  String get subscriptionsPaywallCloseLabel => 'إغلاق';
+
+  @override
+  String get subscriptionsPaywallGoPlans => 'الباقات والدفع';
+
+  @override
+  String get subscriptionsCancelEndTitle => 'إلغاء الاشتراك';
+
+  @override
+  String subscriptionsCancelEndBody(String date) {
+    return 'عند الإلغاء يتوقف التجديد التلقائي، وتبقى مزايا باقتك سارية حتى نهاية الفترة المدفوعة ($date).';
+  }
+
+  @override
+  String get subscriptionsContinue => 'متابعة';
+
+  @override
+  String get subscriptionsGoBack => 'رجوع';
+
+  @override
+  String get subscriptionsRetentionTitle => 'عرض ولاء لمرة واحدة';
+
+  @override
+  String get subscriptionsRetentionBody =>
+      'ابقَ معنا: خصم ٢٠٪ على تجديدك القادم إذا أبقيت اشتراكك الآن. يُعرض هذا التنبيه مرة واحدة فقط.';
+
+  @override
+  String get subscriptionsRetentionStay => 'الإبقاء على الاشتراك';
+
+  @override
+  String get subscriptionsRetentionDecline => 'متابعة الإلغاء';
+
+  @override
+  String get subscriptionsChurnTitle => 'ساعدنا على التحسين';
+
+  @override
+  String get subscriptionsChurnBody =>
+      'ما السبب الرئيسي لإلغاء الاشتراك؟ (اختياري)';
+
+  @override
+  String get subscriptionsChurnSkip => 'تخطّي';
+
+  @override
+  String get subscriptionsChurnSubmit => 'إرسال وإلغاء الاشتراك';
+
+  @override
+  String get subscriptionsChurnReasonPrice => 'السعر';
+
+  @override
+  String get subscriptionsChurnReasonFeatures => 'المزايا أو الحدود';
+
+  @override
+  String get subscriptionsChurnReasonSupport => 'الدعم';
+
+  @override
+  String get subscriptionsChurnReasonOther => 'أخرى';
+
+  @override
+  String get subscriptionsChurnDetailHint => 'تفاصيل إضافية (اختياري)';
 }

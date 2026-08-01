@@ -14,8 +14,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="aqar_user">
 
-  <!-- viewport-fit + interactive-widget: تحسين لوحة المفاتيح على iOS/Safari للويب -->
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <!-- viewport-fit + interactive-widget=resizes-visual:
+       يمرّر ارتفاع لوحة المفاتيح إلى Flutter عبر MediaQuery.viewInsets
+       (resizes-content كان يُصغّر النافذة ويترك inset=0 فيغطّي الحقل). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover, interactive-widget=resizes-visual">
 
   <!-- Icons -->
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
@@ -24,36 +26,61 @@
   <title>aqar_user</title>
   <link rel="manifest" href="manifest.json">
 
+  <!-- خطوط Flutter تُحمَّل عبر FontManifest — preload المبكر يسبب تحذيرات Console -->
+  <link rel="preconnect" href="https://czfvqhepsqkgsrfnknwm.supabase.co" crossorigin>
+  <link rel="dns-prefetch" href="https://czfvqhepsqkgsrfnknwm.supabase.co">
+  <link rel="preload" href="assets/FontManifest.json" as="fetch" crossorigin="anonymous">
+
   <style>
     html, body {
       height: 100%;
       margin: 0;
       padding: 0;
-      background-color: #0F766E;
-      /* يقلّل تعارض اللمس مع التمرير ويحسّن التركيز على الحقول */
+      background-color: #F3F6F8;
+      background-image: radial-gradient(ellipse at 50% 35%, #E6F4F1 0%, #F3F6F8 55%, #EEF2F5 100%);
       touch-action: manipulation;
-      /* متصفحات الجوال: ارتفاع نافذة أوضح مع شريط العنوان الديناميكي */
       min-height: 100%;
       min-height: 100dvh;
     }
 
-    /* iOS: حجم خط ≥16px يمنع تكبير الصفحة عند التركيز في حقول الإدخال */
     input, textarea, select {
       font-size: 16px;
     }
 
-    .center {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 50% 35%, #E6F4F1 0%, #F3F6F8 55%, #EEF2F5 100%);
+    }
+
+    #splash img {
+      width: min(72vw, 280px);
+      height: auto;
+      max-height: 42vh;
+      object-fit: contain;
     }
   </style>
 
   <script>
     function removeSplashFromWeb() {
       document.getElementById("splash")?.remove();
-      document.body.style.background = "transparent";
+      if (document.body) document.body.style.background = "transparent";
+    }
+
+    function pickBootSplashSrc() {
+      var narrow = window.matchMedia("(max-width: 700px)").matches;
+      var shortSide = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+      var phoneLike = shortSide > 0 && shortSide < 600;
+      var ua = (navigator.userAgent || "").toLowerCase();
+      // هاتف فقط (ليس آيباد) أو شاشة ضيّقة → تطبيق؛ آيباد/ويندوز عريض → مؤسسة
+      var phoneUa = /mobi|android|iphone|ipod/.test(ua) && !/ipad/.test(ua);
+      return (phoneLike || narrow || phoneUa)
+        ? "assets/assets/splashscreen.png"
+        : "assets/assets/logo.png";
     }
   </script>
 
@@ -67,29 +94,15 @@
 </head>
 
 <body>
-  <picture id="splash">
-    <source
-      srcset="
-        splash/img/light-1x.png 1x,
-        splash/img/light-2x.png 2x,
-        splash/img/light-3x.png 3x,
-        splash/img/light-4x.png 4x"
-      media="(prefers-color-scheme: light)">
-
-    <source
-      srcset="
-        splash/img/dark-1x.png 1x,
-        splash/img/dark-2x.png 2x,
-        splash/img/dark-3x.png 3x,
-        splash/img/dark-4x.png 4x"
-      media="(prefers-color-scheme: dark)">
-
-    <img
-      class="center"
-      src="splash/img/light-1x.png"
-      alt=""
-      aria-hidden="true">
-  </picture>
+  <div id="splash" aria-hidden="true">
+    <img id="boot-splash-img" alt="" src="assets/assets/logo.png">
+  </div>
+  <script>
+    (function () {
+      var img = document.getElementById("boot-splash-img");
+      if (img) img.src = pickBootSplashSrc();
+    })();
+  </script>
 
   <!--
     Service Worker: المشروع يضمّ `web/flutter_bootstrap.js` يستدعي `_flutter.loader.load({})` بدون
@@ -104,6 +117,32 @@
         for (var i = 0; i < regs.length; i++) regs[i].unregister();
       });
     }
+  </script>
+  <script>
+    /* إزالة طبقات semantics العالقة — Flutter web #175119
+       كان التوقف بعد 20 ثانية يترك التجمّد دائماً إن ظهرت الطبقة لاحقاً. */
+    window.aqarUnblockPointer = function aqarUnblockPointer() {
+      var removed = 0;
+      try {
+        document.querySelectorAll('flt-semantics-placeholder').forEach(function (el) {
+          var r = el.getBoundingClientRect();
+          if (r.width >= window.innerWidth * 0.85 && r.height >= window.innerHeight * 0.85) {
+            el.style.pointerEvents = 'none';
+            removed++;
+          }
+        });
+      } catch (e) {}
+      return removed;
+    };
+    (function () {
+      var ticks = 0;
+      setInterval(function () {
+        ticks++;
+        // أول 30 ثانية: كل ثانية؛ بعدها نتخطى معظم النبضات (كل 5 ثوانٍ).
+        if (ticks > 30 && (ticks % 5) !== 0) return;
+        try { window.aqarUnblockPointer(); } catch (e) {}
+      }, 1000);
+    })();
   </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>

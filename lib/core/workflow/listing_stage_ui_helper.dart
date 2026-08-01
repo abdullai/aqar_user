@@ -2,31 +2,61 @@ import 'package:flutter/material.dart';
 
 import 'listing_workflow_stage.dart';
 
-/// Owner hub tabs (صفحتي) — واجهة 7 تبويبات (0..6):
-/// 0 بانتظار المسوقين، 1 تعاقد، 2 توقف 72س، 3 ملغى، 4 محجوز، 5 منشور، 6 صفقات مكتملة.
-/// [ownerTabMatches] ما زال يستخدم فهارس منطقية قديمة (0,1,2,3,4,5,6) للفلترة؛ 7 لصفقات مكتملة في الفلتر فقط.
-/// Marketer hub tabs (إدارتي) — indices 0..5
+/// Owner hub — فلترة الطلبات/العقارات عبر [ownerTabMatches] بمؤشرات داخلية:
+/// 0 انتظار مسوّقين، 1 التعاقد (بعد الموافقة حتى التصريح)، 2 توقف 72س، 3 ملغى، 4 محجوز، 5 منشور، 6 مكتمل.
+/// شريط التبويب في الواجهة (0..6) يضيف «العروض المقدمة» — انظر `ownerHubDisplayTabIndex`.
+/// Marketer hub tabs (داخل «صفحتي») — indices 0..6:
+/// 0 سوق، 1 عروضي، 2 تعاقد/موافقة، 3 تصريح 72س، 4 منشور/محجوز، 5 بدون إجراء 72، 6 مفسوخ.
 class ListingStageUiHelper {
   ListingStageUiHelper._();
 
+  static const _ownerPostApprovalStages = {
+    ListingWorkflowStage.marketerSelected,
+    ListingWorkflowStage.contractPending,
+    ListingWorkflowStage.contractSent,
+    ListingWorkflowStage.contractReturned,
+    ListingWorkflowStage.contractSigned,
+    ListingWorkflowStage.permitPending,
+    ListingWorkflowStage.permitIssued,
+  };
+
+  /// مراحل تبويب «التعاقد» فقط (بدون التصريح — له تبويب مستقل index 3).
+  static const _marketerContractingStages = {
+    ListingWorkflowStage.marketerSelected,
+    ListingWorkflowStage.contractPending,
+    ListingWorkflowStage.contractSent,
+    ListingWorkflowStage.contractReturned,
+    ListingWorkflowStage.contractSigned,
+  };
+
+  static const _marketerPermitStages = {
+    ListingWorkflowStage.permitPending,
+    ListingWorkflowStage.permitIssued,
+  };
+
   // --- Owner tabs ---
-  /// تبويبات العرض في «صفحتي» (0..6) — يطابق ترتيب [TabBar].
+  /// تبويبات العرض في «صفحتي» للمالك (0..6) — يطابق [TabBar] بعد «العروض المقدمة».
+  /// 0 بانتظار المسوقين، 1 العروض المقدمة، 2 التعاقد، 3 توقف 72س، 4 ملغى، 5 محجوز، 6 صفقات مكتملة.
   static int ownerHubDisplayTabIndex(
     ListingWorkflowStage stage, {
     String? legacyListingStatus,
+    int ownerPendingOffersCount = 0,
   }) {
     final st = (legacyListingStatus ?? '').trim().toLowerCase();
     if (stage == ListingWorkflowStage.archived) {
       if (st == 'sold' || st == 'completed') return 6;
-      return 3;
+      return 4;
     }
-    if (ownerTabMatches(5, stage)) return 4;
-    if (ownerTabMatches(6, stage)) return 5;
-    if (ownerTabMatches(3, stage)) return 2;
-    if (ownerTabMatches(4, stage)) return 3;
-    if (ownerTabMatches(1, stage)) return 1;
-    if (ownerTabMatches(0, stage)) return 0;
-    if (ownerTabMatches(2, stage)) return 5;
+    if (ownerTabMatches(4, stage)) return 5;
+    if (ownerTabMatches(3, stage)) return 4;
+    if (ownerTabMatches(2, stage)) return 3;
+    if (ownerTabMatches(1, stage)) return 2;
+    if (ownerTabMatches(0, stage) || stage == ListingWorkflowStage.addedByOwner) {
+      final offersHint = ownerPendingOffersCount > 0 ||
+          const {'offers_received', 'assigned'}.contains(st);
+      if (offersHint) return 1;
+      return 0;
+    }
     return 0;
   }
 
@@ -36,32 +66,23 @@ class ListingStageUiHelper {
         return stage == ListingWorkflowStage.waitingMarketers ||
             stage == ListingWorkflowStage.addedByOwner;
       case 1:
-        return stage == ListingWorkflowStage.marketerSelected ||
-            stage == ListingWorkflowStage.contractPending ||
-            stage == ListingWorkflowStage.contractSent ||
-            stage == ListingWorkflowStage.contractReturned ||
-            stage == ListingWorkflowStage.contractSigned ||
-            stage == ListingWorkflowStage.permitPending ||
-            stage == ListingWorkflowStage.permitIssued;
+        return _ownerPostApprovalStages.contains(stage);
       case 2:
-        return stage == ListingWorkflowStage.published ||
-            stage == ListingWorkflowStage.reserved;
-      case 3:
         return stage == ListingWorkflowStage.inactive72h;
-      case 4:
+      case 3:
         return stage == ListingWorkflowStage.cancelled ||
             stage == ListingWorkflowStage.contractCancelled ||
             stage == ListingWorkflowStage.terminated;
-      case 5:
+      case 4:
         return stage == ListingWorkflowStage.reserved;
-      case 6:
+      case 5:
         return stage == ListingWorkflowStage.published;
       default:
         return false;
     }
   }
 
-  /// Marketer "إدارتي" — uses [publishedByMe] and [involved] flags from merged row.
+  /// Marketer «صفحتي» — uses [publishedByMe] and [involved] flags from merged row.
   static bool marketerTabMatches(
     int tabIndex,
     ListingWorkflowStage stage, {
@@ -71,30 +92,24 @@ class ListingStageUiHelper {
   }) {
     switch (tabIndex) {
       case 0:
-        // دعوات ما زالت ضمن «استقبال المسوّقين» أو الطلب حديث بدون عروض بعد
         return hasInviteOrOffer &&
             (stage == ListingWorkflowStage.waitingMarketers ||
                 stage == ListingWorkflowStage.addedByOwner);
       case 1:
-        return involvedInContract &&
-            const {
-              ListingWorkflowStage.marketerSelected,
-              ListingWorkflowStage.contractPending,
-              ListingWorkflowStage.contractSent,
-              ListingWorkflowStage.contractReturned,
-              ListingWorkflowStage.contractSigned,
-            }.contains(stage);
+        return hasInviteOrOffer &&
+            stage == ListingWorkflowStage.waitingMarketers;
       case 2:
         return involvedInContract &&
-            (stage == ListingWorkflowStage.permitPending ||
-                stage == ListingWorkflowStage.permitIssued);
+            _marketerContractingStages.contains(stage);
       case 3:
+        return involvedInContract && _marketerPermitStages.contains(stage);
+      case 4:
         return publishedByMe &&
             (stage == ListingWorkflowStage.published ||
                 stage == ListingWorkflowStage.reserved);
-      case 4:
-        return involvedInContract && stage == ListingWorkflowStage.inactive72h;
       case 5:
+        return involvedInContract && stage == ListingWorkflowStage.inactive72h;
+      case 6:
         return involvedInContract &&
             (stage == ListingWorkflowStage.cancelled ||
                 stage == ListingWorkflowStage.contractCancelled ||
@@ -111,9 +126,9 @@ class ListingStageUiHelper {
       case ListingWorkflowStage.waitingMarketers:
         return 'Awaiting marketer offers';
       case ListingWorkflowStage.marketerSelected:
-        return 'Marketer selected';
+        return 'Owner approved';
       case ListingWorkflowStage.contractSent:
-        return 'Awaiting contract';
+        return 'Contracting';
       case ListingWorkflowStage.contractPending:
       case ListingWorkflowStage.contractReturned:
       case ListingWorkflowStage.contractSigned:
@@ -145,15 +160,14 @@ class ListingStageUiHelper {
       case ListingWorkflowStage.waitingMarketers:
         return 'بانتظار عروض المسوقين';
       case ListingWorkflowStage.marketerSelected:
-        return 'تم اختيار المسوق';
+        return 'تمت الموافقة';
       case ListingWorkflowStage.contractSent:
-        return 'بانتظار العقد';
       case ListingWorkflowStage.contractPending:
       case ListingWorkflowStage.contractReturned:
       case ListingWorkflowStage.contractSigned:
-        return 'التعاقد';
+        return 'بانتظار التصريح';
       case ListingWorkflowStage.permitPending:
-        return 'بانتظار التصريح 72 ساعة';
+        return 'إصدار التصاريح — 72 ساعة';
       case ListingWorkflowStage.permitIssued:
         return 'تم إصدار التصريح';
       case ListingWorkflowStage.published:
@@ -199,7 +213,7 @@ class ListingStageUiHelper {
     }
   }
 
-  /// 0..8 for simplified progress strip
+  /// 0..7 for simplified progress strip
   static int progressIndex(ListingWorkflowStage stage) {
     switch (stage) {
       case ListingWorkflowStage.addedByOwner:
@@ -207,27 +221,26 @@ class ListingStageUiHelper {
       case ListingWorkflowStage.waitingMarketers:
         return 1;
       case ListingWorkflowStage.marketerSelected:
-        return 2;
       case ListingWorkflowStage.contractPending:
       case ListingWorkflowStage.contractSent:
       case ListingWorkflowStage.contractReturned:
       case ListingWorkflowStage.contractSigned:
-        return 3;
+        return 2;
       case ListingWorkflowStage.permitPending:
-        return 4;
+        return 3;
       case ListingWorkflowStage.permitIssued:
-        return 4;
+        return 3;
       case ListingWorkflowStage.published:
-        return 5;
+        return 4;
       case ListingWorkflowStage.reserved:
-        return 6;
+        return 5;
       case ListingWorkflowStage.inactive72h:
-        return 7;
+        return 6;
       case ListingWorkflowStage.contractCancelled:
       case ListingWorkflowStage.cancelled:
       case ListingWorkflowStage.terminated:
       case ListingWorkflowStage.archived:
-        return 8;
+        return 7;
     }
   }
 
@@ -237,7 +250,7 @@ class ListingStageUiHelper {
     if (left.isNegative) return 'انتهت المهلة';
     final h = left.inHours;
     final m = left.inMinutes.remainder(60);
-    if (h > 0) return 'متبقي ${h}س ${m}د';
-    return 'متبقي ${m}د';
+    if (h > 0) return 'متبقي $hس $mد';
+    return 'متبقي $mد';
   }
 }

@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/input/saudi_input_formatters.dart';
@@ -286,7 +287,7 @@ class _LegacyDataQualityGateScreenState
           : 'These fields update users_profiles for the current account.',
       child: Column(
         children: [
-          TextField(
+          AqarTextField(
             controller: _profileArCtrl,
             textInputAction: TextInputAction.next,
             decoration: InputDecoration(
@@ -294,7 +295,7 @@ class _LegacyDataQualityGateScreenState
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
+          AqarTextField(
             controller: _profileEnCtrl,
             textDirection: TextDirection.ltr,
             textInputAction: TextInputAction.next,
@@ -317,21 +318,21 @@ class _LegacyDataQualityGateScreenState
         subtitle: id,
         child: Column(
           children: [
-            TextField(
+            AqarTextField(
               controller: c['title'],
               decoration: InputDecoration(
                 labelText: _isAr ? 'عنوان الإعلان' : 'Listing title',
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            AqarTextField(
               controller: c['city'],
               decoration: InputDecoration(
                 labelText: _isAr ? 'المدينة' : 'City',
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            AqarTextField(
               controller: c['price'],
               keyboardType: TextInputType.number,
               inputFormatters: latinDecimalNumberFormatters(),
@@ -340,7 +341,7 @@ class _LegacyDataQualityGateScreenState
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            AqarTextField(
               controller: c['area'],
               keyboardType: TextInputType.number,
               inputFormatters: latinDecimalNumberFormatters(),
@@ -365,21 +366,21 @@ class _LegacyDataQualityGateScreenState
         subtitle: id,
         child: Column(
           children: [
-            TextField(
+            AqarTextField(
               controller: c['title'],
               decoration: InputDecoration(
                 labelText: _isAr ? 'عنوان الطلب' : 'Request title',
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            AqarTextField(
               controller: c['city'],
               decoration: InputDecoration(
                 labelText: _isAr ? 'المدينة' : 'City',
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
+            AqarTextField(
               controller: c['price'],
               keyboardType: TextInputType.number,
               inputFormatters: latinDecimalNumberFormatters(),

@@ -41,18 +41,18 @@ Future<void> showMarketingFullScenarioSheet(
     ),
     _ScenarioStep(
       icon: Icons.description_outlined,
-      title: t('التعاقد والتوقيع', 'Contracting & signatures'),
+      title: t('تم الموافقة — التعاقد والتصريح', 'Approved — contracting & permit'),
       body: t(
-        'من تبويب «بانتظار المالك · التعاقد» أنشئ العقد بعد قبول عرضك، تابع المحادثة والتوقيع من شاشة العقد.',
-        'Under Awaiting owner · Contracting, create the contract after your offer is accepted; follow chat and signing in the contract flow.',
+        'من تبويب «تم الموافقة»: دردشة مع المالك، إصدار الإعلان عبر منصة الهيئة العامة للعقار خارج التطبيق، ثم ربط التصريح والنشر من داخل التطبيق.',
+        'Under Approved: chat with the owner, issue the ad via the REGA public portal externally, then link the permit and publish inside the app.',
       ),
     ),
     _ScenarioStep(
       icon: Icons.verified_outlined,
       title: t('تصريح REGA وفال (72 ساعة)', 'REGA & FAL permit (72h)'),
       body: t(
-        'من تبويب التصريح: اربط رقم ترخيص الإعلان من منصة الهيئة، ويمكن التحقق من رقم فال. يتوفر بلاغ عدم مطابقة عند اختلاف البيانات (سياسة الخادم).',
-        'In the permit tab: link the ad license from the authority portal; FAL verification is available. Use the mismatch report if data does not align (server policy).',
+        'من نفس تبويب «تم الموافقة»: اربط رقم ترخيص الإعلان بعد إصداره من الهيئة، ويمكن التحقق من رقم فال. يتوفر بلاغ عدم مطابقة عند اختلاف البيانات.',
+        'In the same Approved tab: link the ad license after issuing it via REGA; FAL verification is available. Use the mismatch report if data does not align.',
       ),
     ),
     _ScenarioStep(
@@ -122,8 +122,8 @@ Future<void> showOwnerMarketingScenarioSheet(
       icon: Icons.chat_outlined,
       title: t('التعاقد والمحادثة', 'Contract & chat'),
       body: t(
-        'بعد القبول: أنشئ/وقّع عقد التسويق عبر محادثة العقد، حتى يكتمل المسار للتصريح.',
-        'After acceptance: create and sign the marketing contract via the contract chat until the path is ready for permitting.',
+        'بعد القبول: ينتقل الإعلان لتبويب «التعاقد» — دردشة مع المسوّق المختار ومتابعة إصدار التصريح والنشر.',
+        'After acceptance: the listing moves to Contracting — chat with the selected marketer and follow permit issuance and publishing.',
       ),
     ),
     _ScenarioStep(

@@ -22,8 +22,10 @@ abstract final class ListingDeepLink {
     // ----- عقد (ويب: استعلام الرابط | أصلي: مفتاح معلّق من App Links) -----
     if (!_contractHandled) {
       String? cid;
+      String? vtFromWeb;
       if (kIsWeb) {
         cid = AppListingLinks.contractIdFromVerifyUri(Uri.base);
+        vtFromWeb = AppListingLinks.verifyTokenFromVerifyUri(Uri.base);
       }
       if (cid == null || cid.isEmpty) {
         try {
@@ -39,6 +41,18 @@ abstract final class ListingDeepLink {
       }
       if (cid != null && cid.isNotEmpty) {
         _contractHandled = true;
+        String? vt = vtFromWeb;
+        if (vt == null || vt.isEmpty) {
+          try {
+            final p = await SharedPreferences.getInstance();
+            vt = (p.getString(AppListingLinks.pendingContractVerifyTokenPrefKey) ??
+                    '')
+                .trim();
+            if (vt.isNotEmpty) {
+              await p.remove(AppListingLinks.pendingContractVerifyTokenPrefKey);
+            }
+          } catch (_) {}
+        }
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!context.mounted) return;
           Navigator.of(context).pushNamed<void>(
@@ -46,6 +60,7 @@ abstract final class ListingDeepLink {
             arguments: <String, String>{
               'contractId': cid!,
               'lang': lang,
+              if (vt != null && vt.isNotEmpty) 'verifyToken': vt,
             },
           );
         });

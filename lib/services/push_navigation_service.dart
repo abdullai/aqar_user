@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../core/navigation/post_auth_navigation.dart';
 import '../navigation/chat_navigation.dart';
 import '../routes.dart';
 import '../core/notifications/in_app_notification_catalog.dart';
+import '../core/workflow/listing_workflow.dart';
 import 'in_app_notification_hub.dart';
 import '../screens/chat_page.dart' show ConversationKind;
 import '../screens/listing_loader_page.dart';
@@ -114,10 +116,11 @@ class PushNavigationService {
         InAppDashboardDeepLink.pending.value = {
           'id': d['notification_id'] ?? '',
           'type': d['type'] ?? '',
-          'data': d,
+          'data': Map<String, dynamic>.from(d),
         };
-        nav.pushNamed<void>(
-          '/userDashboard',
+        nav.pushNamedAndRemoveUntil<void>(
+          PostAuthNavigation.resolveDashboardRoute('/userDashboard'),
+          (r) => false,
           arguments: {
             'lang': lang,
             'notification': {
@@ -129,6 +132,10 @@ class PushNavigationService {
         );
         return;
       }
+      final myAdsTab = int.tryParse(
+        (d[WorkflowNotificationKeys.myAdsSubTab] ?? d['my_ads_sub_tab'] ?? '')
+            .trim(),
+      );
       final contractIdField = (d['contract_id'] ?? '').trim();
       final listingContractId =
           contractIdField.isNotEmpty
@@ -163,6 +170,19 @@ class PushNavigationService {
               ? requestId
               : (entityType == 'listing_request' ? entityId : '');
       if (req.isNotEmpty) {
+        if (myAdsTab != null) {
+          InAppDashboardDeepLink.pending.value = {
+            'id': d['notification_id'] ?? '',
+            'type': d['type'] ?? '',
+            'data': Map<String, dynamic>.from(d),
+          };
+          nav.pushNamedAndRemoveUntil<void>(
+            PostAuthNavigation.resolveDashboardRoute('/userDashboard'),
+            (r) => false,
+            arguments: <String, dynamic>{'lang': lang},
+          );
+          return;
+        }
         nav.push<void>(
           MaterialPageRoute<void>(
             builder: (_) => ListingRequestStatusPage(

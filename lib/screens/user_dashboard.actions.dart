@@ -1,4 +1,4 @@
-part of 'user_dashboard.dart';
+﻿part of 'user_dashboard.dart';
 
 extension _UserDashboardStateActions on _UserDashboardState {
   // =========================
@@ -6,10 +6,76 @@ extension _UserDashboardStateActions on _UserDashboardState {
   // =========================
 
   /// يفتح فوق جذر اللوحة فقط (يُبقي AppBar + الشريط السفلي ظاهرين).
+  /// ويب وجوال: نفس [Navigator] الداخلي — لا rootNavigator (كان يخفي التبويبات).
   Future<T?> _pushBody<T extends Object?>(Route<T> route) async {
+    if (mounted && !_bottomNavSlideVisible) {
+      setState(() => _bottomNavSlideVisible = true);
+    }
+    final nestedTitle = _nestedTitleForRouteSettings(route.settings);
+    _nestedTitleStack.add(nestedTitle);
+    if (mounted) {
+      setState(() => _nestedShellTitle = nestedTitle);
+    }
     final nav = _dashboardBodyNavKey.currentState;
-    if (nav == null) return null;
-    return nav.push<T>(route);
+    if (nav == null) {
+      // احتياط نادر قبل جاهزية المفتاح.
+      try {
+        return await Navigator.of(context).push<T>(route);
+      } finally {
+        if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
+        if (mounted) {
+          setState(() {
+            _nestedShellTitle =
+                _nestedTitleStack.isEmpty ? null : _nestedTitleStack.last;
+          });
+          unawaited(_maybeConsumeDashboardTourReplayFromPrefs());
+        }
+      }
+    }
+    try {
+      return await nav.push<T>(route);
+    } finally {
+      if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
+      if (mounted) {
+        setState(() {
+          _nestedShellTitle =
+              _nestedTitleStack.isEmpty ? null : _nestedTitleStack.last;
+        });
+        unawaited(_maybeConsumeDashboardTourReplayFromPrefs());
+      }
+    }
+  }
+
+  /// نماذج زر + — دائماً داخل جسم اللوحة (مثل مايو) حتى تبقى التبويبات ظاهرة.
+  /// لا تستخدم rootNavigator: كان يغطي الشريط السفلي ويفشل أحياناً بعد إغلاق الورقة.
+  Future<T?> _pushPlusForm<T extends Object?>(Route<T> route) async {
+    return _pushBody<T>(route);
+  }
+
+  /// بعد إغلاق إدارتي: حدّث الشارات فقط — لا [_reloadAll] الثقيل.
+  Future<void> _lightRefreshAfterDesk() async {
+    if (!mounted) return;
+    unawaited(_loadAccountRole());
+    unawaited(_loadNotifications());
+    if (kIsWeb) {
+      unawaited(_ensureMyAdsHubDataLoaded(force: false));
+    }
+  }
+
+  /// إغلاق مسارات اللوحة مع اعتراض النماذج غير المحفوظة.
+  Future<bool> _popBodyRoutesWithFormGuard() async {
+    final nav = _dashboardBodyNavKey.currentState;
+    if (nav == null || !nav.canPop()) return true;
+    final ok = await ActiveFormGuard.instance.confirmLeaveIfNeeded(
+      context,
+      isAr: _isArabic,
+      popFormRoute: () async {
+        if (nav.canPop()) nav.pop();
+      },
+    );
+    if (!ok || !mounted) return false;
+    nav.popUntil((r) => r.isFirst);
+    return true;
   }
 
   void _readArgsInBuildOnce(BuildContext context) {
@@ -22,61 +88,91 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
+  /// تنقل جذري إلى شاشة الدخول بعد تسهيل إغلاق القائمة المنبثقة وتجنّب [context]
+  /// التالف بعد [signOut] (خصوصاً على الويب).
+  Future<void> _navigateRootToLoginAfterLogout() async {
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+    } catch (_) {}
+    await Future<void>.delayed(Duration.zero);
+
+    final keyNav = UserSessionCoordinationService.navigatorKey?.currentState;
+    if (keyNav != null) {
+      keyNav.pushNamedAndRemoveUntil('/login', (route) => false);
+      return;
+    }
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
+        '/login',
+        (route) => false,
+      );
+      return;
+    }
+
+    // إن أُزيل [UserDashboard] من الشجرة قبل التنقل (مثلاً بعد signOut على الويب).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      UserSessionCoordinationService.navigatorKey?.currentState
+          ?.pushNamedAndRemoveUntil('/login', (route) => false);
+    });
+  }
+
+  /// بعد مغادرة الداشبورد: مسح تفضيلات/دخول سريع (لا يُنفَّذ على المسار الحرج للويب).
+  Future<void> _logoutDeferredLocalCleanup() async {
+    try {
+      await FastLoginService.clearAll().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {},
+      );
+    } catch (_) {}
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(AppConfig.prefGuestModeKey);
+      await prefs.remove(AppConfig.prefEntryModeKey);
+      await prefs.remove(AppConfig.prefGuestLegacyIsGuestKey);
+      await prefs.remove(AppConfig.prefGuestLegacyGuestKey);
+      await prefs.remove(AppConfig.prefDashboardAdvancedSearchDraftKey);
+    } catch (_) {}
+    unawaited(
+      resetStoredAppearanceForNextSignIn().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {},
+      ),
+    );
+  }
+
   Future<void> _logout() async {
     if (_loggingOut) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     _ss(() => _loggingOut = true);
+    AuthSignedOutNavigationGuard.enter();
 
-    final prefs = await SharedPreferences.getInstance();
+    final uidForCleanup = _uid;
 
     try {
       if (_isGuest) {
         if (!mounted) return;
-        Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
-          '/login',
-          (route) => false,
-        );
+        await AppExitNavigation.leaveGuestToEntryChoice(context);
         return;
-      }
-
-      // تجنب طلب /logout عندما لا توجد جلسة (يقلل 403 في الـ Network على الويب).
-      if (_sb.auth.currentSession != null) {
-        try {
-          await _sb.auth.signOut(scope: SignOutScope.local);
-        } catch (_) {
-          try {
-            await _sb.auth.signOut();
-          } catch (_) {}
-        }
       }
 
       InAppNotificationHub.setSessionUsername(null);
       InAppNotificationHub.setSessionUserId(null);
       InAppNotificationHub.dismiss();
 
-      try {
-        await FastLoginService.clearAll();
-      } catch (_) {}
-
-      try {
-        await prefs.remove('guest_mode');
-        await prefs.remove('entry_mode');
-      } catch (_) {}
-
       _propertyCache.clear();
       _profileCache.clear();
       _favoriteIds.clear();
       _clearMarketingStateOnLogout();
-
-      try {
-        await resetStoredAppearanceForNextSignIn();
-      } catch (_) {}
+      SubscriptionService.invalidateSubscriptionCache();
 
       if (!mounted) return;
-
-      Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
-        '/login',
-        (route) => false,
+      await SafeSignOutService.signOutAndNavigateToLogin(
+        context,
+        uidForCleanup: uidForCleanup,
+        logoutReason: 'user_logout',
       );
+
+      unawaited(_logoutDeferredLocalCleanup());
     } catch (e) {
       if (mounted) {
         _showNotification(
@@ -87,6 +183,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       }
     } finally {
       if (mounted) _ss(() => _loggingOut = false);
+      AuthSignedOutNavigationGuard.scheduleLeave();
     }
   }
 
@@ -97,39 +194,48 @@ extension _UserDashboardStateActions on _UserDashboardState {
       return;
     }
 
-    if (AppRoleHelper.isOrgEntity(_accountType)) {
-      await _pushBody<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => MyDeskOrgShellPage(lang: widget.lang),
-        ),
-      );
-      if (!mounted) return;
-      await _reloadAll();
-      return;
+    // افتح إدارتي فوراً — حمّل الدور/التسخين في الخلفية دون انتظار.
+    if (!_accountRoleLoaded || !_orgNavResolved) {
+      unawaited(_loadAccountRole());
     }
+    unawaited(_prefetchMyDeskWarm());
 
-    if (AppRoleHelper.isStandaloneMarketer(_accountType)) {
+    const deskShellBack = true;
+
+    // مسوّق/مكتب/مؤسسة/شركة/وكالة: لوحة إدارتي الكاملة (أعضاء، فريق، اشتراك، دردشة، …).
+    if (AppRoleHelper.isMarketingRole(
+            AppRoleHelper.fromAccountType(_accountType)) ||
+        AppRoleHelper.isOrgEntity(_accountType)) {
       await _pushBody<void>(
         MaterialPageRoute<void>(
-          builder: (_) => MarketerDashboardPage(lang: widget.lang),
+          settings: const RouteSettings(name: '/desk/organization'),
+          builder: (_) => MyOrganizationScreen(
+            lang: widget.lang,
+            suppressImpliedLeading: deskShellBack,
+            embedAppBar: true,
+          ),
         ),
       );
       if (!mounted) return;
-      await _reloadAll();
+      await _lightRefreshAfterDesk();
       return;
     }
 
     if (AppRoleHelper.isOwnerIndividual(_accountType)) {
       await _pushBody<void>(
         MaterialPageRoute<void>(
+          settings: const RouteSettings(name: '/desk/owner'),
           builder: (_) => OwnerIndividualDeskPage(
             lang: widget.lang,
             userId: _uid,
+            accountType: _accountType,
+            suppressImpliedLeading: deskShellBack,
+            embedAppBar: true,
           ),
         ),
       );
       if (!mounted) return;
-      await _reloadAll();
+      await _lightRefreshAfterDesk();
       return;
     }
 
@@ -140,11 +246,16 @@ extension _UserDashboardStateActions on _UserDashboardState {
       if (oid != null && oid.isNotEmpty) {
         await _pushBody<void>(
           MaterialPageRoute<void>(
-            builder: (_) => MyDeskOrgShellPage(lang: widget.lang),
+            settings: const RouteSettings(name: '/desk/organization'),
+            builder: (_) => MyOrganizationScreen(
+              lang: widget.lang,
+              suppressImpliedLeading: deskShellBack,
+              embedAppBar: true,
+            ),
           ),
         );
         if (!mounted) return;
-        await _reloadAll();
+        await _lightRefreshAfterDesk();
         return;
       }
     }
@@ -177,8 +288,13 @@ extension _UserDashboardStateActions on _UserDashboardState {
     bool autoOpenSubmitOffer = false,
   }) {
     AppHaptics.light();
-    unawaited(
-      showMarketRequestHomeSheet(
+    unawaited(() async {
+      String? oid;
+      if (_isMarketingAccountType) {
+        oid = await _marketingSubscriptionOrganizationId();
+      }
+      if (!mounted) return;
+      await showMarketRequestHomeSheet(
         context: context,
         row: row,
         isAr: widget.isAr,
@@ -191,25 +307,200 @@ extension _UserDashboardStateActions on _UserDashboardState {
             _loadMyMarketRequestOfferTracking(),
           ]));
         },
+        onGuestRequiresAuth: _isGuest ? _showLoginDialog : null,
+        onGuestPayOfferUnlock:
+            _isGuest ? () => _guestPayUnlockFlow('offer', targetTab: 2) : null,
+        onSubscriptionRequiredForOffer: _isGuest
+            ? null
+            : () => _openSubscriptionsHubForMarketOffer(row.id),
+        accountType: _accountType,
+        organizationId: oid,
+      );
+    }());
+  }
+
+  /// Paywall → اشتراكات ومدفوعات. يُرجع true إذا عاد المستخدم بصلاحية تقديم عرض.
+  Future<bool> _openSubscriptionsHubForMarketOffer(String marketRequestId) async {
+    final isMarketing = _isMarketingAccountType;
+    await _pushSubscriptionsHubForPaidActionResume(
+      MarketingSubscriptionResumeIntent(
+        kind: MarketingSubscriptionResumeKind.submitOffer,
+        requestId: marketRequestId,
+      ),
+      initialIndex: 0,
+      marketOfferPlansOnly: isMarketing,
+    );
+    SubscriptionService.invalidateSubscriptionCache();
+    final oid = await _marketingSubscriptionOrganizationId();
+    final allow = await IndividualMarketOfferService(_sb).currentAllowance(
+      accountType: _accountType,
+      organizationId: oid,
+    );
+    return allow.canSubmitNow;
+  }
+
+  /// يفتح خريطة الاستكشاف بإعلانات «صفحتي» فقط (لا تظهر فيها الطلبات
+  /// بناءً على المتطلب). تُمرَّر الإعلانات الجاهزة مع عنوان سياق يوضّح
+  /// التبويب الذي فُتحت منه الخريطة (مثلاً: «تبويب السوق»، «إعلاناتي»).
+  /// يُجَلب من قاعدة البيانات إعلانات منشورة بإحداثيات لإكمال أيّ نقص محتمل.
+  Future<void> _openMyPageListingsMap({
+    required List<Property> contextProperties,
+    required String contextTitle,
+  }) async {
+    AppHaptics.light();
+    var properties = contextProperties
+        .where((p) => _hasValidMapCoordinates(p.latitude, p.longitude))
+        .toList(growable: false);
+
+    if (!mounted) return;
+
+    await _pushBody<void>(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '/dashboard/my-page-map'),
+        builder: (_) => PropertyMapDiscoveryPage(
+          isAr: widget.isAr,
+          embedAppBar: true,
+          listingsOnly: true,
+          contextTitle: contextTitle,
+          properties: properties,
+          requests: const <MarketPropertyRequestRow>[],
+          onOpenProperty: (p) {
+            _dashboardBodyNavKey.currentState?.pop();
+            unawaited(_openDetails(p));
+          },
+        ),
       ),
     );
   }
 
+  /// خريطة ذكية من الشريط العلوي:
+  ///   • خارج «صفحتي» → خريطة الاكتشاف العامة (إعلانات + طلبات).
+  ///   • داخل «صفحتي» → خريطة التبويب الحالي (إعلانات التبويب فقط).
+  Future<void> _openSmartAppBarMap() async {
+    if (_tabIndex == 1 && !_isGuest) {
+      await _openMyPageMapForCurrentSubTab();
+      return;
+    }
+    await _openMapDiscovery();
+  }
+
+  Future<void> _openMyPageMapForCurrentSubTab() async {
+    _ensureSubTabControllers();
+    final ar = widget.isAr;
+
+    if (_isMarketingAccountType) {
+      final ctrl = _marketerTabsCtrl;
+      if (ctrl == null) {
+        await _openMyPageListingsMap(
+          contextProperties: _propertiesOwnedOrPublishedByMe(),
+          contextTitle: ar ? 'صفحتي' : 'My page',
+        );
+        return;
+      }
+      final idx = ctrl.index;
+      final ctx = idx == 0
+          ? (ar ? 'تبويب السوق' : 'Market tab')
+          : idx == 1
+              ? (ar ? 'عروضي' : 'My offers')
+              : idx == 2
+                  ? (ar ? 'تم الموافقة' : 'Approved')
+                  : (ar ? 'إعلاناتي' : 'My listings');
+      await _openMyPageListingsMap(
+        contextProperties: _marketerListingsForCurrentTab(idx),
+        contextTitle: ctx,
+      );
+      return;
+    }
+
+    final ctrl = _ownerTabsCtrl;
+    final myItems = sortedMineForHub();
+    if (ctrl == null) {
+      await _openMyPageListingsMap(
+        contextProperties: myItems,
+        contextTitle: ar ? 'صفحتي' : 'My page',
+      );
+      return;
+    }
+
+    final idx = ctrl.index;
+    final ctx = idx == 0
+        ? (ar ? 'بانتظار عروض المسوقين' : 'Awaiting marketer offers')
+        : idx == 1
+            ? (ar ? 'العروض المقدمة' : 'Submitted offers')
+            : idx == 2
+                ? (ar ? 'بانتظار التصريح' : 'Awaiting permit')
+                : idx == 3
+                    ? (ar ? 'لم يتخذ إجراء 72 ساعة' : 'No action (72h)')
+                    : idx == 4
+                        ? (ar ? 'مفسوخ / ملغى' : 'Cancelled / terminated')
+                        : idx == 5
+                            ? (ar ? 'العقارات المحجوزة' : 'Reserved properties')
+                                : (ar ? 'صفقات مكتملة' : 'Completed deals');
+    final props = idx == 1
+        ? <Property>[]
+        : _filterOwnerHubTab(
+            myItems,
+            _ownerSubTabPropertyBucket(idx),
+          );
+    await _openMyPageListingsMap(
+      contextProperties:
+          props.isEmpty ? _propertiesOwnedOrPublishedByMe() : props,
+      contextTitle: ctx,
+    );
+  }
+
+  /// خريطة ذكية للبحث المتقدم — نفس منطق الشريط العلوي.
+  Future<void> _openSmartAdvancedSearchMap() async {
+    await _openSmartAppBarMap();
+  }
+
   Future<void> _openMapDiscovery() async {
     AppHaptics.light();
-    final properties = _all
-        .where((p) => p.latitude != null && p.longitude != null)
+    var properties = _all
+        .where((p) => _hasValidMapCoordinates(p.latitude, p.longitude))
+        .where(propertyEligibleForPublicMap)
         .toList(growable: false);
-    final requests = _marketHomeRequests
-        .where((r) => r.latitude != null && r.longitude != null)
+    var requests = _marketHomeRequests
+        .where((r) => _hasValidMapCoordinates(r.latitude, r.longitude))
+        .where(marketRequestEligibleForPublicMap)
         .toList(growable: false);
+
+    try {
+      final extra = await Future.wait([
+        _loadPublishedPropertiesWithCoordinatesForMap(),
+        _loadMarketRequestsWithCoordinatesForMap(),
+      ]);
+      properties = _mergePropertyListsForMap(
+        properties,
+        extra[0] as List<Property>,
+      ).where(propertyEligibleForPublicMap).toList(growable: false);
+      requests = _mergeMarketRequestListsForMap(
+        requests,
+        extra[1] as List<MarketPropertyRequestRow>,
+      ).where(marketRequestEligibleForPublicMap).toList(growable: false);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][MAP_OPEN] widen fetch: $e');
+      }
+    }
+
+    if (!mounted) return;
 
     await _pushBody<void>(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '/dashboard/property-map'),
         builder: (_) => PropertyMapDiscoveryPage(
           isAr: widget.isAr,
+          embedAppBar: true,
+          initialKind: switch (_homeFeedKind) {
+            HomeFeedKind.listings => MapDiscoveryKind.listings,
+            HomeFeedKind.requests => MapDiscoveryKind.requests,
+            HomeFeedKind.all => MapDiscoveryKind.all,
+          },
           properties: properties,
           requests: requests,
+          requestCoverImageUrl: (r) =>
+              ListingMediaUrls.marketRequestCoverNetworkUrl(r, _sb),
           onOpenProperty: (p) {
             _dashboardBodyNavKey.currentState?.pop();
             unawaited(_openDetails(p));
@@ -224,12 +515,15 @@ extension _UserDashboardStateActions on _UserDashboardState {
   }
 
   /// يفتح تفاصيل طلب السوق من الرئيسية أو من السلة حتى إن لم يعد الطلب في خليط الرئيسية.
-  Future<void> _openMarketRequestDetailById(String requestId) async {
+  Future<void> _openMarketRequestDetailById(
+    String requestId, {
+    bool autoOpenSubmitOffer = false,
+  }) async {
     final rid = requestId.trim();
     if (rid.isEmpty) return;
     for (final e in _marketHomeRequests) {
       if (e.id == rid) {
-        _openMarketRequestDetail(e);
+        _openMarketRequestDetail(e, autoOpenSubmitOffer: autoOpenSubmitOffer);
         return;
       }
     }
@@ -246,7 +540,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
         );
         return;
       }
-      _openMarketRequestDetail(MarketPropertyRequestRow.fromMap(map));
+      _openMarketRequestDetail(
+        MarketPropertyRequestRow.fromMap(map),
+        autoOpenSubmitOffer: autoOpenSubmitOffer,
+      );
     } catch (_) {
       if (!mounted) return;
       _toast(
@@ -264,9 +561,11 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final res = await _pushBody<Object?>(
       MaterialPageRoute<Object?>(
         fullscreenDialog: true,
+        settings: const RouteSettings(name: '/dashboard/market-request-new'),
         builder: (_) => CreateMarketPropertyRequestPage(
           userId: _uid,
           lang: widget.lang,
+          embedAppBar: true,
         ),
       ),
     );
@@ -289,10 +588,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final res = await _pushBody<Object?>(
       MaterialPageRoute<Object?>(
         fullscreenDialog: true,
+        settings: const RouteSettings(name: '/dashboard/market-request-edit'),
         builder: (_) => CreateMarketPropertyRequestPage(
           userId: _uid,
           lang: widget.lang,
           initialRequest: request,
+          embedAppBar: true,
         ),
       ),
     );
@@ -303,13 +604,52 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  /// زر + العائم: إعلان عقاري أو طلب عقاري (بدون دمج الشاشتين).
-  Future<void> _openCenterPlus() async {
-    if (_isGuest) {
-      _showLoginDialog();
-      return;
+  Future<void> _guestPayUnlockFlow(String unlockKind,
+      {required int targetTab}) async {
+    if (!mounted) return;
+    final paid = await runGuestOneTimePaymentFlow(
+      context: context,
+      isAr: widget.isAr,
+      unlockKind: unlockKind,
+    );
+    if (!paid || !mounted) return;
+    try {
+      final session = context.read<AppSession>();
+      final up = await GuestSessionBridge.tryEstablishBrowsingUser(
+        sb: _sb,
+        appSession: session,
+      );
+      if (!mounted) return;
+      if (up) {
+        await GuestUnlockService.clear();
+        unawaited(_reloadAll());
+        if (mounted) {
+          _ss(() => _tabIndex = targetTab);
+          _toast(
+            widget.isAr
+                ? 'تم التفعيل. يمكنك المتابعة من التبويب المفتوح.'
+                : 'Unlocked. Continue from the opened tab.',
+          );
+        }
+      } else {
+        await GuestUnlockService.clear();
+        _toast(
+          widget.isAr
+              ? 'فعّل تسجيل الدخول المجهول في Auth بلوحة Supabase أو أنشئ حساباً.'
+              : 'Enable anonymous sign-in in Supabase Auth, or create an account.',
+          isError: true,
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      _toast(
+        widget.isAr ? 'تعذّر إكمال التفعيل.' : 'Could not complete activation.',
+        isError: true,
+      );
     }
+  }
 
+  Future<void> _guestOpenCenterPlusFlow() async {
     final cs = Theme.of(context).colorScheme;
     final choice = await showModalBottomSheet<String>(
       context: context,
@@ -333,8 +673,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
                 ),
                 subtitle: Text(
                   widget.isAr
-                      ? 'نشر عقار للبيع أو الإيجار (مالك أو مسوّق معتمد وفق صلاحياتك).'
-                      : 'Publish a property for sale or rent (owner or permitted marketer).',
+                      ? 'نشر عقار للبيع أو الإيجار.'
+                      : 'Publish a property for sale or rent.',
                   style: const TextStyle(fontSize: 12),
                 ),
                 onTap: () => Navigator.pop(ctx, 'listing'),
@@ -353,8 +693,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
                 ),
                 subtitle: Text(
                   widget.isAr
-                      ? 'أبحث عن عقار للشراء أو الإيجار — يظهر طلبك في الرئيسية للمهتمين.'
-                      : 'Looking to buy or rent — your request appears on the home feed.',
+                      ? 'أبحث عن عقار للشراء أو الإيجار.'
+                      : 'Looking to buy or rent.',
                   style: const TextStyle(fontSize: 12),
                 ),
                 onTap: () => Navigator.pop(ctx, 'request'),
@@ -364,16 +704,176 @@ extension _UserDashboardStateActions on _UserDashboardState {
         );
       },
     );
+    if (!mounted || choice == null) return;
+    final forListing = choice == 'listing';
+    final gate = await showGuestCreateContentGateSheet(
+      context: context,
+      isAr: widget.isAr,
+      forListing: forListing,
+    );
+    if (!mounted) return;
+    if (gate == GuestCreateContentGateResult.login) {
+      await Navigator.of(context).pushNamed('/login');
+      return;
+    }
+    if (gate == GuestCreateContentGateResult.register) {
+      await Navigator.of(context).pushNamed('/register');
+      return;
+    }
+    if (gate == GuestCreateContentGateResult.payOnce) {
+      final kind = forListing ? 'listing' : 'request';
+      final tab = forListing ? 1 : 2;
+      await _guestPayUnlockFlow(kind, targetTab: tab);
+      if (!mounted) return;
+      if (!_isGuest) {
+        await _openCenterPlus();
+      }
+    }
+  }
+
+  Future<void> _runAddPropertyListingFlow() async {
+    if (_needsRegaGateBeforeAddProperty()) {
+      final res = await _pushPlusForm<bool>(
+        MaterialPageRoute<bool>(
+          fullscreenDialog: true,
+          builder: (_) => MarketingListingEntryPage(
+            userId: _uid,
+            lang: widget.lang,
+            accountType: _accountType,
+            embedAppBar: true,
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      if (res == true) {
+        await _reloadAll();
+        if (mounted) _ss(() => _tabIndex = 0);
+      }
+      return;
+    }
+
+    final res = await _pushPlusForm<bool>(
+      MaterialPageRoute<bool>(
+        fullscreenDialog: true,
+        builder: (_) => addp.AddPropertyPage(
+          userId: _uid,
+          lang: widget.lang,
+          embedAppBar: true,
+        ),
+      ),
+    );
 
     if (!mounted) return;
 
-    if (choice == 'request') {
-      final res = await _pushBody<Object?>(
+    if (res == true) {
+      await _reloadAll();
+      if (mounted) _ss(() => _tabIndex = 0);
+    }
+  }
+
+  /// زر + العائم: إعلان عقاري أو طلب عقاري (بدون دمج الشاشتين).
+  Future<void> _openCenterPlus() async {
+    if (_isGuest) {
+      await _guestOpenCenterPlusFlow();
+      return;
+    }
+
+    if (_accountRoleLoaded &&
+        _orgNavResolved &&
+        !_canPlusSheetAddProperty &&
+        !_canPlusSheetAddRequest) {
+      _showNotification(
+        widget.isAr ? 'تنبيه' : 'Notice',
+        widget.isAr
+            ? 'لا تملك صلاحية إضافة عقار أو طلب عقاري. راجع مدير المنشأة.'
+            : 'You do not have permission to add a listing or request. Ask your organization owner.',
+        isError: false,
+      );
+      return;
+    }
+
+    final cs = Theme.of(context).colorScheme;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_canPlusSheetAddProperty)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: cs.primaryContainer,
+                    child: Icon(
+                      Icons.domain_add_rounded,
+                      color: cs.onPrimaryContainer,
+                    ),
+                  ),
+                  title: Text(
+                    widget.isAr ? 'إعلان عقاري' : 'Property listing',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    widget.isAr
+                        ? 'نشر عقار للبيع أو الإيجار (مالك أو مسوّق معتمد وفق صلاحياتك).'
+                        : 'Publish a property for sale or rent (owner or permitted marketer).',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'listing'),
+                ),
+              if (_canPlusSheetAddRequest)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: cs.secondaryContainer,
+                    child: Icon(
+                      Icons.travel_explore_rounded,
+                      color: cs.onSecondaryContainer,
+                    ),
+                  ),
+                  title: Text(
+                    widget.isAr ? 'طلب عقاري' : 'Property request',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    widget.isAr
+                        ? 'أبحث عن عقار للشراء أو الإيجار — يظهر طلبك في الرئيسية للمهتمين.'
+                        : 'Looking to buy or rent — your request appears on the home feed.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'request'),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!mounted || choice == null) return;
+
+    // بعد إغلاق الورقة: إطاران قصيران حتى لا يُبتلع مسار النموذج مع إغلاق الـ modal.
+    final selected = choice;
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    await Future<void>.delayed(const Duration(milliseconds: 16));
+    if (!mounted) return;
+
+    if (selected == 'request') {
+      if (_isMarketingAccountType &&
+          !await _ensureSubscriptionGate(
+            SubscriptionGateAction.addMarketPropertyRequest,
+          )) {
+        return;
+      }
+      final res = await _pushPlusForm<Object?>(
         MaterialPageRoute<Object?>(
           fullscreenDialog: true,
           builder: (_) => CreateMarketPropertyRequestPage(
             userId: _uid,
             lang: widget.lang,
+            embedAppBar: true,
           ),
         ),
       );
@@ -389,55 +889,22 @@ extension _UserDashboardStateActions on _UserDashboardState {
       return;
     }
 
-    if (choice != 'listing') {
+    if (selected != 'listing') {
       return;
     }
 
-    if (_needsRegaGateBeforeAddProperty()) {
-      final rega = await showRegaAdLicenseGate(
-        context: context,
-        isAr: widget.isAr,
-        sb: _sb,
-      );
-      if (!mounted) return;
-      if (rega == null || rega.isEmpty) return;
-
-      final res = await _pushBody<bool>(
-        MaterialPageRoute<bool>(
-          fullscreenDialog: true,
-          builder: (_) => addp.AddPropertyPage(
-            userId: _uid,
-            lang: widget.lang,
-            initialRegaPayload: rega,
-          ),
+    if (_isMarketerRole && AppRoleHelper.isMarketingAccountType(_accountType)) {
+      if (!await _ensureSubscriptionGate(
+        SubscriptionGateAction.addPropertyListing,
+        resume: const MarketingSubscriptionResumeIntent(
+          kind: MarketingSubscriptionResumeKind.addPropertyListing,
         ),
-      );
-
-      if (!mounted) return;
-
-      if (res == true) {
-        await _reloadAll();
-        if (mounted) _ss(() => _tabIndex = 0);
+      )) {
+        return;
       }
-      return;
     }
 
-    final res = await _pushBody<bool>(
-      MaterialPageRoute<bool>(
-        fullscreenDialog: true,
-        builder: (_) => addp.AddPropertyPage(
-          userId: _uid,
-          lang: widget.lang,
-        ),
-      ),
-    );
-
-    if (!mounted) return;
-
-    if (res == true) {
-      await _reloadAll();
-      if (mounted) _ss(() => _tabIndex = 0);
-    }
+    await _runAddPropertyListingFlow();
   }
 
   Future<void> _openDetails(
@@ -473,6 +940,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           ownerUsername: ownerForDetails,
           marketingRequestId: marketingRequestId,
           marketingInviteId: marketingInviteId,
+          embedAppBar: true,
           allowMarketingOffer: allowMarketingOffer,
           marketerHubPhase: marketerHubPhase,
           isFavorite: !_isGuest && _isFav(p.id),
@@ -496,23 +964,13 @@ extension _UserDashboardStateActions on _UserDashboardState {
             }
             await _toggleFav(p.id);
           },
+          onCompleteDeal:
+              _isGuest || _isMarketingAccountType ? null : _addToCart,
           onEditProperty: (prop) => _editProperty(prop),
           onRequestDelete: (prop) => _requestDeleteProperty(prop),
         ),
       ),
     );
-  }
-
-  void _openSupportPage() {
-    unawaited(_pushBody<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => SupportPage(
-          userId: _uid,
-          isAr: widget.isAr,
-          bankColor: Theme.of(context).colorScheme.primary,
-        ),
-      ),
-    ));
   }
 
   // =========================
@@ -569,6 +1027,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           userId: _uid,
           lang: widget.lang,
           marketerRegaAlignmentMode: true,
+          embedAppBar: true,
         ),
       ),
     );
@@ -633,6 +1092,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           property: property,
           userId: _uid,
           lang: widget.lang,
+          embedAppBar: true,
         ),
       ),
     );
@@ -647,6 +1107,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
         widget.isAr
             ? 'تم تحديث الإعلان بنجاح.'
             : 'Listing updated successfully.',
+      );
+
+      unawaited(
+        ComplianceAuditService.instance.log('listing.edit', {
+          'property_id': result.id,
+        }),
       );
 
       return result;
@@ -722,6 +1188,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
       );
       AppHaptics.light();
 
+      unawaited(
+        ComplianceAuditService.instance.log('listing.delete', {
+          'property_id': property.id,
+        }),
+      );
+
       return true;
     } on PostgrestException catch (e) {
       final msg = e.message.toUpperCase();
@@ -788,7 +1260,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
                       : 'Enter the reason for deletion. The request will be sent to admin and the listing will not be deleted until approved.',
                 ),
                 const SizedBox(height: 12),
-                TextField(
+                AqarTextField(
                   controller: controller,
                   enabled: !submitting,
                   maxLines: 4,
@@ -906,17 +1378,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       final title = p.title.trim().isNotEmpty
           ? p.title.trim()
           : (widget.isAr ? 'إعلان عقار' : 'Property listing');
-      String? img;
-      if (p.images.isNotEmpty) {
-        final first = p.images.first.trim();
-        if (first.startsWith('http://') || first.startsWith('https://')) {
-          img = first;
-        } else if (first.isNotEmpty) {
-          try {
-            img = _sb.storage.from('property-images').getPublicUrl(first);
-          } catch (_) {}
-        }
-      }
+      final img = PropertyListingDisplay.propertySharePreviewUrl(p, _sb);
       await shareListingRich(
         text: '$title\n${uri.toString()}',
         imageHttpUrl: img,
@@ -950,6 +1412,50 @@ extension _UserDashboardStateActions on _UserDashboardState {
     );
   }
 
+  Future<void> _copyMarketRequestPublicLink(MarketPropertyRequestRow r) async {
+    final uri = AppListingLinks.marketRequestWebUri(
+      r.id,
+      lang: widget.isAr ? 'ar' : 'en',
+    );
+    await Clipboard.setData(ClipboardData(text: uri.toString()));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          widget.isAr ? 'تم نسخ رابط الطلب' : 'Request link copied',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _shareMarketRequestFromCard(MarketPropertyRequestRow r) async {
+    try {
+      final uri = AppListingLinks.marketRequestWebUri(
+        r.id,
+        lang: widget.isAr ? 'ar' : 'en',
+      );
+      final title = r.title.trim().isNotEmpty
+          ? r.title.trim()
+          : (widget.isAr ? 'طلب عقاري' : 'Property request');
+      final img =
+          PropertyListingDisplay.marketRequestSharePreviewUrl(r, _sb);
+      await shareListingRich(
+        text: '$title\n${uri.toString()}',
+        imageHttpUrl: img,
+        subject: widget.isAr ? 'طلب — $title' : 'Request — $title',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   Future<void> _addToCart(Property p) async {
     if (_isGuest) {
       _showLoginDialog();
@@ -975,6 +1481,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
             : 'You cannot reserve your own listing',
         isError: true,
       );
+      return;
+    }
+
+    if (!await _ensureSubscriptionGate(
+      SubscriptionGateAction.completeMarketDeal,
+    )) {
       return;
     }
 
@@ -1022,8 +1534,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
       if (!mounted) return;
 
       _showNotification(
-        widget.isAr ? 'تم الحجز' : 'Reserved',
-        widget.isAr ? 'تم الحجز لمدة 72 ساعة' : 'Reserved for 72 hours',
+        widget.isAr ? 'تمت إضافة الإعلان إلى صفقاتك' : 'Added to My deals',
+        widget.isAr
+            ? 'يمكنك متابعة إتمام الصفقة من تبويب «صفقاتي» (72 ساعة).'
+            : 'Continue the deal from the My deals tab (72 hours).',
       );
 
       _ss(() {
@@ -1038,6 +1552,239 @@ extension _UserDashboardStateActions on _UserDashboardState {
             : 'This property is not available for reservation now',
         isError: true,
       );
+    }
+  }
+
+  Future<void> _completeDealFromMarketRequestHome(
+    MarketPropertyRequestRow row,
+  ) async {
+    final isInstant = row.isInstantPaid;
+
+    if (_isGuest) {
+      if (isInstant) {
+        final choice = await showGuestInstantDealAuthSheet(
+          context: context,
+          isAr: widget.isAr,
+        );
+        if (!mounted) return;
+        if (choice == GuestAuthRequiredResult.login) {
+          _showLoginDialog();
+        } else if (choice == GuestAuthRequiredResult.register) {
+          await Navigator.of(context, rootNavigator: true).pushNamed('/register');
+        }
+      } else {
+        _showLoginDialog();
+      }
+      return;
+    }
+
+    if (_isMarketingAccountType) {
+      _showNotification(
+        widget.isAr ? 'غير مسموح' : 'Not allowed',
+        widget.isAr
+            ? 'حساب التسويق لا يمكنه استخدام «صفقاتي».'
+            : 'Marketing accounts cannot use My deals.',
+        isError: true,
+      );
+      return;
+    }
+
+    if (row.requesterId == _uid) {
+      _openMarketRequestDetail(row);
+      return;
+    }
+
+    final draft = await _showMarketRequestCompleteDealDialog(row);
+    if (draft == null || !mounted) return;
+
+    if (!isInstant &&
+        _isMarketingAccountType &&
+        !await _ensureSubscriptionGate(
+          SubscriptionGateAction.completeMarketDeal,
+          resume: MarketingSubscriptionResumeIntent(
+            kind: MarketingSubscriptionResumeKind.submitOffer,
+            requestId: row.id,
+          ),
+        )) {
+      return;
+    }
+
+    String? oid;
+    if (_isMarketingAccountType) {
+      oid = await _marketingSubscriptionOrganizationId();
+    }
+
+    if (!isInstant && _isMarketingAccountType) {
+      var allow = _subscriptionGate.marketOfferAllowance ??
+          await IndividualMarketOfferService(_sb).currentAllowance(
+            accountType: _accountType,
+            organizationId: oid,
+          );
+      if (!mounted) return;
+      if (!allow.canSubmitNow) {
+        final goPay = await showMarketOfferPaywallDialog(
+          context: context,
+          isAr: widget.isAr,
+          allowance: allow,
+        );
+        if (!mounted || !goPay) return;
+        final didSubscribe = await _openSubscriptionsHubForMarketOffer(row.id);
+        if (!mounted || !didSubscribe) return;
+        allow = await IndividualMarketOfferService(_sb).currentAllowance(
+          accountType: _accountType,
+          organizationId: oid,
+        );
+        if (!mounted) return;
+        if (!allow.canSubmitNow) {
+          _showNotification(
+            widget.isAr ? allow.shortStatusAr() : allow.shortStatusEn(),
+            '',
+            isError: true,
+          );
+          return;
+        }
+      }
+
+      final usageRes =
+          await IndividualMarketOfferService(_sb).recordUsageOnSuccess(row.id);
+      if (!mounted) return;
+      if (usageRes['ok'] != true) {
+        final err = '${usageRes['error'] ?? ''}';
+        _showNotification(
+          widget.isAr
+              ? individualOfferShortReasonAr(err)
+              : 'Quota: $err',
+          '',
+          isError: true,
+        );
+        return;
+      }
+    }
+
+    try {
+      final added = await MarketRequestOffersService(_sb).submitOffer(
+        marketRequestId: row.id,
+        offerMessage: draft.message,
+        priceOffer: draft.price,
+      );
+      if (!mounted) return;
+
+      await Future.wait([
+        _loadCart(force: true),
+        _loadHome(force: true),
+        _loadMarketHomeRequests(force: true),
+        _loadMyMarketRequestOfferTracking(),
+      ]);
+
+      if (!mounted) return;
+
+      _showNotification(
+        widget.isAr ? 'تمت إضافة الطلب إلى صفقاتك' : 'Added to My deals',
+        added
+            ? (widget.isAr
+                ? 'تابع إتمام الصفقة من تبويب «صفقاتي».'
+                : 'Continue the deal from the My deals tab.')
+            : (widget.isAr
+                ? 'الطلب موجود بالفعل في «صفقاتي».'
+                : 'This request is already in My deals.'),
+      );
+
+      _ss(() {
+        if (_showBottomNavCart) _tabIndex = 3;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      _showNotification(
+        widget.isAr ? 'تعذر إتمام الصفقة' : 'Could not complete deal',
+        e.toString(),
+        isError: true,
+      );
+    }
+  }
+
+  Future<({String message, double? price})?> _showMarketRequestCompleteDealDialog(
+    MarketPropertyRequestRow row,
+  ) async {
+    final msgCtrl = TextEditingController();
+    final priceCtrl = TextEditingController();
+    final budgetMax = row.budgetMax;
+    if (budgetMax != null && budgetMax > 0) {
+      priceCtrl.text = budgetMax.toStringAsFixed(
+        budgetMax.truncateToDouble() == budgetMax ? 0 : 2,
+      );
+    }
+
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dCtx) {
+          return AlertDialog(
+            title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    widget.isAr
+                        ? 'سيُضاف الطلب إلى «صفقاتي» ويمكنك متابعة إتمام الصفقة مع صاحب الطلب.'
+                        : 'The request will be added to My deals so you can complete the deal with the requester.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  AqarTextField(
+                    controller: msgCtrl,
+                    decoration: InputDecoration(
+                      labelText: widget.isAr
+                          ? 'رسالتك (اختياري)'
+                          : 'Your message (optional)',
+                    ),
+                    minLines: 2,
+                    maxLines: 4,
+                  ),
+                  const SizedBox(height: 10),
+                  AqarTextField(
+                    controller: priceCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: latinDecimalNumberFormatters(),
+                    decoration: InputDecoration(
+                      labelText: widget.isAr
+                          ? 'سعر مقترح (${AppMoney.saudiRiyalSignUnicode})'
+                          : 'Suggested price (SAR)',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dCtx, false),
+                child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dCtx, true),
+                child: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+              ),
+            ],
+          );
+        },
+      );
+      if (ok != true) return null;
+      final parsed = double.tryParse(
+        normalizeWesternDigits(priceCtrl.text.trim()).replaceAll(',', ''),
+      );
+      return (
+        message: msgCtrl.text.trim(),
+        price: (parsed == null || parsed <= 0) ? null : parsed,
+      );
+    } finally {
+      msgCtrl.dispose();
+      priceCtrl.dispose();
     }
   }
 
@@ -1058,7 +1805,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
         context: context,
         builder: (dCtx) {
           return AlertDialog(
-            title: Text(widget.isAr ? 'تقديم عرض' : 'Submit offer'),
+            title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1075,24 +1822,61 @@ extension _UserDashboardStateActions on _UserDashboardState {
                         ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: priceCtrl,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: latinDecimalNumberFormatters(),
-                    decoration: InputDecoration(
-                      labelText: widget.isAr
-                          ? 'قيمة العرض (${AppMoney.saudiRiyalSignUnicode})'
-                          : 'Offer amount (SAR)',
+                  if (p.isAuction) ...[
+                    Text(
+                      widget.isAr
+                          ? 'آخر مزايدة (${AppMoney.saudiRiyalSignUnicode})'
+                          : 'Latest bid (SAR)',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .outlineVariant
+                              .withValues(alpha: 0.45),
+                        ),
+                      ),
+                      child: Text(
+                        currentPrice > 0
+                            ? AppMoney.formatWithCurrencyCode(
+                                currentPrice,
+                                isAr: widget.isAr,
+                              )
+                            : (widget.isAr ? 'لا توجد مزايدة بعد' : 'No bid yet'),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  AqarTextField(
                     controller: msgCtrl,
                     decoration: InputDecoration(
                       labelText: widget.isAr
-                          ? 'رسالتك للمسوق (اختياري)'
-                          : 'Message to marketer (optional)',
+                          ? (p.isAuction
+                              ? 'رسالتك للمسوق (اختياري)'
+                              : 'رسالتك للمسوق')
+                          : (p.isAuction
+                              ? 'Message to marketer (optional)'
+                              : 'Message to marketer'),
                     ),
                     minLines: 2,
                     maxLines: 4,
@@ -1107,7 +1891,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dCtx, true),
-                child: Text(widget.isAr ? 'إرسال العرض' : 'Send offer'),
+                child: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
               ),
             ],
           );
@@ -1115,7 +1899,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
       );
 
       if (ok != true) return null;
-      final parsedOfferPrice = NumberHelper.toDouble(priceCtrl.text.trim());
+      final parsedOfferPrice = p.isAuction
+          ? NumberHelper.toDouble(priceCtrl.text.trim())
+          : null;
       return (
         message: msgCtrl.text.trim(),
         offerPrice: (parsedOfferPrice == null || parsedOfferPrice <= 0)
@@ -1177,14 +1963,15 @@ extension _UserDashboardStateActions on _UserDashboardState {
       ]);
       if (!mounted) return;
       _ensureSubTabControllers();
-      _dashboardBodyNavKey.currentState?.popUntil((route) => route.isFirst);
+      final cleared = await _popBodyRoutesWithFormGuard();
+      if (!cleared || !mounted) return;
       _ss(() => _tabIndex = 1);
       if (!_isMarketerRole && _ownerTabsCtrl != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
           final c = _ownerTabsCtrl;
-          if (c != null && c.length > 6) {
-            c.animateTo(6);
+          if (c != null && c.length > 7) {
+            c.animateTo(7);
           }
           _showNotification(
             widget.isAr ? 'تم إتمام الشراء' : 'Purchase completed',
@@ -1285,26 +2072,49 @@ extension _UserDashboardStateActions on _UserDashboardState {
   }
 
   Future<void> _reloadHiddenFeedPreferences() async {
+    if (_isGuest) {
+      if (_hiddenPropertyIds.isNotEmpty ||
+          _hiddenMarketRequestIds.isNotEmpty ||
+          _hiddenCompletedDealPropertyIds.isNotEmpty ||
+          _hiddenCartMarketOfferIds.isNotEmpty) {
+        _ssHomeFeed(() {
+          _hiddenPropertyIds = {};
+          _hiddenMarketRequestIds = {};
+          _hiddenCompletedDealPropertyIds = {};
+          _hiddenCartMarketOfferIds = {};
+        });
+      }
+      return;
+    }
     final hp = await UserListingPreferencesService.hiddenPropertyIds();
     final hr = await UserListingPreferencesService.hiddenMarketRequestIds();
     final hc =
         await UserListingPreferencesService.hiddenCompletedDealPropertyIds();
+    final ho =
+        await UserListingPreferencesService.hiddenCartMarketOfferIds();
     if (!mounted) return;
-    setState(() {
+    _ssHomeFeed(() {
       _hiddenPropertyIds = hp;
       _hiddenMarketRequestIds = hr;
       _hiddenCompletedDealPropertyIds = hc;
+      _hiddenCartMarketOfferIds = ho;
     });
   }
 
-  Future<void> _copyPlainToClipboard(String text, String okMessage) async {
+  Future<void> _copyPlainToClipboard(
+    String text,
+    String okMessage, {
+    bool playSound = false,
+  }) async {
     final t = text.trim();
     if (t.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: t));
     if (!mounted) return;
+    final msg = okMessage.trim();
     _showNotification(
-      widget.isAr ? 'تم النسخ' : 'Copied',
-      okMessage,
+      msg,
+      '',
+      playSound: playSound,
     );
   }
 
@@ -1313,7 +2123,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     if (id.isEmpty) return;
     await UserListingPreferencesService.addHiddenCompletedDealProperty(id);
     if (!mounted) return;
-    setState(() {
+    _ss(() {
       _hiddenCompletedDealPropertyIds = {
         ..._hiddenCompletedDealPropertyIds,
         id,
@@ -1327,10 +2137,129 @@ extension _UserDashboardStateActions on _UserDashboardState {
     );
   }
 
+  Future<void> _hideCartMarketOffer(String offerId) async {
+    final id = offerId.trim();
+    if (id.isEmpty) return;
+    await UserListingPreferencesService.addHiddenCartMarketOffer(id);
+    if (!mounted) return;
+    _ss(() {
+      _hiddenCartMarketOfferIds = {..._hiddenCartMarketOfferIds, id};
+    });
+    _showNotification(
+      widget.isAr ? 'تم الإخفاء' : 'Hidden',
+      widget.isAr
+          ? 'لن يظهر هذا العرض في «صفقاتي» على هذا الجهاز.'
+          : 'This offer is hidden from My deals on this device.',
+    );
+  }
+
+  /// «حذف وإرجاع للرئيسية»: يسحب عرض المستخدم على طلب سوق ويُعيد ظهور الطلب في الرئيسية.
+  ///
+  /// - يُؤكّد العملية للمستخدم.
+  /// - يستدعي [withdraw_my_market_request_offer] لتحرير الحصة وحذف العرض.
+  /// - يُزيل الطلب من قائمة الإخفاء المحلية بعد سحبتين كي يظهر من جديد فور التحديث.
+  /// - يُعيد تحميل البيانات اللازمة لتنعكس النتيجة على «صفقاتي» و«الرئيسية».
+  Future<void> _withdrawCartMarketOffer(
+    String requestId,
+    String offerId,
+  ) async {
+    final rid = requestId.trim();
+    if (rid.isEmpty) return;
+    final ar = widget.isAr;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: Text(ar ? 'حذف العرض وإرجاع الطلب للرئيسية' : 'Delete & restore'),
+        content: Text(
+          ar
+              ? 'سيتم سحب عرضك من السوق العقاري، وسيعود الطلب للظهور في الرئيسية مع ملاحظة «سبق وأن قدّمت عرضاً». لا يمكن السحب لو اختارك صاحب الطلب لإتمام الصفقة، وبعد سحبتين على نفس الطلب لن يظهر لك مجدداً.'
+              : 'Your offer will be withdrawn and the request will return to Home with a "previously offered" marker. Withdrawal is blocked if the requester selected you for the deal; after two withdrawals on the same request it will not show again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: Text(ar ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: Text(ar ? 'حذف وإرجاع' : 'Delete & restore'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final res = await IndividualMarketOfferService(_sb).withdrawMyOffer(rid);
+    if (!mounted) return;
+    final ok = res['ok'] == true;
+    if (!ok) {
+      final code = (res['error'] ?? '').toString();
+      _showNotification(
+        ar ? 'تعذّر سحب العرض' : 'Could not withdraw',
+        ar
+            ? individualOfferShortReasonAr(code)
+            : 'Server error: $code',
+      );
+      return;
+    }
+
+    final isFinal = res['final'] == true;
+    _ss(() {
+      // إن لم تُستهلك السحبتان نُعيد ظهور الطلب في الرئيسية فوراً.
+      if (!isFinal) {
+        _marketRequestIdsHiddenAfterTwoWithdrawals = {
+          ..._marketRequestIdsHiddenAfterTwoWithdrawals,
+        }..remove(rid);
+        _hiddenMarketRequestIds = {..._hiddenMarketRequestIds}..remove(rid);
+      } else {
+        _marketRequestIdsHiddenAfterTwoWithdrawals = {
+          ..._marketRequestIdsHiddenAfterTwoWithdrawals,
+          rid,
+        };
+      }
+      // أزل العرض من قائمة الانتظار محلياً (نفس مفتاح id):
+      if (offerId.trim().isNotEmpty) {
+        _myPendingMarketOffersForCart = _myPendingMarketOffersForCart
+            .where((m) => (m['id'] ?? '').toString().trim() != offerId.trim())
+            .toList();
+        // أيضاً من الأرشيف — حتى لو ظهر بحالة 'withdrawn' من إعادة التحميل.
+        _myArchivedMarketOffersForCart = _myArchivedMarketOffersForCart
+            .where((m) => (m['id'] ?? '').toString().trim() != offerId.trim())
+            .toList();
+      }
+      // أيضاً أزل بناءً على request_id لأي عرض على نفس الطلب (للأمان).
+      _myPendingMarketOffersForCart = _myPendingMarketOffersForCart
+          .where((m) =>
+              (m['market_request_id'] ?? '').toString().trim() != rid)
+          .toList();
+      _myArchivedMarketOffersForCart = _myArchivedMarketOffersForCart
+          .where((m) =>
+              (m['market_request_id'] ?? '').toString().trim() != rid)
+          .toList();
+      _marketRequestIdsWithMyPendingOffer = {
+        ..._marketRequestIdsWithMyPendingOffer,
+      }..remove(rid);
+    });
+
+    unawaited(_loadMyMarketRequestOfferTracking());
+    unawaited(_loadMarketHomeRequests(force: true));
+
+    _showNotification(
+      ar ? 'تم الحذف' : 'Deleted',
+      isFinal
+          ? (ar
+              ? 'تم سحب عرضك. لن يظهر لك هذا الطلب مرة أخرى (الحد سحبتان لكل طلب).'
+              : 'Offer withdrawn. This request will no longer appear (limit: 2 withdrawals per request).')
+          : (ar
+              ? 'تم سحب عرضك وأُعيد الطلب إلى الرئيسية.'
+              : 'Offer withdrawn and the request was restored to Home.'),
+    );
+  }
+
   Future<void> _restoreAllHiddenCompletedDeals() async {
     await UserListingPreferencesService.clearHiddenCompletedDeals();
     if (!mounted) return;
-    setState(() => _hiddenCompletedDealPropertyIds = {});
+    _ss(() => _hiddenCompletedDealPropertyIds = {});
     _showNotification(
       widget.isAr ? 'تم الإظهار' : 'Restored',
       widget.isAr
@@ -1372,11 +2301,15 @@ extension _UserDashboardStateActions on _UserDashboardState {
             userId: _uid,
             lang: widget.lang,
             initialRegaPayload: rega,
+            embedAppBar: true,
           ),
         ),
       );
       if (!mounted) return;
-      if (res == true) await _reloadAll();
+      if (res == true) {
+        await _reloadAll();
+        if (mounted) _ss(() => _tabIndex = 0);
+      }
       return;
     }
 
@@ -1386,18 +2319,22 @@ extension _UserDashboardStateActions on _UserDashboardState {
         builder: (_) => addp.AddPropertyPage(
           userId: _uid,
           lang: widget.lang,
+          embedAppBar: true,
         ),
       ),
     );
     if (!mounted) return;
-    if (res == true) await _reloadAll();
+    if (res == true) {
+      await _reloadAll();
+      if (mounted) _ss(() => _tabIndex = 0);
+    }
   }
 
   Future<void> _onHomeHideProperty(Property p) async {
     if (_isGuest) return;
     await UserListingPreferencesService.addHiddenProperty(p.id);
     if (!mounted) return;
-    setState(() => _hiddenPropertyIds = {..._hiddenPropertyIds, p.id});
+    _ss(() => _hiddenPropertyIds = {..._hiddenPropertyIds, p.id});
     final l10n = AppLocalizations.of(context);
     if (l10n != null) {
       _toast(l10n.dashboardToastListingHiddenFromHome);
@@ -1408,7 +2345,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     if (_isGuest) return;
     await UserListingPreferencesService.removeHiddenProperty(p.id);
     if (!mounted) return;
-    setState(() {
+    _ss(() {
       final next = {..._hiddenPropertyIds}..remove(p.id);
       _hiddenPropertyIds = next;
     });
@@ -1434,7 +2371,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     if (_isGuest) return;
     await UserListingPreferencesService.removeHiddenMarketRequest(r.id);
     if (!mounted) return;
-    setState(() {
+    _ss(() {
       final next = {..._hiddenMarketRequestIds}..remove(r.id);
       _hiddenMarketRequestIds = next;
     });
@@ -1461,8 +2398,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     if (_isGuest) return;
     await UserListingPreferencesService.addHiddenMarketRequest(r.id);
     if (!mounted) return;
-    setState(
-        () => _hiddenMarketRequestIds = {..._hiddenMarketRequestIds, r.id});
+    _ss(() => _hiddenMarketRequestIds = {..._hiddenMarketRequestIds, r.id});
     final l10n = AppLocalizations.of(context);
     if (l10n != null) {
       _toast(l10n.dashboardToastMarketRequestHiddenFromHome);
@@ -1480,5 +2416,478 @@ extension _UserDashboardStateActions on _UserDashboardState {
       },
     );
     if (mounted) await _reloadHiddenFeedPreferences();
+  }
+
+  List<Property> _mergePropertyListsForMap(
+    List<Property> primary,
+    List<Property> extra,
+  ) {
+    final m = <String, Property>{};
+    for (final p in primary) {
+      m[p.id] = p;
+    }
+    for (final p in extra) {
+      m[p.id] = p;
+    }
+    return m.values.toList(growable: false);
+  }
+
+  List<MarketPropertyRequestRow> _mergeMarketRequestListsForMap(
+    List<MarketPropertyRequestRow> primary,
+    List<MarketPropertyRequestRow> extra,
+  ) {
+    final m = <String, MarketPropertyRequestRow>{};
+    for (final r in primary) {
+      m[r.id] = r;
+    }
+    for (final r in extra) {
+      m[r.id] = r;
+    }
+    return m.values.toList(growable: false);
+  }
+
+  Future<String?> _orgUnitIdForSubscriptionsMenu() async {
+    if (!_orgNavIsOwner) return null;
+    try {
+      final o = await OrgTeamService(_sb).orgUnitForOwner();
+      return o?['id']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// منشأة الفريق لاشتراك التسويق (مكاتب/شركات/مؤسسات/وكالة)، أو اشتراك المالك عند التوفر.
+  Future<String?> _marketingSubscriptionOrganizationId() async {
+    if (!AppRoleHelper.isMarketingAccountType(_accountType)) return null;
+    if (AppRoleHelper.isStandaloneMarketer(_accountType)) return null;
+    try {
+      final ctx = await OrgTeamService(_sb).myOrgContext();
+      final id = '${ctx?['org_id'] ?? ''}'.trim();
+      if (id.isNotEmpty) return id;
+    } catch (_) {}
+    if (_orgNavIsOwner) {
+      return await _orgUnitIdForSubscriptionsMenu();
+    }
+    return null;
+  }
+
+  AppSubscriptionGate get _subscriptionGate => context.read<AppSubscriptionGate>();
+
+  Future<void> _refreshSubscriptionGate({bool force = true}) async {
+    await _subscriptionGate.refresh(force: force);
+  }
+
+  Future<void> _openSubscriptionsFromGate(
+    SubscriptionGateAction action, {
+    MarketingSubscriptionResumeIntent? resume,
+  }) async {
+    if (_isGuest) {
+      _showLoginDialog();
+      return;
+    }
+    final intent = resume ??
+        MarketingSubscriptionResumeIntent(
+          kind: switch (action) {
+            SubscriptionGateAction.completeMarketDeal =>
+              MarketingSubscriptionResumeKind.submitOffer,
+            SubscriptionGateAction.addPropertyListing =>
+              MarketingSubscriptionResumeKind.addPropertyListing,
+            SubscriptionGateAction.addMarketPropertyRequest =>
+              MarketingSubscriptionResumeKind.postPaidUnlock,
+            SubscriptionGateAction.marketingPaidWorkflow =>
+              MarketingSubscriptionResumeKind.postPaidUnlock,
+          },
+        );
+    // إتمام الصفقة للمسوّق: اعرض باقات «إضافة صفقات» فقط (لا الباقات الكاملة).
+    final marketOfferOnly =
+        action == SubscriptionGateAction.completeMarketDeal &&
+        _isMarketingAccountType;
+    await _pushSubscriptionsHubForPaidActionResume(
+      intent,
+      marketOfferPlansOnly: marketOfferOnly,
+    );
+    await _refreshSubscriptionGate(force: true);
+  }
+
+  Future<bool> _ensureSubscriptionGate(
+    SubscriptionGateAction action, {
+    MarketingSubscriptionResumeIntent? resume,
+    bool presentDialog = true,
+  }) async {
+    if (_isGuest) {
+      _showLoginDialog();
+      return false;
+    }
+    await _refreshSubscriptionGate(force: false);
+    if (_subscriptionGate.allows(action)) return true;
+    if (!mounted || !presentDialog) return false;
+
+    if (action == SubscriptionGateAction.completeMarketDeal) {
+      final allow = _subscriptionGate.marketOfferAllowance;
+      if (allow != null) {
+        final goPay = await showMarketOfferPaywallDialog(
+          context: context,
+          isAr: widget.isAr,
+          allowance: allow,
+        );
+        if (!mounted || !goPay) return false;
+        await _openSubscriptionsFromGate(
+          action,
+          resume: resume,
+        );
+        await _refreshSubscriptionGate(force: true);
+        return _subscriptionGate.allows(action);
+      }
+    }
+
+    if (action == SubscriptionGateAction.marketingPaidWorkflow ||
+        (action == SubscriptionGateAction.addPropertyListing &&
+            _isMarketingAccountType)) {
+      final oid = await _marketingSubscriptionOrganizationId();
+      final row = _subscriptionGate.subscriptionRow ??
+          await SubscriptionService(_sb)
+              .getCurrentSubscription(organizationId: oid);
+      if (!mounted) return false;
+      await showMarketingSubscriptionPaywallDialog(
+        context: context,
+        isAr: widget.isAr,
+        subscriptionRow: row,
+        onSubscribe: () => unawaited(
+          _openSubscriptionsFromGate(action, resume: resume),
+        ),
+      );
+      await _refreshSubscriptionGate(force: true);
+      return _subscriptionGate.allows(action);
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.lock_outline),
+        title: Text(
+          widget.isAr
+              ? _subscriptionGate.alertTitleAr(action)
+              : _subscriptionGate.alertTitleEn(action),
+        ),
+        content: Text(
+          widget.isAr
+              ? _subscriptionGate.alertBodyAr(action)
+              : _subscriptionGate.alertBodyEn(action),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(widget.isAr ? 'لاحقاً' : 'Later'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              unawaited(_openSubscriptionsFromGate(action, resume: resume));
+            },
+            icon: const Icon(Icons.subscriptions_outlined),
+            label: Text(widget.isAr ? 'الذهاب للاشتراك' : 'Go to subscription'),
+          ),
+        ],
+      ),
+    );
+    await _refreshSubscriptionGate(force: true);
+    return _subscriptionGate.allows(action);
+  }
+
+  /// بوابة اشتراك لكل إجراء تسويقي مدفوع/تعاقدي من لوحة «صفحتي».
+  Future<bool> _ensureMarketingSubscriptionForPaidWorkflow(
+    MarketingSubscriptionResumeIntent resume,
+  ) async {
+    if (_isGuest) return false;
+    if (!_isMarketingAccountType) {
+      return true;
+    }
+    if (_subscriptionGate.canUseMarketingPaidWorkflow) return true;
+    return _ensureSubscriptionGate(
+      SubscriptionGateAction.marketingPaidWorkflow,
+      resume: resume,
+    );
+  }
+
+  /// إشعار «اشتراك على وشك الانتهاء» — يُعرض مرة واحدة لكل جلسة عند بقاء ≤ 3 أيام.
+  Future<void> _maybeShowExpiringSubscriptionPrompt() async {
+    if (!mounted || _isGuest) return;
+    if (_expiringPromptShown) return;
+    if (!_isMarketingAccountType) return;
+    try {
+      final oid = await _marketingSubscriptionOrganizationId();
+      final svc = SubscriptionService(_sb);
+      final row = await svc.getCurrentSubscription(organizationId: oid);
+      if (row == null) return;
+      final end = SubscriptionService.subscriptionExclusiveEndUtc(row);
+      if (end == null) return;
+      final now = DateTime.now().toUtc();
+      final diff = end.difference(now);
+      if (diff.isNegative) return;
+      if (diff > const Duration(days: 3)) return;
+      if (!mounted) return;
+      _expiringPromptShown = true;
+
+      final isAr = widget.isAr;
+      final endLocal = end.toLocal();
+      final formatted = DateFormat(
+        'EEEE d MMM yyyy — HH:mm',
+        isAr ? 'ar' : 'en',
+      ).format(endLocal);
+      final days = diff.inDays;
+      final hours = diff.inHours - days * 24;
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(
+            isAr ? 'اشتراكك على وشك الانتهاء' : 'Your subscription is ending soon',
+          ),
+          content: Text(
+            isAr
+                ? 'يتبقى على انتهاء اشتراكك ${days > 0 ? '$days يوم و ' : ''}$hours ساعة.\nتاريخ ووقت الانتهاء: $formatted.\n\nجدّد الاشتراك قبل الانتهاء لتجنّب توقف ميزات النشر والتعاقد.'
+                : 'Your subscription ends in ${days > 0 ? '$days days and ' : ''}$hours hours.\nEnds at: $formatted.\n\nRenew now to avoid interruption.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(isAr ? 'لاحقاً' : 'Later'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                unawaited(_pushSubscriptionsHubForPaidActionResume(
+                  const MarketingSubscriptionResumeIntent(
+                    kind: MarketingSubscriptionResumeKind.postPaidUnlock,
+                  ),
+                ));
+              },
+              child: Text(isAr ? 'جدّد الآن' : 'Renew now'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      debugPrint('_maybeShowExpiringSubscriptionPrompt error: $e');
+    }
+  }
+
+  Future<void> _pushSubscriptionsHubForPaidActionResume(
+    MarketingSubscriptionResumeIntent intent, {
+    int initialIndex = 0,
+    bool marketOfferPlansOnly = false,
+  }) async {
+    if (_isGuest) {
+      _showLoginDialog();
+      return;
+    }
+    final oid = await _marketingSubscriptionOrganizationId();
+    if (!mounted) return;
+    final popped = await _pushBody<MarketingSubscriptionResumeIntent?>(
+      MaterialPageRoute<MarketingSubscriptionResumeIntent?>(
+        settings: const RouteSettings(name: '/dashboard/subscriptions'),
+        builder: (_) => SubscriptionsRootScreen(
+          lang: widget.lang,
+          accountType: _accountType,
+          organizationId: oid,
+          initialIndex: initialIndex,
+          embedAppBar: true,
+          resumeAfterPurchase: intent,
+          marketOfferPlansOnly: marketOfferPlansOnly,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    unawaited(_refreshSubscriptionMenuBadge());
+    await _refreshSubscriptionGate(force: true);
+    if (popped != null && popped.isValid) {
+      await _resumeMarketingSubscriptionAfterPurchase(popped);
+    }
+  }
+
+  Future<void> _resumeMarketingSubscriptionAfterPurchase(
+    MarketingSubscriptionResumeIntent intent,
+  ) async {
+    SubscriptionService.invalidateSubscriptionCache();
+    await _loadMarketerBuckets(force: true);
+    if (!mounted) return;
+    switch (intent.kind) {
+      case MarketingSubscriptionResumeKind.submitOffer:
+        final rid = intent.requestId.trim();
+        if (rid.isNotEmpty && !_isMarketingAccountType) {
+          await _openMarketRequestDetailById(
+            rid,
+            autoOpenSubmitOffer: true,
+          );
+        } else {
+          final row = _findMarketerRowForSubscriptionResume(intent);
+          if (row != null) {
+            await _showMarketingOfferSheetForRow(row);
+          } else if (rid.isNotEmpty) {
+            await _openMarketRequestDetailById(
+              rid,
+              autoOpenSubmitOffer: true,
+            );
+          } else {
+            _showNotification(
+              widget.isAr ? 'تنبيه' : 'Notice',
+              widget.isAr
+                  ? 'تم تفعيل الاشتراك. حدّث القائمة أو أعد فتح الطلب لإتمام الصفقة.'
+                  : 'Subscription active. Refresh the list or reopen the request to complete your deal.',
+              isError: false,
+            );
+          }
+        }
+        break;
+      case MarketingSubscriptionResumeKind.createContract:
+        final r1 = _findMarketerRowForSubscriptionResume(intent);
+        if (r1 != null) {
+          await _createMarketingContract(r1);
+        } else {
+          _showNotification(
+            widget.isAr ? 'تنبيه' : 'Notice',
+            widget.isAr
+                ? 'تم تفعيل الاشتراك. حدّث القائمة ثم أنشئ العقد من بطاقة العرض المقبول.'
+                : 'Subscription active. Refresh the list, then create the contract from the accepted offer card.',
+            isError: false,
+          );
+        }
+        break;
+      case MarketingSubscriptionResumeKind.submitPermit:
+        final rp = _findMarketerRowForSubscriptionResume(intent);
+        if (rp != null) {
+          await _submitMarketingPermit(rp);
+        } else {
+          _showNotification(
+            widget.isAr ? 'تنبيه' : 'Notice',
+            widget.isAr
+                ? 'تم تفعيل الاشتراك. حدّث القائمة ثم ارفع التصريح من بطاقة التراخيص.'
+                : 'Subscription active. Refresh the list, then submit the permit from the permits card.',
+            isError: false,
+          );
+        }
+        break;
+      case MarketingSubscriptionResumeKind.linkRegaPermit:
+        final rl = _findMarketerRowForSubscriptionResume(intent);
+        if (rl != null) {
+          await _linkRegaAdLicenseWithAuthority(rl);
+        } else {
+          _showNotification(
+            widget.isAr ? 'تنبيه' : 'Notice',
+            widget.isAr
+                ? 'تم تفعيل الاشتراك. حدّث القائمة ثم أكمل ربط التصريح.'
+                : 'Subscription active. Refresh the list, then complete REGA linking.',
+            isError: false,
+          );
+        }
+        break;
+      case MarketingSubscriptionResumeKind.publishListing:
+        final pub = _findMarketerRowForSubscriptionResume(intent);
+        if (pub != null) {
+          await _showPublishMarketingListingDialog(pub);
+        } else {
+          _showNotification(
+            widget.isAr ? 'تنبيه' : 'Notice',
+            widget.isAr
+                ? 'تم تفعيل الاشتراك. حدّث القائمة ثم أكمل النشر.'
+                : 'Subscription active. Refresh the list, then complete publishing.',
+            isError: false,
+          );
+        }
+        break;
+      case MarketingSubscriptionResumeKind.reportRegaMismatch:
+        final rr = _findMarketerRowForSubscriptionResume(intent);
+        if (rr != null) {
+          await _reportRegaLicenseMismatch(rr);
+        } else {
+          _showNotification(
+            widget.isAr ? 'تنبيه' : 'Notice',
+            widget.isAr
+                ? 'تم تفعيل الاشتراك. حدّث القائمة ثم سجّل البلاغ إن لزم.'
+                : 'Subscription active. Refresh the list, then submit the report if needed.',
+            isError: false,
+          );
+        }
+        break;
+      case MarketingSubscriptionResumeKind.contractChat:
+        final rc = _findMarketerRowForSubscriptionResume(intent);
+        if (rc != null) {
+          await _openMarketerChatWithOwnerGated(rc);
+        } else {
+          _showNotification(
+            widget.isAr ? 'تنبيه' : 'Notice',
+            widget.isAr
+                ? 'تم تفعيل الاشتراك. افتح دردشة المالك من البطاقة بعد التحديث.'
+                : 'Subscription active. Open owner chat from the card after refresh.',
+            isError: false,
+          );
+        }
+        break;
+      case MarketingSubscriptionResumeKind.postPaidUnlock:
+        _showNotification(
+          widget.isAr ? 'تم' : 'Done',
+          widget.isAr
+              ? 'تم تفعيل الاشتراك — يمكنك تنفيذ الإجراء الآن من نفس البطاقة.'
+              : 'Subscription active — you can complete the action from the same card.',
+          isError: false,
+        );
+        break;
+      case MarketingSubscriptionResumeKind.addPropertyListing:
+        await _runAddPropertyListingFlow();
+        break;
+    }
+  }
+
+  Future<void> _refreshSubscriptionMenuBadge() async {
+    if (_isGuest || _uid.isEmpty) {
+      _ss(() => _subscriptionMenuBadge = 0);
+      return;
+    }
+    try {
+      final svc = SubscriptionService(_sb);
+      var badge = await svc.subscriptionMenuBadge();
+      if (_orgNavIsOwner) {
+        final oid = await _orgUnitIdForSubscriptionsMenu();
+        if (oid != null && oid.isNotEmpty) {
+          final b2 = await svc.subscriptionMenuBadge(organizationId: oid);
+          if (b2 > badge) badge = b2;
+        }
+      }
+      if (AppRoleHelper.isMarketingAccountType(_accountType) &&
+          !AppRoleHelper.isStandaloneMarketer(_accountType)) {
+        final oidM = await _marketingSubscriptionOrganizationId();
+        if (oidM != null && oidM.isNotEmpty) {
+          final b3 = await svc.subscriptionMenuBadge(organizationId: oidM);
+          if (b3 > badge) badge = b3;
+        }
+      }
+      _ss(() => _subscriptionMenuBadge = badge);
+    } catch (_) {
+      _ss(() => _subscriptionMenuBadge = 0);
+    }
+  }
+
+  void _openSubscriptionsHub({int initialIndex = 0}) {
+    unawaited(() async {
+      if (_isGuest) {
+        _showLoginDialog();
+        return;
+      }
+      final oid = await _orgUnitIdForSubscriptionsMenu();
+      if (!mounted) return;
+      await _pushBody<void>(
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: '/dashboard/subscriptions'),
+          builder: (_) => SubscriptionsRootScreen(
+            lang: widget.lang,
+            accountType: _accountType,
+            organizationId: oid,
+            initialIndex: initialIndex,
+            embedAppBar: true,
+          ),
+        ),
+      );
+      if (mounted) unawaited(_refreshSubscriptionMenuBadge());
+    }());
   }
 }

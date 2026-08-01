@@ -1,8 +1,12 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/account_type_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/field_group_frame.dart';
+import '../core/navigation/post_auth_navigation.dart';
+import 'browse_organizations_screen.dart';
 
 class AccountTypeSetupScreen extends StatefulWidget {
   const AccountTypeSetupScreen({super.key});
@@ -59,7 +63,7 @@ class _AccountTypeSetupScreenState extends State<AccountTypeSetupScreen> {
         _verStatus = 'none';
         _busy = false;
       });
-      Navigator.pushNamedAndRemoveUntil(context, '/userDashboard', (r) => false);
+      unawaited(PostAuthNavigation.openDashboard(context));
     } catch (e) {
       setState(() {
         _err = '$e';
@@ -70,6 +74,22 @@ class _AccountTypeSetupScreenState extends State<AccountTypeSetupScreen> {
 
   void _goVerify(String type) {
     Navigator.pushNamed(context, '/verificationRequest', arguments: type);
+  }
+
+  /// تصفّح المنشآت للانضمام كعضو فريق — لا يحتاج توثيق فردي مستقل،
+  /// لأن المنشأة الأم هي صاحبة الرخصة (الموافقة بيد المدير).
+  void _openBrowseOrganizations() {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            BrowseOrganizationsScreen(lang: WidgetsBinding.instance
+                        .platformDispatcher.locale.languageCode
+                        .startsWith('ar')
+                ? 'ar'
+                : 'en'),
+      ),
+    );
   }
 
   @override
@@ -120,43 +140,57 @@ class _AccountTypeSetupScreenState extends State<AccountTypeSetupScreen> {
                         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                         child: ListView(
                           children: [
-                          _tile(
-                            title: 'مستخدم (تصفح فقط)',
-                            subtitle: 'لا يمكن نشر إعلان',
-                            icon: Icons.person_outline,
-                            onTap: () => _setSimple('user'),
-                          ),
-                          _tile(
-                            title: 'بائع فرد',
-                            subtitle: 'لنشر عقارك الشخصي',
-                            icon: Icons.home_outlined,
-                            onTap: () => _setSimple('individual_seller'),
-                          ),
-                          _tile(
-                            title: 'مسوّق عقاري (يتطلب توثيق)',
-                            subtitle: 'طلب توثيق ثم انتظار الموافقة',
-                            icon: Icons.verified_outlined,
-                            onTap: () => _goVerify('marketer'),
-                          ),
-                          _tile(
-                            title: 'مكتب عقاري (يتطلب توثيق)',
-                            subtitle: 'سجل تجاري + رخصة فال',
-                            icon: Icons.storefront_outlined,
-                            onTap: () => _goVerify('office'),
-                          ),
-                          _tile(
-                            title: 'مؤسسة عقارية (يتطلب توثيق)',
-                            subtitle: 'سجل تجاري + رخصة فال',
-                            icon: Icons.apartment_outlined,
-                            onTap: () => _goVerify('institution'),
-                          ),
-                          _tile(
-                            title: 'شركة عقارية (يتطلب توثيق)',
-                            subtitle: 'سجل تجاري + رخصة فال',
-                            icon: Icons.corporate_fare_outlined,
-                            onTap: () => _goVerify('company'),
-                          ),
-                        ],
+                            // 1) فرد / مالك — لنشر عقار شخصي.
+                            _tile(
+                              title: 'فرد / مالك',
+                              subtitle: 'لنشر عقارك الشخصي — الاسم الرباعي والجوال والبريد',
+                              icon: Icons.home_outlined,
+                              onTap: () => _setSimple('individual_seller'),
+                            ),
+                            // 2) عضو ضمن فريق — للانضمام إلى منشأة قائمة (مكتب/مؤسسة/شركة).
+                            _tile(
+                              title: 'عضو ضمن فريق',
+                              subtitle: 'انضم إلى منشأة قائمة بإذن من المدير',
+                              icon: Icons.group_outlined,
+                              onTap: _openBrowseOrganizations,
+                            ),
+                            // 3) مسوّق عقاري فردي (يتطلب رخصة فال).
+                            _tile(
+                              title: 'مسوّق عقاري (يتطلب توثيق)',
+                              subtitle: 'رخصة فال + هوية وطنية + توثيق الهيئة',
+                              icon: Icons.verified_outlined,
+                              onTap: () => _goVerify('marketer'),
+                            ),
+                            // 4) مكتب عقاري (يتطلب فال + سجل تجاري).
+                            _tile(
+                              title: 'مكتب عقاري (يتطلب توثيق)',
+                              subtitle: 'رخصة فال + الرقم الموحّد للسجل التجاري',
+                              icon: Icons.storefront_outlined,
+                              onTap: () => _goVerify('office'),
+                            ),
+                            // 5) مؤسسة عقارية (يتطلب فال + سجل تجاري).
+                            _tile(
+                              title: 'مؤسسة عقارية (يتطلب توثيق)',
+                              subtitle: 'رخصة فال + الرقم الموحّد للسجل التجاري',
+                              icon: Icons.apartment_outlined,
+                              onTap: () => _goVerify('institution'),
+                            ),
+                            // 6) شركة عقارية (يتطلب فال + سجل تجاري).
+                            _tile(
+                              title: 'شركة عقارية (يتطلب توثيق)',
+                              subtitle: 'رخصة فال + الرقم الموحّد للسجل التجاري',
+                              icon: Icons.corporate_fare_outlined,
+                              onTap: () => _goVerify('company'),
+                            ),
+                            const SizedBox(height: 8),
+                            // الخيار الأقل بروزاً — تصفّح فقط للمستخدم العادي.
+                            _tile(
+                              title: 'مستخدم (تصفح فقط)',
+                              subtitle: 'لا يمكن نشر إعلان — للتصفح فقط',
+                              icon: Icons.person_outline,
+                              onTap: () => _setSimple('user'),
+                            ),
+                          ],
                         ),
                       ),
                     ),

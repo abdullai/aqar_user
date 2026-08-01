@@ -9,9 +9,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';
 
 import '../core/config/app_config.dart';
+import '../core/auth/auth_local_sign_out.dart';
+import '../core/security/install_device_identity.dart';
 import '../core/session/return_after_auth.dart';
 import 'auth_service.dart';
 import 'user_session_coordination_service.dart';
@@ -32,17 +33,8 @@ class RegisterDeviceSlotResult {
 class UserInstallSessionService {
   UserInstallSessionService._();
 
-  static const _prefInstallKey = 'aqar_install_device_key';
-
-  static Future<String> installDeviceKey() async {
-    final p = await SharedPreferences.getInstance();
-    var k = p.getString(_prefInstallKey);
-    if (k == null || k.trim().isEmpty) {
-      k = const Uuid().v4();
-      await p.setString(_prefInstallKey, k);
-    }
-    return k;
-  }
+  /// معرّف تثبيت مستقر لكل متصفح/تطبيق — لا يتغيّر بتغيير الحساب على نفس الجهاز.
+  static Future<String> installDeviceKey() => InstallDeviceIdentity.key();
 
   static Future<bool> _isGuestMode() async {
     try {
@@ -62,11 +54,22 @@ class UserInstallSessionService {
     final key = await installDeviceKey();
     final platform = kIsWeb ? 'web' : defaultTargetPlatform.name;
     final label = await AuthService.devicePlatformModelLabel();
-    return jsonEncode({
+    final map = <String, dynamic>{
       'install_id': key,
       'platform': platform,
       'label': label,
-    });
+    };
+    // إحداثيات اختيار الاستكشاف المحفوظة (إن وُجدت) — تُحسّن دقة «المدينة» على الخادم عند دعمها.
+    try {
+      final p = await SharedPreferences.getInstance();
+      final lat = p.getDouble(AppConfig.prefPreferredExploreLatKey);
+      final lng = p.getDouble(AppConfig.prefPreferredExploreLngKey);
+      if (lat != null && lng != null && lat.abs() > 1e-6 && lng.abs() > 1e-6) {
+        map['approx_lat'] = lat;
+        map['approx_lng'] = lng;
+      }
+    } catch (_) {}
+    return jsonEncode(map);
   }
 
   static Future<String?> _preferredCityDisplay() async {
@@ -86,8 +89,26 @@ class UserInstallSessionService {
   }
 
   /// بعد تسجيل الدخول: حجز خانة جهاز (حدّ 2) أو إرجاع device_limit.
+  static Future<RegisterDeviceSlotResult>? _registerInFlight;
+
   static Future<RegisterDeviceSlotResult>
       registerDeviceSlotAfterSignIn() async {
+    final existing = _registerInFlight;
+    if (existing != null) return existing;
+
+    final fut = _registerDeviceSlotAfterSignInImpl();
+    _registerInFlight = fut;
+    try {
+      return await fut;
+    } finally {
+      if (identical(_registerInFlight, fut)) {
+        _registerInFlight = null;
+      }
+    }
+  }
+
+  static Future<RegisterDeviceSlotResult>
+      _registerDeviceSlotAfterSignInImpl() async {
     if (await _isGuestMode()) return RegisterDeviceSlotResult.success();
     if (Supabase.instance.client.auth.currentSession == null) {
       return RegisterDeviceSlotResult.success();
@@ -147,6 +168,9 @@ class UserInstallSessionService {
     if (await _isGuestMode()) return;
     if (Supabase.instance.client.auth.currentSession == null) return;
 
+    // أثناء مسار الدخول/OTP الجهاز غالباً غير مسجّل بعد — لا تطرد الجلسة.
+    if (_isAuthFlowRoute()) return;
+
     try {
       final payload = await _devicePayload();
       final raw = await Supabase.instance.client.rpc(
@@ -166,33 +190,37 @@ class UserInstallSessionService {
     }
   }
 
+  static bool _isAuthFlowRoute() {
+    final ctx = UserSessionCoordinationService.navigatorKey?.currentContext;
+    if (ctx == null || !ctx.mounted) return false;
+    final name = ModalRoute.of(ctx)?.settings.name ?? '';
+    return name == '/login' ||
+        name == '/fastLogin' ||
+        name == '/' ||
+        name == '/gate' ||
+        name == '/verify' ||
+        name == '/entryChoice' ||
+        name == '/passwordSetup' ||
+        name == '/deviceManagement';
+  }
+
   static Future<void> _kickLocalSessionReplaced() async {
     final navKey = UserSessionCoordinationService.navigatorKey;
+    // مهم: افحص المسار قبل signOut — سابقاً كان يُلغي الجلسة أثناء /verify
+    // فيفشل request_inapp_otp بـ not_authenticated (400 في سجلات Supabase).
+    if (_isAuthFlowRoute()) return;
+
     if (navKey != null) {
       await ReturnAfterAuth.saveFromNavigatorKey(navKey);
     }
     try {
       final auth = Supabase.instance.client.auth;
       if (auth.currentSession != null) {
-        await auth.signOut(scope: SignOutScope.local);
+        await AuthLocalSignOut.signOutLocal(Supabase.instance.client);
       }
     } catch (_) {}
     final nav = navKey?.currentState;
     if (nav == null) return;
-    final ctx = navKey?.currentContext;
-    if (ctx != null && ctx.mounted) {
-      final name = ModalRoute.of(ctx)?.settings.name ?? '';
-      if (name == '/login' ||
-          name == '/fastLogin' ||
-          name == '/' ||
-          name == '/gate' ||
-          name == '/verify' ||
-          name == '/entryChoice' ||
-          name == '/passwordSetup' ||
-          name == '/deviceManagement') {
-        return;
-      }
-    }
     nav.pushNamedAndRemoveUntil('/login', (r) => false);
   }
 }

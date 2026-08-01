@@ -1,4 +1,6 @@
 // lib/services/auth_service.dart
+import 'dart:async';
+
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
@@ -6,7 +8,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
 import 'package:aqar_user/models.dart';
+import 'package:aqar_user/core/auth/login_security_db.dart';
 import 'package:aqar_user/core/input/input_normalizers.dart';
+import 'package:aqar_user/core/security/install_device_identity.dart';
 
 class LoginResult {
   final bool ok;
@@ -59,32 +63,9 @@ class AuthService {
   }
 
   static Future<String> _deviceFingerprint() async {
-    final info = DeviceInfoPlugin();
-
-    try {
-      if (kIsWeb) {
-        final w = await info.webBrowserInfo;
-        final vendor = (w.vendor ?? 'unknown').toString();
-        final userAgent = (w.userAgent ?? 'unknown').toString();
-        return 'web:$vendor:$userAgent';
-      }
-
-      switch (defaultTargetPlatform) {
-        case TargetPlatform.android:
-          final a = await info.androidInfo;
-          return 'android:${a.id}:${a.model}:${a.brand}';
-        case TargetPlatform.iOS:
-          final i = await info.iosInfo;
-          return 'ios:${i.identifierForVendor}:${i.model}';
-        case TargetPlatform.windows:
-          final w = await info.windowsInfo;
-          return 'win:${w.deviceId}:${w.computerName}';
-        default:
-          break;
-      }
-    } catch (_) {}
-
-    return 'unknown-device';
+    // مصدر واحد مستقر لكل الحسابات على نفس التثبيت/المتصفح.
+    // سابقاً كان User-Agent يتغيّر فيُحسب الجهاز الواحد أجهزة متعددة بالخطأ.
+    return InstallDeviceIdentity.key();
   }
 
   /// تسمية منصة/طراز للعرض وتخزينها مع الجهاز الموثوق.
@@ -124,9 +105,21 @@ class AuthService {
     required bool success,
     String? details,
   }) async {
-    // ✅ لا ترسل null لأي باراميتر
     final u = username.trim().isEmpty ? 'guest' : username.trim();
     final d = (details ?? '').toString();
+
+    // قبل تسجيل الدخول لا توجد جلسة — RPC المحمي يُرجع 401 ويُشوّش Network.
+    if (_sb.auth.currentSession == null) {
+      if (action == 'login_password_failed' && isTenDigitLoginKey(u)) {
+        unawaited(
+          LoginSecurityDb.recordFailedPasswordLogin(
+            _sb,
+            tenDigitUsername: u,
+          ),
+        );
+      }
+      return;
+    }
 
     try {
       await _sb.rpc(
@@ -138,9 +131,7 @@ class AuthService {
           'p_details': d,
         },
       );
-    } catch (_) {
-      // تجاهل الأخطاء حتى لا تعلق الواجهات
-    }
+    } catch (_) {}
   }
 
   /* ============================================================
@@ -188,19 +179,17 @@ class AuthService {
     if (!_isValidLoginKey(u)) return null;
 
     try {
-      final res = await _sb.rpc(
-        'get_login_email',
-        params: {'p_digits': u},
-      );
+      final res = await _sb
+          .rpc('get_login_email', params: {'p_digits': u})
+          .timeout(const Duration(seconds: 8));
       final email = res?.toString().trim();
       if (email != null && email.isNotEmpty && email != 'null') return email;
     } catch (_) {}
 
     try {
-      final res = await _sb.rpc(
-        'get_email_by_national_id',
-        params: {'p_national_id': u},
-      );
+      final res = await _sb
+          .rpc('get_email_by_national_id', params: {'p_national_id': u})
+          .timeout(const Duration(seconds: 8));
       final email = res?.toString().trim();
       if (email == null || email.isEmpty || email == 'null') return null;
       return email;
@@ -235,9 +224,16 @@ class AuthService {
     }
   }
 
-  static Future<bool> requestOtp(String username) async {
+  /// Returns `null` if the OTP RPC succeeded; otherwise a machine-readable hint
+  /// (`timeout`, `invalid_username`, or the raw exception message).
+  static Future<String?> requestOtpWithMessage(String username) async {
     final u = digitsOnly(normalizeAsciiDigits(username.trim()));
-    if (!_isValidLoginKey(u)) return false;
+    if (!_isValidLoginKey(u)) return 'invalid_username';
+
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) {
+      return 'not_authenticated';
+    }
 
     final canonical = await securityUsernameForDeviceFlow(u);
 
@@ -252,16 +248,31 @@ class AuthService {
         success: true,
         details: '',
       );
-      return true;
+      return null;
     } catch (e) {
+      final raw = e.toString();
       await _logSecurity(
         username: canonical,
         action: 'otp_requested',
         success: false,
-        details: e.toString(),
+        details: raw,
       );
-      return false;
+      // PostgREST 400 من RAISE EXCEPTION — أعِد رمزاً واضحاً للواجهة.
+      final lower = raw.toLowerCase();
+      if (lower.contains('not_authenticated')) return 'not_authenticated';
+      if (lower.contains('username_not_current_user')) {
+        return 'username_not_current_user';
+      }
+      if (lower.contains('rate') || lower.contains('too many')) {
+        return 'rate_limited';
+      }
+      return raw;
     }
+  }
+
+  static Future<bool> requestOtp(String username) async {
+    final err = await requestOtpWithMessage(username);
+    return err == null;
   }
 
   /* ============================================================

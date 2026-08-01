@@ -23,6 +23,7 @@ abstract final class InAppDeepRoutes {
   static const String orgMonitoring = 'org_monitoring';
   static const String propertyDetails = 'property_details';
   static const String chat = 'chat';
+  static const String subscriptionsHub = 'subscriptions_hub';
 }
 
 /// أنواع شائعة لعمود type (يمكنك إضافة أي نص؛ الافتراضي يُعرض كإشعار عام).
@@ -50,6 +51,7 @@ abstract final class InAppNotifTypes {
 
   /// تجاوز عتبة بلاغات من مستخدمين مختلفين — إخفاء مؤقت من الرئيسية + مراجعة عاجلة.
   static const String listingReportEscalated = 'listing_report_escalated';
+  static const String billingPaymentSuccess = 'billing_payment_success';
 }
 
 /// كيانات شائعة لعمود entity_type.
@@ -59,6 +61,7 @@ abstract final class InAppEntityTypes {
   static const String listingContract = 'listing_contract';
   static const String listingPermit = 'listing_permit';
   static const String property = 'property';
+  static const String billingTransaction = 'billing_transaction';
 }
 
 /// مفاتيح إضافية داخل JSON data (إلى جانب WorkflowNotificationKeys).
@@ -181,6 +184,9 @@ abstract final class InAppNotificationCatalog {
         data[WorkflowNotificationKeys.mainTab] = WorkflowMainSections.reservations;
       }
     }
+    if (tl == InAppNotifTypes.billingPaymentSuccess) {
+      setDeep(InAppDeepRoutes.subscriptionsHub);
+    }
 
     // ربط request_id من الكيان عند غيابه (صفوف قديمة أو إدراج من SQL بدون JSON كامل).
     if (entityType == InAppEntityTypes.listingRequest && entityId.isNotEmpty) {
@@ -259,6 +265,8 @@ abstract final class InAppNotificationCatalog {
     final et = entityType.toLowerCase().trim();
 
     switch (et) {
+      case InAppEntityTypes.billingTransaction:
+        return Icons.receipt_long_rounded;
       case InAppEntityTypes.listingRequest:
         return Icons.assignment_rounded;
       case InAppEntityTypes.listingOffer:
@@ -317,6 +325,8 @@ abstract final class InAppNotificationCatalog {
         return Icons.sms_rounded;
       case 'payment':
         return Icons.payments_rounded;
+      case InAppNotifTypes.billingPaymentSuccess:
+        return Icons.receipt_long_rounded;
       case InAppNotifTypes.system:
         return Icons.info_rounded;
       default:
@@ -332,6 +342,8 @@ abstract final class InAppNotificationCatalog {
     final et = entityType.toLowerCase().trim();
 
     switch (et) {
+      case InAppEntityTypes.billingTransaction:
+        return const Color(0xFF059669);
       case InAppEntityTypes.listingOffer:
         return const Color(0xFFEA580C);
       case InAppEntityTypes.listingContract:
@@ -381,6 +393,8 @@ abstract final class InAppNotificationCatalog {
         return const Color(0xFF7C3AED);
       case InAppNotifTypes.reservation:
         return const Color(0xFFDB2777);
+      case InAppNotifTypes.billingPaymentSuccess:
+        return const Color(0xFF059669);
       default:
         return const Color(0xFF0F766E);
     }

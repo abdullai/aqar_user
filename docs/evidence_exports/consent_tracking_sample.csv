@@ -1,0 +1,3 @@
+user_id,analytics_cookies,marketing_cookies,essential_ack,updated_at_utc,mock
+00000000-0000-4000-8000-0000000000a1,false,false,true,2026-05-01T12:05:00Z,yes
+00000000-0000-4000-8000-0000000000a2,true,false,true,2026-05-03T10:00:00Z,yes

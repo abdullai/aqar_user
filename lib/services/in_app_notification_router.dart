@@ -4,16 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/notifications/in_app_notification_catalog.dart';
+import '../core/navigation/post_auth_navigation.dart';
 import '../core/workflow/listing_workflow.dart';
 import '../navigation/chat_navigation.dart';
 import '../routes.dart';
-import '../screens/listing_request_status_page.dart';
+import '../screens/subscriptions/subscriptions_root_screen.dart';
 import 'in_app_notification_hub.dart';
 import 'marketing_flow_service.dart';
 
 /// توجيه موحّد عالمي من صف `in_app_notifications` — أي شاشة في التطبيق تستخدم [open] فقط.
 class InAppNotificationRouter {
   InAppNotificationRouter._();
+
+  /// مسارات الجذر (مع [AppOrphanRouteChrome] في [main.dart]) — لا تُفتح داخل [Navigator] الداخلي للوحة.
+  static Future<T?> _pushRootNamed<T extends Object?>(
+    BuildContext context,
+    String name, {
+    Object? arguments,
+  }) {
+    if (!context.mounted) return Future<T?>.value(null);
+    return Navigator.of(context, rootNavigator: true).pushNamed<T>(
+      name,
+      arguments: arguments,
+    );
+  }
 
   static Map<String, dynamic> _dataMap(Map<String, dynamic> row) {
     return InAppNotificationCatalog.parseDataColumn(row);
@@ -29,8 +43,9 @@ class InAppNotificationRouter {
   }
 
   static bool _onUserDashboardRoute(BuildContext context) {
-    final name = ModalRoute.of(context)?.settings.name ?? '';
-    return name == '/userDashboard';
+    final name =
+        (ModalRoute.of(context)?.settings.name ?? '').trim().toLowerCase();
+    return name == '/userdashboard' || name == '/';
   }
 
   static Future<void> _goDashboard(
@@ -43,8 +58,9 @@ class InAppNotificationRouter {
       InAppDashboardDeepLink.pending.value = copy;
       return;
     }
-    await Navigator.of(context).pushNamed(
-      '/userDashboard',
+    await Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil(
+      PostAuthNavigation.resolveDashboardRoute('/userDashboard'),
+      (r) => false,
       arguments: <String, dynamic>{'lang': lang},
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -122,7 +138,7 @@ class InAppNotificationRouter {
         typeLower == 'verification' ||
         typeLower == 'phone_verification') {
       if (context.mounted) {
-        await Navigator.of(context).pushNamed('/settings');
+        await _pushRootNamed<void>(context, '/settings');
       }
       return;
     }
@@ -169,13 +185,10 @@ class InAppNotificationRouter {
     if (deepRoute == InAppDeepRoutes.listingRequestStatus) {
       final rid = (data[WorkflowNotificationKeys.requestId] ?? '').toString().trim();
       if (rid.isNotEmpty) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => ListingRequestStatusPage(
-              requestId: rid,
-              lang: lang,
-            ),
-          ),
+        await _pushRootNamed<void>(
+          context,
+          AppRoutes.listingRequestStatus,
+          arguments: <String, dynamic>{'requestId': rid, 'lang': lang},
         );
         return;
       }
@@ -187,13 +200,10 @@ class InAppNotificationRouter {
           .toString()
           .trim();
       if (rid.isNotEmpty && context.mounted) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => ListingRequestStatusPage(
-              requestId: rid,
-              lang: lang,
-            ),
-          ),
+        await _pushRootNamed<void>(
+          context,
+          AppRoutes.listingRequestStatus,
+          arguments: <String, dynamic>{'requestId': rid, 'lang': lang},
         );
         return;
       }
@@ -207,7 +217,8 @@ class InAppNotificationRouter {
       final rid =
           (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim();
       if (rid.isNotEmpty) {
-        await Navigator.of(context).pushNamed(
+        await _pushRootNamed<void>(
+          context,
           AppRoutes.ownerOffers,
           arguments: <String, dynamic>{'requestId': rid, 'lang': lang},
         );
@@ -216,13 +227,10 @@ class InAppNotificationRouter {
     }
 
     if (entityType == InAppEntityTypes.listingRequest && entityId.isNotEmpty) {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ListingRequestStatusPage(
-            requestId: entityId,
-            lang: lang,
-          ),
-        ),
+      await _pushRootNamed<void>(
+        context,
+        AppRoutes.listingRequestStatus,
+        arguments: <String, dynamic>{'requestId': entityId, 'lang': lang},
       );
       return;
     }
@@ -231,7 +239,8 @@ class InAppNotificationRouter {
         (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim().isNotEmpty) {
       final rid =
           (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim();
-      await Navigator.of(context).pushNamed(
+      await _pushRootNamed<void>(
+        context,
         AppRoutes.submitPermits,
         arguments: <String, dynamic>{'requestId': rid, 'lang': lang},
       );
@@ -242,7 +251,8 @@ class InAppNotificationRouter {
         (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim().isNotEmpty) {
       final rid =
           (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim();
-      await Navigator.of(context).pushNamed(
+      await _pushRootNamed<void>(
+        context,
         AppRoutes.submitOffer,
         arguments: <String, dynamic>{'requestId': rid, 'lang': lang},
       );
@@ -251,33 +261,53 @@ class InAppNotificationRouter {
 
     if (deepRoute == InAppDeepRoutes.marketerDashboard ||
         (data[WorkflowNotificationKeys.role] ?? '').toString() == 'marketer') {
-      await Navigator.of(context).pushNamed(AppRoutes.marketerDashboard);
+      await _pushRootNamed<void>(context, AppRoutes.marketerDashboard);
       return;
     }
 
     if (deepRoute == InAppDeepRoutes.ownerRequests) {
-      await Navigator.of(context).pushNamed(AppRoutes.ownerRequests);
+      await _pushRootNamed<void>(context, AppRoutes.ownerRequests);
       return;
     }
 
     if (deepRoute == InAppDeepRoutes.settings) {
-      await Navigator.of(context).pushNamed('/settings');
+      await _pushRootNamed<void>(context, '/settings');
+      return;
+    }
+
+    if (deepRoute == InAppDeepRoutes.subscriptionsHub ||
+        deepRoute == 'subscriptions_hub' ||
+        typeLower == InAppNotifTypes.billingPaymentSuccess) {
+      final at = (data['account_type'] ?? 'user').toString().trim();
+      if (context.mounted) {
+        await Navigator.of(context, rootNavigator: true).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => SubscriptionsRootScreen(
+              lang: lang,
+              accountType: at.isEmpty ? 'user' : at,
+              organizationId: null,
+              initialIndex: 2,
+            ),
+          ),
+        );
+      }
       return;
     }
 
     if (deepRoute == InAppDeepRoutes.orgTeamManagement) {
-      await Navigator.of(context).pushNamed(AppRoutes.orgTeamManagement);
+      await _pushRootNamed<void>(context, AppRoutes.orgTeamManagement);
       return;
     }
 
     if (deepRoute == InAppDeepRoutes.orgMonitoring) {
-      await Navigator.of(context).pushNamed(AppRoutes.orgMonitoring);
+      await _pushRootNamed<void>(context, AppRoutes.orgMonitoring);
       return;
     }
 
     if (deepRoute == InAppDeepRoutes.inAppNotifications ||
         deepRoute == 'notifications') {
-      await Navigator.of(context).pushNamed(
+      await _pushRootNamed<void>(
+        context,
         AppRoutes.inAppNotifications,
         arguments: <String, dynamic>{'lang': lang},
       );

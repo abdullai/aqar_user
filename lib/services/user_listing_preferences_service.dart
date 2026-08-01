@@ -10,6 +10,8 @@ abstract final class UserListingPreferencesService {
   static const String _kHiddenRequests = 'user_hidden_market_request_ids_v1';
   static const String _kHiddenCompletedDeals =
       'user_hidden_completed_deal_property_ids_v1';
+  static const String _kHiddenCartMarketOffers =
+      'user_hidden_cart_market_offer_ids_v1';
   static const String _kReportEvents = 'user_report_events_v1';
   static const String _kPendingPropertyReports =
       'user_pending_property_reports_map_v1';
@@ -21,11 +23,35 @@ abstract final class UserListingPreferencesService {
   static const int maxPropertyReportsPerDay = 12;
   static const int sternWarningPropertyReportsPerDay = 5;
 
+  static String? get _uid {
+    try {
+      return Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// مفاتيح مربوطة بـ uid حتى لا يرث حساب لاحق إخفاء الحساب السابق على الجهاز.
+  static String _scoped(String base) {
+    final uid = (_uid ?? '').trim();
+    if (uid.isEmpty) return '${base}__anon';
+    return '${base}__$uid';
+  }
+
   static Future<Set<String>> hiddenPropertyIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_kHiddenProperties);
-      return _decodeIdSet(raw);
+      final raw = p.getString(_scoped(_kHiddenProperties)) ??
+          // ترحيل لمرة واحدة من المفتاح القديم غير المقيّد.
+          (p.getString(_kHiddenProperties));
+      final set = _decodeIdSet(raw);
+      if (raw != null &&
+          p.getString(_scoped(_kHiddenProperties)) == null &&
+          (_uid ?? '').isNotEmpty) {
+        await _saveSet(_scoped(_kHiddenProperties), set);
+        await p.remove(_kHiddenProperties);
+      }
+      return set;
     } catch (_) {
       return {};
     }
@@ -34,8 +60,16 @@ abstract final class UserListingPreferencesService {
   static Future<Set<String>> hiddenMarketRequestIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_kHiddenRequests);
-      return _decodeIdSet(raw);
+      final raw = p.getString(_scoped(_kHiddenRequests)) ??
+          p.getString(_kHiddenRequests);
+      final set = _decodeIdSet(raw);
+      if (raw != null &&
+          p.getString(_scoped(_kHiddenRequests)) == null &&
+          (_uid ?? '').isNotEmpty) {
+        await _saveSet(_scoped(_kHiddenRequests), set);
+        await p.remove(_kHiddenRequests);
+      }
+      return set;
     } catch (_) {
       return {};
     }
@@ -65,7 +99,7 @@ abstract final class UserListingPreferencesService {
     if (sid.isEmpty) return;
     final s = await hiddenPropertyIds();
     s.add(sid);
-    await _saveSet(_kHiddenProperties, s);
+    await _saveSet(_scoped(_kHiddenProperties), s);
   }
 
   static Future<void> removeHiddenProperty(String id) async {
@@ -73,7 +107,7 @@ abstract final class UserListingPreferencesService {
     if (sid.isEmpty) return;
     final s = await hiddenPropertyIds();
     s.remove(sid);
-    await _saveSet(_kHiddenProperties, s);
+    await _saveSet(_scoped(_kHiddenProperties), s);
   }
 
   static Future<void> addHiddenMarketRequest(String id) async {
@@ -81,7 +115,7 @@ abstract final class UserListingPreferencesService {
     if (sid.isEmpty) return;
     final s = await hiddenMarketRequestIds();
     s.add(sid);
-    await _saveSet(_kHiddenRequests, s);
+    await _saveSet(_scoped(_kHiddenRequests), s);
   }
 
   static Future<void> removeHiddenMarketRequest(String id) async {
@@ -89,20 +123,21 @@ abstract final class UserListingPreferencesService {
     if (sid.isEmpty) return;
     final s = await hiddenMarketRequestIds();
     s.remove(sid);
-    await _saveSet(_kHiddenRequests, s);
+    await _saveSet(_scoped(_kHiddenRequests), s);
   }
 
   /// مسح إخفاء الرئيسية المحلي (إعلانات + طلبات السوق) — لا يمس «صفقات مكتملة».
   static Future<void> clearHomeFeedHideSets() async {
-    await _saveSet(_kHiddenProperties, {});
-    await _saveSet(_kHiddenRequests, {});
+    await _saveSet(_scoped(_kHiddenProperties), {});
+    await _saveSet(_scoped(_kHiddenRequests), {});
   }
 
   /// إخفاء عقار من تبويب «صفقات مكتملة» في صفحتي (محلي، لا يؤثر على الرئيسية).
   static Future<Set<String>> hiddenCompletedDealPropertyIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_kHiddenCompletedDeals);
+      final raw = p.getString(_scoped(_kHiddenCompletedDeals)) ??
+          p.getString(_kHiddenCompletedDeals);
       return _decodeIdSet(raw);
     } catch (_) {
       return {};
@@ -114,7 +149,7 @@ abstract final class UserListingPreferencesService {
     if (sid.isEmpty) return;
     final s = await hiddenCompletedDealPropertyIds();
     s.add(sid);
-    await _saveSet(_kHiddenCompletedDeals, s);
+    await _saveSet(_scoped(_kHiddenCompletedDeals), s);
   }
 
   static Future<void> removeHiddenCompletedDealProperty(String id) async {
@@ -122,11 +157,31 @@ abstract final class UserListingPreferencesService {
     if (sid.isEmpty) return;
     final s = await hiddenCompletedDealPropertyIds();
     s.remove(sid);
-    await _saveSet(_kHiddenCompletedDeals, s);
+    await _saveSet(_scoped(_kHiddenCompletedDeals), s);
   }
 
   static Future<void> clearHiddenCompletedDeals() async {
-    await _saveSet(_kHiddenCompletedDeals, {});
+    await _saveSet(_scoped(_kHiddenCompletedDeals), {});
+  }
+
+  /// إخفاء عرض طلب سوق من تبويب «صفقاتي» (محلي).
+  static Future<Set<String>> hiddenCartMarketOfferIds() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final raw = p.getString(_scoped(_kHiddenCartMarketOffers)) ??
+          p.getString(_kHiddenCartMarketOffers);
+      return _decodeIdSet(raw);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<void> addHiddenCartMarketOffer(String offerId) async {
+    final sid = offerId.trim();
+    if (sid.isEmpty) return;
+    final s = await hiddenCartMarketOfferIds();
+    s.add(sid);
+    await _saveSet(_scoped(_kHiddenCartMarketOffers), s);
   }
 
   // ---------------------------------------------------------------------------
@@ -136,7 +191,8 @@ abstract final class UserListingPreferencesService {
   static Future<List<_ReportEvent>> _loadReportEvents() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_kReportEvents);
+      final raw = p.getString(_scoped(_kReportEvents)) ??
+          p.getString(_kReportEvents);
       if (raw == null || raw.trim().isEmpty) return [];
       final d = jsonDecode(raw);
       if (d is! List) return [];
@@ -164,7 +220,7 @@ abstract final class UserListingPreferencesService {
         ? list.sublist(list.length - _maxEvents)
         : list;
     await p.setString(
-      _kReportEvents,
+      _scoped(_kReportEvents),
       jsonEncode(trimmed
           .map((e) => {'ts': e.ts, 'kind': e.kind, 'id': e.id})
           .toList()),
@@ -260,7 +316,8 @@ abstract final class UserListingPreferencesService {
   static Future<Map<String, String>> _pendingReportsMap() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_kPendingPropertyReports);
+      final raw = p.getString(_scoped(_kPendingPropertyReports)) ??
+          p.getString(_kPendingPropertyReports);
       if (raw == null || raw.trim().isEmpty) return {};
       final d = jsonDecode(raw);
       if (d is! Map) return {};
@@ -272,7 +329,7 @@ abstract final class UserListingPreferencesService {
 
   static Future<void> _savePendingReportsMap(Map<String, String> m) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString(_kPendingPropertyReports, jsonEncode(m));
+    await p.setString(_scoped(_kPendingPropertyReports), jsonEncode(m));
   }
 
   static Future<void> setPendingPropertyReportRow(
@@ -336,7 +393,7 @@ abstract final class UserListingPreferencesService {
     if (hidden.isEmpty) return;
     final next = hidden.where((id) => set.contains(id)).toSet();
     if (next.length != hidden.length) {
-      await _saveSet(_kHiddenProperties, next);
+      await _saveSet(_scoped(_kHiddenProperties), next);
     }
     final pending = await _pendingReportsMap();
     if (pending.isEmpty) return;
@@ -355,7 +412,7 @@ abstract final class UserListingPreferencesService {
     if (hidden.isEmpty) return;
     final next = hidden.where((id) => set.contains(id)).toSet();
     if (next.length != hidden.length) {
-      await _saveSet(_kHiddenRequests, next);
+      await _saveSet(_scoped(_kHiddenRequests), next);
     }
   }
 }

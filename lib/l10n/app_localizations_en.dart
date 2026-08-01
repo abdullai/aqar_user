@@ -9,13 +9,13 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get appTitle => 'Motawoq Real Estate';
+  String get appTitle => 'Mawthuq Line Real Estate App';
 
   @override
   String get welcomeTitle => 'Welcome';
 
   @override
-  String get welcomeTrustedAqar => 'Welcome to Motawoq Real Estate';
+  String get welcomeTrustedAqar => 'Welcome to Mawthuq Line Real Estate App';
 
   @override
   String get signInToContinue => 'Sign in to continue';
@@ -104,14 +104,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Web: in-app chime from assets. Phone/tablet: light haptic + system click (no bundled WAV). Separate from in-app banner alerts and from push notification sounds.';
 
   @override
-  String get legalTermsCoachTitle => 'Terms & privacy';
+  String get legalTermsCoachTitle => 'Terms & Conditions';
 
   @override
   String get legalTermsCoachBody =>
-      'You can review the terms and privacy policy anytime in Settings. Acceptance may still be required at sign-in.';
+      'Review the Terms & Conditions via the link, then check the acknowledgment box to continue. This prompt will not appear again after you confirm.';
 
   @override
-  String get legalTermsCoachOk => 'OK';
+  String get legalTermsCoachOk => 'Acknowledged — continue';
 
   @override
   String get fieldGroupCredentialsTitle => 'Sign-in details';
@@ -206,7 +206,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get mapPickerOpenExternalMaps => 'Open in Maps';
 
   @override
-  String get welcomeDashboardBannerTitle => 'Welcome to Motawoq Real Estate';
+  String get welcomeDashboardBannerTitle =>
+      'Welcome to Mawthuq Line Real Estate';
 
   @override
   String get welcomeDashboardBannerBody =>
@@ -219,12 +220,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get usernameHint10Digits => 'Distinguished number (10 digits)';
 
   @override
-  String get loginUsernameFieldHelper =>
-      'ID/Iqama, FAL license, or unified national no. 700… (10 digits)';
+  String get loginUsernameFieldHelper => 'Enter ID / Iqama — 10 digits';
 
   @override
-  String get loginIdentifierFieldLabel =>
-      'National ID, unified CR, or FAL license — 10 digits';
+  String get loginIdentifierFieldLabel => 'Username';
 
   @override
   String get loginPasswordFieldLabel => 'Enter your password';
@@ -378,7 +377,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get marketerTabInvites => '🏢 Real estate market';
 
   @override
-  String get marketerTabAwaitingOwner => '⏳ Awaiting owner · contracting';
+  String get marketerTabAwaitingOwner => '✅ Permit issuance';
 
   @override
   String get marketerTabMyOffers => '💼 Offers';
@@ -693,7 +692,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get legalTermsFallbackBody =>
-      'Terms and privacy text could not be loaded from the server. By continuing you agree to use Motawoq Real Estate in accordance with applicable laws in the Kingdom of Saudi Arabia, including personal data protection rules where they apply, to provide accurate information, and to use listings and messaging responsibly. For the full text, contact support or try again later.';
+      'Terms and privacy text could not be loaded from the server. By continuing you agree to use Mawthuq Line Real Estate Establishment in accordance with applicable laws in the Kingdom of Saudi Arabia, including personal data protection rules where they apply, to provide accurate information, and to use listings and messaging responsibly. For the full text, contact support or try again later.';
 
   @override
   String get permissionsGateTitle => 'Before we start';
@@ -879,8 +878,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get postAuthChecking => 'Checking account…';
 
   @override
-  String get loginIdentifierFieldHint =>
-      'ID/Iqama, FAL license, or unified national no. 700… (10 digits)';
+  String get loginIdentifierFieldHint => 'Enter ID / Iqama number (10 digits)';
 
   @override
   String get loginEnterIdentifierFirst =>
@@ -1091,10 +1089,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your 10-digit public ID (offices and teams)';
 
   @override
-  String get onboardingWelcomeTitleApp => 'Motawoq Real Estate app';
+  String get onboardingWelcomeTitleApp => 'Mawthuq Line Real Estate App';
 
   @override
-  String get onboardingWelcomeTitleWeb => 'Motawoq Real Estate online platform';
+  String get onboardingWelcomeTitleWeb =>
+      'Mawthuq Line Real Estate Establishment';
 
   @override
   String get onboardingWelcomeBodyApp =>
@@ -1102,7 +1101,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get onboardingWelcomeBodyWeb =>
-      'We’re glad you’re here on the Motawoq Real Estate online platform. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.';
+      'We’re glad you’re here on the Mawthuq Line Real Estate Establishment platform. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.';
 
   @override
   String get onboardingHomeTitle => 'Home';
@@ -1402,6 +1401,40 @@ class AppLocalizationsEn extends AppLocalizations {
   String get securityClearOtherDevices => 'Clear other devices';
 
   @override
+  String get securityDeviceColBrowser => 'Browser / device';
+
+  @override
+  String get securityDeviceColPlatform => 'Platform';
+
+  @override
+  String get securityDeviceColLocation => 'Location';
+
+  @override
+  String get securityDeviceColLastSignIn => 'Last sign-in';
+
+  @override
+  String get securityDeviceColRegistered => 'Registered';
+
+  @override
+  String get securityDeviceColStatus => 'Status';
+
+  @override
+  String get securityDeviceStatusCurrent => 'This device';
+
+  @override
+  String get securityDeviceUnknownBrowser => 'Unknown device';
+
+  @override
+  String get securityDeviceRemoveAction => 'Remove';
+
+  @override
+  String get securityDeviceOtpSent => 'Verification code sent';
+
+  @override
+  String get securityDeviceOtpResendWait =>
+      'Wait for the timer before resending';
+
+  @override
   String get securityRetryContinue => 'Continue after update';
 
   @override
@@ -1412,6 +1445,34 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsSectionSessionHistory => 'Sign-in history';
+
+  @override
+  String get settingsSectionAccountHub => 'Account & guided tour';
+
+  @override
+  String get settingsReplayDashboardTourTitle => 'Replay dashboard tour';
+
+  @override
+  String get settingsReplayDashboardTourSubtitle =>
+      'Walks main tabs again (Home → My page → …). Starts when you return to the dashboard.';
+
+  @override
+  String get settingsReplayDashboardTourSnackbar =>
+      'Tour will start when you go back to the dashboard.';
+
+  @override
+  String get settingsOpenSwitchAccountTitle => 'Switch account';
+
+  @override
+  String get settingsOpenSwitchAccountSubtitle =>
+      'Pick another profile you used on this device.';
+
+  @override
+  String get settingsOpenSessionHistoryTitle => 'Full session log';
+
+  @override
+  String get settingsOpenSessionHistorySubtitle =>
+      'Open the detailed sign-in history screen.';
 
   @override
   String get settingsDevicesFooterHint =>
@@ -1647,7 +1708,27 @@ class AppLocalizationsEn extends AppLocalizations {
       'Inappropriate behavior after contact';
 
   @override
+  String get listingReportReasonFraudFinancial =>
+      'Fraud, extortion, or illegal payment demands';
+
+  @override
+  String get listingReportReasonIllegalContent =>
+      'Illegal content or serious criminal activity';
+
+  @override
+  String get listingReportReasonPrivacyViolation =>
+      'Privacy breach or misuse of personal data';
+
+  @override
   String get listingReportReasonOther => 'Other (add details)';
+
+  @override
+  String get listingReportLegalDetailsLabel =>
+      'Legal / factual explanation (required for this selection)';
+
+  @override
+  String get listingReportLegalDetailsRequired =>
+      'Add a clear explanation (at least 30 characters) for the selected reason.';
 
   @override
   String get inAppNotifListingReportTitle => 'Report on your listing';
@@ -1735,4 +1816,724 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get inboxSearchHint => 'Search notifications…';
+
+  @override
+  String get registerTitle => 'Create account';
+
+  @override
+  String get registerSubtitle =>
+      'Choose account type, then complete registration.';
+
+  @override
+  String get registerAccountTypeHeading => 'Account type';
+
+  @override
+  String get accountKindIndividual => 'Individual user (browse)';
+
+  @override
+  String get accountKindOffice => 'Real estate office (max 3 members)';
+
+  @override
+  String get accountKindInstitution =>
+      'Real estate institution (max 6 members)';
+
+  @override
+  String get accountKindCompany => 'Real estate company (max 12 members)';
+
+  @override
+  String get registerContinue => 'Continue to registration';
+
+  @override
+  String get accountKindIndependentAdvertiser =>
+      'Independent (individual advertiser)';
+
+  @override
+  String get accountKindMarketer => 'Real estate marketer';
+
+  @override
+  String get registerOrgModeSectionTitle => 'Organization setup';
+
+  @override
+  String get registerOrgModeCreate =>
+      'Create a new organization (you will be the owner)';
+
+  @override
+  String get registerOrgModeJoin => 'Join an existing organization';
+
+  @override
+  String get registerInviteCodeLabel => 'Organization or invitation code (FAL)';
+
+  @override
+  String get registerInviteCodeHint => 'Enter the code shared by the owner';
+
+  @override
+  String get registerLookupOrg => 'Look up organization';
+
+  @override
+  String get registerOrgPreviewTitle => 'Confirm organization';
+
+  @override
+  String registerOrgPreviewFal(String code) {
+    return 'Display code: $code';
+  }
+
+  @override
+  String get registerInviteInvalid =>
+      'Code not found. Check with the owner and try again.';
+
+  @override
+  String get registerInviteContinueRequiresPreview =>
+      'Look up the organization before continuing.';
+
+  @override
+  String get registerSignupJoinPendingSnackbar =>
+      'Account created. After you sign in, your join request is sent to the owner for approval.';
+
+  @override
+  String get registerPendingJoinIntro =>
+      'Join request submitted from account registration.';
+
+  @override
+  String get registerJoinFlowHint =>
+      'After you complete signup and sign in, a join request is sent to the organization owner for approval.';
+
+  @override
+  String get orgBrowseTitle => 'Organizations';
+
+  @override
+  String get orgBrowseEmpty => 'No organizations yet.';
+
+  @override
+  String get orgJoinSubmit => 'Request to join';
+
+  @override
+  String get orgJoinMessageHint => 'Optional message';
+
+  @override
+  String get orgProfileTitle => 'Organization';
+
+  @override
+  String orgMembersCount(int count) {
+    return '$count members';
+  }
+
+  @override
+  String orgFalBadge(String code) {
+    return 'FAL $code';
+  }
+
+  @override
+  String get orgSetupTitle => 'Organization created';
+
+  @override
+  String orgSetupFalLine(String code) {
+    return 'Public license: $code';
+  }
+
+  @override
+  String get orgSettingsTitle => 'Organization settings';
+
+  @override
+  String get orgRenewFal => 'Renew FAL display license';
+
+  @override
+  String get orgBuySeats => 'Purchase extra seats';
+
+  @override
+  String get orgAssignPermissionsTitle => 'Member permissions';
+
+  @override
+  String get permManageTeam => 'Manage team';
+
+  @override
+  String get permAddProperties => 'Add properties';
+
+  @override
+  String get permAddAds => 'Add ads only';
+
+  @override
+  String get permViewMarket => 'Market access';
+
+  @override
+  String get permViewProfile => 'My profile tab';
+
+  @override
+  String get permAccessChat => 'Chats';
+
+  @override
+  String get permEditOrgSettings => 'Organization settings';
+
+  @override
+  String get permViewAnalytics => 'Analytics';
+
+  @override
+  String get orgListingOrgTap => 'Organization';
+
+  @override
+  String get manageMembersTitle => 'Member management';
+
+  @override
+  String get tabActiveMembers => 'Active';
+
+  @override
+  String get tabBanned => 'Banned';
+
+  @override
+  String get tabAlumni => 'Left';
+
+  @override
+  String get tabLeaveRequests => 'Leave requests';
+
+  @override
+  String get orgRejectReasonHint => 'Optional reason (shown to applicant)';
+
+  @override
+  String get deskTabTeamDashboard => 'Team board';
+
+  @override
+  String get deskTabRolesPermissions => 'Roles';
+
+  @override
+  String get deskTabTeamAnalytics => 'Statistics';
+
+  @override
+  String get deskTabReportsDesk => 'Reports & export';
+
+  @override
+  String get deskTabAnalyticsReports => 'Analytics';
+
+  @override
+  String get appBarOrgJoinRequestsTooltip => 'Pending join requests';
+
+  @override
+  String get orgTeamDeskTitle => 'My organization';
+
+  @override
+  String get orgStatActiveMembers => 'Active members';
+
+  @override
+  String get orgStatPendingJoin => 'Pending requests';
+
+  @override
+  String get orgStatOrgListings => 'Team listings';
+
+  @override
+  String get orgStatOrgAds => 'Team ads';
+
+  @override
+  String get orgLeaderboardTitle => 'Member leaderboard';
+
+  @override
+  String get orgLeaderboardProps => 'Listings';
+
+  @override
+  String get orgLeaderboardAds => 'Ads';
+
+  @override
+  String get orgLeaderboardRank => 'Rank';
+
+  @override
+  String get orgRolesPickMember => 'Pick a teammate';
+
+  @override
+  String get orgRolesEditPermissions => 'Edit permissions';
+
+  @override
+  String get orgExportReport => 'Export report';
+
+  @override
+  String get orgExportCsv => 'Share CSV summary';
+
+  @override
+  String get orgAnalyticsEmpty => 'No analytics data yet.';
+
+  @override
+  String get organalyticsSoldRented => 'Sold / rented (est.)';
+
+  @override
+  String get organalyticsScore => 'Score';
+
+  @override
+  String get permManageTeamHelp =>
+      'Approve or decline join requests, edit permissions, ban or remove members.';
+
+  @override
+  String get permAddPropertiesHelp =>
+      'Create and publish new property listings on behalf of the organization.';
+
+  @override
+  String get permAddAdsHelp =>
+      'Create side or promotional ads where your role allows.';
+
+  @override
+  String get permViewMarketHelp => 'Open the public real-estate market tab.';
+
+  @override
+  String get permViewProfileHelp =>
+      'Access your personal profile tab inside the app.';
+
+  @override
+  String get permAccessChatHelp =>
+      'Use internal team chat and direct team messages.';
+
+  @override
+  String get permEditOrgSettingsHelp =>
+      'Edit organization branding, contacts, and desk settings.';
+
+  @override
+  String get permViewAnalyticsHelp =>
+      'View team dashboards, charts, and exports.';
+
+  @override
+  String get permAddListingRequests => 'Listing requests';
+
+  @override
+  String get permAddListingRequestsHelp =>
+      'Add buy/rent property requests that appear on the home feed.';
+
+  @override
+  String get permEditProperties => 'Edit properties';
+
+  @override
+  String get permEditPropertiesHelp =>
+      'Edit or delete any property listing owned by your organization.';
+
+  @override
+  String get permManageSubscription => 'Manage subscription';
+
+  @override
+  String get permManageSubscriptionHelp =>
+      'Purchase extra seats, renew the display license, and manage the plan.';
+
+  @override
+  String get permExportData => 'Export data';
+
+  @override
+  String get permExportDataHelp =>
+      'Export team summaries to CSV or share reports from analytics.';
+
+  @override
+  String get permInviteMembers => 'Invite members';
+
+  @override
+  String get permInviteMembersHelp =>
+      'Show the invite / FAL code and renew it so teammates can join.';
+
+  @override
+  String get permManageChatRooms => 'Manage chat rooms';
+
+  @override
+  String get permManageChatRoomsHelp =>
+      'Create private team chat rooms and assign moderators.';
+
+  @override
+  String get permViewMemberActivity => 'Member activity';
+
+  @override
+  String get permViewMemberActivityHelp =>
+      'View the activity log and recent actions by teammates.';
+
+  @override
+  String get deskTabMemberActivity => 'Activity log';
+
+  @override
+  String get orgMemberActivityEmpty =>
+      'No activity recorded yet for this organization.';
+
+  @override
+  String get orgMemberActivityUnknownAction => 'Activity';
+
+  @override
+  String get orgMemberLastActivity => 'Last activity';
+
+  @override
+  String get inviteMembersTitle => 'Invite teammates';
+
+  @override
+  String get inviteMembersBody =>
+      'Share this code with people joining from registration. It is the same public FAL / invite code for your organization.';
+
+  @override
+  String get inviteMembersShare => 'Share code';
+
+  @override
+  String get inviteMembersRenew => 'Generate new invite code';
+
+  @override
+  String get inviteMembersRenewHint =>
+      'Generating a new code invalidates the previous one for join-by-code flows.';
+
+  @override
+  String get inviteMembersQrCaption =>
+      'Scan to copy the code on another device.';
+
+  @override
+  String get inviteMembersShareHint =>
+      'Enter this code when choosing “Join an existing organization” in sign-up.';
+
+  @override
+  String get reportsDeskServerSyncHint =>
+      'Team and billing figures in these templates will fill automatically once server analytics queries are connected. Export, print, and share work today; full platform operations console will roll out later under project policy.';
+
+  @override
+  String get subscriptionsMenuHub => 'Subscriptions & payments';
+
+  @override
+  String get subscriptionsMenuCards => 'My saved cards';
+
+  @override
+  String get subscriptionsMenuHistory => 'Payment history';
+
+  @override
+  String get subscriptionsMenuPlans => 'Subscription plans';
+
+  @override
+  String get subscriptionsTitle => 'Subscriptions & payments';
+
+  @override
+  String get subscriptionsTabPlans => 'Plans';
+
+  @override
+  String get subscriptionsTabPaymentMethods => 'Payment methods';
+
+  @override
+  String get subscriptionsTabHistory => 'History';
+
+  @override
+  String get subscriptionsTabTeam => 'Team seats';
+
+  @override
+  String get subscriptionsTabUsage => 'Plan usage';
+
+  @override
+  String get subscriptionsTabUpgrade => 'Upgrade plan';
+
+  @override
+  String get subscriptionsTabRenewFal => 'Renew FAL license';
+
+  @override
+  String get subscriptionsOrgManageTab => 'Subscription';
+
+  @override
+  String get subscriptionsBadgeExpired => 'Subscription expired or ending soon';
+
+  @override
+  String get subscriptionsSar => 'SAR';
+
+  @override
+  String get subscriptionsMonthly => 'Monthly';
+
+  @override
+  String get subscriptionsYearly => 'Yearly (20% off)';
+
+  @override
+  String get subscriptionsSubscribeNow => 'Subscribe now';
+
+  @override
+  String get subscriptionsCurrentPlan => 'Current plan';
+
+  @override
+  String subscriptionsRenewsOn(String date) {
+    return 'Renews on $date';
+  }
+
+  @override
+  String subscriptionsExpiredOn(String date) {
+    return 'Ended on $date';
+  }
+
+  @override
+  String get subscriptionsRenew => 'Renew';
+
+  @override
+  String get subscriptionsCancel => 'Cancel subscription';
+
+  @override
+  String get subscriptionsUnlimited => 'Unlimited';
+
+  @override
+  String get subscriptionsMembers => 'Members';
+
+  @override
+  String get subscriptionsProperties => 'Properties';
+
+  @override
+  String get subscriptionsAdsPerMonth => 'Ads / month';
+
+  @override
+  String get subscriptionsListingRequests => 'Listing requests';
+
+  @override
+  String get subscriptionsFalIncluded => 'FAL license included';
+
+  @override
+  String get subscriptionsSupport => 'Support';
+
+  @override
+  String get subscriptionsAddCard => 'Add new card';
+
+  @override
+  String get subscriptionsCardSaved => 'Card saved';
+
+  @override
+  String get subscriptionsCardDeleted => 'Card removed';
+
+  @override
+  String get subscriptionsDefaultCard => 'Default';
+
+  @override
+  String get subscriptionsSetDefault => 'Set default';
+
+  @override
+  String get subscriptionsDelete => 'Delete';
+
+  @override
+  String get subscriptionsAddCardTitle => 'Add payment card';
+
+  @override
+  String get subscriptionsCardNumber => 'Card number';
+
+  @override
+  String get subscriptionsCardHolder => 'Cardholder name';
+
+  @override
+  String get subscriptionsExpiry => 'Expiry (MM/YY or MM/YYYY)';
+
+  @override
+  String get subscriptionsCapsLockOn =>
+      'Caps Lock is on — card fields usually expect Latin letters.';
+
+  @override
+  String get subscriptionsCardHolderLatinTitle => 'Latin characters only';
+
+  @override
+  String get subscriptionsCardHolderLatinBody =>
+      'Enter the cardholder name in English letters (as printed on the card). Arabic or Persian letters are not accepted for this field.';
+
+  @override
+  String get subscriptionsCardHolderLatinOk => 'OK';
+
+  @override
+  String get subscriptionsMoyasarCardFieldHint =>
+      'On this step, Moyasar collects card data securely. Use Latin letters for the name and Western digits (0–9) as on the card.';
+
+  @override
+  String get subscriptionsCvv => 'CVV';
+
+  @override
+  String get subscriptionsCardLabel => 'Card label (optional)';
+
+  @override
+  String get subscriptionsSaveCard => 'Save card';
+
+  @override
+  String get subscriptionsFieldRequired => 'Required';
+
+  @override
+  String get subscriptionsCheckoutTitle => 'Checkout summary';
+
+  @override
+  String get subscriptionsPay => 'Complete payment';
+
+  @override
+  String get subscriptionsPlanLine => 'Plan';
+
+  @override
+  String get subscriptionsPeriodLine => 'Period';
+
+  @override
+  String get subscriptionsOriginalLine => 'Original price';
+
+  @override
+  String get subscriptionsDiscountLine => 'Discount';
+
+  @override
+  String get subscriptionsTotalLine => 'Total';
+
+  @override
+  String get subscriptionsPaymentMethod => 'Payment method';
+
+  @override
+  String get subscriptionsPaySavedCard => 'Saved card';
+
+  @override
+  String get subscriptionsPayNewCard => 'New card';
+
+  @override
+  String get subscriptionsApplePay => 'Apple Pay';
+
+  @override
+  String get subscriptionsMadaPay => 'Mada Pay';
+
+  @override
+  String get subscriptionsPaymentSuccess => 'Payment successful';
+
+  @override
+  String get subscriptionsPaymentFailed => 'Payment failed';
+
+  @override
+  String get subscriptionsDownloadInvoice => 'Download invoice';
+
+  @override
+  String get subscriptionsInvoiceSaved => 'Invoice saved';
+
+  @override
+  String get subscriptionsFilterAll => 'All';
+
+  @override
+  String get subscriptionsFilterSuccess => 'Paid';
+
+  @override
+  String get subscriptionsFilterPending => 'Pending';
+
+  @override
+  String get subscriptionsFilterFailed => 'Failed';
+
+  @override
+  String get subscriptionsSearch => 'Search';
+
+  @override
+  String get subscriptionsTxnRef => 'Transaction ref';
+
+  @override
+  String get subscriptionsStatus => 'Status';
+
+  @override
+  String get subscriptionsTeamTitle => 'Team & seats';
+
+  @override
+  String get subscriptionsSeatsUsed => 'Seats used';
+
+  @override
+  String get subscriptionsAddMember => 'Add teammate';
+
+  @override
+  String get subscriptionsUpgradeHint =>
+      'You reached the seat limit — upgrade your plan.';
+
+  @override
+  String get subscriptionsUpgradeCta => 'Upgrade plan';
+
+  @override
+  String get subscriptionsUsageTitle => 'Usage';
+
+  @override
+  String get subscriptionsRenewFalBody =>
+      'FAL display renewal is linked to your active subscription. Open organization settings to renew the public license code.';
+
+  @override
+  String get subscriptionsOpenOrgSettings => 'Open organization settings';
+
+  @override
+  String get subscriptionsDetailsTitle => 'Current subscription';
+
+  @override
+  String get subscriptionsNoSubscription => 'No active subscription';
+
+  @override
+  String get subscriptionsOrgSubscriptionExpired =>
+      'Organization subscription is inactive. Renew to keep FAL renewal and desk features.';
+
+  @override
+  String get subscriptionsAuthenticateToPay => 'Confirm with biometrics';
+
+  @override
+  String get subscriptionsBiometricFailed =>
+      'Biometric authentication failed or cancelled';
+
+  @override
+  String get subscriptionsYearlyDiscountNote =>
+      'Yearly billing includes a 20% discount vs monthly.';
+
+  @override
+  String get subscriptionsExtraSeats => 'Buy extra seats';
+
+  @override
+  String get subscriptionsSharePaymentLink => 'Share payment summary';
+
+  @override
+  String get subscriptionsSharePaymentSubject => 'Subscription payment';
+
+  @override
+  String get subscriptionsCheckoutRefundPolicy =>
+      'By paying, you confirm that the subscription activates for the selected plan and billing period. Subscription fees are not refundable once charged.';
+
+  @override
+  String get subscriptionsMarketingPaywallTitle => 'Subscription required';
+
+  @override
+  String get subscriptionsMarketingPaywallBody =>
+      'Marketing actions that affect contracts, permits, publishing, or listings require an active subscription. Open plans to subscribe, then you can continue immediately.';
+
+  @override
+  String get subscriptionsPaywallExpiredTitle => 'Subscription inactive';
+
+  @override
+  String get subscriptionsPaywallNoAutoRenewBody =>
+      'Your paid subscription period has ended (by date and time). This action is blocked until you subscribe again. Your data remains; you can keep working within free-tier limits after closing this dialog.';
+
+  @override
+  String get subscriptionsPaywallAutoRenewFailBody =>
+      'Automatic renewal could not charge your card (declined or insufficient funds). This action stays blocked until payment succeeds or you renew manually. Update your card or open plans to pay.';
+
+  @override
+  String get subscriptionsPaywallCloseLabel => 'Close';
+
+  @override
+  String get subscriptionsPaywallGoPlans => 'Plans & pay';
+
+  @override
+  String get subscriptionsCancelEndTitle => 'Cancel subscription';
+
+  @override
+  String subscriptionsCancelEndBody(String date) {
+    return 'If you cancel, auto-renewal stops. Your benefits stay active until the end of the paid period ($date).';
+  }
+
+  @override
+  String get subscriptionsContinue => 'Continue';
+
+  @override
+  String get subscriptionsGoBack => 'Go back';
+
+  @override
+  String get subscriptionsRetentionTitle => 'One-time loyalty offer';
+
+  @override
+  String get subscriptionsRetentionBody =>
+      'Stay with us: get 20% off your next renewal if you keep your subscription now. This offer is shown only once.';
+
+  @override
+  String get subscriptionsRetentionStay => 'Keep subscription';
+
+  @override
+  String get subscriptionsRetentionDecline => 'Continue cancellation';
+
+  @override
+  String get subscriptionsChurnTitle => 'Help us improve';
+
+  @override
+  String get subscriptionsChurnBody =>
+      'What is the main reason you are cancelling? (optional)';
+
+  @override
+  String get subscriptionsChurnSkip => 'Skip';
+
+  @override
+  String get subscriptionsChurnSubmit => 'Submit & cancel';
+
+  @override
+  String get subscriptionsChurnReasonPrice => 'Price';
+
+  @override
+  String get subscriptionsChurnReasonFeatures => 'Features / limits';
+
+  @override
+  String get subscriptionsChurnReasonSupport => 'Support';
+
+  @override
+  String get subscriptionsChurnReasonOther => 'Other';
+
+  @override
+  String get subscriptionsChurnDetailHint => 'Additional details (optional)';
 }

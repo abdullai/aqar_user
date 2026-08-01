@@ -21,41 +21,142 @@ DateTime? _marketerRowCreatedAt(Map<String, dynamic> m) {
   return DateTime.tryParse((m['created_at'] ?? '').toString());
 }
 
-/// مهلة ردّ المالك على عرض المسوّق قبل إعادة إظهار الطلب في «الدعوات» (وإخفاء العرض مؤقتاً).
-const Duration _kMarketerOwnerOfferGrace = Duration(hours: 48);
+/// كل عروض الجولة الحالية «معلّقة» وانتهت [expires_at] — حتى لو بقي status `submitted` قبل تشغيل cron.
+Map<String, bool> _ownerOffersAllExpiredByDeadlineMap({
+  required List<Map<String, dynamic>> offerRows,
+  required Map<String, Map<String, dynamic>> requestRowsById,
+}) {
+  final grouped = <String, List<Map<String, dynamic>>>{};
+  for (final o in offerRows) {
+    final rid = (o['request_id'] ?? '').toString().trim();
+    if (rid.isEmpty) continue;
+    grouped.putIfAbsent(rid, () => []).add(o);
+  }
+  final out = <String, bool>{};
+  final now = DateTime.now().toUtc();
+  for (final e in grouped.entries) {
+    final req = requestRowsById[e.key];
+    final round = (req?['marketing_round'] as num?)?.toInt() ?? 1;
+    final pending = e.value.where((o) {
+      final rn = (o['round_no'] as num?)?.toInt() ?? 1;
+      if (rn != round) return false;
+      final st = (o['status'] ?? '').toString().toLowerCase().trim();
+      return const {'submitted', 'pending', ''}.contains(st);
+    }).toList();
+    if (pending.isEmpty) {
+      out[e.key] = false;
+      continue;
+    }
+    final allPast = pending.every((o) {
+      final st = (o['status'] ?? '').toString().toLowerCase().trim();
+      if (const {
+        'expired',
+        'offer_expired',
+        'deadline_passed',
+        'timed_out',
+        'no_action',
+        'inactive_72h',
+      }.contains(st)) {
+        return true;
+      }
+      final exp =
+          DateTime.tryParse((o['expires_at'] ?? '').toString())?.toUtc();
+      if (exp != null) {
+        return !exp.isAfter(now);
+      }
+      final created =
+          DateTime.tryParse((o['created_at'] ?? '').toString())?.toUtc();
+      if (created == null) return false;
+      return now.isAfter(created.add(const Duration(hours: 72)));
+    });
+    out[e.key] = allPast;
+  }
+  return out;
+}
 
-bool _marketerOfferIsOwnerWaitingGrace(
-  Map<String, dynamic> o,
+/// طلب في `waiting_marketers` وله عروض سابقة لكن لا عرض نشط في الجولة الحالية
+/// (منتهٍ/مرفوض/جولة قديمة) — يحتاج إعادة طرح من المالك أو تقديماً جديداً.
+Map<String, bool> _ownerOffersNeedRelistMap({
+  required List<Map<String, dynamic>> offerRows,
+  required Map<String, Map<String, dynamic>> requestRowsById,
+}) {
+  final out = <String, bool>{};
+  for (final entry in requestRowsById.entries) {
+    final rid = entry.key;
+    final req = entry.value;
+    final stage =
+        (req['workflow_stage'] ?? '').toString().toLowerCase().trim();
+    if (stage != 'waiting_marketers') {
+      out[rid] = false;
+      continue;
+    }
+    final round = (req['marketing_round'] as num?)?.toInt() ?? 1;
+    final forReq = offerRows
+        .where((o) => (o['request_id'] ?? '').toString().trim() == rid)
+        .toList();
+    if (forReq.isEmpty) {
+      out[rid] = false;
+      continue;
+    }
+    final hasLiveInRound = forReq.any((o) {
+      final rn = (o['round_no'] as num?)?.toInt() ?? 1;
+      if (rn != round) return false;
+      final st = (o['status'] ?? '').toString().toLowerCase().trim();
+      return const {'submitted', 'pending', ''}.contains(st);
+    });
+    out[rid] = !hasLiveInRound;
+  }
+  return out;
+}
+
+void _applyOfferDeadlineExpiryFlags(
+  Iterable<Map<String, dynamic>> rows,
+  Map<String, bool> expiredByRequestId,
+) {
+  for (final r in rows) {
+    final rid =
+        (r['request_id'] ?? r['listing_request_id'] ?? '').toString().trim();
+    if (rid.isEmpty) continue;
+    r['_owner_offers_all_expired_by_deadline'] =
+        expiredByRequestId[rid] ?? false;
+  }
+}
+
+/// بعد إعادة طرح الطلب لجولة أعلى: يظهر للمسوّق شارة أنه قدّم عرضاً في جولة سابقة.
+void _annotateMarketerInvitesPriorRoundOfferFlag(
+  List<Map<String, dynamic>> invites,
+  List<Map<String, dynamic>> allOffersForRequests,
   Map<String, Map<String, dynamic>> reqMap,
   String marketerUid,
 ) {
-  final reqId =
-      (o['request_id'] ?? o['listing_request_id'] ?? '').toString().trim();
-  if (reqId.isEmpty) return false;
-  final req = reqMap[reqId];
-  final selected = (req?['selected_marketer_id'] ?? '').toString().trim();
-  if (selected.isNotEmpty && selected != marketerUid) return false;
-
-  final st = (o['status'] ?? '').toString().toLowerCase().trim();
-  const terminal = <String>{
-    'declined',
-    'withdrawn',
-    'cancelled',
-    'expired',
-    'rejected',
-    'accepted',
-    'approved',
-  };
-  if (terminal.contains(st)) return false;
-
-  final responded = o['owner_responded_at'] ?? o['owner_decided_at'];
-  if (responded != null && responded.toString().trim().isNotEmpty) {
-    return false;
+  if (invites.isEmpty) return;
+  final uid = marketerUid.trim();
+  if (uid.isEmpty) return;
+  for (final inv in invites) {
+    final reqId =
+        (inv['request_id'] ?? inv['listing_request_id'] ?? '').toString().trim();
+    if (reqId.isEmpty) {
+      inv['_hub_prior_round_marketer_offer'] = false;
+      continue;
+    }
+    final req = reqMap[reqId];
+    final curRound = (req?['marketing_round'] as num?)?.toInt() ?? 1;
+    if (curRound <= 1) {
+      inv['_hub_prior_round_marketer_offer'] = false;
+      continue;
+    }
+    final prior = allOffersForRequests.any((o) {
+      final rid = (o['request_id'] ?? '').toString().trim();
+      if (rid != reqId) return false;
+      if ((o['marketer_id'] ?? '').toString().trim() != uid) return false;
+      final rn = (o['round_no'] as num?)?.toInt() ?? 1;
+      if (rn >= curRound) return false;
+      final st = (o['status'] ?? '').toString().toLowerCase().trim();
+      if (st == 'withdrawn' || st == 'cancelled') return false;
+      return true;
+    });
+    inv['_hub_prior_round_marketer_offer'] = prior;
   }
-
-  final created = _marketerRowCreatedAt(o)?.toUtc();
-  if (created == null) return true;
-  return DateTime.now().toUtc().difference(created) < _kMarketerOwnerOfferGrace;
 }
 
 bool _marketerOfferBlocksInviteRound(
@@ -82,39 +183,52 @@ bool _marketerOfferExcludedFromOffersList(
   Map<String, Map<String, dynamic>> reqMap,
   String marketerUid,
 ) {
+  // v8: العرض الخاسر بعد اختيار مسوّق آخر — يَختفي من قائمة هذا المسوّق.
+  final lostAt = (o['lost_at'] ?? '').toString().trim();
+  final status = (o['status'] ?? '').toString().toLowerCase().trim();
+  if (lostAt.isNotEmpty || status == 'lost') return true;
+
+  // cancelled/withdrawn/rejected تبقى في المصدر لتظهر في «مفسوخ/ملغى»؛
+  // تبويب عروضي يستبعدها عبر فلتر التبويب.
+
   final reqId =
       (o['request_id'] ?? o['listing_request_id'] ?? '').toString().trim();
   if (reqId.isNotEmpty) {
     final req = reqMap[reqId];
     final selected = (req?['selected_marketer_id'] ?? '').toString().trim();
-    if (selected.isNotEmpty && selected != marketerUid) return true;
+    if (selected.isNotEmpty && selected != marketerUid) {
+      // إن كان العرض ملغى/مرفوضاً نُبقيه للمفسوخ؛ وإلا نخفيه كخاسر.
+      if (!const {
+        'owner_rejected',
+        'rejected',
+        'declined',
+        'withdrawn',
+        'cancelled',
+      }.contains(status)) {
+        return true;
+      }
+    }
+
+    final stage =
+        (req?['workflow_stage'] ?? '').toString().toLowerCase().trim();
+  // بعد انتهاء مهلة المالك: أبقِ عرض هذا المسوّق ليظهر في «بدون إجراء 72».
+    if (const {'owner_action_required', 'inactive_72h', 'inactive72h'}
+        .contains(stage)) {
+      final offerMid = (o['marketer_id'] ?? '').toString().trim();
+      if (offerMid == marketerUid) return false;
+      final prev =
+          (req?['prev_selected_marketer_id'] ?? '').toString().trim();
+      if (prev == marketerUid) return false;
+      final os = (o['status'] ?? '').toString().toLowerCase().trim();
+      if (const {'owner_accepted', 'selected', 'approved'}
+          .contains(os)) {
+        return prev.isNotEmpty && prev != marketerUid;
+      }
+      return true;
+    }
   }
 
-  if (_marketerOfferIsOwnerWaitingGrace(o, reqMap, marketerUid)) {
-    return true;
-  }
-
-  final st = (o['status'] ?? '').toString().toLowerCase().trim();
-  const terminal = <String>{
-    'declined',
-    'withdrawn',
-    'cancelled',
-    'expired',
-    'rejected',
-    'accepted',
-    'approved',
-  };
-  if (terminal.contains(st)) return false;
-
-  final responded = o['owner_responded_at'] ?? o['owner_decided_at'];
-  if (responded != null && responded.toString().trim().isNotEmpty) {
-    return false;
-  }
-
-  final created = _marketerRowCreatedAt(o)?.toUtc();
-  if (created == null) return false;
-  return DateTime.now().toUtc().difference(created) >=
-      _kMarketerOwnerOfferGrace;
+  return false;
 }
 
 /// أكثر من صف دعوة لنفس الطلب/الجولة يظهر كبطاقات مكررة — نبقي الأحدث.
@@ -167,23 +281,22 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       final orgSvc = OrgTeamService(_sb);
       final ctx = await orgSvc.myOrgContext();
       final oid = ctx?['org_id']?.toString();
-      if (oid != null && oid.isNotEmpty) {
-        isOwner = ctx?['is_owner'] == true;
-        if (!isOwner) {
-          final mem = await _sb
-              .from('org_memberships')
-              .select('permissions')
-              .eq('org_id', oid)
-              .eq('user_id', uid)
-              .maybeSingle();
-          final p = mem?['permissions'];
-          if (p is Map) {
-            permissions = Map<String, dynamic>.from(
-              p.map((k, v) => MapEntry(k.toString(), v)),
-            );
-          }
-        }
+      if (oid == null || oid.isEmpty) {
+        await OrgPermissionManager.clearUser(uid);
+        return (isOwner: false, permissions: null);
       }
+      isOwner = ctx?['is_owner'] == true;
+      final p = ctx?['permissions'];
+      if (p is Map) {
+        permissions = Map<String, dynamic>.from(
+          p.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      await OrgPermissionManager.cacheForUser(
+        uid,
+        permissions,
+        isOwner: isOwner,
+      );
     } catch (_) {}
     return (isOwner: isOwner, permissions: permissions);
   }
@@ -198,6 +311,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         _orgNavResolved = true;
         _orgNavIsOwner = false;
         _orgMembershipPermissions = null;
+        _subscriptionMenuBadge = 0;
         if (_tabIndex == 3) _tabIndex = 0;
       });
       _ensureSubTabControllers();
@@ -224,11 +338,10 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
               .eq('user_id', uid)
               .maybeSingle();
           if (fb == null) return null;
-          final vs = (fb['verification_status'] ?? '').toString().toLowerCase();
+          final vs = (fb['verification_status'] ?? '').toString();
           data = {
             'account_type': (fb['account_type'] ?? 'user').toString().trim(),
-            'verified':
-                vs == 'verified' || vs == 'approved' || vs == 'complete',
+            'verified': isProfileVerificationComplete(vs),
           };
         }
         return data;
@@ -257,6 +370,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       });
 
       _ensureSubTabControllers();
+      unawaited(_refreshOrgJoinRequestBadge());
+      unawaited(_refreshSubscriptionMenuBadge());
+      _ensureOrgJoinBadgePolling();
       await AccountRoleCache.save(
         AccountRoleSnapshot(
           userId: uid,
@@ -278,14 +394,13 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
             .maybeSingle();
         if (!mounted) return;
         if (fb != null) {
-          final vs = (fb['verification_status'] ?? '').toString().toLowerCase();
+          final vs = (fb['verification_status'] ?? '').toString();
           final orgFlags = await _fetchOrgMembershipNavFlags(_uid);
           if (!mounted) return;
           _ss(() {
             _accountType = (fb['account_type'] ?? 'user').toString().trim();
             if (_accountType.isEmpty) _accountType = 'user';
-            _verified =
-                vs == 'verified' || vs == 'approved' || vs == 'complete';
+            _verified = isProfileVerificationComplete(vs);
             _accountRoleLoaded = true;
             _orgNavResolved = true;
             _orgNavIsOwner = orgFlags.isOwner;
@@ -295,6 +410,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
             }
           });
           _ensureSubTabControllers();
+          unawaited(_refreshOrgJoinRequestBadge());
+          unawaited(_refreshSubscriptionMenuBadge());
+          _ensureOrgJoinBadgePolling();
           await AccountRoleCache.save(
             AccountRoleSnapshot(
               userId: _uid,
@@ -324,6 +442,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       });
 
       _ensureSubTabControllers();
+      unawaited(_refreshOrgJoinRequestBadge());
+      unawaited(_refreshSubscriptionMenuBadge());
+      _ensureOrgJoinBadgePolling();
       await AccountRoleCache.save(
         AccountRoleSnapshot(
           userId: _uid,
@@ -334,63 +455,274 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
           orgPermissions: _orgMembershipPermissions,
         ),
       );
+    } finally {
+      if (kIsWeb && mounted && !_accountRoleLoaded) {
+        _ss(() {
+          _accountRoleLoaded = true;
+          _orgNavResolved = true;
+        });
+      }
     }
   }
 
   // =========================================================
   // Tab controllers
   // =========================================================
+  void _disposeTabControllerLater(TabController? ctrl) {
+    if (ctrl == null) return;
+    // لا تُتلف أثناء البناء — TabBar/AnimatedBuilder ما زالا مربوطين بالمرجع.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        ctrl.dispose();
+      } catch (_) {}
+    });
+  }
+
   void _ensureSubTabControllers() {
     if (!mounted) return;
 
-    final bool shouldUseMarketerTabs = _isMarketerRole;
-    final bool shouldUseOwnerTabs = !_isMarketerRole;
+    // استرجع من SharedPreferences آخر تبويب فرعي زاره المستخدم — مرة واحدة فقط.
+    if (!_subTabIndicesPrefsRestored) {
+      _subTabIndicesPrefsRestored = true;
+      unawaited(_restoreSubTabIndicesFromPrefs());
+    }
+
+    final bool shouldUseMarketerTabs = _usesMarketerMyPageHub;
+    // دائماً جهّز تبويبات المالك: المسوّق قد يملك طلبات طرحها للسوق.
+    final bool shouldUseOwnerTabs = true;
 
     if (shouldUseOwnerTabs) {
-      if (_marketerTabsCtrl != null) {
-        _marketerTabsCtrl!.dispose();
-        _marketerTabsCtrl = null;
-      }
+      // ويب: لا تتلف كنترولر المسوّق — IndexedStack قد يُبقي شجرة قديمة لحظة.
+      // يُتلف في dispose() فقط.
 
-      if (_ownerTabsCtrl == null || _ownerTabsCtrl!.length != 7) {
-        final int preserved = _ownerTabsCtrl?.index ?? 0;
-        _ownerTabsCtrl?.dispose();
-        final newIdx = preserved.clamp(0, 6);
-        _ownerTabsCtrl = TabController(
-          length: 7,
+      // الطول الجديد للمالك = 7 (دمج تبويبي «التعاقد» و«التصريح 72 ساعة»).
+      const int kOwnerTabsLen = 7;
+      if (_ownerTabsCtrl == null ||
+          _ownerTabsCtrl!.length != kOwnerTabsLen) {
+        final int preserved =
+            _ownerTabsCtrl?.index ?? _lastOwnerSubTabIndex;
+        final int? oldLen = _ownerTabsCtrl?.length;
+        final oldOwner = _ownerTabsCtrl;
+        // لا تُصفّر الحقل قبل التبديل — IndexedStack/AnimatedBuilder قد يقرأ null → Null check.
+        int mappedPreserved = preserved;
+        if (oldLen == 9) {
+          if (preserved == 7) {
+            mappedPreserved = 6;
+          } else if (preserved > 7) {
+            mappedPreserved = preserved - 2;
+          } else if (preserved >= 3) {
+            mappedPreserved = preserved - 1;
+          }
+        } else if (oldLen == 8) {
+          if (preserved >= 3) {
+            mappedPreserved = preserved - 1;
+          }
+        }
+        mappedPreserved = mappedPreserved.clamp(0, kOwnerTabsLen - 1);
+        final next = TabController(
+          length: kOwnerTabsLen,
           vsync: this,
-          initialIndex: newIdx,
+          initialIndex: mappedPreserved,
         );
+        _ownerTabsCtrl = next;
+        _attachSubTabIndexPersistence(next, isMarketer: false);
+        _lastOwnerSubTabIndex = mappedPreserved;
+        if (oldOwner != null && !identical(oldOwner, next)) {
+          _disposeTabControllerLater(oldOwner);
+        }
       } else {
-        final idx = _ownerTabsCtrl!.index.clamp(0, 6);
+        final idx = _ownerTabsCtrl!.index.clamp(0, kOwnerTabsLen - 1);
         if (_ownerTabsCtrl!.index != idx) {
           _ownerTabsCtrl!.index = idx;
         }
       }
-      return;
+      if (!shouldUseMarketerTabs) return;
     }
 
     if (shouldUseMarketerTabs) {
-      if (_ownerTabsCtrl != null) {
-        _ownerTabsCtrl!.dispose();
-        _ownerTabsCtrl = null;
-      }
+      // ويب: أبقِ كنترولر المالك حياً — التبديل owner↔marketer لا يتلف أثناء البناء.
 
-      if (_marketerTabsCtrl == null || _marketerTabsCtrl!.length != 6) {
-        final int preservedIndex = _marketerTabsCtrl?.index ?? 0;
-        _marketerTabsCtrl?.dispose();
-        _marketerTabsCtrl = TabController(
-          length: 6,
+      // الطول = 7 (سوق، عروض، تعاقد، تصريح 72، منشور، بدون إجراء 72، مفسوخ).
+      const int kMarketerTabsLen = 7;
+      if (_marketerTabsCtrl == null ||
+          _marketerTabsCtrl!.length != kMarketerTabsLen) {
+        final int preservedIndex =
+            _marketerTabsCtrl?.index ?? _lastMarketerSubTabIndex;
+        final int? oldLen = _marketerTabsCtrl?.length;
+        final oldMarketer = _marketerTabsCtrl;
+        // تبديل ذري: لا null وسط البناء (كان يسبب Null check متكرر على الويب).
+        int mappedPreserved = preservedIndex;
+        // ترقية من 5 تبويبات (دمج تصريح+منشور) → 7.
+        if (oldLen == 5) {
+          if (preservedIndex >= 3) {
+            mappedPreserved = preservedIndex + 2;
+          }
+        } else if (oldLen == 6) {
+          if (preservedIndex >= 3) {
+            mappedPreserved = preservedIndex + 1;
+          }
+        }
+        mappedPreserved = mappedPreserved.clamp(0, kMarketerTabsLen - 1);
+        final next = TabController(
+          length: kMarketerTabsLen,
           vsync: this,
-          initialIndex: preservedIndex.clamp(0, 5),
+          initialIndex: mappedPreserved,
         );
+        _marketerTabsCtrl = next;
+        _attachSubTabIndexPersistence(next, isMarketer: true);
+        _lastMarketerSubTabIndex = mappedPreserved;
+        if (oldMarketer != null && !identical(oldMarketer, next)) {
+          _disposeTabControllerLater(oldMarketer);
+        }
       } else {
-        final idx = _marketerTabsCtrl!.index.clamp(0, 5);
+        final idx = _marketerTabsCtrl!.index.clamp(0, kMarketerTabsLen - 1);
         if (_marketerTabsCtrl!.index != idx) {
           _marketerTabsCtrl!.index = idx;
         }
+        _lastMarketerSubTabIndex = idx;
       }
     }
+
+    // شريط كمسوّق/كمعلن: كنترولر ثابت الطول (2) — يُنشأ مرة ولا يُصفَّر وسط البناء.
+    if (shouldUseMarketerTabs) {
+      _ensureMarketerPublisherRoleTabsCtrl();
+    }
+  }
+
+  void _ensureMarketerPublisherRoleTabsCtrl() {
+    if (!mounted) return;
+    final want = _marketerPublisherHubMode.clamp(0, 1);
+    if (_marketerPublisherRoleTabsCtrl != null) {
+      final c = _marketerPublisherRoleTabsCtrl!;
+      if (c.index != want && !c.indexIsChanging) {
+        c.index = want;
+      }
+      return;
+    }
+    final next = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: want,
+    );
+    next.addListener(() {
+      final c = _marketerPublisherRoleTabsCtrl;
+      if (c == null || c.indexIsChanging) return;
+      if (_marketerPublisherHubMode == c.index) return;
+      if (!mounted) return;
+      setState(() => _marketerPublisherHubMode = c.index);
+      if (c.index == 1) {
+        unawaited(_loadOwnerRequestsBuckets(force: false, silent: true));
+      }
+    });
+    _marketerPublisherRoleTabsCtrl = next;
+  }
+
+  /// مزامنة وضع كمسوّق/كمعلن مع شريط التبويب (للروابط العميقة وتحديثات الدلاء).
+  void _setMarketerPublisherHubMode(int mode, {bool animate = false}) {
+    final m = mode.clamp(0, 1);
+    _ensureMarketerPublisherRoleTabsCtrl();
+    if (_marketerPublisherHubMode != m) {
+      _marketerPublisherHubMode = m;
+    }
+    final c = _marketerPublisherRoleTabsCtrl;
+    if (c != null && c.index != m) {
+      if (animate) {
+        c.animateTo(m);
+      } else {
+        c.index = m;
+      }
+    }
+  }
+
+  /// عند فتح صفحتي: ارجع لأول تبويب فرعي (يمين في العربية).
+  void _focusMyPageFirstSubTab() {
+    _lastOwnerSubTabIndex = 0;
+    _lastMarketerSubTabIndex = 0;
+    try {
+      final o = _ownerTabsCtrl;
+      if (o != null && o.length > 0 && o.index != 0) {
+        o.index = 0;
+      }
+    } catch (_) {}
+    try {
+      final m = _marketerTabsCtrl;
+      if (m != null && m.length > 0 && m.index != 0) {
+        m.index = 0;
+      }
+    } catch (_) {}
+    unawaited(_persistSubTabIndex(isMarketer: false, index: 0));
+    unawaited(_persistSubTabIndex(isMarketer: true, index: 0));
+  }
+
+  /// Listener موحّد على [TabController] لحفظ آخر تبويب فرعي في الذاكرة + التخزين الدائم.
+  void _attachSubTabIndexPersistence(
+    TabController controller, {
+    required bool isMarketer,
+  }) {
+    controller.addListener(() {
+      // أثناء التبديل المتحرّك يُطلق listener عدة مرات؛ احفظ القيمة النهائية فقط.
+      if (controller.indexIsChanging) return;
+      final idx = controller.index;
+      if (isMarketer) {
+        if (_lastMarketerSubTabIndex == idx) return;
+        _lastMarketerSubTabIndex = idx;
+      } else {
+        if (_lastOwnerSubTabIndex == idx) return;
+        _lastOwnerSubTabIndex = idx;
+      }
+      unawaited(_persistSubTabIndex(isMarketer: isMarketer, index: idx));
+      // إعادة بناء الواجهة بحيث تنعكس قرارات اعتمدت على التبويب الفرعي الحالي
+      // (مثل كشف/تمويه رقم جوّال المالك للمسوّق داخل تبويب «تصاريح 72 ساعة»).
+      if (mounted) setState(() {});
+    });
+  }
+
+  Future<void> _restoreSubTabIndicesFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final owner = prefs.getInt(MarketingStateMixin._kPrefOwnerSubTabIndex);
+      final marketer = prefs.getInt(MarketingStateMixin._kPrefMarketerSubTabIndex);
+      if (!mounted) return;
+      if (owner != null) {
+        _lastOwnerSubTabIndex = owner.clamp(0, 8);
+        final c = _ownerTabsCtrl;
+        if (c != null && c.length == 9) {
+          final clamped = owner.clamp(0, 8);
+          if (c.index != clamped) {
+            try {
+              c.index = clamped;
+            } catch (_) {}
+          }
+        }
+      }
+      if (marketer != null) {
+        _lastMarketerSubTabIndex = marketer.clamp(0, 6);
+        final c = _marketerTabsCtrl;
+        if (c != null && c.length == 7) {
+          final clamped = marketer.clamp(0, 6);
+          if (c.index != clamped) {
+            try {
+              c.index = clamped;
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _persistSubTabIndex({
+    required bool isMarketer,
+    required int index,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(
+        isMarketer
+            ? MarketingStateMixin._kPrefMarketerSubTabIndex
+            : MarketingStateMixin._kPrefOwnerSubTabIndex,
+        index,
+      );
+    } catch (_) {}
   }
 
   Map<String, dynamic> _mergedJsonPayloadForRow(Map<String, dynamic> row) {
@@ -403,6 +735,109 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     mergeDyn(row['payload_json']);
     mergeDyn(row['payload']);
     return payload;
+  }
+
+  /// إعلان/طلب بدون رخصة REGA نشره المسوّق نفسه — لا يظهر له في «السوق العقاري».
+  bool _isMarketerOwnNoLicenseMarketRow(
+    Map<String, dynamic> row,
+    String uid,
+  ) {
+    if (uid.isEmpty) return false;
+    final pub =
+        (row['preview_published_by_marketer_id'] ?? '').toString().trim();
+    final owner =
+        (row['owner_id'] ?? row['request_owner_id'] ?? '').toString().trim();
+    if (pub != uid && owner != uid) return false;
+    if (row['market_without_rega_license'] == true ||
+        row['no_rega_ad_license'] == true ||
+        row['no_license_market_consent'] == true) {
+      return true;
+    }
+    final payload = _mergedJsonPayloadForRow(row);
+    return payload['market_without_rega_license'] == true ||
+        payload['no_rega_ad_license'] == true ||
+        payload['no_license_market_consent'] == true;
+  }
+
+  /// صف مؤهل لتبويب «السوق العقاري» فقط: بانتظار مسوّقين وبدون مسوّق مختار.
+  bool _isMarketerOpenMarketEligibleRow(
+    Map<String, dynamic> row, {
+    String? uid,
+  }) {
+    final id = (uid ?? _uid).trim();
+    final stage = (row['workflow_stage'] ??
+            row['request_workflow_stage'] ??
+            row['preview_workflow_stage'] ??
+            '')
+        .toString()
+        .toLowerCase()
+        .trim();
+    if (stage != 'waiting_marketers') return false;
+    final selected = (row['selected_marketer_id'] ??
+            row['request_selected_marketer_id'] ??
+            '')
+        .toString()
+        .trim();
+    if (selected.isNotEmpty) return false;
+    if (id.isNotEmpty && _isMarketerOwnNoLicenseMarketRow(row, id)) {
+      return false;
+    }
+    final owner = (row['owner_id'] ?? row['request_owner_id'] ?? '')
+        .toString()
+        .trim();
+    if (id.isNotEmpty && owner == id) return false;
+    final prevSelected =
+        (row['prev_selected_marketer_id'] ?? '').toString().trim();
+    final allowRetry = row['allow_previous_marketers_retry'] == true ||
+        row['allow_previous_marketers_retry'] == 1 ||
+        (row['allow_previous_marketers_retry'] is String &&
+            const {'true', 't', '1', 'yes'}.contains(
+              (row['allow_previous_marketers_retry'] as String).toLowerCase(),
+            ));
+    if (id.isNotEmpty && prevSelected == id && !allowRetry) return false;
+    return true;
+  }
+
+  /// المعلن وافق على إظهار جواله من بطاقة السوق قبل اختيار مسوّق.
+  bool _listingRevealsOwnerPhoneFromMarket(Map<String, dynamic> row) {
+    bool truthy(dynamic v) =>
+        v == true ||
+        v == 1 ||
+        (v is String &&
+            const {'true', 't', '1', 'yes'}.contains(v.toLowerCase()));
+    for (final k in const [
+      'show_owner_phone_on_market',
+      'reveal_phone_from_market',
+      'contact_visible_in_market',
+      'show_phone_in_market',
+    ]) {
+      if (truthy(row[k])) return true;
+    }
+    final payload = _mergedJsonPayloadForRow(row);
+    for (final k in const [
+      'show_owner_phone_on_market',
+      'reveal_phone_from_market',
+      'contact_visible_in_market',
+      'show_phone_in_market',
+    ]) {
+      if (truthy(payload[k])) return true;
+    }
+    return false;
+  }
+
+  void _stripOwnerPhoneUnlessMarketReveal(Map<String, dynamic> row) {
+    if (_listingRevealsOwnerPhoneFromMarket(row)) return;
+    for (final k in const [
+      'request_owner_phone',
+      'preview_owner_phone',
+      'owner_phone',
+      'contact_phone',
+      'phone',
+      'mobile',
+      'owner_mobile',
+    ]) {
+      row[k] = '';
+    }
   }
 
   Map<String, dynamic> _decodeLooseJsonMap(dynamic value) {
@@ -520,6 +955,14 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       if (t.isNotEmpty) row['preview_type'] = t;
     }
 
+    for (final flag in const [
+      'market_without_rega_license',
+      'no_rega_ad_license',
+      'no_license_market_consent',
+    ]) {
+      if (payload[flag] == true) row[flag] = true;
+    }
+
     if (pick('request_owner_name').isEmpty &&
         pick('preview_owner_name').isEmpty) {
       final on = _payloadString(payload, const [
@@ -540,32 +983,61 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   // =========================================================
   // Owner buckets
   // =========================================================
-  Future<void> _loadOwnerRequestsBuckets({bool force = false}) async {
-    if (_isGuest || _isMarketerRole) return;
+  Future<void> _loadOwnerRequestsBuckets({
+    bool force = false,
+    bool silent = false,
+  }) async {
+    // المسوّق/المكتب قد يكون أيضاً مالك طلبات طرحها للسوق — نحمّل دلاء المالك دائماً لغير الضيوف.
+    if (_isGuest) return;
 
     _ensureSubTabControllers();
 
-    _ss(() {
-      _loadingRequests = true;
-      _errorRequests = null;
+    // مع force: لا تُعد رسم الكاش القديم — كان يُبقي البطاقة في تبويب قديم بعد الموافقة/الإعادة.
+    var hadOwnerCache = false;
+    if (!force) {
+      try {
+        final uid = _sb.auth.currentUser?.id ?? '';
+        final cached = MarketingBucketsCache.instance.readOwner(uid);
+        if (cached != null) {
+          hadOwnerCache = true;
+          _ss(() {
+            _ownerListingRequests = cached.rows;
+            _loadingOwnerRequests = false;
+          });
+        }
+      } catch (_) {}
+    } else {
+      MarketingBucketsCache.instance.invalidateOwner(
+        _sb.auth.currentUser?.id ?? '',
+      );
+    }
 
-      if (force) {
-        _ownerListingRequests = <Map<String, dynamic>>[];
+    _ss(() {
+      if (!silent) {
+        _loadingOwnerRequests =
+            !hadOwnerCache && _ownerListingRequests.isEmpty;
+        // لا تمسح الصفوف عند force — حدّث في الخلفية.
       }
     });
 
     try {
+      try {
+        await MarketingFlowService(_sb).syncExpiredContractCreationWindows();
+      } catch (_) {}
+
       final uid = _uid;
 
       final data = await _net<List<Map<String, dynamic>>>(() async {
-        final result = await _sb
+        // ويب: حدّ أعلى يمنع عاصفة البطاقات بعد الدخول (كل صلاحيات المالك الفرد).
+        var q = _sb
             .from('listing_requests')
             .select(SupabaseSchemaSelects.listingRequestsLookup)
             .eq('owner_id', uid)
-            .order(
-              'created_at',
-              ascending: false,
-            );
+            .order('created_at', ascending: false);
+        if (kIsWeb) {
+          q = q.limit(60);
+        }
+        final result = await q;
 
         return (result as List)
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -622,21 +1094,286 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       await _backfillOwnerRequestCoverImagesFromDb(merged);
       await _cacheOwnerRequestPreviewProperties(merged);
 
+      final ownerReqIdsForPdf = merged
+          .map((e) => (e['request_id'] ?? e['id'] ?? '').toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      if (ownerReqIdsForPdf.isNotEmpty) {
+        try {
+          final cp = await _net<dynamic>(
+            () async => _sb
+                .from('listing_contracts')
+                .select('request_id,contract_pdf_url')
+                .inFilter('request_id', ownerReqIdsForPdf),
+            tag: 'OWNER_REQ_CONTRACT_PDF',
+          );
+          final pdfByReq = <String, String>{};
+          for (final e in _asMapList(cp)) {
+            final rid = (e['request_id'] ?? '').toString().trim();
+            final u = (e['contract_pdf_url'] ?? '').toString().trim();
+            if (rid.isNotEmpty && u.isNotEmpty) {
+              pdfByReq[rid] = u;
+            }
+          }
+          for (final r in merged) {
+            final rid = (r['request_id'] ?? r['id'] ?? '').toString().trim();
+            final u = pdfByReq[rid];
+            if (u != null && u.isNotEmpty) {
+              r['contract_pdf_url'] = u;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // تجميع عروض listing_offers النشطة + وجود محادثة (عقار/مباشر) مع مسوّق قدّم عرضاً — لبطاقة «بانتظار المسوقين».
+      final reqIdsForAgg = merged
+          .map((e) => (e['request_id'] ?? e['id'] ?? '').toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList();
+      final pendingByReq = <String, int>{for (final id in reqIdsForAgg) id: 0};
+      final marketerIdsByReq = <String, Set<String>>{};
+      final reqWithPropChat = <String>{};
+      final directChatReq = <String>{};
+      var offerDeadlineExpiredByRequest = <String, bool>{};
+      var needRelistByReq = <String, bool>{};
+      if (reqIdsForAgg.isNotEmpty) {
+        final pendingPreviewByReq = <String, List<Map<String, dynamic>>>{};
+        try {
+          final offRaw = await _net<dynamic>(() async {
+            return await _sb
+                .from('listing_offers')
+                .select(
+                    'id,request_id,marketer_id,status,expires_at,round_no,offer_amount,price')
+                .inFilter('request_id', reqIdsForAgg);
+          }, tag: 'OWNER_OFFER_AGG');
+          final offerAggRows = _asMapList(offRaw);
+          final nowUtc = DateTime.now().toUtc();
+          final priorRejectedByKey = <String, int>{};
+          for (final e in offerAggRows) {
+            final ridK = (e['request_id'] ?? '').toString().trim();
+            final midK = (e['marketer_id'] ?? '').toString().trim();
+            if (ridK.isEmpty || midK.isEmpty) continue;
+            final stK =
+                (e['status'] ?? '').toString().toLowerCase().trim();
+            if (!const {'owner_rejected', 'rejected', 'declined'}
+                .contains(stK)) {
+              continue;
+            }
+            final key = '$ridK|$midK';
+            priorRejectedByKey[key] = (priorRejectedByKey[key] ?? 0) + 1;
+          }
+          bool isRepeatPendingOffer(Map<String, dynamic> e) {
+            final ridK = (e['request_id'] ?? '').toString().trim();
+            final midK = (e['marketer_id'] ?? '').toString().trim();
+            if (ridK.isEmpty || midK.isEmpty) return false;
+            final roundNo = (e['round_no'] as num?)?.toInt() ?? 1;
+            if (roundNo > 1) return true;
+            return (priorRejectedByKey['$ridK|$midK'] ?? 0) > 0;
+          }
+          final reqRowById = <String, Map<String, dynamic>>{};
+          for (final mr in merged) {
+            final id = (mr['request_id'] ?? mr['id'] ?? '').toString().trim();
+            if (id.isNotEmpty) reqRowById[id] = mr;
+          }
+          offerDeadlineExpiredByRequest = _ownerOffersAllExpiredByDeadlineMap(
+            offerRows: offerAggRows,
+            requestRowsById: reqRowById,
+          );
+          needRelistByReq = _ownerOffersNeedRelistMap(
+            offerRows: offerAggRows,
+            requestRowsById: reqRowById,
+          );
+          for (final e in offerAggRows) {
+            final rid = (e['request_id'] ?? '').toString().trim();
+            final st = (e['status'] ?? '').toString().toLowerCase().trim();
+            if (!const {'submitted', 'pending', ''}.contains(st)) continue;
+            final exp =
+                DateTime.tryParse((e['expires_at'] ?? '').toString())?.toUtc();
+            if (exp != null && !exp.isAfter(nowUtc)) {
+              continue;
+            }
+            pendingByReq[rid] = (pendingByReq[rid] ?? 0) + 1;
+            final mid = (e['marketer_id'] ?? '').toString().trim();
+            if (mid.isNotEmpty) {
+              marketerIdsByReq.putIfAbsent(rid, () => <String>{}).add(mid);
+            }
+            final oid = (e['id'] ?? '').toString().trim();
+            if (oid.isNotEmpty) {
+              pendingPreviewByReq.putIfAbsent(rid, () => []).add(
+                    Map<String, dynamic>.from({
+                      'id': oid,
+                      'marketer_id': mid,
+                      'offer_price': e['offer_amount'] ?? e['price'],
+                      'is_repeat_offer': isRepeatPendingOffer(e),
+                    }),
+                  );
+            }
+          }
+        } catch (_) {}
+
+        final previewIds = merged
+            .map((e) => (e['preview_property_id'] ?? '').toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toSet()
+            .toList();
+        if (previewIds.isNotEmpty) {
+          try {
+            final convRows = await _net<dynamic>(() async {
+              return await _sb
+                  .from('conversations')
+                  .select('property_id')
+                  .eq('kind', 'property')
+                  .inFilter('property_id', previewIds)
+                  .or('user_id.eq.$uid,counterparty_id.eq.$uid');
+            }, tag: 'OWNER_CONV_PROP');
+            final pidsHit = <String>{};
+            for (final e in _asMapList(convRows)) {
+              final pid = (e['property_id'] ?? '').toString().trim();
+              if (pid.isNotEmpty) pidsHit.add(pid);
+            }
+            for (final r in merged) {
+              final rid = (r['request_id'] ?? r['id'] ?? '').toString().trim();
+              final pp = (r['preview_property_id'] ?? '').toString().trim();
+              if (rid.isNotEmpty && pp.isNotEmpty && pidsHit.contains(pp)) {
+                reqWithPropChat.add(rid);
+              }
+            }
+          } catch (_) {}
+        }
+
+        final allM = marketerIdsByReq.values.expand((s) => s).toSet().toList();
+        final peersWithDm = <String>{};
+        if (allM.isNotEmpty) {
+          try {
+            final a = await _net<dynamic>(() async {
+              return await _sb
+                  .from('conversations')
+                  .select('counterparty_id')
+                  .eq('kind', 'direct')
+                  .eq('user_id', uid)
+                  .inFilter('counterparty_id', allM);
+            }, tag: 'OWNER_DM_A');
+            for (final e in _asMapList(a)) {
+              final c = (e['counterparty_id'] ?? '').toString().trim();
+              if (c.isNotEmpty) peersWithDm.add(c);
+            }
+            final b = await _net<dynamic>(() async {
+              return await _sb
+                  .from('conversations')
+                  .select('user_id')
+                  .eq('kind', 'direct')
+                  .eq('counterparty_id', uid)
+                  .inFilter('user_id', allM);
+            }, tag: 'OWNER_DM_B');
+            for (final e in _asMapList(b)) {
+              final c = (e['user_id'] ?? '').toString().trim();
+              if (c.isNotEmpty) peersWithDm.add(c);
+            }
+          } catch (_) {}
+        }
+        for (final e in marketerIdsByReq.entries) {
+          for (final mid in e.value) {
+            if (peersWithDm.contains(mid)) {
+              directChatReq.add(e.key);
+              break;
+            }
+          }
+        }
+
+        for (final r in merged) {
+          final rid = (r['request_id'] ?? r['id'] ?? '').toString().trim();
+          if (rid.isEmpty) continue;
+          r['_owner_pending_offers_count'] = pendingByReq[rid] ?? 0;
+          r['_owner_offers_all_expired_by_deadline'] =
+              offerDeadlineExpiredByRequest[rid] ?? false;
+          r['_owner_offers_need_relist'] = needRelistByReq[rid] ?? false;
+          r['_owner_has_marketer_chat'] = reqWithPropChat.contains(rid) ||
+              directChatReq.contains(rid);
+          r['_owner_pending_offers_preview'] =
+              List<Map<String, dynamic>>.from(
+                  pendingPreviewByReq[rid] ?? const <Map<String, dynamic>>[]);
+          r['_owner_has_repeat_pending_offer'] =
+              (pendingPreviewByReq[rid] ?? const <Map<String, dynamic>>[])
+                  .any((o) => o['is_repeat_offer'] == true);
+        }
+      }
+
       if (!mounted) return;
 
       _ss(() {
         _ownerListingRequests = merged;
       });
-    } catch (e) {
-      if (!mounted) return;
-      _ss(() {
-        _errorRequests = e.toString();
-      });
+
+      unawaited(_refreshExhaustedOpportunityIds(
+        merged.map((r) => (r['request_id'] ?? r['id'] ?? '').toString()),
+      ));
+
+      // v8 (perf): احفظ في الكاش الذاكرة لجلسة التطبيق الحالية.
+      try {
+        MarketingBucketsCache.instance.saveOwner(uid: uid, rows: merged);
+      } catch (_) {}
+    } catch (_) {
+      // الخطأ يحفظ القائمة كما هي (لا نعرض رسالة بصرية حاليًا)؛ نحرص فقط على
+      // رفع علم التحميل في `finally` كي لا تبقى التبويبات على «جارٍ التحميل…».
     } finally {
-      if (!mounted) return;
-      _ss(() {
-        _loadingRequests = false;
-      });
+      if (!silent) {
+        _loadingOwnerRequests = false;
+      }
+      if (mounted) _ss(() {});
+    }
+  }
+
+  Future<void> _backfillOwnerDisplayNamesOnMarketerRows({
+    required Map<String, Map<String, dynamic>> reqMap,
+    required Map<String, Map<String, dynamic>> previewMap,
+    required List<Map<String, dynamic>> invitesRaw,
+    required List<Map<String, dynamic>> offersRaw,
+    required List<Map<String, dynamic>> contractsRaw,
+  }) async {
+    final ownerIds = <String>{};
+    for (final r in reqMap.values) {
+      final oid =
+          (r['request_owner_id'] ?? r['owner_id'] ?? '').toString().trim();
+      if (oid.isNotEmpty) ownerIds.add(oid);
+    }
+    for (final p in previewMap.values) {
+      final oid = (p['owner_id'] ?? '').toString().trim();
+      if (oid.isNotEmpty) ownerIds.add(oid);
+    }
+    for (final row in [...invitesRaw, ...offersRaw, ...contractsRaw]) {
+      final oid = (row['owner_id'] ?? '').toString().trim();
+      if (oid.isNotEmpty) ownerIds.add(oid);
+    }
+    if (ownerIds.isEmpty) return;
+
+    final profMap = await _fetchProfilesByUserIds(ownerIds.toList());
+    void applyName(String oid, Map<String, dynamic> target) {
+      if (oid.isEmpty) return;
+      final nm = _displayNameFromProfile(profMap[oid]);
+      if (nm.isEmpty) return;
+      if ((target['request_owner_name'] ?? '').toString().trim().isEmpty) {
+        target['request_owner_name'] = nm;
+      }
+      if ((target['preview_owner_name'] ?? '').toString().trim().isEmpty) {
+        target['preview_owner_name'] = nm;
+      }
+      if ((target['request_owner_full_name'] ?? '').toString().trim().isEmpty) {
+        target['request_owner_full_name'] = nm;
+      }
+      if ((target['owner_full_name'] ?? '').toString().trim().isEmpty) {
+        target['owner_full_name'] = nm;
+      }
+    }
+
+    for (final r in reqMap.values) {
+      final oid =
+          (r['request_owner_id'] ?? r['owner_id'] ?? '').toString().trim();
+      applyName(oid, r);
+    }
+    for (final p in previewMap.values) {
+      final oid = (p['owner_id'] ?? '').toString().trim();
+      applyName(oid, p);
     }
   }
 
@@ -685,13 +1422,6 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         .where((e) => e.isNotEmpty)
         .toSet()
         .toList();
-  }
-
-  Map<String, dynamic> _asMap(dynamic value) {
-    if (value is Map) {
-      return Map<String, dynamic>.from(value);
-    }
-    return <String, dynamic>{};
   }
 
   List<Map<String, dynamic>> _asMapList(dynamic value) {
@@ -1012,6 +1742,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       const minimalSelect = '''
 id,
 owner_id,
+listing_request_public_code,
 title,
 city,
 description,
@@ -1271,6 +2002,8 @@ preview_property_id
       'preview_image_urls': images,
       'preview_video_url': (row['video_url'] ?? '').toString().trim(),
       'preview_cover_primary': _previewCoverPrimaryFromPropertyRow(row),
+      'preview_listing_public_code':
+          (row['listing_public_code'] ?? '').toString().trim(),
     };
   }
 
@@ -1360,8 +2093,8 @@ preview_property_id
   // =========================================================
   // Merge request + preview info
   // =========================================================
-  String _mergeNonEmptyStr(dynamic a, dynamic b, [dynamic c, dynamic d]) {
-    for (final x in [a, b, c, d]) {
+  String _mergeNonEmptyStr(dynamic a, dynamic b, [dynamic c, dynamic d, dynamic e]) {
+    for (final x in [a, b, c, d, e]) {
       final t = (x ?? '').toString().trim();
       if (t.isNotEmpty) return t;
     }
@@ -1509,12 +2242,28 @@ preview_property_id
               .toString(),
       'request_owner_name': _mergeNonEmptyStr(
         req['request_owner_name'],
+        req['request_owner_full_name'],
         preview['preview_owner_name'],
+        preview['preview_owner_full_name'],
         row['request_owner_name'],
       ),
       'preview_owner_name': _mergeNonEmptyStr(
         req['request_owner_name'],
+        req['request_owner_full_name'],
         preview['preview_owner_name'],
+        preview['preview_owner_full_name'],
+      ),
+      'request_owner_full_name': _mergeNonEmptyStr(
+        req['request_owner_full_name'],
+        req['request_owner_name'],
+        preview['preview_owner_full_name'],
+        preview['preview_owner_name'],
+      ),
+      'request_owner_id': _mergeNonEmptyStr(
+        req['owner_id'],
+        req['request_owner_id'],
+        row['owner_id'],
+        row['request_owner_id'],
       ),
     };
   }
@@ -1632,86 +2381,153 @@ preview_property_id
   // =========================================================
   // Marketer buckets
   // =========================================================
-  Future<void> _loadMarketerBuckets({bool force = false}) async {
-    if (_isGuest || !_isMarketerRole) return;
+  Future<void> _loadMarketerBuckets({
+    bool force = false,
+    bool silent = false,
+  }) async {
+    if (_isGuest || !_usesMarketerMyPageHub) return;
 
     _ensureSubTabControllers();
 
-    _ss(() {
-      _loadingMarketing = true;
-      _errorMarketing = null;
+    // مع force: لا تُعد رسم الكاش القديم (يمنع بقاء البطاقة في تبويب خاطئ).
+    var hadCache = false;
+    if (!force) {
+      try {
+        final uid = _sb.auth.currentUser?.id ?? '';
+        final cached = MarketingBucketsCache.instance.readMarketer(uid);
+        if (cached != null) {
+          hadCache = true;
+          _ss(() {
+            _mkInvites = cached.invites;
+            _mkOffers = cached.offers;
+            _mkContracts = cached.contracts;
+            _mkPermits = cached.permits;
+            _mkPublished = cached.published;
+            _loadingMarketing = false;
+          });
+        }
+      } catch (_) {}
+    } else {
+      MarketingBucketsCache.instance.invalidateMarketer(
+        _sb.auth.currentUser?.id ?? '',
+      );
+    }
 
-      if (force) {
-        _mkInvites = <Map<String, dynamic>>[];
-        _mkOffers = <Map<String, dynamic>>[];
-        _mkContracts = <Map<String, dynamic>>[];
-        _mkPermits = <Map<String, dynamic>>[];
-        _mkPublished = <Map<String, dynamic>>[];
+    try {
+      _marketerHiddenMarketRequestIds =
+          await MarketerMarketVisibilityPrefs.hiddenRequestIds(_uid);
+    } catch (_) {
+      _marketerHiddenMarketRequestIds = {};
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw =
+          prefs.getStringList('mk_dismissed_cancelled_v1_$_uid') ?? const [];
+      _marketerDismissedCancelledIds = raw.toSet();
+    } catch (_) {
+      _marketerDismissedCancelledIds = {};
+    }
+
+    final hasLocalBuckets = hadCache ||
+        _mkInvites.isNotEmpty ||
+        _mkOffers.isNotEmpty ||
+        _mkContracts.isNotEmpty ||
+        _mkPermits.isNotEmpty ||
+        _mkPublished.isNotEmpty;
+
+    _ss(() {
+      if (!silent) {
+        // لا تمسح القوائم عند force — حدّث في الخلفية (stale-while-revalidate).
+        _loadingMarketing = !hasLocalBuckets;
+        _errorMarketing = null;
       }
     });
 
     try {
+      unawaited((() async {
+        try {
+          await MarketingFlowService(_sb).syncExpiredContractCreationWindows();
+        } catch (_) {}
+      })());
+
       final uid = _uid;
 
-      final invitesRaw = (await _net<List<Map<String, dynamic>>>(() async {
-            final data = await _sb
-                .from('listing_request_invites')
-                .select()
-                .eq('marketer_id', uid)
-                .order('created_at', ascending: false);
+      Future<List<Map<String, dynamic>>> loadPermitsSafe() async {
+        try {
+          return (await _net<List<Map<String, dynamic>>>(() async {
+                final data = await _sb
+                    .from('listing_permits')
+                    .select()
+                    .eq('marketer_id', uid)
+                    .order('created_at', ascending: false)
+                    .limit(kIsWeb ? 40 : 120);
 
-            return (data as List)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList();
-          }, tag: 'MK_INVITES')) ??
-          <Map<String, dynamic>>[];
-
-      final offersRaw = (await _net<List<Map<String, dynamic>>>(() async {
-            final data = await _sb
-                .from('listing_offers')
-                .select()
-                .eq('marketer_id', uid)
-                .order('created_at', ascending: false);
-
-            return (data as List)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList();
-          }, tag: 'MK_OFFERS')) ??
-          <Map<String, dynamic>>[];
-
-      final contractsRaw = (await _net<List<Map<String, dynamic>>>(() async {
-            final data = await _sb
-                .from('listing_contracts')
-                .select()
-                .eq('marketer_id', uid)
-                .order('created_at', ascending: false);
-
-            return (data as List)
-                .map((e) => Map<String, dynamic>.from(e as Map))
-                .toList();
-          }, tag: 'MK_CONTRACTS')) ??
-          <Map<String, dynamic>>[];
-
-      List<Map<String, dynamic>> permitsRaw = <Map<String, dynamic>>[];
-      try {
-        permitsRaw = (await _net<List<Map<String, dynamic>>>(() async {
-              final data = await _sb
-                  .from('listing_permits')
-                  .select()
-                  .eq('marketer_id', uid)
-                  .order('created_at', ascending: false);
-
-              return (data as List)
-                  .map((e) => Map<String, dynamic>.from(e as Map))
-                  .toList();
-            }, tag: 'MK_PERMITS')) ??
-            <Map<String, dynamic>>[];
-      } catch (e) {
-        if (kDebugMode) {
-          print('[DBG][MK_PERMITS] ERR $e');
+                return (data as List)
+                    .map((e) => Map<String, dynamic>.from(e as Map))
+                    .toList();
+              }, tag: 'MK_PERMITS')) ??
+              <Map<String, dynamic>>[];
+        } catch (e) {
+          if (kDebugMode) {
+            print('[DBG][MK_PERMITS] ERR $e');
+          }
+          return <Map<String, dynamic>>[];
         }
-        permitsRaw = <Map<String, dynamic>>[];
       }
+
+      final mkParallel = await Future.wait<List<Map<String, dynamic>>>([
+        () async {
+          return (await _net<List<Map<String, dynamic>>>(() async {
+                final data = await _sb
+                    .from('listing_request_invites')
+                    .select()
+                    .eq('marketer_id', uid)
+                    .order('created_at', ascending: false)
+                    .limit(kIsWeb ? 50 : 150);
+
+                return (data as List)
+                    .map((e) => Map<String, dynamic>.from(e as Map))
+                    .toList();
+              }, tag: 'MK_INVITES')) ??
+              <Map<String, dynamic>>[];
+        }(),
+        () async {
+          return (await _net<List<Map<String, dynamic>>>(() async {
+                final data = await _sb
+                    .from('listing_offers')
+                    .select()
+                    .eq('marketer_id', uid)
+                    .order('created_at', ascending: false)
+                    .limit(kIsWeb ? 50 : 150);
+
+                return (data as List)
+                    .map((e) => Map<String, dynamic>.from(e as Map))
+                    .toList();
+              }, tag: 'MK_OFFERS')) ??
+              <Map<String, dynamic>>[];
+        }(),
+        () async {
+          return (await _net<List<Map<String, dynamic>>>(() async {
+                final data = await _sb
+                    .from('listing_contracts')
+                    .select()
+                    .eq('marketer_id', uid)
+                    .order('created_at', ascending: false)
+                    .limit(kIsWeb ? 40 : 120);
+
+                return (data as List)
+                    .map((e) => Map<String, dynamic>.from(e as Map))
+                    .toList();
+              }, tag: 'MK_CONTRACTS')) ??
+              <Map<String, dynamic>>[];
+        }(),
+        loadPermitsSafe(),
+      ]);
+
+      final invitesRaw = mkParallel[0];
+      final offersRaw = mkParallel[1];
+      final contractsRaw = mkParallel[2];
+      final permitsRaw = mkParallel[3];
 
       if (kDebugMode) {
         print('[DBG][MK_INVITES] ${invitesRaw.length}');
@@ -1759,8 +2575,10 @@ preview_property_id
             r['request_owner_name'] = nm;
           }
           final ph = _phoneFromProfile(prof);
-          if (ph.isNotEmpty) {
+          if (ph.isNotEmpty && _listingRevealsOwnerPhoneFromMarket(r)) {
             r['request_owner_phone'] = ph;
+          } else {
+            _stripOwnerPhoneUnlessMarketReveal(r);
           }
           final av = (prof?['avatar_url'] ?? '').toString().trim();
           if (av.isNotEmpty) {
@@ -1780,6 +2598,32 @@ preview_property_id
         previewPropertyIdByRequestId:
             previewPidByReq.isEmpty ? null : previewPidByReq,
       );
+
+      await _backfillOwnerDisplayNamesOnMarketerRows(
+        reqMap: reqMap,
+        previewMap: previewMap,
+        invitesRaw: invitesRaw,
+        offersRaw: offersRaw,
+        contractsRaw: contractsRaw,
+      );
+
+      var offerDeadlineExpiredByRequest = <String, bool>{};
+      var allOffersForRequestIds = <Map<String, dynamic>>[];
+      if (requestIds.isNotEmpty) {
+        try {
+          final allOff = await _net<dynamic>(() async {
+            return await _sb
+                .from('listing_offers')
+                .select('request_id,marketer_id,status,expires_at,round_no')
+                .inFilter('request_id', requestIds);
+          }, tag: 'MK_ALL_OFFERS_FOR_DEADLINE');
+          allOffersForRequestIds = _asMapList(allOff);
+          offerDeadlineExpiredByRequest = _ownerOffersAllExpiredByDeadlineMap(
+            offerRows: allOffersForRequestIds,
+            requestRowsById: reqMap,
+          );
+        } catch (_) {}
+      }
 
       final permitsFiltered = permitsRaw.where((r) {
         final requestId = (r['request_id'] ?? '').toString().trim();
@@ -1853,12 +2697,23 @@ preview_property_id
 
       final invitesDeduped = _dedupeMarketerInvites(enrichedInvites, reqMap);
 
+      _annotateMarketerInvitesPriorRoundOfferFlag(
+        invitesDeduped,
+        allOffersForRequestIds,
+        reqMap,
+        uid,
+      );
+
       for (final r in invitesDeduped) {
         _applyPayloadFallbacksToOwnerRequestRow(r);
       }
       await _backfillMergedRowsFromPreviewPropertyTable(
         invitesDeduped,
         reqMap,
+      );
+      _applyOfferDeadlineExpiryFlags(
+        invitesDeduped,
+        offerDeadlineExpiredByRequest,
       );
 
       final enrichedOffers = offersRaw
@@ -1877,6 +2732,23 @@ preview_property_id
         reqMap,
       );
 
+      // لازم لـ [_filterMarketerRowsForTab] تبويب «عروضي» (1) — بدونها تُستبعد كل العروض.
+      for (final r in enrichedOffers) {
+        r['_hubKind'] = 'offer';
+        r['_ui_type'] = 'offer';
+      }
+      _applyOfferDeadlineExpiryFlags(
+        enrichedOffers,
+        offerDeadlineExpiredByRequest,
+      );
+      for (final o in enrichedOffers) {
+        final inactive =
+            ListingWorkflowUnified.marketerOfferAwaitingOwnerPastDeadline(o) ||
+                ListingWorkflowUnified.fromMarketerMergedRow(o) ==
+                    ListingWorkflowStage.inactive72h;
+        o['_hub_inactive_72h'] = inactive;
+      }
+
       final offeredPairs = <String>{};
       for (final o in enrichedOffers) {
         if (!_marketerOfferBlocksInviteRound(o, reqMap, uid)) continue;
@@ -1894,6 +2766,7 @@ preview_property_id
             .toString()
             .trim();
         if (reqId.isEmpty) return true;
+        if (_marketerHiddenMarketRequestIds.contains(reqId)) return false;
         final st = ((inv['invite_gate_status'] ?? inv['status']) ?? '')
             .toString()
             .toLowerCase()
@@ -1906,6 +2779,243 @@ preview_property_id
             1;
         return !offeredPairs.contains('$reqId#$roundNo');
       }).toList();
+
+      // ويب: ارسم دعوات/عروض فوراً قبل جلب سوق waiting_marketers (غالباً الأبطأ).
+      if (kIsWeb && mounted) {
+        final offersEarly = enrichedOffers
+            .where((o) => !_marketerOfferExcludedFromOffersList(o, reqMap, uid))
+            .toList();
+        final invitesEarly = invitesVisible
+            .where((r) => _isMarketerOpenMarketEligibleRow(r, uid: uid))
+            .map((r) {
+          final copy = Map<String, dynamic>.from(r);
+          _stripOwnerPhoneUnlessMarketReveal(copy);
+          return copy;
+        }).toList();
+        _ss(() {
+          _mkInvites = invitesEarly;
+          _mkOffers = offersEarly;
+          _loadingMarketing = false;
+        });
+        try {
+          MarketingBucketsCache.instance.saveMarketer(
+            uid: uid,
+            invites: invitesEarly,
+            offers: offersEarly,
+            contracts: List<Map<String, dynamic>>.from(_mkContracts),
+            permits: List<Map<String, dynamic>>.from(_mkPermits),
+            published: List<Map<String, dynamic>>.from(_mkPublished),
+          );
+        } catch (_) {}
+        // أعد التنفس للواجهة قبل إكمال الإثراء الثقيل.
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      // سوق مفتوح: طلبات waiting_marketers لغير صاحب الطلب (مسوّق/مكتب/مؤسسة/شركة).
+      // يعتمد على RLS الموسّع (دعوة/عرض أو سوق مفتوح) — يعمل على الويب والجوال.
+      List<Map<String, dynamic>> openMarketRequestsRaw =
+          const <Map<String, dynamic>>[];
+      try {
+        openMarketRequestsRaw =
+            (await _net<List<Map<String, dynamic>>>(() async {
+                  final data = await _sb
+                      .from('listing_requests')
+                      .select(SupabaseSchemaSelects.listingRequestsLookup)
+                      .eq('workflow_stage', 'waiting_marketers')
+                      .neq('owner_id', uid)
+                      .order('created_at', ascending: false)
+                      .limit(200);
+                  return (data as List)
+                      .map((e) => Map<String, dynamic>.from(e as Map))
+                      .toList();
+                }, tag: 'MK_OPEN_MARKET_REQS')) ??
+                <Map<String, dynamic>>[];
+      } catch (e) {
+        if (kDebugMode) {
+          print('[DBG][MK_OPEN_MARKET_REQS] ERR $e');
+        }
+        openMarketRequestsRaw = const <Map<String, dynamic>>[];
+      }
+
+      // الدعوات المعروضة في الجولة الحالية فقط — حتى لا تَحجب دعوة جولة قديمة
+      // ظهور الطلب في «السوق العقاري» بعد رفع marketing_round.
+      final existingInviteReqIds = <String>{};
+      for (final inv in invitesVisible) {
+        final reqId = (inv['request_id'] ?? inv['listing_request_id'] ?? '')
+            .toString()
+            .trim();
+        if (reqId.isEmpty) continue;
+        final invRound = (inv['round_no'] as num?)?.toInt() ??
+            (reqMap[reqId]?['marketing_round'] as num?)?.toInt() ??
+            1;
+        final curRound =
+            (reqMap[reqId]?['marketing_round'] as num?)?.toInt() ?? 1;
+        if (invRound != curRound) continue;
+        existingInviteReqIds.add(reqId);
+      }
+
+      final openMarketRequestsFiltered = <Map<String, dynamic>>[];
+      for (final req in openMarketRequestsRaw) {
+        final rid = (req['id'] ?? '').toString().trim();
+        if (rid.isEmpty) continue;
+        if (_marketerHiddenMarketRequestIds.contains(rid)) continue;
+        if (existingInviteReqIds.contains(rid)) continue;
+        final selectedMarketerId =
+            (req['selected_marketer_id'] ?? '').toString().trim();
+        if (selectedMarketerId.isNotEmpty) continue;
+        final ownerId = (req['owner_id'] ?? '').toString().trim();
+        if (ownerId == uid) continue;
+        if (_isMarketerOwnNoLicenseMarketRow(req, uid)) continue;
+        // مسوّق سابق مُستثنى عند إعادة السوق بدون منحه فرصة.
+        final prevSelected =
+            (req['prev_selected_marketer_id'] ?? '').toString().trim();
+        final allowRetry = req['allow_previous_marketers_retry'] == true ||
+            req['allow_previous_marketers_retry'] == 1 ||
+            (req['allow_previous_marketers_retry'] is String &&
+                const {'true', 't', '1', 'yes'}.contains(
+                  (req['allow_previous_marketers_retry'] as String)
+                      .toLowerCase(),
+                ));
+        if (prevSelected == uid && !allowRetry) continue;
+        final roundNo = (req['marketing_round'] as num?)?.toInt() ?? 1;
+        if (offeredPairs.contains('$rid#$roundNo')) continue;
+
+        // استبعاد الطلبات التي قدّم المسوّق عرضاً عليها سابقاً مهما كانت حالة العرض،
+        // إلا لو كان مسموحاً بإعادة المحاولة (allow_previous_marketers_retry = true).
+        if (!allowRetry) {
+          final hasLiveOfferThisRound = enrichedOffers.any((o) {
+            final oReq = (o['request_id'] ?? o['listing_request_id'] ?? '')
+                .toString()
+                .trim();
+            if (oReq != rid) return false;
+            final rn = (o['round_no'] as num?)?.toInt() ?? 1;
+            if (rn != roundNo) return false;
+            final st = (o['status'] ?? '').toString().toLowerCase().trim();
+            return const {'submitted', 'pending', ''}.contains(st);
+          });
+          if (hasLiveOfferThisRound) continue;
+        }
+
+        openMarketRequestsFiltered.add(req);
+      }
+
+      if (openMarketRequestsFiltered.isNotEmpty) {
+        for (final req in openMarketRequestsFiltered) {
+          final rid = (req['id'] ?? '').toString().trim();
+          if (rid.isEmpty) continue;
+          // لا تكتب فوق صفوف موجودة سابقاً في reqMap.
+          reqMap.putIfAbsent(rid, () => Map<String, dynamic>.from(req));
+        }
+
+        final openOwnerIds = openMarketRequestsFiltered
+            .map((r) => (r['owner_id'] ?? '').toString().trim())
+            .where((s) => s.isNotEmpty)
+            .toSet()
+            .toList();
+        if (openOwnerIds.isNotEmpty) {
+          try {
+            final openProfMap = await _fetchProfilesByUserIds(openOwnerIds);
+            for (final r in reqMap.values) {
+              final oid =
+                  (r['request_owner_id'] ?? r['owner_id'] ?? '')
+                      .toString()
+                      .trim();
+              if (oid.isEmpty) continue;
+              if ((r['request_owner_name']?.toString().trim().isNotEmpty ??
+                      false) &&
+                  (r['request_owner_phone']?.toString().trim().isNotEmpty ??
+                      false)) {
+                continue;
+              }
+              final prof = openProfMap[oid];
+              final nm = _displayNameFromProfile(prof);
+              if (nm.isNotEmpty &&
+                  (r['request_owner_name']?.toString().trim().isEmpty ??
+                      true)) {
+                r['request_owner_name'] = nm;
+              }
+              final ph = _phoneFromProfile(prof);
+              if (_listingRevealsOwnerPhoneFromMarket(r) &&
+                  ph.isNotEmpty &&
+                  (r['request_owner_phone']?.toString().trim().isEmpty ??
+                      true)) {
+                r['request_owner_phone'] = ph;
+              }
+              final av = (prof?['avatar_url'] ?? '').toString().trim();
+              if (av.isNotEmpty &&
+                  (r['request_owner_avatar_url']
+                          ?.toString()
+                          .trim()
+                          .isEmpty ??
+                      true)) {
+                r['request_owner_avatar_url'] = av;
+              }
+            }
+          } catch (_) {}
+        }
+
+        final openPreviewPidByReq = <String, String>{};
+        for (final req in openMarketRequestsFiltered) {
+          final rid = (req['id'] ?? '').toString().trim();
+          final pp = (req['preview_property_id'] ?? '').toString().trim();
+          if (rid.isNotEmpty && pp.isNotEmpty) {
+            openPreviewPidByReq[rid] = pp;
+          }
+        }
+        try {
+          final openPm = await _fetchPreviewPropertiesByRequestIds(
+            openMarketRequestsFiltered
+                .map((r) => (r['id'] ?? '').toString().trim())
+                .where((s) => s.isNotEmpty)
+                .toList(),
+            previewPropertyIdByRequestId:
+                openPreviewPidByReq.isEmpty ? null : openPreviewPidByReq,
+          );
+          for (final e in openPm.entries) {
+            previewMap.putIfAbsent(e.key, () => e.value);
+          }
+        } catch (_) {}
+
+        final syntheticInvites = <Map<String, dynamic>>[];
+        for (final req in openMarketRequestsFiltered) {
+          final rid = (req['id'] ?? '').toString().trim();
+          if (rid.isEmpty) continue;
+          final synthetic = <String, dynamic>{
+            'id': 'open_market_${rid}_$uid',
+            'request_id': rid,
+            'listing_request_id': rid,
+            'marketer_id': uid,
+            'invite_gate_status': 'waiting',
+            'status': 'waiting',
+            'round_no': (req['marketing_round'] as num?)?.toInt() ?? 1,
+            'created_at': req['created_at'],
+            '_open_market_synthetic': true,
+          };
+          final merged = _mergeRequestInfo(
+            row: synthetic,
+            reqMap: reqMap,
+            previewMap: previewMap,
+          );
+          merged['_hubKind'] = 'invite';
+          merged['_ui_type'] = 'invite';
+          merged['invite_gate_status'] = 'waiting';
+          merged['_open_market_synthetic'] = true;
+          syntheticInvites.add(merged);
+        }
+
+        if (syntheticInvites.isNotEmpty) {
+          for (final r in syntheticInvites) {
+            _applyPayloadFallbacksToOwnerRequestRow(r);
+            _stripOwnerPhoneUnlessMarketReveal(r);
+          }
+          await _backfillMergedRowsFromPreviewPropertyTable(
+            syntheticInvites,
+            reqMap,
+          );
+          await _backfillOwnerRequestCoverImagesFromDb(syntheticInvites);
+          invitesVisible.addAll(syntheticInvites);
+        }
+      }
 
       final enrichedContracts = contractsRaw
           .map((r) => _mergeRequestInfo(
@@ -1974,21 +3084,49 @@ preview_property_id
           .where((o) => !_marketerOfferExcludedFromOffersList(o, reqMap, uid))
           .toList();
 
-      await _backfillOwnerRequestCoverImagesFromDb(invitesDeduped);
-      await _backfillOwnerRequestCoverImagesFromDb(offersVisible);
-      await _backfillOwnerRequestCoverImagesFromDb(enrichedContracts);
-      await _backfillOwnerRequestCoverImagesFromDb(enrichedPermits);
-      await _backfillOwnerRequestCoverImagesFromDb(enrichedPublished);
+      await Future.wait([
+        _backfillOwnerRequestCoverImagesFromDb(invitesDeduped),
+        _backfillOwnerRequestCoverImagesFromDb(offersVisible),
+        _backfillOwnerRequestCoverImagesFromDb(enrichedContracts),
+        _backfillOwnerRequestCoverImagesFromDb(enrichedPermits),
+        _backfillOwnerRequestCoverImagesFromDb(enrichedPublished),
+      ]);
 
       if (!mounted) return;
 
+      final invitesForMarketer = invitesVisible
+          .where((r) => _isMarketerOpenMarketEligibleRow(r, uid: uid))
+          .map((r) {
+        final copy = Map<String, dynamic>.from(r);
+        _stripOwnerPhoneUnlessMarketReveal(copy);
+        return copy;
+      }).toList();
+
       _ss(() {
-        _mkInvites = invitesVisible;
+        _mkInvites = invitesForMarketer;
         _mkOffers = offersVisible;
         _mkContracts = enrichedContracts;
         _mkPermits = enrichedPermits;
         _mkPublished = enrichedPublished;
       });
+
+      unawaited(_refreshExhaustedOpportunityIds([
+        ...offersVisible.map((r) => _marketingRequestIdFromRow(r)),
+        ...enrichedContracts.map((r) => _marketingRequestIdFromRow(r)),
+        ...enrichedPermits.map((r) => _marketingRequestIdFromRow(r)),
+      ]));
+
+      // v8 (perf): احفظ النسخة الناجحة في الكاش الذاكرة للجلسة الحالية.
+      try {
+        MarketingBucketsCache.instance.saveMarketer(
+          uid: uid,
+          invites: invitesForMarketer,
+          offers: offersVisible,
+          contracts: enrichedContracts,
+          permits: enrichedPermits,
+          published: enrichedPublished,
+        );
+      } catch (_) {}
     } catch (e) {
       if (!mounted) return;
 
@@ -2000,10 +3138,13 @@ preview_property_id
         _errorMarketing = e.toString();
       });
     } finally {
-      if (!mounted) return;
-      _ss(() {
-        _loadingMarketing = false;
-      });
+      if (mounted) {
+        _ss(() {
+          if (!silent) {
+            _loadingMarketing = false;
+          }
+        });
+      }
     }
   }
 }

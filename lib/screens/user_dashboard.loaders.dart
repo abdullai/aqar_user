@@ -73,6 +73,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
     final seen = <String>{};
     final list = <Property>[];
+    final prune = <String>[];
 
     Property? findInList(List<Property> items, String id) {
       for (final item in items) {
@@ -87,9 +88,19 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       p ??= findInList(_all, id);
       p ??= findInList(_mine, id);
 
-      if (p != null && seen.add(p.id)) {
+      if (p == null) continue;
+      if (_listingCompletedDealForFavorites(p)) {
+        prune.add(p.id);
+        continue;
+      }
+      if (seen.add(p.id)) {
         list.add(p);
       }
+    }
+
+    if (prune.isNotEmpty) {
+      _favoriteIds.removeAll(prune);
+      unawaited(_saveFavoritesForUid());
     }
 
     list.sort((a, b) => b.displayDate.compareTo(a.displayDate));
@@ -224,15 +235,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           ..clear()
           ..addAll(filtered);
 
-        bool isUnread(Map<String, dynamic> r) {
-          final v = r['is_read'];
-          if (v == null) return true;
-          if (v is bool) return !v;
-          final s = v.toString().toLowerCase();
-          return s != 'true' && s != '1';
-        }
-
-        _unreadNotificationsCount = filtered.where(isUnread).length;
+        _unreadNotificationsCount = filtered
+            .where(MarketingFlowService.countsForInboxUnreadBadge)
+            .length;
 
         if (kDebugMode) {
           print('[DBG][NOTIF] rows=${_notifications.length}');
@@ -329,7 +334,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   Future<Map<String, Map<String, dynamic>>> _fetchProfilesByUserIds(
     List<String> userIds,
   ) async {
-    if (userIds.isEmpty) return {};
+    // ضيف: RLS يرفض users_profiles بدون auth.uid → 401 حتمي يُثقل الشبكة والكونسول.
+    if (_isGuest || userIds.isEmpty) return {};
 
     final ids = userIds
         .map((e) => e.trim())
@@ -355,7 +361,12 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       final data = await _net(() {
         return _sb
             .from('users_profiles')
-            .select('user_id,username')
+            .select(
+              'user_id,username,phone,'
+              'first_name_ar,second_name_ar,third_name_ar,fourth_name_ar,'
+              'first_name_en,second_name_en,third_name_en,fourth_name_en,'
+              'full_name_ar,full_name_en,full_name',
+            )
             .inFilter('user_id', uncachedIds);
       }, showDialog: false, tag: 'PROFILES');
 
@@ -373,6 +384,17 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
 
       _syncInAppHubFromProfileCache();
+
+      // حدّث كاش اسم التحية فوراً بعد جلب ملفي.
+      if (_uid.isNotEmpty && _profileCache.containsKey(_uid)) {
+        final nm = _displayNameFromProfile(_profileCache[_uid]).trim();
+        if (nm.isNotEmpty) {
+          unawaited(DashboardGreetingCache.save(_uid, nm));
+          if (nm != _greetingNameCache) {
+            _greetingNameCache = nm;
+          }
+        }
+      }
 
       if (kDebugMode) {
         print(
@@ -423,7 +445,16 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     final full = pick(prof['full_name']);
     if (full.isNotEmpty) return full;
 
-    return pick(prof['username']);
+    final u = pick(prof['username']);
+    final email = _sb.auth.currentUser?.email?.trim();
+    if (email != null &&
+        email.contains('@') &&
+        u.isNotEmpty &&
+        RegExp(r'^\d{9,12}$').hasMatch(u)) {
+      final local = email.split('@').first.trim();
+      if (local.isNotEmpty) return local;
+    }
+    return u;
   }
 
   String _phoneFromProfile(Map<String, dynamic>? prof) {
@@ -573,14 +604,50 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     List<Map> rows,
   ) async {
     if (_isGuest) return const {};
-
     final ownerIds = rows
         .map((r) => (r['owner_id'] ?? '').toString().trim())
-        .where((s) => s.isNotEmpty)
-        .toSet()
-        .toList();
+        .where((s) => s.isNotEmpty);
 
-    return _fetchProfilesByUserIds(ownerIds);
+    final marketerIds = rows
+        .map((r) => (r['published_by_marketer_id'] ?? '').toString().trim())
+        .where((s) => s.isNotEmpty);
+
+    final ids = <String>{...ownerIds, ...marketerIds}.toList();
+    if (ids.isEmpty) return {};
+    return _fetchProfilesByUserIds(ids);
+  }
+
+  /// يستبدل سطر المسوّق على البطاقة إذا كان من الترخيص يبدو كرقم هوية وتوفر اسم من users_profiles.
+  Property _propertyWithMarketerProfileOverlay(
+    Property p,
+    Map<String, Map<String, dynamic>> profiles,
+  ) {
+    final mid = (p.publishedByMarketerId ?? '').trim();
+    if (mid.isEmpty) return p;
+    final prof = profiles[mid];
+    final nm = _displayNameFromProfile(prof);
+    if (nm.isEmpty) return p;
+
+    final current = (p.marketerEntityPublicLine(_isArabic) ?? '').trim();
+    final digitsOnly =
+        current.replaceAll(RegExp(r'[\s\-\.]'), '').trim().isNotEmpty &&
+            RegExp(r'^\d+$').hasMatch(
+              current.replaceAll(RegExp(r'[\s\-\.]'), ''),
+            );
+    final shortLicense =
+        current.isNotEmpty && current.length <= 12 && digitsOnly;
+    final useProfile = current.isEmpty || shortLicense;
+
+    if (!useProfile) return p;
+
+    final snap = p.marketingLicenseSnapshot;
+    final merged = snap == null || snap.isEmpty
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(snap);
+    merged['fal_broker_full_name'] = nm;
+    merged['fal_broker_name'] = nm;
+    merged['brokerage_name'] = nm;
+    return p.copyWith(marketingLicenseSnapshot: merged);
   }
 
   Property _propertyFromRowWithProfiles(
@@ -606,12 +673,15 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         ? (ownerName.isNotEmpty ? ownerName : fallbackUsername)
         : null;
 
-    final property = _propertyFromDb(
-      row,
-      imageUrls: imageUrls,
-      ownerUsername: ownerUsername,
-      ownerPhone: ownerPhone,
-      omitOwnerDisplayForPrivacy: !effectiveShow,
+    final property = _propertyWithMarketerProfileOverlay(
+      _propertyFromDb(
+        row,
+        imageUrls: imageUrls,
+        ownerUsername: ownerUsername,
+        ownerPhone: ownerPhone,
+        omitOwnerDisplayForPrivacy: !effectiveShow,
+      ),
+      ownerProfiles,
     );
 
     if (property.id.isNotEmpty) {
@@ -619,6 +689,114 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     }
 
     return property;
+  }
+
+  /// يملأ سعر/مساحة/عمولة التسويق من listing_requests إن كان سجل العقار ناقصاً بعد النشر.
+  Future<List<Property>> _enrichPublishedPropertiesFromRequests(
+    List<Property> list,
+    List<Map<dynamic, dynamic>> rows,
+  ) async {
+    if (list.isEmpty || rows.isEmpty || list.length != rows.length) {
+      return list;
+    }
+
+    final reqIds = <String>{};
+    for (var i = 0; i < list.length; i++) {
+      final p = list[i];
+      if (p.price > 0 && p.area > 0 && p.marketingLicenseSnapshot != null) {
+        continue;
+      }
+      final rid = (rows[i]['request_id'] ?? '').toString().trim();
+      if (rid.isNotEmpty) reqIds.add(rid);
+    }
+    if (reqIds.isEmpty) return list;
+
+    try {
+      final raw = await _net<dynamic>(
+        () => _sb
+            .from('listing_requests')
+            .select(
+              'id,price,request_price,preview_price,'
+              'price_includes_vat,vat_rate,marketing_commission_kind,'
+              'marketing_commission_rate,marketing_commission_amount,payload_json',
+            )
+            .inFilter('id', reqIds.toList()),
+        tag: 'ENRICH_PROP_FROM_REQ',
+      );
+      final byId = <String, Map<String, dynamic>>{};
+      for (final e in (raw as List)) {
+        if (e is! Map) continue;
+        final m = Map<String, dynamic>.from(e);
+        final id = (m['id'] ?? '').toString().trim();
+        if (id.isNotEmpty) byId[id] = m;
+      }
+      if (byId.isEmpty) return list;
+
+      double pickPrice(Map<String, dynamic> req, Property p) {
+        if (p.price > 0) return p.price;
+        num? n;
+        for (final k in ['preview_price', 'request_price', 'price']) {
+          final v = req[k];
+          if (v is num && v > 0) return v.toDouble();
+          n = num.tryParse('$v');
+          if (n != null && n > 0) return n.toDouble();
+        }
+        final pl = req['payload_json'];
+        if (pl is Map) {
+          final pv = pl['price'];
+          if (pv is num && pv > 0) return pv.toDouble();
+          final parsed = num.tryParse('$pv');
+          if (parsed != null && parsed > 0) return parsed.toDouble();
+        }
+        return p.price;
+      }
+
+      double pickArea(Map<String, dynamic> req, Property p) {
+        if (p.area > 0) return p.area;
+        final pl = req['payload_json'];
+        if (pl is Map) {
+          final av = pl['area'];
+          if (av is num && av > 0) return av.toDouble();
+        }
+        return p.area;
+      }
+
+      final out = <Property>[];
+      for (var i = 0; i < list.length; i++) {
+        var p = list[i];
+        final rid = (rows[i]['request_id'] ?? '').toString().trim();
+        final req = byId[rid];
+        if (req == null) {
+          out.add(p);
+          continue;
+        }
+        final price = pickPrice(req, p);
+        final area = pickArea(req, p);
+        if (price != p.price ||
+            area != p.area ||
+            req['marketing_commission_kind'] != null) {
+          p = p.copyWith(
+            price: price > 0 ? price : p.price,
+            area: area > 0 ? area : p.area,
+            priceIncludesVat: p.priceIncludesVat,
+            vatRate: (req['vat_rate'] as num?)?.toDouble() ?? p.vatRate,
+            marketingCommissionKind:
+                (req['marketing_commission_kind'] ?? p.marketingCommissionKind)
+                    ?.toString(),
+            marketingCommissionRate:
+                (req['marketing_commission_rate'] as num?)?.toDouble() ??
+                    p.marketingCommissionRate,
+            marketingCommissionAmount:
+                (req['marketing_commission_amount'] as num?)?.toDouble() ??
+                    p.marketingCommissionAmount,
+          );
+        }
+        out.add(p);
+      }
+      return out;
+    } catch (_) {
+      return list;
+    }
   }
 
   // =========================================================
@@ -649,22 +827,142 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         s.contains('permission denied');
   }
 
-  Future<dynamic> _propertiesHomeQuery({required bool filterSuppressed}) {
-    var qb = _sb
-        .from('properties')
-        .select(_UserDashboardState._propertiesSelect)
-        .neq('status', 'deleted');
-    if (filterSuppressed) {
-      // `= false` يستبعد NULL في SQL؛ الصفوف القديمة بدون عمود أو بقيمة NULL يجب أن تبقى ظاهرة.
-      qb = qb.or('home_feed_suppressed.is.null,home_feed_suppressed.eq.false');
-    }
-    return qb
-        .or(SupabaseSchemaSelects.propertiesHomeFeedOrFilter)
-        .order('created_at', ascending: false);
+  /// PostgREST 42501 when RLS policies call helper functions without anon EXECUTE.
+  bool _errorLooksLikeHomeFeedRlsDenied(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains('42501') ||
+        (s.contains('permission denied') &&
+            (s.contains('property_marketer_public_verified') ||
+                s.contains('property_public_publish_ready') ||
+                s.contains('property_has_listing_media') ||
+                s.contains('property_image_public_home_readable')));
   }
 
-  Future<void> _loadHome({bool force = false}) async {
-    if (_loadingHome) return;
+  String _homeFeedRlsDeniedMessage() {
+    return _isArabic
+        ? 'تعذّر عرض إعلانات الرئيسية: صلاحيات قاعدة البيانات للزائر غير مكتملة. طبّق migration «20260518120000_public_home_feed_function_grants» على Supabase ثم أعد المحاولة.'
+        : 'Home listings are blocked: database guest permissions are incomplete. Apply migration «20260518120000_public_home_feed_function_grants» on Supabase, then retry.';
+  }
+
+  String _homeFeedUnauthorizedMessage() {
+    return _isArabic
+        ? 'تعذّر جلب الإعلانات (401). الأسباب الشائعة:\n'
+            '• سياسة RLS لجدول property_images غير مطبّقة — نفّذ supabase/sql/APPLY_NOW_fix_property_images_401_home_feed.sql\n'
+            '• جلسة JWT قديمة — Ctrl+F5 أو مسح بيانات الموقع\n'
+            '• مفتاح Publishable ناقص في web/supabase_config.json'
+        : 'Could not load listings (401). Common causes:\n'
+            '• Missing property_images RLS — run APPLY_NOW_fix_property_images_401_home_feed.sql on Supabase\n'
+            '• Stale JWT in browser — hard refresh / clear site data\n'
+            '• Incomplete Publishable key in web/supabase_config.json';
+  }
+
+  Future<List<dynamic>> _propertiesHomeQuery({
+    required bool filterSuppressed,
+    bool allowBypassCircuit = false,
+  }) {
+    final limit = kIsWeb
+        ? _UserDashboardState.homeFeedFetchLimitWeb
+        : _UserDashboardState.homeFeedFetchLimit;
+    return PropertiesHomeFeedService.fetch(
+      client: _sb,
+      filterSuppressed: filterSuppressed,
+      limit: limit,
+      allowBypassCircuit: allowBypassCircuit,
+    );
+  }
+
+  Future<void> _retryHomeFeedLoad() async {
+    PropertiesHomeFeedService.resetCircuit();
+    await _loadHome(force: true, userInitiated: true);
+  }
+
+  /// تحليل صفوف الرئيسية على دفعات — يمنع تجمّد واجهة الويب عند `select(*)` ثقيل.
+  Future<List<Property>> _parseHomeRowsYielding(
+    List<Map> rows,
+    Map<String, Map<String, dynamic>> ownerProfiles,
+  ) async {
+    final batch = kIsWeb ? 3 : 6;
+    final list = <Property>[];
+    for (var i = 0; i < rows.length; i++) {
+      if (!mounted) break;
+      list.add(_propertyFromRowWithProfiles(rows[i], ownerProfiles));
+      if (kIsWeb && (i + 1) % batch == 0 && i + 1 < rows.length) {
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+      }
+    }
+    return list;
+  }
+
+  /// بعد أول إطار على الويب: حجوزات فقط — بدون إعادة بناء القائمة (يمنع وميض البطاقة).
+  Future<void> _enrichHomeFeedAfterFirstPaint(
+    List<String> propIds,
+    List<Map> rows,
+  ) async {
+    if (!kIsWeb || !mounted) return;
+    if (_isGuest) return;
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      if (!mounted) return;
+      final activeRes = await _fetchActiveReservationsByPropertyIds(propIds)
+          .timeout(const Duration(seconds: 12));
+      if (!mounted || activeRes.isEmpty) return;
+      for (final e in activeRes.entries) {
+        _activeReservationByPropertyId[e.key] = e.value;
+      }
+      _ssHomeFeed(() {});
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][HOME] web enrich deferred failed: $e');
+      }
+    }
+  }
+
+  Future<void> _loadHome({
+    bool force = false,
+    bool userInitiated = false,
+  }) async {
+    if (!userInitiated && PropertiesHomeFeedService.isCircuitOpen) {
+      WebBootstrapDiag.warn('home.fetch', 'skipped — circuit open');
+      _ssHomeFeed(() {
+        if (_errorHome == null) {
+          _errorHome = _isArabic
+              ? 'تعذّر جلب الإعلانات مؤقتاً بعد خطأ مصادقة. انتظر دقيقة أو اضغط «تحديث».'
+              : 'Home listings are temporarily paused after an auth error. Wait a minute or tap Refresh.';
+        }
+      });
+      return;
+    }
+    if (userInitiated) {
+      PropertiesHomeFeedService.resetCircuit();
+    }
+
+    // منع عاصفة home.fetch: لا تُعِد الجلب القسري إن كانت البيانات حديثة.
+    if (force &&
+        !userInitiated &&
+        _all.isNotEmpty &&
+        _lastHomeFetch != null &&
+        DateTime.now().difference(_lastHomeFetch!) <
+            const Duration(seconds: 4)) {
+      return;
+    }
+
+    // السماح بـ «تحديث قسري» حتى لو جلب سابق لم ينتهِ بعد (تجنّب زر تحديث بلا أثر).
+    if (_loadingHome && !force && !userInitiated) return;
+    if (force && _loadingHome) {
+      final since = _homeLoadingSince;
+      if (since != null &&
+          DateTime.now().difference(since) > const Duration(seconds: 28)) {
+        if (kDebugMode) {
+          print('[DBG][HOME] reset stuck _loadingHome before force reload');
+        }
+        _loadingHome = false;
+      } else {
+        final deadline = DateTime.now().add(const Duration(seconds: 8));
+        while (_loadingHome && mounted && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+        }
+      }
+    }
 
     if (!force && !_shouldFetchHome() && _all.isNotEmpty) {
       return;
@@ -678,52 +976,69 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
     try {
       dynamic data;
-      try {
-        data = await _net(
-          () => _propertiesHomeQuery(filterSuppressed: true),
-          tag: 'HOME',
+      // ويب: لا تمرّ عبر [_net]/runNetworkGuarded — بعد تسجيل الدخول قد يعيد null
+      // (context/token) فيفرّغ الرئيسية بينما الضيف يرى نفس البيانات عبر fetch مباشر.
+      Future<dynamic> loadProps({required bool filterSuppressed}) async {
+        if (kIsWeb) {
+          return _propertiesHomeQuery(
+            filterSuppressed: filterSuppressed,
+            allowBypassCircuit: true,
+          );
+        }
+        return _net(
+          () => _propertiesHomeQuery(
+            filterSuppressed: filterSuppressed,
+            allowBypassCircuit: userInitiated,
+          ),
+          tag: filterSuppressed ? 'HOME' : 'HOME_FALLBACK',
         );
+      }
+
+      try {
+        data = await loadProps(filterSuppressed: true);
       } catch (e) {
+        if (_errorLooksLikeUnauthorized(e) ||
+            SupabasePublicReadGuard.isAuthError(e)) {
+          rethrow;
+        }
         if (_errorLooksLikeMissingHomeFeedSuppressedColumn(e)) {
           if (kDebugMode) {
             print('[DBG][HOME] retry without home_feed_suppressed filter');
           }
-          data = await _net(
-            () => _propertiesHomeQuery(filterSuppressed: false),
-            tag: 'HOME_FALLBACK',
-          );
+          data = await loadProps(filterSuppressed: false);
         } else {
           rethrow;
         }
       }
 
-      // إن حجبها [AppSession.hasInternet] رجع null، نُعيد المحاولة مباشرةً (بدون guard)
-      // حتى لا تبقى الرئيسية فارغة بصمت.
-      if (data == null) {
-        try {
-          data = await _propertiesHomeQuery(filterSuppressed: true);
-        } catch (e) {
-          if (_errorLooksLikeMissingHomeFeedSuppressedColumn(e)) {
-            try {
-              data = await _propertiesHomeQuery(filterSuppressed: false);
-            } catch (_) {}
-          }
-        }
-      }
       if (data == null) {
         // بدون هذا يبقى [_all] كما كان (غالباً فارغاً) دون [_errorHome] — الرئيسية تبدو «فارغة» بلا سبب.
-        _ss(() {
+        WebBootstrapDiag.warn('home.fetch', 'null response (net guard?)');
+        _ssHomeFeed(() {
           _errorHome = _isArabic
               ? 'تعذّر جلب إعلانات الرئيسية: لا استجابة من الشبكة أو تم إيقاف الطلب (تحقق من الاتصال وإعدادات Supabase/الـ RLS).'
               : 'Could not load home listings: no network response or the request was blocked (check connectivity and Supabase/RLS).';
         });
         return;
       }
+      if (kIsWeb) {
+        final n = (data is List) ? data.length : -1;
+        WebBootstrapDiag.log(
+          'home.fetch',
+          'raw=$n circuit=${PropertiesHomeFeedService.isCircuitOpen}',
+        );
+      }
 
       final rows = (data as List).cast<Map>();
 
       if (kDebugMode) {
         print('[DBG][HOME] rows=${rows.length}');
+      }
+      if (kIsWeb && rows.isEmpty && _errorHome == null) {
+        WebBootstrapDiag.warn(
+          'home.empty',
+          'server returned 0 properties — not a UI freeze; check Supabase data/RLS',
+        );
       }
 
       final propIds = rows
@@ -734,12 +1049,85 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       _activeReservationByPropertyId
           .removeWhere((k, v) => !propIds.contains(k));
 
-      final activeRes = await _fetchActiveReservationsByPropertyIds(propIds);
-      final ownerProfiles = await _ownerProfilesForRows(rows);
+      var list = kIsWeb
+          ? await _parseHomeRowsYielding(
+              rows,
+              const <String, Map<String, dynamic>>{},
+            )
+          : rows
+              .map(
+                (row) => _propertyFromRowWithProfiles(
+                  row,
+                  <String, Map<String, dynamic>>{},
+                ),
+              )
+              .toList();
 
-      final list = rows
-          .map((row) => _propertyFromRowWithProfiles(row, ownerProfiles))
-          .toList();
+      var activeRes = <String, Map<String, dynamic>>{};
+
+      if (kIsWeb) {
+        // طبّق فوراً — الطابور المؤجّل كان يترك rows=0 رغم raw>0 عند الازدواج/الفلَش.
+        _all = list;
+        _lastHomeFetch = DateTime.now();
+        _rebuildFavoritesFromCache();
+        _nestedDashboardFeedCacheBuiltKey = -1;
+        _webTabChildren = null;
+        _webTabChildrenFeedSig = -1;
+        _markDashboardFeedDirty();
+        WebBootstrapDiag.log('home.apply', 'sync rows=${_all.length}');
+        // إطار واحد لإعادة الرسم دون تأجيل الطابور السابق على _all الفارغ.
+        if (mounted) {
+          _ssHomeFeed(() {});
+        }
+        unawaited(_enrichHomeFeedAfterFirstPaint(propIds, rows));
+        unawaited(() async {
+          final enriched = await _enrichPublishedPropertiesFromRequests(
+            list,
+            rows.cast<Map<dynamic, dynamic>>(),
+          );
+          if (!mounted || identical(enriched, list)) return;
+          var changed = false;
+          if (enriched.length != list.length) {
+            changed = true;
+          } else {
+            for (var i = 0; i < list.length; i++) {
+              final a = list[i];
+              final b = enriched[i];
+              if (a.price != b.price ||
+                  a.area != b.area ||
+                  a.marketingCommissionKind != b.marketingCommissionKind ||
+                  a.marketingCommissionRate != b.marketingCommissionRate ||
+                  a.marketingCommissionAmount != b.marketingCommissionAmount ||
+                  a.vatRate != b.vatRate) {
+                changed = true;
+                break;
+              }
+            }
+          }
+          // لا تستبدل القائمة إن لم يتغيّر شيء — يمنع وميض البطاقة.
+          if (!changed) return;
+          _ssHomeFeed(() {
+            _all = enriched;
+            _rebuildFavoritesFromCache();
+          });
+        }());
+      } else {
+        // ملفّات المالك + الحجوزات معاً، ثم إثراء واحد (تجنّب إثراء يُستبدل فوراً).
+        final homeEnrich =
+            await Future.wait<Map<String, Map<String, dynamic>>>([
+          _fetchActiveReservationsByPropertyIds(propIds),
+          _ownerProfilesForRows(rows),
+        ]);
+        activeRes = homeEnrich[0];
+        final ownerProfiles = homeEnrich[1];
+        list = rows
+            .map((row) => _propertyFromRowWithProfiles(row, ownerProfiles))
+            .toList();
+        list = await _enrichPublishedPropertiesFromRequests(
+          list,
+          rows.cast<Map<dynamic, dynamic>>(),
+        );
+      }
 
       if (kDebugMode && list.isNotEmpty) {
         final pub =
@@ -759,47 +1147,64 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _activeReservationByPropertyId[e.key] = e.value;
       }
 
-      await UserListingPreferencesService.pruneHiddenAgainstKnownPropertyIds(
-        propIds,
-      );
+      if (!_isGuest) {
+        await UserListingPreferencesService.pruneHiddenAgainstKnownPropertyIds(
+          propIds,
+        );
 
-      // إن كانت قائمة «إخفاء من الرئيسية» تغطي كل ما جلبه الخادم، تصبح الشبكة
-      // فارغة دون فلاتر علوية — نمسح إخفاء الرئيسية تلقائياً (مرة لكل جلب ناجح).
-      final hiddenAfterPrune =
-          await UserListingPreferencesService.hiddenPropertyIds();
-      final loadedIdSet = propIds.toSet();
-      if (loadedIdSet.isNotEmpty &&
-          loadedIdSet.every(hiddenAfterPrune.contains)) {
-        await UserListingPreferencesService.clearHomeFeedHideSets();
-        if (kDebugMode) {
-          print(
-            '[DBG][HOME] cleared home-feed hide set (all loaded rows were hidden)',
-          );
+        // إن كانت قائمة «إخفاء من الرئيسية» تغطي كل ما جلبه الخادم، تصبح الشبكة
+        // فارغة دون فلاتر علوية — نمسح إخفاء الرئيسية تلقائياً (مرة لكل جلب ناجح).
+        final hiddenAfterPrune =
+            await UserListingPreferencesService.hiddenPropertyIds();
+        final loadedIdSet = propIds.toSet();
+        if (loadedIdSet.isNotEmpty &&
+            loadedIdSet.every(hiddenAfterPrune.contains)) {
+          await UserListingPreferencesService.clearHomeFeedHideSets();
+          if (kDebugMode) {
+            print(
+              '[DBG][HOME] cleared home-feed hide set (all loaded rows were hidden)',
+            );
+          }
+          if (mounted) await _reloadHiddenFeedPreferences();
         }
-        if (mounted) await _reloadHiddenFeedPreferences();
       }
 
-      _ss(() {
-        _all = list;
-        _lastHomeFetch = DateTime.now();
-        _rebuildFavoritesFromCache();
-      });
-      if (mounted) {
+      if (!kIsWeb) {
+        _ssHomeFeed(() {
+          _all = list;
+          _lastHomeFetch = DateTime.now();
+          _rebuildFavoritesFromCache();
+        });
+      }
+      // الضيف يتجاهل قائمة الإخفاء محلياً — لا تحملها من الجهاز (كانت تورّث من جلسة سابقة).
+      if (mounted && !_isGuest) {
         unawaited(_reloadHiddenFeedPreferences());
       }
     } catch (e) {
-      if (_isGuest && _errorLooksLikeUnauthorized(e)) {
+      if (_errorLooksLikeUnauthorized(e) ||
+          SupabasePublicReadGuard.isAuthError(e)) {
         if (kDebugMode) {
-          print('[DBG][HOME] guest public listings blocked by RLS/auth: $e');
+          print('[DBG][HOME] auth/401 blocked home feed: $e');
         }
-        _ss(() {
+        _ssHomeFeed(() {
           _all = <Property>[];
           _lastHomeFetch = DateTime.now();
-          _errorHome = null;
+          _errorHome = _homeFeedUnauthorizedMessage();
         });
         return;
       }
-      _ss(() {
+      if (_errorLooksLikeHomeFeedRlsDenied(e)) {
+        if (kDebugMode) {
+          print('[DBG][HOME] public listings blocked by RLS: $e');
+        }
+        _ssHomeFeed(() {
+          _all = <Property>[];
+          _lastHomeFetch = DateTime.now();
+          _errorHome = _homeFeedRlsDeniedMessage();
+        });
+        return;
+      }
+      _ssHomeFeed(() {
         _errorHome = e.toString();
       });
     } finally {
@@ -808,6 +1213,59 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           _loadingHome = false;
           _homeLoadingSince = null;
         });
+        _flushHomeFeedMutationsSync();
+      }
+    }
+  }
+
+  // =========================================================
+  // طلبات السوق التي قدّمها المستخدم (تبويب «طلباتي»)
+  // =========================================================
+  Future<void> _loadMyMarketSubmissions({bool force = false}) async {
+    if (_isGuest || _uid.isEmpty) {
+      _ss(() {
+        _myMarketSubmissions = const [];
+        _loadingMyMarketSubmissions = false;
+      });
+      return;
+    }
+    if (_loadingMyMarketSubmissions && !force) return;
+    _ss(() => _loadingMyMarketSubmissions = true);
+    const selectCols =
+        'id,request_public_code,title,description,purpose,property_type,city,districts,'
+        'budget_min,budget_max,area_min_m2,created_at,updated_at,'
+        'requester_id,show_requester_name,requester_public_name,'
+        'cover_image_storage_path,default_cover_used,request_priority,status,'
+        'edit_count,max_edits,deletion_requested_at,completed_at,selected_offer_id';
+    try {
+      final rows = await _net(() {
+        return _sb
+            .from('market_property_requests')
+            .select(selectCols)
+            .eq('requester_id', _uid)
+            .order('created_at', ascending: false)
+            .limit(60);
+      }, tag: 'MY_MARKET_SUBMISSIONS', showDialog: false);
+      if (rows == null) {
+        _ss(() => _myMarketSubmissions = const []);
+        return;
+      }
+      final list = (rows as List)
+          .cast<Map>()
+          .map((m) => MarketPropertyRequestRow.fromMap(
+                Map<String, dynamic>.from(m),
+              ))
+          .where((r) => r.id.isNotEmpty)
+          .toList(growable: false);
+      _ss(() => _myMarketSubmissions = list);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][MY_MARKET_SUBMISSIONS] skip: $e');
+      }
+      _ss(() => _myMarketSubmissions = const []);
+    } finally {
+      if (mounted) {
+        _ss(() => _loadingMyMarketSubmissions = false);
       }
     }
   }
@@ -819,25 +1277,26 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     if (_loadingMarketRequests && !force) return;
     _ss(() {
       _loadingMarketRequests = true;
+      _marketRequestsLoadingSince = DateTime.now();
       _errorMarketRequests = null;
     });
     const selectWithPriorityDetails =
         'id,request_public_code,title,description,purpose,property_type,city,districts,'
         'budget_min,budget_max,area_min_m2,created_at,updated_at,'
         'requester_id,show_requester_name,requester_public_name,'
-        'cover_image_storage_path,request_priority,details_json,status,'
+        'cover_image_storage_path,default_cover_used,request_priority,details_json,status,'
         'edit_count,max_edits,deletion_requested_at,completed_at,selected_offer_id';
     const selectWithPriority =
         'id,request_public_code,title,description,purpose,property_type,city,districts,'
         'budget_min,budget_max,area_min_m2,created_at,updated_at,'
         'requester_id,show_requester_name,requester_public_name,'
-        'cover_image_storage_path,request_priority,status,'
+        'cover_image_storage_path,default_cover_used,request_priority,status,'
         'edit_count,max_edits,deletion_requested_at,completed_at,selected_offer_id';
     const selectLegacy =
         'id,title,description,purpose,property_type,city,districts,'
         'budget_min,budget_max,area_min_m2,created_at,updated_at,'
         'requester_id,show_requester_name,requester_public_name,'
-        'cover_image_storage_path,status';
+        'cover_image_storage_path,default_cover_used,status';
 
     bool _missingColumn(Object e, String col) {
       final s = e.toString().toLowerCase();
@@ -850,15 +1309,21 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     Future<List<Map<String, dynamic>>> _fetchMarketRows(
         String selectCols) async {
       final d = await _net(() {
-        return _sb
-            .from('market_property_requests')
-            .select(selectCols)
-            .inFilter(
-              'status',
-              SupabaseSchemaSelects.marketPropertyRequestsHomeStatuses,
-            )
-            .order('created_at', ascending: false)
-            .limit(1000);
+        return SupabasePublicReadGuard.run(_sb, () {
+          return _sb
+              .from('market_property_requests')
+              .select(selectCols)
+              .inFilter(
+                'status',
+                SupabaseSchemaSelects.marketPropertyRequestsHomeStatuses,
+              )
+              .order('created_at', ascending: false)
+              .limit(
+                kIsWeb
+                    ? _UserDashboardState.marketHomeRequestsFetchLimitWeb
+                    : _UserDashboardState.marketHomeRequestsFetchLimit,
+              );
+        });
       }, tag: 'MARKET_REQ_HOME', showDialog: false);
       if (d == null) return const [];
       return (d as List)
@@ -870,7 +1335,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     try {
       late List<Map<String, dynamic>> rowMaps;
       try {
-        rowMaps = await _fetchMarketRows(selectWithPriorityDetails);
+        // الويب: استعلام أخف أولاً (بدون details_json) لتقليل زمن الانتظار ومحاولات 400 المتتابعة.
+        rowMaps = kIsWeb
+            ? await _fetchMarketRows(selectWithPriority)
+            : await _fetchMarketRows(selectWithPriorityDetails);
       } catch (e) {
         if (_missingColumn(e, 'request_public_code') ||
             _missingColumn(e, 'edit_count') ||
@@ -900,7 +1368,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
 
       if (rowMaps.isEmpty) {
-        _ss(() => _marketHomeRequests = const []);
+        _ssHomeFeed(() => _marketHomeRequests = const []);
         return;
       }
 
@@ -912,14 +1380,20 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       final avatarByUid = <String, String>{};
       if (!_isGuest && uids.isNotEmpty) {
         try {
-          final prof = await _sb
-              .from('users_profiles')
-              .select('user_id,avatar_url')
-              .inFilter('user_id', uids);
-          for (final p in (prof as List).cast<Map>()) {
-            final uid = (p['user_id'] ?? '').toString().trim();
-            final url = (p['avatar_url'] ?? '').toString().trim();
-            if (uid.isNotEmpty && url.isNotEmpty) avatarByUid[uid] = url;
+          // يجب _net/timeout — بدونها يعلق التحميل ويبقى _loadingMarketRequests=true
+          // فيُرجع _buildHomeBody شاشة فارغة إلى الأبد.
+          final prof = await _net(() {
+            return _sb
+                .from('users_profiles')
+                .select('user_id,avatar_url')
+                .inFilter('user_id', uids);
+          }, tag: 'MARKET_REQ_AVATARS', showDialog: false);
+          if (prof != null) {
+            for (final p in (prof as List).cast<Map>()) {
+              final uid = (p['user_id'] ?? '').toString().trim();
+              final url = (p['avatar_url'] ?? '').toString().trim();
+              if (uid.isNotEmpty && url.isNotEmpty) avatarByUid[uid] = url;
+            }
           }
         } catch (_) {}
       }
@@ -934,9 +1408,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           .where(
             (r) =>
                 r.id.isNotEmpty &&
-                ListingPermissionsHelper.shouldShowMarketRequestInPublicHome(
-                  r.status,
-                ),
+                ListingPermissionsHelper.shouldShowMarketRequestWithoutDeal(r),
           )
           .toList(growable: false);
 
@@ -944,7 +1416,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         list.map((r) => r.id),
       );
 
-      _ss(() => _marketHomeRequests = list);
+      _ssHomeFeed(() => _marketHomeRequests = list);
       if (mounted) {
         unawaited(_reloadHiddenFeedPreferences());
       }
@@ -952,13 +1424,16 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       if (kDebugMode) {
         print('[DBG][MARKET_REQ_HOME] skip: $e');
       }
-      _ss(() {
+      _ssHomeFeed(() {
         _errorMarketRequests = e.toString();
         _marketHomeRequests = const [];
       });
     } finally {
       if (mounted) {
-        _ss(() => _loadingMarketRequests = false);
+        _ss(() {
+          _loadingMarketRequests = false;
+          _marketRequestsLoadingSince = null;
+        });
       }
     }
   }
@@ -998,7 +1473,6 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .select(_UserDashboardState._propertiesSelect)
             .inFilter('id', ids)
             .neq('status', 'deleted')
-            .or(SupabaseSchemaSelects.propertiesHomeFeedOrFilter)
             .order('updated_at', ascending: false)
             .order('created_at', ascending: false);
       }, tag: 'FAV_LIST');
@@ -1016,8 +1490,13 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           .where((s) => s.isNotEmpty)
           .toList();
 
-      final activeRes = await _fetchActiveReservationsByPropertyIds(propIds);
-      final ownerProfiles = await _ownerProfilesForRows(rows);
+      final favEnrich =
+          await Future.wait<Map<String, Map<String, dynamic>>>([
+        _fetchActiveReservationsByPropertyIds(propIds),
+        _ownerProfilesForRows(rows),
+      ]);
+      final activeRes = favEnrich[0];
+      final ownerProfiles = favEnrich[1];
 
       for (final row in rows) {
         _propertyFromRowWithProfiles(row, ownerProfiles);
@@ -1073,28 +1552,95 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
       _myPropertyById = {};
 
-      final mineData = await _net(() {
-        return _sb
-            .from('properties')
-            .select(_UserDashboardState._propertiesSelect)
-            .eq('owner_id', _uid)
-            .order('updated_at', ascending: false)
-            .order('created_at', ascending: false);
-      }, tag: 'MINE');
+      final mineLimit = kIsWeb
+          ? _UserDashboardState.minePropertiesFetchLimitWeb
+          : _UserDashboardState.minePropertiesFetchLimit;
+      final mineSelect = _UserDashboardState._propertiesSelect;
 
-      if (mineData == null) return;
+      final minePair = await Future.wait<dynamic>([
+        _net(() {
+          return _sb
+              .from('properties')
+              .select(mineSelect)
+              .eq('owner_id', _uid)
+              .order('updated_at', ascending: false)
+              .order('created_at', ascending: false)
+              .limit(mineLimit);
+        }, tag: 'MINE'),
+        _net(() {
+          return _sb
+              .from('properties')
+              .select(mineSelect)
+              .eq('published_by_marketer_id', _uid)
+              .order('updated_at', ascending: false)
+              .order('created_at', ascending: false)
+              .limit(mineLimit);
+        }, tag: 'MINE_PUBLISHED_BY'),
+      ]);
+      final mineData = minePair[0];
+      final publishedByMeData = minePair[1];
 
-      final mineRows = (mineData as List).cast<Map>();
+      if (mineData == null && publishedByMeData == null) return;
+
+      final byId = <String, Map>{};
+      for (final raw in [
+        if (mineData is List) ...mineData,
+        if (publishedByMeData is List) ...publishedByMeData,
+      ]) {
+        if (raw is! Map) continue;
+        final id = (raw['id'] ?? '').toString().trim();
+        if (id.isEmpty) continue;
+        byId[id] = raw;
+      }
+      final mineRows = byId.values.toList();
 
       if (kDebugMode) {
         print('[DBG][MINE] rows=${mineRows.length} uid=$_uid');
       }
 
-      final myProfile = (await _fetchProfilesByUserIds([_uid]))[_uid];
+      final myIdsEarly = mineRows
+          .map((r) => (r['id'] ?? '').toString().trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+
+      final mineParallel = <Future<dynamic>>[
+        _ownerProfilesForRows(mineRows),
+      ];
+      if (myIdsEarly.isNotEmpty) {
+        mineParallel.add(
+          _net(() {
+            return _sb
+                .from('reservations')
+                .select('''
+              id,
+              property_id,
+              user_id,
+              status,
+              created_at,
+              expires_at,
+              base_price,
+              platform_fee_amount,
+              extra_fee_amount,
+              total_amount
+            ''')
+                .inFilter('property_id', myIdsEarly)
+                .order('created_at', ascending: false);
+          }, tag: 'OFFERS'),
+        );
+      }
+
+      final mineParallelOut = await Future.wait(mineParallel);
+      final mineProfiles =
+          mineParallelOut[0] as Map<String, Map<String, dynamic>>;
+      final offersDataPrefetched =
+          myIdsEarly.isNotEmpty ? mineParallelOut[1] : null;
+      final myProfile = mineProfiles[_uid];
       final myName = _displayNameFromProfile(myProfile);
       final myPhone = _phoneFromProfile(myProfile);
 
-      final mineList = mineRows.map((row) {
+      final mineList = <Property>[];
+      for (var i = 0; i < mineRows.length; i++) {
+        final row = mineRows[i];
         final imageUrls = _loaderImageUrlsFromRow(row);
 
         final fallbackUsername =
@@ -1116,25 +1662,33 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           }
         }
 
-        final property = _propertyFromDb(
-          row,
-          imageUrls: imageUrls,
-          ownerUsername: ownerUsername,
-          ownerPhone: myPhone,
+        final property = _propertyWithMarketerProfileOverlay(
+          _propertyFromDb(
+            row,
+            imageUrls: imageUrls,
+            ownerUsername: ownerUsername,
+            ownerPhone: myPhone,
+          ),
+          mineProfiles,
         );
 
         if (property.id.isNotEmpty) {
           _propertyCache[property.id] = property;
           _myPropertyById[property.id] = property;
         }
-
-        return property;
-      }).toList();
+        mineList.add(property);
+        if (kIsWeb && (i + 1) % 5 == 0 && i + 1 < mineRows.length) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
 
       _ss(() {
         _mine = mineList;
         _lastMineFetch = DateTime.now();
         _rebuildFavoritesFromCache();
+        // إعلاناتي جاهزة — لا ننتظر جلب العروض/الحجوزات لإخفاء حالة التحميل.
+        _loadingMine = false;
+        _mineLoadingSince = null;
       });
 
       final myIds =
@@ -1144,28 +1698,13 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _ss(() {
           _offers = <Map<String, dynamic>>[];
           _offersCount = 0;
+          _loadingOffers = false;
+          _offersLoadingSince = null;
         });
         return;
       }
 
-      final offersData = await _net(() {
-        return _sb
-            .from('reservations')
-            .select('''
-              id,
-              property_id,
-              user_id,
-              status,
-              created_at,
-              expires_at,
-              base_price,
-              platform_fee_amount,
-              extra_fee_amount,
-              total_amount
-            ''')
-            .inFilter('property_id', myIds)
-            .order('created_at', ascending: false);
-      }, tag: 'OFFERS');
+      final offersData = offersDataPrefetched;
 
       if (offersData == null) return;
 
@@ -1186,7 +1725,13 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           .toSet()
           .toList();
 
-      final profMap = await _fetchProfilesByUserIds(userIds);
+      final offersEnrich =
+          await Future.wait<Map<String, Map<String, dynamic>>>([
+        _fetchProfilesByUserIds(userIds),
+        _fetchActiveReservationsByPropertyIds(myIds),
+      ]);
+      final profMap = offersEnrich[0];
+      final myActiveRes = offersEnrich[1];
 
       for (final r in offersRows) {
         final uid = (r['user_id'] ?? '').toString().trim();
@@ -1207,8 +1752,6 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           cnt++;
         }
       }
-
-      final myActiveRes = await _fetchActiveReservationsByPropertyIds(myIds);
       for (final e in myActiveRes.entries) {
         _activeReservationByPropertyId[e.key] = e.value;
       }
@@ -1266,10 +1809,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         return;
       }
 
-      final cartData = await _net(() {
-        return _sb
-            .from('reservations')
-            .select('''
+      final cartParallel = await Future.wait([
+        _net(() {
+          return _sb
+              .from('reservations')
+              .select('''
               id,
               property_id,
               user_id,
@@ -1281,10 +1825,33 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               extra_fee_amount,
               total_amount
             ''')
-            .eq('user_id', _uid)
-            .inFilter('status', ['pending', 'paid'])
-            .order('created_at', ascending: false);
-      }, tag: 'CART');
+              .eq('user_id', _uid)
+              .inFilter('status', ['pending', 'paid'])
+              .order('created_at', ascending: false);
+        }, tag: 'CART'),
+        _net(() {
+          return _sb
+              .from('reservations')
+              .select('''
+              id,
+              property_id,
+              user_id,
+              status,
+              created_at,
+              expires_at,
+              base_price,
+              platform_fee_amount,
+              extra_fee_amount,
+              total_amount
+            ''')
+              .eq('user_id', _uid)
+              .inFilter('status', ['completed', 'sold'])
+              .order('created_at', ascending: false);
+        }, tag: 'CART_COMPLETED'),
+      ]);
+
+      final cartData = cartParallel[0];
+      final completedData = cartParallel[1];
 
       if (cartData == null) return;
 
@@ -1297,26 +1864,6 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
 
       final cartRows = cartRowsRaw.where(_isStillValidReservationRow).toList();
-
-      final completedData = await _net(() {
-        return _sb
-            .from('reservations')
-            .select('''
-              id,
-              property_id,
-              user_id,
-              status,
-              created_at,
-              expires_at,
-              base_price,
-              platform_fee_amount,
-              extra_fee_amount,
-              total_amount
-            ''')
-            .eq('user_id', _uid)
-            .inFilter('status', ['completed', 'sold'])
-            .order('created_at', ascending: false);
-      }, tag: 'CART_COMPLETED');
 
       final completedRows = completedData == null
           ? <Map<String, dynamic>>[]
@@ -1372,7 +1919,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         }
       }
 
-      _ss(() {
+      // _ssHomeFeed: يبلّغ تبويب الرئيسية بإعادة التصفية الفورية حتى يختفي
+      // أي إعلان أصبح في السلة دون الحاجة للضغط على «تحديث».
+      _ssHomeFeed(() {
         _cart = cartRows;
         _cartPropertyById = byId;
         _completedCart = completedRows;
@@ -1397,27 +1946,59 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // =========================================================
   Future<void> _loadMyMarketRequestOfferTracking() async {
     if (_isGuest) {
-      _ss(() {
+      _ssHomeFeed(() {
         _marketRequestIdsWithMyPendingOffer = <String>{};
+        _marketRequestIdsHiddenAfterTwoWithdrawals = <String>{};
         _myPendingMarketOffersForCart = const [];
+        _myArchivedMarketOffersForCart = const [];
       });
       return;
     }
     try {
-      final list =
-          await MarketingFlowService(_sb).myActiveMarketRequestOffers();
+      final svc = MarketingFlowService(_sb);
+      final uid = _uid;
+      final results = await Future.wait([
+        svc.myActiveMarketRequestOffers(),
+        svc.myArchivedMarketRequestOffers(),
+        _net(() {
+          return _sb
+              .from('market_request_offer_user_withdrawals')
+              .select('market_request_id,withdrawn_count')
+              .eq('user_id', uid)
+              .gte('withdrawn_count', 2);
+        }, tag: 'MR_OFFER_WITHDRAWALS', showDialog: false),
+      ]);
+      final list = (results[0] as List?)
+              ?.cast<Map<String, dynamic>>() ??
+          const <Map<String, dynamic>>[];
+      final archived = (results[1] as List?)
+              ?.cast<Map<String, dynamic>>() ??
+          const <Map<String, dynamic>>[];
+      final withdrawList = (results[2] as List?) ?? const [];
       final ids = list
           .map((m) => (m['market_request_id'] ?? '').toString().trim())
           .where((s) => s.isNotEmpty)
           .toSet();
-      _ss(() {
+      final hiddenAfterTwo = <String>{};
+      for (final raw in withdrawList) {
+        if (raw is! Map) continue;
+        final rid = (raw['market_request_id'] ?? '').toString().trim();
+        final count = int.tryParse('${raw['withdrawn_count'] ?? 0}') ?? 0;
+        if (rid.isNotEmpty && count >= 2) hiddenAfterTwo.add(rid);
+      }
+      // _ssHomeFeed: يضمن إخفاء أي طلب قُدِّم عليه عرض من الرئيسية فوراً.
+      _ssHomeFeed(() {
         _marketRequestIdsWithMyPendingOffer = ids;
+        _marketRequestIdsHiddenAfterTwoWithdrawals = hiddenAfterTwo;
         _myPendingMarketOffersForCart = list;
+        _myArchivedMarketOffersForCart = archived;
       });
     } catch (_) {
-      _ss(() {
+      _ssHomeFeed(() {
         _marketRequestIdsWithMyPendingOffer = <String>{};
+        _marketRequestIdsHiddenAfterTwoWithdrawals = <String>{};
         _myPendingMarketOffersForCart = const [];
+        _myArchivedMarketOffersForCart = const [];
       });
     }
   }
@@ -1426,6 +2007,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // Full reload
   // =========================================================
   Future<void> _reloadAll() async {
+    PropertiesHomeFeedService.resetCircuit();
+
     if (_isGuest) {
       _ss(() {
         _errorHome = null;
@@ -1450,35 +2033,58 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       return;
     }
 
+    // الويب: الرئيسية + طلبات السوق معاً؛ باقي التبويبات في الخلفية.
+    if (kIsWeb) {
+      await Future.wait([
+        _loadHome(force: true),
+        _loadMarketHomeRequests(force: true),
+      ]);
+      unawaited(_reloadAllLoggedInDeferred());
+      return;
+    }
+
     if (!_favoritesLoaded) {
       await _loadFavoritesForUid();
     }
 
-    await _loadAccountRole();
-
     await Future.wait([
+      _loadAccountRole(),
       _loadHome(force: true),
       _loadMarketHomeRequests(force: true),
+    ]);
+
+    if (!_favoritesLoaded) {
+      await _loadFavoritesForUid();
+    }
+
+    await Future.wait([
       _loadMineAndOffers(force: true),
+      _loadMyMarketRequestOfferTracking(),
+    ]);
+
+    await Future.wait([
       _loadCart(force: true),
       _loadNotifications(),
-      _loadMyMarketRequestOfferTracking(),
     ]);
 
     if (_favoritesLoaded) {
       _ss(() {
         _rebuildFavoritesFromCache();
       });
-
-      if (_favoriteIds.isNotEmpty) {
-        await _loadFavoritesList(force: true);
-      }
     }
 
-    if (_isMarketerRole) {
-      await _loadMarketerBuckets(force: true);
+    final tail = <Future<void>>[];
+    if (_favoriteIds.isNotEmpty) {
+      tail.add(_loadFavoritesList(force: true));
+    }
+    if (_isMarketerRole || _usesMarketerMyPageHub) {
+      tail.add(_loadMarketerBuckets(force: true));
+      tail.add(_loadOwnerRequestsBuckets(force: true));
     } else {
-      await _loadOwnerRequestsBuckets(force: true);
+      tail.add(_loadOwnerRequestsBuckets(force: true));
+    }
+    if (tail.isNotEmpty) {
+      await Future.wait(tail);
     }
 
     if (kDebugMode) {
@@ -1493,6 +2099,168 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       print(
         '[DBG][RELOAD_ALL] marketer invites=${_mkInvites.length} offers=${_mkOffers.length} contracts=${_mkContracts.length} permits=${_mkPermits.length} published=${_mkPublished.length}',
       );
+    }
+  }
+
+  /// باقي تحميل التبويبات بعد «تحديث» الرئيسية على الويب (لا يعطّل main thread).
+  Future<void> _reloadAllLoggedInDeferred() async {
+    if (!mounted || _isGuest) return;
+    try {
+      if (!_favoritesLoaded) {
+        await _loadFavoritesForUid();
+      }
+      // الدور أولاً — buckets المسوّق/المالك تعتمد عليه.
+      await _loadAccountRole();
+      if (!mounted) return;
+      await Future.wait([
+        _loadMineAndOffers(force: true),
+        _loadMyMarketRequestOfferTracking(),
+      ]);
+      if (!mounted) return;
+      await Future.wait([
+        _loadCart(force: true),
+        _loadNotifications(),
+      ]);
+      if (!mounted) return;
+      if (_favoritesLoaded) {
+        _ss(() {
+          _rebuildFavoritesFromCache();
+        });
+      }
+      final tail = <Future<void>>[];
+      if (_favoriteIds.isNotEmpty) {
+        tail.add(_loadFavoritesList(force: true));
+      }
+      if (_isMarketerRole) {
+        tail.add(_loadMarketerBuckets(force: true));
+      } else {
+        tail.add(_loadOwnerRequestsBuckets(force: true));
+      }
+      if (tail.isNotEmpty) {
+        await Future.wait(tail);
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][RELOAD_ALL][WEB_DEFERRED] $e');
+      }
+    }
+  }
+
+  bool _hasValidMapCoordinates(double? lat, double? lng) {
+    if (lat == null || lng == null) return false;
+    if (lat.isNaN || lng.isNaN) return false;
+    if (lat.abs() < 1e-5 && lng.abs() < 1e-5) return false;
+    return true;
+  }
+
+  /// إعلانات منشورة تملك إحداثيات — للخريطة العامة (أوسع من شريحة الرئيسية المحمّلة).
+  Future<List<Property>> _loadPublishedPropertiesWithCoordinatesForMap() async {
+    try {
+      final data = await _net(
+        () => PropertiesHomeFeedService.fetch(
+          client: _sb,
+          filterSuppressed: false,
+          limit: _UserDashboardState.mapDiscoveryFetchLimit,
+          allowBypassCircuit: true,
+        ),
+        tag: 'MAP_PROP_COORDS',
+        showDialog: false,
+      );
+      if (data == null) return const [];
+      final rows = (data as List).cast<Map>();
+      final coordRows = <Map>[];
+      for (final r in rows) {
+        final lat = (r['latitude'] as num?)?.toDouble();
+        final lng = (r['longitude'] as num?)?.toDouble();
+        if (!_hasValidMapCoordinates(lat, lng)) continue;
+        coordRows.add(r);
+      }
+      if (coordRows.isEmpty) return const [];
+
+      final ownerProfiles = await _ownerProfilesForRows(coordRows);
+      return coordRows
+          .map(
+            (row) => _propertyFromRowWithProfiles(
+              Map<String, dynamic>.from(row),
+              ownerProfiles,
+            ),
+          )
+          .where((p) => p.id.isNotEmpty)
+          .toList(growable: false);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][MAP_PROP_COORDS] skip: $e');
+      }
+      return const [];
+    }
+  }
+
+  /// طلبات السوق الظاهرة للعامة التي يمكن رسمها على الخريطة.
+  Future<List<MarketPropertyRequestRow>>
+      _loadMarketRequestsWithCoordinatesForMap() async {
+    const selectWithDetails =
+        'id,request_public_code,title,description,purpose,property_type,city,districts,'
+        'budget_min,budget_max,area_min_m2,created_at,updated_at,'
+        'requester_id,show_requester_name,requester_public_name,'
+        'cover_image_storage_path,default_cover_used,request_priority,details_json,status,'
+        'edit_count,max_edits,deletion_requested_at,completed_at,selected_offer_id';
+    const selectLegacy =
+        'id,request_public_code,title,description,purpose,property_type,city,districts,'
+        'budget_min,budget_max,area_min_m2,created_at,updated_at,'
+        'requester_id,show_requester_name,requester_public_name,'
+        'cover_image_storage_path,default_cover_used,status';
+
+    Future<List<Map<String, dynamic>>> fetch(String cols) async {
+      final d = await _net(
+        () => _sb
+            .from('market_property_requests')
+            .select(cols)
+            .inFilter(
+              'status',
+              SupabaseSchemaSelects.marketPropertyRequestsHomeStatuses,
+            )
+            .order('created_at', ascending: false)
+            .limit(_UserDashboardState.mapDiscoveryFetchLimit),
+        tag: 'MAP_REQ_COORDS',
+        showDialog: false,
+      );
+      if (d == null) return const [];
+      return (d as List)
+          .cast<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+    }
+
+    try {
+      List<Map<String, dynamic>> rowMaps;
+      try {
+        rowMaps = await fetch(selectWithDetails);
+      } catch (e) {
+        final s = e.toString().toLowerCase();
+        if (s.contains('details_json') ||
+            s.contains('request_priority') ||
+            s.contains('42703') ||
+            s.contains('column')) {
+          rowMaps = await fetch(selectLegacy);
+        } else {
+          rethrow;
+        }
+      }
+
+      return rowMaps
+          .map(MarketPropertyRequestRow.fromMap)
+          .where(
+            (r) =>
+                r.id.isNotEmpty &&
+                ListingPermissionsHelper.shouldShowMarketRequestWithoutDeal(r),
+          )
+          .where((r) => _hasValidMapCoordinates(r.latitude, r.longitude))
+          .toList(growable: false);
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][MAP_REQ_COORDS] skip: $e');
+      }
+      return const [];
     }
   }
 }

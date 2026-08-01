@@ -30,6 +30,9 @@ class OrgJoinPendingGateScreen extends StatelessWidget {
         return t?.orgKindInstitution ?? (_isAr ? 'مؤسسة' : 'Institution');
       case 'company':
         return t?.orgKindCompany ?? (_isAr ? 'شركة عقارية' : 'Real estate company');
+      case 'marketer':
+        return t?.accountKindMarketer ??
+            (_isAr ? 'مسوق عقاري' : 'Real estate marketer');
       default:
         return t?.orgKindGeneric ?? (_isAr ? 'مؤسستك' : 'the organization');
     }

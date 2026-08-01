@@ -14,6 +14,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'push_navigation_service.dart';
+import '../core/branding/app_branding.dart';
+import '../core/navigation/web_bootstrap_diag.dart';
 import 'chat_notification_prefs.dart';
 
 class NotificationService {
@@ -44,7 +46,7 @@ class NotificationService {
   static const AndroidNotificationChannel _workflowChannel =
       AndroidNotificationChannel(
     'workflow_channel',
-    'موثوق العقاري — التنبيهات',
+    '${AppBranding.brandNameAr} — التنبيهات',
     description: 'عروض، عقود، تصاريح، دردشة، وغيرها',
     importance: Importance.high,
     playSound: true,
@@ -65,30 +67,11 @@ class NotificationService {
     return FirebaseMessaging.instance;
   }
 
-  /// تهيئة الويب: FCM فقط (بدون إشعارات محلية). يُلفّى بـ try/catch حتى لا يعطل الإقلاع.
+  /// الويب: FCM معطّل — getToken بدون Service Worker يسبب AbortError.
   static Future<void> _initWeb() async {
-    if (_inited) {
-      await syncFcmTokenToSupabase();
-      return;
-    }
-    try {
-      final fcm = FirebaseMessaging.instance;
-      // إذن إشعارات الويب يطلبه المتصفح عند الحاجة (لا شاشة إلزامية عند الإقلاع).
-      try {
-        final token = await fcm.getToken();
-        if (token != null && token.isNotEmpty) {
-          await _upsertToken(token, allowWeb: true);
-        }
-      } catch (_) {}
-      _tokenRefreshSub?.cancel();
-      _tokenRefreshSub = fcm.onTokenRefresh.listen((newToken) async {
-        if (newToken.isEmpty) return;
-        await _upsertToken(newToken, allowWeb: true);
-      });
+    if (!_inited) {
+      WebBootstrapDiag.log('fcm', 'skipped on web (no push SW)');
       _inited = true;
-    } catch (e, st) {
-      debugPrint('NotificationService._initWeb: $e');
-      debugPrint('$st');
     }
   }
 
@@ -171,9 +154,15 @@ class NotificationService {
 
       final n = m.notification;
       final data = Map<String, dynamic>.from(m.data);
-      final title = (n?.title ?? data['title_ar'] ?? data['title'] ?? 'موثوق العقاري')
-          .toString();
-      final body = (n?.body ?? data['body_ar'] ?? data['body'] ?? '').toString();
+      final title = AppBranding.normalizeUserFacing(
+        (n?.title ?? data['title_ar'] ?? data['title'] ?? AppBranding.brandNameAr)
+            .toString(),
+        isAr: true,
+      );
+      final body = AppBranding.normalizeUserFacing(
+        (n?.body ?? data['body_ar'] ?? data['body'] ?? '').toString(),
+        isAr: true,
+      );
       if (body.isEmpty && n == null) return;
 
       final dedupe =
@@ -277,6 +266,7 @@ class NotificationService {
   // FCM -> Supabase
   // =========================
   static Future<void> syncFcmTokenToSupabase() async {
+    if (kIsWeb) return;
     final sb = Supabase.instance.client;
     final user = sb.auth.currentUser;
 
@@ -402,6 +392,9 @@ class NotificationService {
     String? dedupeKey,
     Map<String, String>? payloadMap,
   }) async {
+    final displayTitle =
+        AppBranding.normalizeUserFacing(title, isAr: true);
+    final displayBody = AppBranding.normalizeUserFacing(body, isAr: true);
     if (kIsWeb) return;
     if (!_inited) await init();
 
@@ -418,9 +411,9 @@ class NotificationService {
             ? 'chat_reservation'
             : _workflowChannel.id;
     final channelName = kind == 'support'
-        ? 'دعم — موثوق العقاري'
+        ? 'دعم — ${AppBranding.brandNameAr}'
         : kind == 'reservation'
-            ? 'حجوزات — موثوق العقاري'
+            ? 'حجوزات — ${AppBranding.brandNameAr}'
             : _workflowChannel.name;
     final channelDesc = kind == 'support'
         ? 'رسائل الدعم'
@@ -465,8 +458,8 @@ class NotificationService {
 
     await _plugin.show(
       _workflowNotificationId(dedupeKey),
-      title,
-      body,
+      displayTitle,
+      displayBody,
       details,
       payload: payload,
     );

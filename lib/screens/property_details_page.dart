@@ -1,39 +1,64 @@
-import 'dart:async' show Timer, unawaited;
+﻿import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/branding/app_branding.dart';
+import '../core/branding/aqar_brand_colors.dart';
 import '../l10n/app_localizations.dart';
+import '../core/branding/branding_logo_image.dart';
+import '../core/listing/listing_media_urls.dart';
+import '../core/listing/property_listing_display.dart';
 import '../core/listing/property_type_catalog.dart';
+import '../core/session/app_session.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/display_ids.dart';
 import '../core/share/app_listing_links.dart';
 import '../core/share/listing_share_helper.dart';
+import '../core/subscription/app_subscription_gate.dart';
+import '../core/subscription/marketing_subscription_access.dart';
+import '../core/subscription/subscription_gate_helper.dart';
 import '../models/property.dart';
 import '../services/marketing_flow_service.dart';
 import '../services/marketing_workflow_hub.dart';
+import '../services/subscription_service.dart';
 import '../services/property_view_service.dart';
 import '../services/property_auction_service.dart';
 import '../services/listing_payment_service.dart';
 import '../services/reservations_service.dart';
 import '../core/workflow/listing_edit_permissions.dart';
 import '../core/workflow/listing_permissions_helper.dart';
+import '../core/workflow/listing_workflow_stage.dart';
 import '../services/user_listing_preferences_service.dart';
+import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/listing_public_actions_menu.dart';
 import '../widgets/listing_report_sheet.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/marketing_offer_submit_sheet.dart';
+import '../widgets/marketer_policy_notice_card.dart';
 import '../widgets/inline_property_video.dart';
 import '../widgets/listing_watermark_overlay.dart';
+import '../widgets/listing_media_gallery.dart';
 import '../widgets/property_video_sheet.dart';
+import '../widgets/listing_formatted_spec_panel.dart';
+import '../widgets/listing_marketing_tracking_sheet.dart';
+import '../widgets/guest_participation_gate.dart';
+import '../services/guest_session_bridge.dart';
+import '../services/guest_unlock_service.dart';
 import '../widgets/government_in_app_web_page.dart';
 import '../navigation/chat_navigation.dart';
 import 'listing_request_status_page.dart';
+import 'listing_contract_chat_page.dart';
+import 'subscriptions/subscriptions_root_screen.dart';
+import 'owner_offers_page.dart';
 import 'property_map_discovery_page.dart';
 
 class PropertyDetailsPage extends StatefulWidget {
@@ -66,6 +91,13 @@ class PropertyDetailsPage extends StatefulWidget {
   /// بعد إخفاء/إظهار/بلاغ/سحب بلاغ من جهة الزائر — لتحديث شريط المخفية في الرئيسية.
   final VoidCallback? onVisitorListingPreferenceChanged;
 
+  /// عند `true`: لا يُعرض سهم الرجوع الداخلي — الشريط العلوي للوحة الداشبورد
+  /// يعرض سهم الرجوع الموحَّد. يُمرَّر `true` من `_pushBody` في الداشبورد.
+  final bool embedAppBar;
+
+  /// إتمام صفقة على إعلان منشور (إضافة للسلة) — يُمرَّر من الداشبورد.
+  final Future<void> Function(Property property)? onCompleteDeal;
+
   const PropertyDetailsPage({
     super.key,
     required this.property,
@@ -85,6 +117,8 @@ class PropertyDetailsPage extends StatefulWidget {
     this.onRequestDelete,
     this.homeFeedShowsHiddenOnly = false,
     this.onVisitorListingPreferenceChanged,
+    this.embedAppBar = false,
+    this.onCompleteDeal,
   });
 
   @override
@@ -109,6 +143,12 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   bool _openingChat = false;
   bool _openingVideo = false;
   bool _runningOwnerAction = false;
+  bool _loadingWorkflowSidecars = false;
+  String? _resolvedListingRequestId;
+  String? _resolvedListingRequestWorkflow;
+  String? _resolvedListingContractId;
+  DateTime? _resolvedContractStartedAt;
+  int _ownerOffersCount = 0;
   bool _loadingDeleteMeta = false;
   bool _sharing = false;
 
@@ -135,17 +175,154 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   DateTime? _deleteRequestedAt;
   String? _deleteRequestReason;
 
+  bool _viewerInCartForListing = false;
+  bool _buyerDealSubscriptionOk = false;
+  bool _loadingBuyerDealAccess = false;
+
   bool get _isGuest => widget.currentUserId == 'guest';
   bool get _isOwnerManager => widget.canManageProperty;
-  bool get _canUseMarketingOfferAction =>
-      widget.allowMarketingOffer &&
+  String get _effectiveMarketingRequestId {
+    final w = (widget.marketingRequestId ?? '').trim();
+    if (w.isNotEmpty) return w;
+    return (_resolvedListingRequestId ?? '').trim();
+  }
+
+  String get _effectiveOwnerListingRequestId {
+    final w = (widget.marketingRequestId ?? '').trim();
+    if (w.isNotEmpty) return w;
+    return (_resolvedListingRequestId ?? '').trim();
+  }
+
+  bool get _resolvedMarketerSidecar =>
       !_isGuest &&
-      (widget.marketingRequestId ?? '').trim().isNotEmpty;
+      !_isListingOwner &&
+      widget.currentUserId.trim().isNotEmpty &&
+      widget.currentUserId != _property.ownerId;
+
+  bool get _allowMarketingOfferEffective =>
+      widget.allowMarketingOffer ||
+      (_resolvedMarketerSidecar &&
+          (_resolvedListingRequestId ?? '').trim().isNotEmpty &&
+          !_isPublishedLikeListing);
+
+  bool get _canUseMarketingOfferAction =>
+      _allowMarketingOfferEffective &&
+      !_isGuest &&
+      _effectiveMarketingRequestId.isNotEmpty;
+
+  bool get _marketerWorkflowBlocksNewOffer {
+    final s = _property.effectiveWorkflowStage;
+    switch (s) {
+      case ListingWorkflowStage.marketerSelected:
+      case ListingWorkflowStage.contractPending:
+      case ListingWorkflowStage.contractSent:
+      case ListingWorkflowStage.contractReturned:
+      case ListingWorkflowStage.contractSigned:
+      case ListingWorkflowStage.contractCancelled:
+      case ListingWorkflowStage.permitPending:
+      case ListingWorkflowStage.permitIssued:
+      case ListingWorkflowStage.published:
+      case ListingWorkflowStage.reserved:
+      case ListingWorkflowStage.cancelled:
+      case ListingWorkflowStage.terminated:
+      case ListingWorkflowStage.archived:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool get _showMarketerSubmitOfferButton =>
+      _canUseMarketingOfferAction &&
+      !_isPublishedLikeListing &&
+      !_marketerWorkflowBlocksNewOffer &&
+      !_offerSentThisRound &&
+      !_checkingMarketingOffer;
+
+  String get _effectiveMarketerHubPhase {
+    final raw = (widget.marketerHubPhase ?? '').trim();
+    if (raw.isNotEmpty) return raw.toLowerCase();
+    if (!_canUseMarketingOfferAction && !_isPartyMarketerOnListing) {
+      return '';
+    }
+    if (_offerSentThisRound) return 'offer_pending';
+    final s = _property.effectiveWorkflowStage;
+    if (s == ListingWorkflowStage.marketerSelected) return 'accepted';
+    if (s == ListingWorkflowStage.contractPending ||
+        s == ListingWorkflowStage.contractSent ||
+        s == ListingWorkflowStage.contractReturned) {
+      return 'contract';
+    }
+    if (s == ListingWorkflowStage.contractSigned) return 'signed';
+    // مرحلة «التصاريح 72 ساعة»: العقد موقَّع والمسوّق ينتظر/يُدخل تصريح REGA.
+    if (s == ListingWorkflowStage.permitPending ||
+        s == ListingWorkflowStage.permitIssued) {
+      return 'permit';
+    }
+    return '';
+  }
+
+  /// `true` إذا كان المسوّق وصل إلى مرحلة «تصاريح 72 ساعة» أو ما بعدها — يحلّ
+  /// لنا قرار كشف رقم جوّال المالك للمسوّق فقط في هذه المرحلة وما تلاها.
+  bool get _marketerCanSeeOwnerContact {
+    if (_isListingOwner) return true; // المالك يرى بياناته دائماً
+    if (!_isPartyMarketerOnListing && !widget.allowMarketingOffer) {
+      return false; // مستخدم عادي/ضيف لا يرى رقم المالك (يبقى التواصل عبر المسوّق)
+    }
+    final phase = _effectiveMarketerHubPhase;
+    return phase == 'signed' || phase == 'permit';
+  }
 
   bool get _showMarketerHubShortcuts =>
       !_isGuest &&
-      (widget.marketerHubPhase ?? '').trim().isNotEmpty &&
-      (widget.marketingRequestId ?? '').trim().isNotEmpty;
+      _effectiveMarketingRequestId.isNotEmpty &&
+      (_effectiveMarketerHubPhase.isNotEmpty || _isPartyMarketerOnListing);
+
+  /// إخفاء بطاقة «التسويق والتعاقد» عندما يكون عرض المسوّق قيد المراجعة فقط — يكفي «مسار التسويق» أعلاه والفوترة.
+  bool get _showMarketerMarketingHubCard {
+    if (_isPublishedLikeListing) return false;
+    if (!_canUseMarketingOfferAction && !_showMarketerHubShortcuts) {
+      return false;
+    }
+    if (!_isListingOwner &&
+        _offerSentThisRound &&
+        _effectiveMarketerHubPhase == 'offer_pending') {
+      return false;
+    }
+    return true;
+  }
+
+  bool get _ownerMarketingDeskEligible =>
+      _isListingOwner &&
+      !_isGuest &&
+      !_isPublishedLikeListing &&
+      _effectiveOwnerListingRequestId.isNotEmpty;
+
+  /// زر/بطاقة «تتبع التسويق» — للمالك أو المسوّق المرتبط بالإعلان عند وجود طلب.
+  bool get _showMarketingTrackingEntry =>
+      !_isGuest &&
+      widget.currentUserId.trim().isNotEmpty &&
+      _effectiveMarketingRequestId.isNotEmpty &&
+      (_isListingOwner ||
+          _isPublishingMarketer ||
+          _isSelectedMarketerForListing ||
+          _showMarketerHubShortcuts);
+
+  bool get _ownerShowsOffersEntry =>
+      _ownerMarketingDeskEligible &&
+      (_ownerOffersCount > 0 ||
+          _property.effectiveWorkflowStage ==
+              ListingWorkflowStage.waitingMarketers);
+
+  bool get _ownerShowsContractDeskEntry =>
+      _ownerMarketingDeskEligible &&
+      (_resolvedListingContractId ?? '').trim().isNotEmpty &&
+      <ListingWorkflowStage>{
+        ListingWorkflowStage.contractSent,
+        ListingWorkflowStage.contractPending,
+        ListingWorkflowStage.marketerSelected,
+        ListingWorkflowStage.contractReturned,
+      }.contains(_property.effectiveWorkflowStage);
 
   String get _marketingLang => widget.isAr ? 'ar' : 'en';
 
@@ -173,6 +350,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   bool get _isSelectedMarketerForListing =>
       !_isGuest &&
       widget.currentUserId == (_property.selectedMarketerId ?? '').trim();
+
+  /// عدّاد ٧٢ ساعة لإنشاء العقد بعد قبول المالك لعرضك.
+  bool get _showMarketerContract72Countdown =>
+      !_isGuest &&
+      !_isListingOwner &&
+      _isSelectedMarketerForListing &&
+      (_resolvedListingContractId ?? '').trim().isEmpty &&
+      _resolvedContractStartedAt != null &&
+      _property.effectiveWorkflowStage ==
+          ListingWorkflowStage.marketerSelected;
 
   /// مشتري محتمل فقط — ليس مالكاً ولا مسوّقاً مرتبطاً بالإعلان (منشّر/مختار).
   bool get _canRecordBuyerGoodFaith =>
@@ -233,11 +420,69 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return true;
   }
 
-  bool get _showMarketerChatButton =>
-      _canOpenMarketerChat &&
-      (_isPublishedLikeListing ||
-          _isListingOwner ||
-          !_isPartyMarketerOnListing);
+  bool get _isPublicBuyerOnPublishedListing =>
+      _isPublishedLikeListing &&
+      !_isGuest &&
+      !_isListingOwner &&
+      !_isPublishingMarketer &&
+      !_isSelectedMarketerForListing &&
+      !_platformStaff &&
+      !_isPartyMarketerOnListing &&
+      !_allowMarketingOfferEffective;
+
+  bool get _publicBuyerMayChatMarketer =>
+      _viewerInCartForListing && _buyerDealSubscriptionOk;
+
+  bool get _showMarketerChatButton {
+    if (!_canOpenMarketerChat) return false;
+    if (_isPublicBuyerOnPublishedListing) {
+      return _publicBuyerMayChatMarketer;
+    }
+    return _isPublishedLikeListing ||
+        _isListingOwner ||
+        !_isPartyMarketerOnListing;
+  }
+
+  bool get _showGuestCompleteDealBar =>
+      _isGuest &&
+      _isPublishedLikeListing &&
+      !_allowMarketingOfferEffective &&
+      widget.onCompleteDeal != null;
+
+  bool get _showBuyerCompleteDealBar =>
+      !_isGuest &&
+      _isPublishedLikeListing &&
+      !_isListingOwner &&
+      !_isPublishingMarketer &&
+      !_isSelectedMarketerForListing &&
+      !_allowMarketingOfferEffective &&
+      !_platformStaff &&
+      widget.onCompleteDeal != null &&
+      !_viewerInCartForListing;
+
+  Future<void> _loadBuyerDealAccess() async {
+    if (_isGuest) return;
+    final uid = widget.currentUserId.trim();
+    if (uid.isEmpty || uid == 'guest') return;
+    setState(() => _loadingBuyerDealAccess = true);
+    try {
+      final inCart =
+          await ReservationsService.userHasActiveReservationForProperty(
+        userId: uid,
+        propertyId: _property.id,
+      );
+      final gate = context.read<AppSubscriptionGate>();
+      await gate.refresh(force: false);
+      if (!mounted) return;
+      setState(() {
+        _viewerInCartForListing = inCart;
+        _buyerDealSubscriptionOk = gate.canCompleteMarketDeal;
+        _loadingBuyerDealAccess = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loadingBuyerDealAccess = false);
+    }
+  }
 
   bool get _showMarketerRegaEdit =>
       widget.onMarketerRegaAlignEdit != null &&
@@ -246,10 +491,37 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         widget.currentUserId,
       );
 
-  bool get _hasDeedInfo =>
-      (_property.deedNumber ?? '').trim().isNotEmpty ||
-      _property.deedDate != null ||
-      (_property.deedIssuer ?? '').trim().isNotEmpty;
+  bool get _hasDeedInfo {
+    if ((_property.deedNumber ?? '').trim().isNotEmpty) return true;
+    if (_property.deedDate != null) return true;
+    if ((_property.deedIssuer ?? '').trim().isNotEmpty) return true;
+    // احتياطي من لقطة الترخيص إن لم تُملأ أعمدة الصك على الصف.
+    final snapDeed = _licenseField('deed_or_benefit_doc_number');
+    if (snapDeed.isNotEmpty) return true;
+    final snapDate = _licenseField('deed_date');
+    if (snapDate.isNotEmpty) return true;
+    return false;
+  }
+
+  String get _deedNumberDisplay {
+    final n = (_property.deedNumber ?? '').trim();
+    if (n.isNotEmpty) return n;
+    return _licenseField('deed_or_benefit_doc_number');
+  }
+
+  String get _deedDateDisplay {
+    if (_property.deedDate != null) {
+      final d = _property.deedDate!;
+      return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    }
+    return _licenseField('deed_date');
+  }
+
+  String get _deedIssuerDisplay {
+    final i = (_property.deedIssuer ?? '').trim();
+    if (i.isNotEmpty) return i;
+    return _licenseField('deed_issuer');
+  }
 
   String _maskDeedNumber(String raw) {
     final s = raw.trim();
@@ -302,6 +574,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     _loadCoordinates();
     _loadDeleteMeta();
     _loadMarketingOfferAvailability();
+    unawaited(_loadWorkflowSidecars());
     _loadAuctionBidsIfNeeded();
     _ensureAuctionRealtimeChannel();
     unawaited(_loadAuctionSession());
@@ -309,6 +582,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       unawaited(_loadPlatformStaff());
     }
     unawaited(_loadPaymentEvents());
+    if (!_isGuest) {
+      unawaited(_loadBuyerDealAccess());
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (!_isGuest) {
@@ -318,19 +594,74 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   bool get _isPublishedLikeListing {
+    final reqWf = (_resolvedListingRequestWorkflow ?? '').trim().toLowerCase();
+    if (reqWf == 'waiting_marketers') return false;
     final st = (_property.status ?? '').trim().toLowerCase();
     final wf = (_property.workflowStage ?? '').trim().toLowerCase();
+    if (wf == 'waiting_marketers') return false;
     return st == 'published' ||
         st == 'live' ||
         st == 'active' ||
         wf == 'published';
   }
 
+  Future<void> _loadWorkflowSidecars() async {
+    if (_isGuest || _isPublishedLikeListing) return;
+    final pid = _property.id.trim();
+    if (pid.isEmpty) return;
+    setState(() => _loadingWorkflowSidecars = true);
+    try {
+      Map<String, dynamic>? row = await MarketingFlowService(_sb)
+          .listingRequestSummaryForPreviewProperty(pid);
+      final midPass = (widget.marketingRequestId ?? '').trim();
+      if (row == null && midPass.isNotEmpty) {
+        row = await MarketingFlowService(_sb).ownerListingRequestSnapshot(midPass);
+      }
+      if (!mounted) return;
+      if (row == null) {
+        setState(() {
+          _resolvedListingRequestId = null;
+          _resolvedListingContractId = null;
+          _resolvedContractStartedAt = null;
+          _ownerOffersCount = 0;
+          _loadingWorkflowSidecars = false;
+        });
+        await _loadMarketingOfferAvailability();
+        return;
+      }
+      final rid = (row['id'] ?? '').toString().trim();
+      final reqWf = (row['workflow_stage'] ?? '').toString().trim();
+      final cid = (row['contract_id'] ?? '').toString().trim();
+      final cStart = DateTime.tryParse(
+        (row['contract_started_at'] ?? '').toString(),
+      );
+      var count = 0;
+      if (_isListingOwner && rid.isNotEmpty) {
+        count = await MarketingFlowService(_sb).ownerOffersCountForRequest(rid);
+      }
+      if (!mounted) return;
+      setState(() {
+        _resolvedListingRequestId = rid.isNotEmpty ? rid : null;
+        _resolvedListingRequestWorkflow = reqWf.isNotEmpty ? reqWf : null;
+        _resolvedListingContractId = cid.isNotEmpty ? cid : null;
+        _resolvedContractStartedAt = cStart;
+        _ownerOffersCount = count;
+        _loadingWorkflowSidecars = false;
+      });
+      await _loadMarketingOfferAvailability();
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loadingWorkflowSidecars = false);
+      }
+    }
+  }
+
   Future<void> _loadMarketingOfferAvailability() async {
-    if (!_canUseMarketingOfferAction) return;
+    if (_isGuest || _isListingOwner) return;
+    final reqId = _effectiveMarketingRequestId.trim();
+    if (reqId.isEmpty) return;
     setState(() => _checkingMarketingOffer = true);
     try {
-      final reqId = widget.marketingRequestId!.trim();
       final has = await MarketingFlowService(_sb)
           .marketerHasLiveOfferForRequestRound(reqId);
       if (!mounted) return;
@@ -343,8 +674,40 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
+  Future<bool> _ensureMarketingSubscriptionForPropertyDetails() async {
+    if (!_showMarketerHubShortcuts &&
+        !_isPartyMarketerOnListing &&
+        !widget.allowMarketingOffer) {
+      return true;
+    }
+    return SubscriptionGateHelper.ensure(
+      context,
+      isAr: widget.isAr,
+      action: SubscriptionGateAction.marketingPaidWorkflow,
+      onGoSubscribe: () {
+        if (!mounted) return;
+        final lang = widget.isAr ? 'ar' : 'en';
+        unawaited(
+          Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              settings:
+                  const RouteSettings(name: '/propertyDetails/subscriptions'),
+              builder: (_) => SubscriptionsRootScreen(
+                lang: lang,
+                accountType: '',
+                embedAppBar: true,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _submitMarketingOfferFromDetails() async {
-    final reqId = (widget.marketingRequestId ?? '').trim();
+    if (!await _ensureMarketingSubscriptionForPropertyDetails()) return;
+    if (!mounted) return;
+    final reqId = _effectiveMarketingRequestId.trim();
     if (reqId.isEmpty) return;
     final inv = (widget.marketingInviteId ?? '').trim();
     final hint = _property.price > 0 ? _property.price : null;
@@ -362,8 +725,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  void _openMarketingListingStatusPage() {
-    final rid = (widget.marketingRequestId ?? '').trim();
+  Future<void> _openMarketingListingStatusPage() async {
+    if (!await _ensureMarketingSubscriptionForPropertyDetails()) return;
+    if (!mounted) return;
+    final rid = _effectiveMarketingRequestId.trim();
     if (rid.isEmpty) return;
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -375,79 +740,49 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
-  Future<void> _openMarketerOfferTrackFromDetails() async {
-    final rid = (widget.marketingRequestId ?? '').trim();
-    if (rid.isEmpty) return;
+  Future<void> _openMarketingTrackingSheet() async {
+    final rid = _effectiveMarketingRequestId.trim();
     final uid = widget.currentUserId.trim();
-
-    String fmt(dynamic v) {
-      if (v == null) return '—';
-      final dt = DateTime.tryParse(v.toString());
-      if (dt == null) return v.toString();
-      return dt.toLocal().toString().split('.').first;
-    }
-
-    Map<String, dynamic>? req;
-    Map<String, dynamic>? myOffer;
-    try {
-      req = await MarketingFlowService(_sb).ownerListingRequestSnapshot(rid);
-      final rows = await _sb
-          .from('listing_offers')
-          .select('created_at, owner_responded_at, status')
-          .eq('request_id', rid)
-          .eq('marketer_id', uid)
-          .order('created_at', ascending: false)
-          .limit(1);
-      if (rows.isNotEmpty) {
-        myOffer = Map<String, dynamic>.from(rows.first as Map);
-      }
-    } catch (_) {}
-
-    if (!mounted) return;
-    final viewed = req?['owner_viewed_offers_at'];
-    await showDialog<void>(
+    if (rid.isEmpty || uid.isEmpty) return;
+    await showListingMarketingTrackingSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(widget.isAr ? 'تتبع العرض' : 'Offer tracking'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.isAr ? 'تاريخ إرسال عرضك' : 'Your offer sent',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              Text(fmt(myOffer?['created_at'])),
-              const SizedBox(height: 12),
-              Text(
-                widget.isAr
-                    ? 'أول مشاهدة للمالك لصفحة العروض'
-                    : 'Owner first viewed offers page',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              Text(
-                viewed != null
-                    ? fmt(viewed)
-                    : (widget.isAr ? 'لا يوجد سجل بعد' : 'No record yet'),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                widget.isAr
-                    ? 'استجابة المالك (إن وُجدت)'
-                    : 'Owner response timestamp',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              Text(fmt(myOffer?['owner_responded_at'])),
-            ],
-          ),
+      sb: _sb,
+      requestId: rid,
+      isAr: widget.isAr,
+      viewerUserId: uid,
+    );
+  }
+
+  void _openOwnerOffersFromDetails() {
+    final rid = _effectiveOwnerListingRequestId.trim();
+    if (rid.isEmpty) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => OwnerOffersPage(
+          requestId: rid,
+          lang: _marketingLang,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(widget.isAr ? 'إغلاق' : 'Close'),
-          ),
-        ],
+      ),
+    );
+  }
+
+  Future<void> _openMarketerListingContractDetails() async {
+    if (!await _ensureMarketingSubscriptionForPropertyDetails()) return;
+    if (!mounted) return;
+    final cid = (_resolvedListingContractId ?? '').trim();
+    if (cid.isEmpty) {
+      await _openMarketingListingStatusPage();
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ListingContractChatPage(
+          contractId: cid,
+          lang: _marketingLang,
+          strictReadOnly: true,
+          lockAfterOwnerSigns: true,
+        ),
       ),
     );
   }
@@ -620,6 +955,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   List<String> get _galleryUrls {
+    if (_property.defaultCoverUsed) return const [];
     final out = <String>[];
 
     for (final raw in _property.images) {
@@ -647,13 +983,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         lang: widget.isAr ? 'ar' : 'en',
       );
 
-  String? get _firstShareImageUrl =>
-      _galleryUrls.isNotEmpty ? _galleryUrls.first : null;
+  String get _shareImageUrlForRichShare =>
+      _galleryUrls.isNotEmpty
+          ? _galleryUrls.first
+          : PropertyListingDisplay.propertySharePreviewUrl(_property, _sb);
 
   String get _shareBodyWithLinkAndBrand {
-    final brand = widget.isAr
-        ? 'موثوق العقاري — Motawoq Real Estate'
-        : 'Motawoq Real Estate — موثوق العقاري';
+    final brand = AppBranding.shareBrandLine(isAr: widget.isAr);
     final more = widget.isAr
         ? 'لمزيد من معلومات العقار والصور، قم بزيارة  الرابط:'
         : 'More photos and full details at:';
@@ -751,6 +1087,99 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  Future<void> _onGuestSubmitOfferTap() async {
+    final choice = await showGuestHomeOfferGateSheet(
+      context: context,
+      isAr: widget.isAr,
+    );
+    if (!mounted) return;
+    if (choice == GuestHomeOfferGateResult.login) {
+      await Navigator.of(context).pushNamed('/login');
+      return;
+    }
+    if (choice == GuestHomeOfferGateResult.register) {
+      await Navigator.of(context, rootNavigator: true).pushNamed('/register');
+      return;
+    }
+    if (choice == GuestHomeOfferGateResult.payOnce) {
+      final paid = await runGuestOneTimePaymentFlow(
+        context: context,
+        isAr: widget.isAr,
+        unlockKind: 'offer',
+      );
+      if (!paid || !mounted) return;
+      final up = await GuestSessionBridge.tryEstablishBrowsingUser(
+        sb: Supabase.instance.client,
+        appSession: context.read<AppSession>(),
+      );
+      if (!mounted) return;
+      if (up) {
+        await GuestUnlockService.clear();
+        if (mounted) Navigator.of(context).pop();
+      } else {
+        await GuestUnlockService.clear();
+        _snack(
+          widget.isAr
+              ? 'فعّل تسجيل الدخول المجهول في Supabase أو أنشئ حساباً.'
+              : 'Enable anonymous sign-in in Supabase or create an account.',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Widget _guestParticipationBottomBar(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 10,
+      color: cs.surface,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: SafeArea(
+          top: false,
+          child: FilledButton.icon(
+            onPressed: () => unawaited(_onGuestSubmitOfferTap()),
+            icon: const Icon(Icons.local_offer_outlined),
+            label: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buyerCompleteDealBottomBar(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 10,
+      color: cs.surface,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: SafeArea(
+          top: false,
+          child: FilledButton.icon(
+            onPressed: _loadingBuyerDealAccess
+                ? null
+                : () async {
+                    final fn = widget.onCompleteDeal;
+                    if (fn == null) return;
+                    await fn(_property);
+                    if (!mounted) return;
+                    await _loadBuyerDealAccess();
+                  },
+            icon: _loadingBuyerDealAccess
+                ? SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: AppLogoLoading(compact: true, size: 20),
+                  )
+                : const Icon(Icons.handshake_outlined),
+            label: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openChatWithMarketer() async {
     if (_isGuest) {
       _snackLoginRequired();
@@ -764,6 +1193,46 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         isError: true,
       );
       return;
+    }
+    if (_isPublicBuyerOnPublishedListing) {
+      if (!_viewerInCartForListing) {
+        _snack(
+          widget.isAr
+              ? 'أكمل الصفقة أولاً (أضف الإعلان إلى صفقاتك) ثم يمكنك مراسلة المسوّق.'
+              : 'Complete the deal first (add to My deals), then you can message the marketer.',
+          isError: true,
+        );
+        return;
+      }
+      if (!await SubscriptionGateHelper.ensure(
+        context,
+        isAr: widget.isAr,
+        action: SubscriptionGateAction.completeMarketDeal,
+        onGoSubscribe: () {
+          if (!mounted) return;
+          final lang = widget.isAr ? 'ar' : 'en';
+          unawaited(
+            Navigator.of(context).push<void>(
+              MaterialPageRoute<void>(
+                settings: const RouteSettings(
+                  name: '/propertyDetails/subscriptions',
+                ),
+                builder: (_) => SubscriptionsRootScreen(
+                  lang: lang,
+                  accountType: '',
+                  embedAppBar: true,
+                  marketOfferPlansOnly: true,
+                ),
+              ),
+            ),
+          );
+        },
+      )) {
+        return;
+      }
+      if (!mounted) return;
+      await _loadBuyerDealAccess();
+      if (!mounted || !_publicBuyerMayChatMarketer) return;
     }
     if (_openingChat) return;
 
@@ -963,16 +1432,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return c;
   }
 
-  double get _basePrice {
+  /// السعر المُدخل من المعلن (أو المزايدة الحالية في المزاد) قبل أي حساب.
+  double get _enteredPrice {
     final p = _property.price.toDouble();
     final bid = (_property.currentBid ?? p).toDouble();
     return _property.isAuction ? bid : p;
   }
 
-  double get _vatAmount => _basePrice * 0.05;
-  double get _platformFee => _basePrice * 0.025;
-  double get _totalAfterVat => _basePrice + _vatAmount;
-  double get _finalTotal => _basePrice + _vatAmount + _platformFee;
+  /// تفاصيل الفاتورة المطابقة لـ ZATCA / REGA — مشتقة من بيانات العقار المخزّنة.
+  ListingInvoiceModel get _invoice => ListingInvoiceModel(
+        enteredPrice: _enteredPrice,
+        priceIncludesVat: _property.priceIncludesVat,
+        vatRate: _property.vatRate,
+        commissionKind: _property.marketingCommissionKind,
+        commissionRate: _property.marketingCommissionRate,
+        commissionAmount: _property.marketingCommissionAmount,
+        currencyCode: _currencyCode,
+      );
+
+  /// السعر الأساسي قبل الضريبة (يستحقّه البائع).
+  double get _basePrice => _invoice.basePrice;
+  double get _vatAmount => _invoice.vatAmount;
+  double get _platformFee => _invoice.commissionTotal;
+  double get _totalAfterVat => _invoice.totalWithVat;
+  double get _finalTotal => _invoice.finalTotal;
 
   String get _licensedMarketerPhone =>
       _licenseField('rega_ad_responsible_mobile');
@@ -986,15 +1469,20 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? '\n📞 ${widget.isAr ? 'تواصل المسوّق (بيانات ترخيص الهيئة):' : 'Marketer (REGA license):'} $licPh'
         : '';
 
+    final vatNote = _property.priceIncludesVat
+        ? (widget.isAr ? 'محتسبة ضمن المبلغ' : 'included in total')
+        : (widget.isAr ? 'مضافة على المبلغ' : 'added on top');
+    final commissionLine = _platformFee > 0
+        ? '\n🌐 ${widget.isAr ? 'عمولة التسويق:' : 'Marketing commission:'} ${_formatNumber(_platformFee)} $_currencySymbol'
+        : '';
     return '''
 🏡 ${_property.title}
 📍 ${widget.isAr ? 'الموقع:' : 'Location:'} ${_property.locationText}
 $licLine
-💰 ${widget.isAr ? 'السعر:' : 'Price:'} ${_formatNumber(_basePrice)} $_currencySymbol
-🧾 ${widget.isAr ? 'الضريبة (5%):' : 'VAT (5%):'} ${_formatNumber(_vatAmount)} $_currencySymbol
-✅ ${widget.isAr ? 'الإجمالي بعد الضريبة:' : 'Total after VAT:'} ${_formatNumber(_totalAfterVat)} $_currencySymbol
-🌐 ${widget.isAr ? 'عمولة المنصة (2.5%):' : 'Platform fee (2.5%):'} ${_formatNumber(_platformFee)} $_currencySymbol
-🏁 ${widget.isAr ? 'الإجمالي النهائي:' : 'Final total:'} ${_formatNumber(_finalTotal)} $_currencySymbol$coordsText
+💰 ${widget.isAr ? 'السعر الأساسي:' : 'Base price:'} ${_formatNumber(_basePrice)} $_currencySymbol
+🧾 ${widget.isAr ? 'الضريبة (5%) — $vatNote:' : 'VAT (5%) — $vatNote:'} ${_formatNumber(_vatAmount)} $_currencySymbol
+✅ ${widget.isAr ? 'الإجمالي مع الضريبة:' : 'Total with VAT:'} ${_formatNumber(_totalAfterVat)} $_currencySymbol$commissionLine
+🏁 ${widget.isAr ? 'المجموع النهائي:' : 'Final total:'} ${_formatNumber(_finalTotal)} $_currencySymbol$coordsText
 
 #Aqar #${widget.isAr ? 'عقار' : 'RealEstate'}
 ''';
@@ -1180,7 +1668,7 @@ $licLine
                         ),
                       ],
                       const SizedBox(height: 8),
-                      TextField(
+                      AqarTextField(
                         controller: minCtrl,
                         keyboardType: const TextInputType.numberWithOptions(
                             decimal: true),
@@ -1557,7 +2045,7 @@ $licLine
                         },
                       ),
                       const SizedBox(height: 12),
-                      TextField(
+                      AqarTextField(
                         controller: amountCtrl,
                         keyboardType: const TextInputType.numberWithOptions(
                             decimal: true),
@@ -1569,7 +2057,7 @@ $licLine
                         ),
                       ),
                       const SizedBox(height: 10),
-                      TextField(
+                      AqarTextField(
                         controller: notesCtrl,
                         maxLines: 2,
                         decoration: InputDecoration(
@@ -1945,7 +2433,7 @@ $licLine
           ),
           if (canBid) ...[
             const SizedBox(height: 12),
-            TextField(
+            AqarTextField(
               controller: _bidAmountController,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
@@ -2158,7 +2646,7 @@ $licLine
           : 'Property listing — ${_property.title}';
       await shareListingRich(
         text: _shareBodyWithLinkAndBrand,
-        imageHttpUrl: _firstShareImageUrl,
+        imageHttpUrl: _shareImageUrlForRichShare,
         subject: subject,
       );
     } catch (e) {
@@ -2491,21 +2979,39 @@ $licLine
     final total = (videoLead ? 1 : 0) + imgs.length;
 
     if (total == 0) {
-      return Container(
-        height: 260,
-        color: cs.surfaceContainerHighest.withOpacity(0.6),
-        child: Center(
-          child: Icon(
-            Icons.image_not_supported_outlined,
-            size: 60,
-            color: cs.onSurfaceVariant,
+      return ColoredBox(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: const BrandingLogoImage(
+            fillFrame: true,
+            errorIcon: Icons.image_not_supported_outlined,
           ),
         ),
       );
     }
 
-    final safeIndex = _imgIndex >= total ? 0 : _imgIndex;
+    // صور فقط (بدون فيديو كغلاف): المعرض الموحّد مع أسهم وتكبير.
+    if (!videoLead) {
+      final idShort = _property.id.trim();
+      final wmTrace = idShort.length <= 8
+          ? idShort
+          : idShort.substring(idShort.length - 8);
+      return ListingMediaGallery(
+        imageUrls: imgs,
+        isAr: widget.isAr,
+        aspectRatio: 16 / 9,
+        maxHeight: 480,
+        borderRadius: 0,
+        initialIndex: 0,
+        watermark: ListingWatermarkOverlay(
+          traceId: wmTrace,
+          isAr: widget.isAr,
+        ),
+      );
+    }
 
+    final safeIndex = _imgIndex >= total ? 0 : _imgIndex;
     if (safeIndex != _imgIndex) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -2517,178 +3023,220 @@ $licLine
     final wmTrace =
         idShort.length <= 8 ? idShort : idShort.substring(idShort.length - 8);
 
-    return SizedBox(
-      height: 280,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          PageView.builder(
-            controller: _page,
-            itemCount: total,
-            onPageChanged: (i) => setState(() => _imgIndex = i),
-            itemBuilder: (_, i) {
-              if (videoLead && i == 0) {
-                final raw = _property.videoUrl!.trim();
-                final url = _resolveVideoPlayableUrl(raw);
-                return ClipRect(
-                  child: InlinePropertyVideoPlayer(
-                    videoUrl: url,
-                    isAr: widget.isAr,
+    void go(int delta) {
+      if (total <= 1) return;
+      final next = (_imgIndex + delta).clamp(0, total - 1);
+      _page.animateToPage(
+        next,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    final frame = ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 480),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            PageView.builder(
+              controller: _page,
+              itemCount: total,
+              onPageChanged: (i) => setState(() => _imgIndex = i),
+              itemBuilder: (_, i) {
+                if (videoLead && i == 0) {
+                  final raw = _property.videoUrl!.trim();
+                  final url = _resolveVideoPlayableUrl(raw);
+                  return ClipRect(
+                    child: InlinePropertyVideoPlayer(
+                      videoUrl: url,
+                      isAr: widget.isAr,
+                    ),
+                  );
+                }
+                final imgIndex = videoLead ? i - 1 : i;
+                final imageUrl = imgs[imgIndex];
+                return GestureDetector(
+                  onTap: () {
+                    // فتح معرض الصور فقط (تخطي شريحة الفيديو).
+                    showDialog<void>(
+                      context: context,
+                      barrierColor: Colors.black.withValues(alpha: 0.92),
+                      builder: (_) => ListingImageLightbox(
+                        urls: imgs,
+                        initialIndex: imgIndex.clamp(0, imgs.length - 1),
+                        isAr: widget.isAr,
+                      ),
+                    );
+                  },
+                  child: CachedNetworkImage(
+                    imageUrl: imageUrl,
+                    fit: BoxFit.cover,
+                    memCacheWidth: kIsWeb ? 900 : 1400,
+                    memCacheHeight: kIsWeb ? 650 : 1000,
+                    placeholder: (_, __) => const Center(
+                      child: AppLogoLoading(compact: true, size: 40),
+                    ),
+                    errorWidget: (_, __, error) {
+                      debugPrint(
+                        'PropertyDetails image load error: $error | url=$imageUrl',
+                      );
+                      return ColoredBox(
+                        color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
+                        child: const Center(
+                          child: BrandingLogoImage(
+                            fit: BoxFit.contain,
+                            errorIcon: Icons.broken_image_outlined,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 );
-              }
-              final imgIndex = videoLead ? i - 1 : i;
-              final imageUrl = imgs[imgIndex];
-
-              return Image.network(
-                imageUrl,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, p) {
-                  if (p == null) return child;
-                  final totalBytes = p.expectedTotalBytes;
-                  final loaded = p.cumulativeBytesLoaded;
-
-                  return Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const AppLogoLoading(compact: true, size: 48),
-                        if (totalBytes != null && totalBytes > 0) ...[
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: 120,
-                            child: LinearProgressIndicator(
-                              value: loaded / totalBytes,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                },
-                errorBuilder: (_, __, error) {
-                  debugPrint(
-                    'PropertyDetails image load error: $error | url=$imageUrl',
-                  );
-                  return Container(
-                    color: cs.surfaceContainerHighest.withOpacity(0.6),
-                    child: Center(
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        size: 60,
-                        color: cs.onSurfaceVariant,
+              },
+            ),
+            ListingWatermarkOverlay(traceId: wmTrace, isAr: widget.isAr),
+            PositionedDirectional(
+              top: 10,
+              start: 10,
+              child: _Pill(
+                text: '${safeIndex + 1} / $total',
+                icon: safeIndex == 0
+                    ? Icons.videocam_outlined
+                    : Icons.photo_library_outlined,
+              ),
+            ),
+            if (total > 1) ...[
+              Positioned(
+                left: 6,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => go(-1),
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.chevron_left_rounded,
+                            color: Colors.white, size: 26),
                       ),
                     ),
-                  );
-                },
-              );
-            },
-          ),
-          ListingWatermarkOverlay(traceId: wmTrace, isAr: widget.isAr),
-          PositionedDirectional(
-            top: 14,
-            start: 14,
-            child: _Pill(
-              text: '${safeIndex + 1} / $total',
-              icon: videoLead && safeIndex == 0
-                  ? Icons.videocam_outlined
-                  : Icons.photo_library_outlined,
-            ),
-          ),
-          PositionedDirectional(
-            bottom: 10,
-            start: 10,
-            end: 10,
-            child: _buildThumbs(imgs, videoLead: videoLead),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildThumbs(List<String> imgs, {required bool videoLead}) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.35),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            if (videoLead)
-              GestureDetector(
-                onTap: () => _page.animateToPage(
-                  0,
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOut,
-                ),
-                child: Container(
-                  width: 62,
-                  height: 48,
-                  margin: const EdgeInsetsDirectional.only(end: 8),
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      width: _imgIndex == 0 ? 2 : 1,
-                      color: _imgIndex == 0
-                          ? const Color(0xFF0F766E)
-                          : cs.outlineVariant.withOpacity(0.8),
-                    ),
-                    color: Colors.black.withOpacity(0.45),
-                  ),
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    color: Colors.white.withOpacity(0.9),
-                    size: 32,
                   ),
                 ),
               ),
-            ...List.generate(imgs.length, (i) {
-              final pageIndex = videoLead ? i + 1 : i;
-              final selected = pageIndex == _imgIndex;
-
-              return GestureDetector(
-                onTap: () => _page.animateToPage(
-                  pageIndex,
-                  duration: const Duration(milliseconds: 250),
-                  curve: Curves.easeOut,
-                ),
-                child: Container(
-                  width: 62,
-                  height: 48,
-                  margin: const EdgeInsetsDirectional.only(end: 8),
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      width: selected ? 2 : 1,
-                      color: selected
-                          ? const Color(0xFF0F766E)
-                          : cs.outlineVariant.withOpacity(0.8),
-                    ),
-                  ),
-                  child: Image.network(
-                    imgs[i],
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      color: cs.surfaceContainerHighest.withOpacity(0.55),
-                      child: Icon(
-                        Icons.image_not_supported_outlined,
-                        size: 18,
-                        color: cs.onSurfaceVariant,
+              Positioned(
+                right: 6,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: () => go(1),
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.chevron_right_rounded,
+                            color: Colors.white, size: 26),
                       ),
                     ),
                   ),
                 ),
-              );
-            }),
+              ),
+            ],
           ],
         ),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: frame,
+          ),
+          if (total > 1) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 56,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  GestureDetector(
+                    onTap: () => _page.animateToPage(
+                      0,
+                      duration: const Duration(milliseconds: 250),
+                      curve: Curves.easeOut,
+                    ),
+                    child: Container(
+                      width: 72,
+                      margin: const EdgeInsetsDirectional.only(end: 8),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          width: _imgIndex == 0 ? 2.2 : 1,
+                          color: _imgIndex == 0
+                              ? const Color(0xFF0F766E)
+                              : cs.outlineVariant.withValues(alpha: 0.75),
+                        ),
+                        color: Colors.black87,
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded,
+                          color: Colors.white, size: 28),
+                    ),
+                  ),
+                  ...List.generate(imgs.length, (i) {
+                    final pageIndex = i + 1;
+                    final selected = pageIndex == _imgIndex;
+                    return GestureDetector(
+                      onTap: () => _page.animateToPage(
+                        pageIndex,
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOut,
+                      ),
+                      child: Container(
+                        width: 72,
+                        margin: const EdgeInsetsDirectional.only(end: 8),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            width: selected ? 2.2 : 1,
+                            color: selected
+                                ? const Color(0xFF0F766E)
+                                : cs.outlineVariant.withValues(alpha: 0.75),
+                          ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: CachedNetworkImage(
+                          imageUrl: imgs[i],
+                          fit: BoxFit.cover,
+                          memCacheWidth: 220,
+                          memCacheHeight: 160,
+                          errorWidget: (_, __, ___) => ColoredBox(
+                            color: cs.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              size: 16,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -2754,12 +3302,14 @@ $licLine
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Image.network(
-                  staticUrl,
+                CachedNetworkImage(
+                  imageUrl: staticUrl,
                   height: 210,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  memCacheWidth: kIsWeb ? 900 : 1200,
+                  memCacheHeight: kIsWeb ? 420 : 560,
+                  errorWidget: (_, __, ___) => Container(
                     height: 210,
                     color: cs.surfaceContainerHighest,
                     alignment: Alignment.center,
@@ -2795,30 +3345,89 @@ $licLine
                 Icon(
                   Icons.location_pin,
                   size: 48,
-                  color: cs.primary,
+                  color: AqarBrandColors.primary,
                 ),
                 PositionedDirectional(
                   start: 12,
                   top: 12,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  end: 88,
+                  child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: cs.primary,
-                      borderRadius: BorderRadius.circular(999),
+                      color: AqarBrandColors.primary,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: AqarBrandColors.gold.withValues(alpha: 0.7),
+                        width: 1.4,
+                      ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.20),
+                          color: Colors.black.withValues(alpha: 0.22),
                           blurRadius: 14,
                           offset: const Offset(0, 6),
                         ),
                       ],
                     ),
-                    child: Text(
-                      priceLabel,
-                      style: TextStyle(
-                        color: cs.onPrimary,
-                        fontWeight: FontWeight.w900,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            priceLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            PropertyListingDisplay.displayListingTitle(
+                              _property,
+                              widget.isAr,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.95),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                          if ([
+                            if ((_property.location ?? '').trim().isNotEmpty)
+                              _property.location!.trim(),
+                            if (_property.city.trim().isNotEmpty &&
+                                !PropertyListingDisplay.displayListingTitle(
+                                      _property,
+                                      widget.isAr,
+                                    )
+                                    .contains(_property.city.trim()))
+                              _property.city.trim(),
+                          ].isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              [
+                                if ((_property.location ?? '')
+                                    .trim()
+                                    .isNotEmpty)
+                                  _property.location!.trim(),
+                                if (_property.city.trim().isNotEmpty)
+                                  _property.city.trim(),
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontWeight: FontWeight.w600,
+                                fontSize: 11.5,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   ),
@@ -2840,8 +3449,8 @@ $licLine
           padding: const EdgeInsets.only(top: 4),
           child: Text(
             widget.isAr
-                ? 'اضغط على الخريطة لتكبير موقع العقار'
-                : 'Tap the map to zoom into this listing',
+                ? 'اضغط الخريطة لفتح الموقع مع وصف الدبوس على الخريطة'
+                : 'Tap the map to open the location with a rich pin description',
             style: TextStyle(
               fontSize: 10,
               color: cs.onSurfaceVariant,
@@ -3035,6 +3644,10 @@ $licLine
       child: Scaffold(
         backgroundColor: cs.surface,
         appBar: AppBar(
+          // عند الفتح داخل لوحة الداشبورد: الشريط العلوي يعرض سهم الرجوع
+          // الموحَّد، فنخفي السهم الداخلي. عند الفتح من رابط مباشر فإن
+          // [canPop] أصلاً false فلا فرق.
+          automaticallyImplyLeading: !widget.embedAppBar,
           title: Text(
             widget.isAr ? 'تفاصيل العقار' : 'Property details',
           ),
@@ -3105,7 +3718,10 @@ $licLine
                           children: [
                             Expanded(
                               child: Text(
-                                _property.title,
+                                PropertyListingDisplay.displayListingTitle(
+                                  _property,
+                                  widget.isAr,
+                                ),
                                 style: const TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w900,
@@ -3120,53 +3736,60 @@ $licLine
                           ],
                         ),
                       ),
-                      if ((_property.listingPublicCode ?? '')
-                          .trim()
-                          .isNotEmpty) ...[
-                        const SizedBox(height: 8),
+                      if (_hasDeedInfo) ...[
+                        const SizedBox(height: 12),
                         _Card(
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Icon(
-                                Icons.tag_outlined,
-                                size: 20,
-                                color: cs.primary,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: SelectableText(
-                                  widget.isAr
-                                      ? 'رقم الإعلان: ${DisplayIds.plainNumericOrClean(_property.listingPublicCode)}'
-                                      : 'Listing ID: ${DisplayIds.plainNumericOrClean(_property.listingPublicCode)}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: cs.onSurface,
-                                  ),
+                              Text(
+                                widget.isAr
+                                    ? 'بيانات الصك'
+                                    : 'Deed information',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
-                              IconButton(
-                                tooltip: widget.isAr
-                                    ? 'نسخ رقم الإعلان'
-                                    : 'Copy listing ID',
-                                onPressed: () async {
-                                  final code = DisplayIds.plainNumericOrClean(
-                                    _property.listingPublicCode,
-                                  );
-                                  await Clipboard.setData(
-                                      ClipboardData(text: code));
-                                  if (!context.mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        widget.isAr
-                                            ? 'تم نسخ رقم الإعلان'
-                                            : 'Listing ID copied',
-                                      ),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.copy_rounded),
-                              ),
+                              const SizedBox(height: 8),
+                              if (_deedNumberDisplay.isNotEmpty)
+                                _InfoRow(
+                                  icon: Icons.numbers_outlined,
+                                  title:
+                                      widget.isAr ? 'رقم الصك' : 'Deed number',
+                                  value: _maskDeedNumber(_deedNumberDisplay),
+                                  copyValue:
+                                      _maskDeedNumber(_deedNumberDisplay),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم نسخ رقم الصك (كما يظهر)'
+                                      : 'Deed number copied (as shown)',
+                                ),
+                              if (_deedDateDisplay.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                _InfoRow(
+                                  icon: Icons.calendar_today_outlined,
+                                  title:
+                                      widget.isAr ? 'تاريخ الصك' : 'Deed date',
+                                  value: _deedDateDisplay,
+                                  copyValue: _deedDateDisplay,
+                                  copiedMessage: widget.isAr
+                                      ? 'تم نسخ تاريخ الصك'
+                                      : 'Deed date copied',
+                                ),
+                              ],
+                              if (_deedIssuerDisplay.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                _InfoRow(
+                                  icon: Icons.account_balance_outlined,
+                                  title: widget.isAr
+                                      ? 'الجهة المصدرة'
+                                      : 'Issuing authority',
+                                  value: _deedIssuerDisplay,
+                                  copyValue: _deedIssuerDisplay,
+                                  copiedMessage: widget.isAr
+                                      ? 'تم نسخ اسم الجهة'
+                                      : 'Issuer copied',
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -3228,6 +3851,152 @@ $licLine
                                           ),
                                         ),
                                       ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Theme(
+                                      data: Theme.of(context).copyWith(
+                                        dividerColor: Colors.transparent,
+                                      ),
+                                      child: ExpansionTile(
+                                        initiallyExpanded: true,
+                                        maintainState: true,
+                                        tilePadding: EdgeInsets.zero,
+                                        expandedAlignment: widget.isAr
+                                            ? Alignment.centerRight
+                                            : Alignment.centerLeft,
+                                        childrenPadding: const EdgeInsets.only(
+                                          top: 6,
+                                          bottom: 2,
+                                        ),
+                                        leading: Icon(
+                                          Icons.article_outlined,
+                                          size: 22,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                        title: Text(
+                                          widget.isAr
+                                              ? 'البيانات التنظيمية للإعلان'
+                                              : 'Structured listing data',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 15,
+                                            fontFamily: 'Cairo',
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
+                                          ),
+                                        ),
+                                        children: [
+                                          ListingFormattedSpecPanel(
+                                            property: _property,
+                                            isAr: widget.isAr,
+                                            omitDeedSection: _hasDeedInfo,
+                                          ),
+                                          const SizedBox(height: 10),
+                                          LayoutBuilder(
+                                            builder: (context, c) {
+                                              final narrow = c.maxWidth < 420;
+                                              final verifyBtn = FilledButton.tonalIcon(
+                                                onPressed: () async {
+                                                  final src =
+                                                      _licenseField('rega_source_url')
+                                                          .trim();
+                                                  final license =
+                                                      _licenseField(
+                                                              'rega_ad_license_number')
+                                                          .trim();
+                                                  Uri? u;
+                                                  if (src.isNotEmpty) {
+                                                    u = Uri.tryParse(src);
+                                                  }
+                                                  u ??= Uri.tryParse(
+                                                    license.isNotEmpty
+                                                        ? 'https://eservicesredp.rega.gov.sa/public/OfficesBroker/ElanDetails/$license'
+                                                        : 'https://rega.gov.sa',
+                                                  );
+                                                  if (u == null) return;
+                                                  if (!context.mounted) return;
+                                                  await Navigator.of(context)
+                                                      .push<void>(
+                                                    MaterialPageRoute<void>(
+                                                      builder: (_) =>
+                                                          GovernmentInAppWebViewPage(
+                                                        uri: u!,
+                                                        title: widget.isAr
+                                                            ? 'الهيئة العامة للعقار'
+                                                            : 'REGA',
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                                icon: const Icon(
+                                                  Icons.verified_outlined,
+                                                  size: 18,
+                                                ),
+                                                label: Text(
+                                                  widget.isAr
+                                                      ? 'التحقق من الإعلان في الهيئة'
+                                                      : 'Verify listing on REGA',
+                                                  maxLines: 1,
+                                                  softWrap: false,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w900,
+                                                    fontFamily: 'Cairo',
+                                                  ),
+                                                ),
+                                              );
+                                              final mapBtn = OutlinedButton.icon(
+                                                onPressed: (lat != null ||
+                                                        _property.latitude !=
+                                                            null)
+                                                    ? () => unawaited(
+                                                          _openExternalPropertyMap(),
+                                                        )
+                                                    : null,
+                                                icon: const Icon(
+                                                  Icons.map_outlined,
+                                                  size: 18,
+                                                ),
+                                                label: Text(
+                                                  widget.isAr
+                                                      ? 'الموقع على الخريطة'
+                                                      : 'Open on map',
+                                                  maxLines: 1,
+                                                  softWrap: false,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w900,
+                                                    fontFamily: 'Cairo',
+                                                  ),
+                                                ),
+                                              );
+                                              if (narrow) {
+                                                return Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.stretch,
+                                                  children: [
+                                                    verifyBtn,
+                                                    const SizedBox(height: 8),
+                                                    mapBtn,
+                                                  ],
+                                                );
+                                              }
+                                              return Row(
+                                                children: [
+                                                  Expanded(child: verifyBtn),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(child: mapBtn),
+                                                ],
+                                              );
+                                            },
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                     if (!showOwnerIdentity) ...[
                                       const SizedBox(height: 8),
@@ -3309,14 +4078,18 @@ $licLine
                                 ],
                               ),
                             ),
-                            if (_showMarketerChatButton ||
+                            if ((_showMarketerChatButton &&
+                                    (!_isListingOwner ||
+                                        _ownerOffersCount > 0)) ||
                                 _canOpenListingOwnerChat) ...[
                               const SizedBox(width: 8),
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  if (_showMarketerChatButton)
+                                  if (_showMarketerChatButton &&
+                                      (!_isListingOwner ||
+                                          _ownerOffersCount > 0))
                                     SizedBox(
                                       height: 42,
                                       child: ElevatedButton.icon(
@@ -3360,6 +4133,8 @@ $licLine
                                       ),
                                     ),
                                   if (_showMarketerChatButton &&
+                                      (!_isListingOwner ||
+                                          _ownerOffersCount > 0) &&
                                       _canOpenListingOwnerChat)
                                     const SizedBox(height: 8),
                                   if (_canOpenListingOwnerChat)
@@ -3483,6 +4258,12 @@ $licLine
                               icon: Icons.location_on_outlined,
                               title: widget.isAr ? 'العنوان' : 'Address',
                               value: _property.locationText,
+                              copyValue: _property.locationText.trim().isEmpty
+                                  ? null
+                                  : _property.locationText.trim(),
+                              copiedMessage: widget.isAr
+                                  ? 'تم نسخ العنوان'
+                                  : 'Address copied',
                             ),
                             if ((_property.buildingNumber ?? '')
                                 .trim()
@@ -3493,6 +4274,10 @@ $licLine
                                 title:
                                     widget.isAr ? 'رقم المبنى' : 'Building no.',
                                 value: _property.buildingNumber!.trim(),
+                                copyValue: _property.buildingNumber!.trim(),
+                                copiedMessage: widget.isAr
+                                    ? 'تم نسخ رقم المبنى'
+                                    : 'Building number copied',
                               ),
                             ],
                             if ((_property.addressLine ?? '')
@@ -3505,6 +4290,10 @@ $licLine
                                     ? 'العنوان الوطني'
                                     : 'National address',
                                 value: _property.addressLine!.trim(),
+                                copyValue: _property.addressLine!.trim(),
+                                copiedMessage: widget.isAr
+                                    ? 'تم نسخ العنوان الوطني'
+                                    : 'National address copied',
                               ),
                             ],
                             const SizedBox(height: 10),
@@ -3512,52 +4301,53 @@ $licLine
                           ],
                         ),
                       ),
-                      if (_hasDeedInfo) ...[
-                        const SizedBox(height: 12),
+                      if ((_property.listingPublicCode ?? '')
+                          .trim()
+                          .isNotEmpty) ...[
+                        const SizedBox(height: 8),
                         _Card(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                          child: Row(
                             children: [
-                              Text(
-                                widget.isAr
-                                    ? 'بيانات الصك'
-                                    : 'Deed information',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
+                              Icon(
+                                Icons.tag_outlined,
+                                size: 20,
+                                color: cs.primary,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: SelectableText(
+                                  widget.isAr
+                                      ? 'رقم الإعلان: ${DisplayIds.tenDigit(_property.listingPublicCode)}'
+                                      : 'Listing no.: ${DisplayIds.tenDigit(_property.listingPublicCode)}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: cs.onSurface,
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              if ((_property.deedNumber ?? '')
-                                  .trim()
-                                  .isNotEmpty)
-                                _InfoRow(
-                                  icon: Icons.numbers_outlined,
-                                  title:
-                                      widget.isAr ? 'رقم الصك' : 'Deed number',
-                                  value: _maskDeedNumber(_property.deedNumber!),
-                                ),
-                              if (_property.deedDate != null) ...[
-                                const SizedBox(height: 8),
-                                _InfoRow(
-                                  icon: Icons.calendar_today_outlined,
-                                  title:
-                                      widget.isAr ? 'تاريخ الصك' : 'Deed date',
-                                  value:
-                                      '${_property.deedDate!.year}-${_property.deedDate!.month.toString().padLeft(2, '0')}-${_property.deedDate!.day.toString().padLeft(2, '0')}',
-                                ),
-                              ],
-                              if ((_property.deedIssuer ?? '')
-                                  .trim()
-                                  .isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                _InfoRow(
-                                  icon: Icons.account_balance_outlined,
-                                  title: widget.isAr
-                                      ? 'الجهة المصدرة'
-                                      : 'Issuing authority',
-                                  value: _property.deedIssuer!.trim(),
-                                ),
-                              ],
+                              IconButton(
+                                tooltip: widget.isAr
+                                    ? 'نسخ رقم الإعلان'
+                                    : 'Copy listing ID',
+                                onPressed: () async {
+                                  final code = DisplayIds.tenDigit(
+                                    _property.listingPublicCode,
+                                  );
+                                  await Clipboard.setData(
+                                      ClipboardData(text: code));
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        widget.isAr
+                                            ? 'تم نسخ رقم الإعلان'
+                                            : 'Listing ID copied',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.copy_rounded),
+                              ),
                             ],
                           ),
                         ),
@@ -3597,6 +4387,11 @@ $licLine
                                       : 'Ad license no.',
                                   value:
                                       _licenseField('rega_ad_license_number'),
+                                  copyValue:
+                                      _licenseField('rega_ad_license_number'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               if (_licenseField('rega_issue_date')
                                   .isNotEmpty) ...[
@@ -3607,6 +4402,11 @@ $licLine
                                       ? 'تاريخ الإصدار'
                                       : 'Issue date',
                                   value: _licenseField('rega_issue_date'),
+                                  copyValue:
+                                      _licenseField('rega_issue_date'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('rega_expiry_date')
@@ -3618,6 +4418,11 @@ $licLine
                                       ? 'تاريخ الانتهاء'
                                       : 'Expiry date',
                                   value: _licenseField('rega_expiry_date'),
+                                  copyValue:
+                                      _licenseField('rega_expiry_date'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('fal_broker_license_number')
@@ -3630,6 +4435,11 @@ $licLine
                                       : 'FAL broker license',
                                   value: _licenseField(
                                       'fal_broker_license_number'),
+                                  copyValue: _licenseField(
+                                      'fal_broker_license_number'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('deed_or_benefit_doc_number')
@@ -3642,6 +4452,11 @@ $licLine
                                       : 'Deed / benefit doc no.',
                                   value: _licenseField(
                                       'deed_or_benefit_doc_number'),
+                                  copyValue: _licenseField(
+                                      'deed_or_benefit_doc_number'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField(
@@ -3655,6 +4470,11 @@ $licLine
                                       : 'Advertiser unified number',
                                   value: _licenseField(
                                       'rega_advertiser_unified_number'),
+                                  copyValue: _licenseField(
+                                      'rega_advertiser_unified_number'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('rega_ad_responsible_name')
@@ -3667,6 +4487,11 @@ $licLine
                                       : 'Ad responsible name',
                                   value:
                                       _licenseField('rega_ad_responsible_name'),
+                                  copyValue: _licenseField(
+                                      'rega_ad_responsible_name'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('rega_ad_responsible_mobile')
@@ -3679,6 +4504,11 @@ $licLine
                                       : 'Ad responsible mobile',
                                   value: _licenseField(
                                       'rega_ad_responsible_mobile'),
+                                  copyValue: _licenseField(
+                                      'rega_ad_responsible_mobile'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم نسخ رقم الجوال'
+                                      : 'Phone copied',
                                 ),
                               ],
                               if (_licenseField('rega_ad_purpose')
@@ -3690,6 +4520,11 @@ $licLine
                                       ? 'غرض الإعلان (الهيئة)'
                                       : 'REGA ad purpose',
                                   value: _licenseField('rega_ad_purpose'),
+                                  copyValue:
+                                      _licenseField('rega_ad_purpose'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('rega_unit_price')
@@ -3701,6 +4536,11 @@ $licLine
                                       ? 'سعر الوحدة (الهيئة)'
                                       : 'REGA unit price',
                                   value: _licenseField('rega_unit_price'),
+                                  copyValue:
+                                      _licenseField('rega_unit_price'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('notes').isNotEmpty) ...[
@@ -3709,6 +4549,10 @@ $licLine
                                   icon: Icons.notes_outlined,
                                   title: widget.isAr ? 'ملاحظات' : 'Notes',
                                   value: _licenseField('notes'),
+                                  copyValue: _licenseField('notes'),
+                                  copiedMessage: widget.isAr
+                                      ? 'تم النسخ'
+                                      : 'Copied',
                                 ),
                               ],
                               if (_licenseField('rega_source_url')
@@ -3798,12 +4642,14 @@ $licLine
                                     borderRadius: BorderRadius.circular(10),
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(10),
-                                      child: Image.network(
-                                        _normalizeImageUrl(
+                                      child: CachedNetworkImage(
+                                        imageUrl: _normalizeImageUrl(
                                             _licenseQrImageSrc()),
                                         height: 180,
                                         fit: BoxFit.contain,
-                                        errorBuilder: (_, __, ___) => Text(
+                                        memCacheWidth: 360,
+                                        memCacheHeight: 360,
+                                        errorWidget: (_, __, ___) => Text(
                                           widget.isAr
                                               ? 'تعذر تحميل الصورة'
                                               : 'Could not load image',
@@ -3845,8 +4691,7 @@ $licLine
                           ],
                         ),
                       ),
-                      if (_canUseMarketingOfferAction &&
-                          !_isPublishedLikeListing) ...[
+                      if (_showMarketingTrackingEntry) ...[
                         const SizedBox(height: 12),
                         _Card(
                           child: Column(
@@ -3854,37 +4699,44 @@ $licLine
                             children: [
                               Text(
                                 widget.isAr
-                                    ? 'إجراء التسويق'
-                                    : 'Marketing action',
+                                    ? 'تتبّع مسار التسويق'
+                                    : 'Marketing journey',
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.w900),
-                              ),
-                              const SizedBox(height: 8),
-                              if (_checkingMarketingOffer)
-                                const AppLogoLoading(compact: true, size: 24)
-                              else if (_offerSentThisRound)
-                                OutlinedButton.icon(
-                                  onPressed: _openMarketingListingStatusPage,
-                                  icon: const Icon(Icons.assignment_turned_in),
-                                  label: Text(
-                                    widget.isAr
-                                        ? 'تم إرسال عرضك - فتح حالة الطلب'
-                                        : 'Offer sent - open request status',
-                                  ),
-                                )
-                              else
-                                FilledButton.icon(
-                                  onPressed: _submitMarketingOfferFromDetails,
-                                  icon: const Icon(Icons.edit_note_outlined),
-                                  label: Text(
-                                    widget.isAr ? 'تقديم عرض' : 'Submit offer',
-                                  ),
+                                  fontWeight: FontWeight.w900,
                                 ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                widget.isAr
+                                    ? 'عرض دعوات وعروض وعقود والمراحل دون الخروج من صفحة العقار.'
+                                    : 'Invites, offers, contracts, and stages in one place.',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: cs.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              FilledButton.tonalIcon(
+                                onPressed: () =>
+                                    unawaited(_openMarketingTrackingSheet()),
+                                icon: const Icon(Icons.route_outlined),
+                                label: Text(
+                                  _isListingOwner
+                                      ? (widget.isAr
+                                          ? 'تتبّع طلب التسويق'
+                                          : 'Track marketing request')
+                                      : (widget.isAr
+                                          ? 'تتبّع عرضي التسويقي'
+                                          : 'Track my marketing offer'),
+                                ),
+                              ),
                             ],
                           ),
                         ),
                       ],
-                      if (_showMarketerHubShortcuts) ...[
+                      if (_ownerMarketingDeskEligible) ...[
                         const SizedBox(height: 12),
                         _Card(
                           child: Column(
@@ -3892,33 +4744,185 @@ $licLine
                             children: [
                               Text(
                                 widget.isAr
-                                    ? 'طلب التسويق والتعاقد'
-                                    : 'Marketing request & contract',
+                                    ? 'إدارة طلب التسويق'
+                                    : 'Manage marketing request',
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.w900),
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
                               const SizedBox(height: 10),
-                              OutlinedButton.icon(
-                                onPressed: _openMarketingListingStatusPage,
-                                icon: const Icon(Icons.assignment_outlined),
-                                label: Text(
-                                  widget.isAr
-                                      ? 'فتح حالة الطلب والتعاقد'
-                                      : 'Open request & contract status',
+                              if (_loadingWorkflowSidecars)
+                                const AppLogoLoading(compact: true, size: 24)
+                              else ...[
+                                if (_ownerShowsOffersEntry)
+                                  FilledButton.icon(
+                                    onPressed: _openOwnerOffersFromDetails,
+                                    icon: const Icon(Icons.local_offer_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'العروض المقدّمة'
+                                          : 'Submitted offers',
+                                    ),
+                                  ),
+                                if (_ownerShowsOffersEntry &&
+                                    _showMarketerChatButton)
+                                  const SizedBox(height: 8),
+                                if (_showMarketerChatButton &&
+                                    _isListingOwner &&
+                                    (_chatMarketerId ?? '').isNotEmpty &&
+                                    _ownerOffersCount > 0)
+                                  OutlinedButton.icon(
+                                    onPressed: _openingChat
+                                        ? null
+                                        : () {
+                                            unawaited(_openChatWithMarketer());
+                                          },
+                                    icon: const Icon(Icons.chat_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'المراسلة مع المسوّق'
+                                          : 'Message marketer',
+                                    ),
+                                  ),
+                                if (_ownerShowsContractDeskEntry) ...[
+                                  if (_ownerShowsOffersEntry ||
+                                      (_showMarketerChatButton &&
+                                          _isListingOwner))
+                                    const SizedBox(height: 8),
+                                  FilledButton.icon(
+                                    onPressed: () => unawaited(_openMarketingListingStatusPage()),
+                                    icon: const Icon(Icons.draw_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'توقيع العقد أو إلغاؤه'
+                                          : 'Sign or cancel contract',
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                      if (_showMarketerMarketingHubCard) ...[
+                        const SizedBox(height: 12),
+                        _Card(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                widget.isAr
+                                    ? 'التسويق والتعاقد'
+                                    : 'Marketing & contracting',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
                                 ),
                               ),
-                              if ((widget.marketerHubPhase ?? '')
-                                      .toLowerCase()
-                                      .trim() ==
-                                  'offer') ...[
-                                const SizedBox(height: 8),
-                                OutlinedButton.icon(
-                                  onPressed: _openMarketerOfferTrackFromDetails,
-                                  icon: const Icon(Icons.timeline_outlined),
-                                  label: Text(
-                                    widget.isAr ? 'تتبع العرض' : 'Track offer',
+                              const SizedBox(height: 10),
+                              if (_loadingWorkflowSidecars)
+                                const AppLogoLoading(compact: true, size: 24)
+                              else ...[
+                                if (_showMarketerSubmitOfferButton)
+                                  FilledButton.icon(
+                                    onPressed: _submitMarketingOfferFromDetails,
+                                    icon: const Icon(Icons.edit_note_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'إتمام الصفقة'
+                                          : 'Complete deal',
+                                    ),
                                   ),
-                                ),
+                                if (_offerSentThisRound &&
+                                    !_marketerWorkflowBlocksNewOffer) ...[
+                                  if (_showMarketerSubmitOfferButton)
+                                    const SizedBox(height: 8),
+                                  // بدل النص القصير القديم — بطاقة سياسة كاملة
+                                  // تشرح للمسوّق المسار من العرض إلى النشر
+                                  // ومنع التواصل المباشر مع المالك قبل التعاقد.
+                                  MarketerPolicyNoticeCard(
+                                    isAr: widget.isAr,
+                                    stageHint: MarketerPolicyStage.afterOffer,
+                                  ),
+                                ],
+                                if (_effectiveMarketerHubPhase == 'accepted' ||
+                                    _effectiveMarketerHubPhase == 'contract')
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: MarketerPolicyNoticeCard(
+                                      isAr: widget.isAr,
+                                      stageHint:
+                                          MarketerPolicyStage.contractPending,
+                                    ),
+                                  ),
+                                if (_effectiveMarketerHubPhase == 'signed')
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: MarketerPolicyNoticeCard(
+                                      isAr: widget.isAr,
+                                      stageHint:
+                                          MarketerPolicyStage.permitWindow,
+                                    ),
+                                  ),
+                                if (_effectiveMarketerHubPhase == 'accepted') ...[
+                                  if (_showMarketerSubmitOfferButton ||
+                                      (_offerSentThisRound &&
+                                          !_marketerWorkflowBlocksNewOffer))
+                                    const SizedBox(height: 8),
+                                  if (_showMarketerContract72Countdown) ...[
+                                    _MarketerContract72Countdown(
+                                      startAt: _resolvedContractStartedAt!,
+                                      isAr: widget.isAr,
+                                      supabase: _sb,
+                                    ),
+                                    const SizedBox(height: 8),
+                                  ],
+                                  FilledButton.icon(
+                                    onPressed: () => unawaited(_openMarketingListingStatusPage()),
+                                    icon: const Icon(Icons.description_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'إنشاء العقد'
+                                          : 'Create contract',
+                                    ),
+                                  ),
+                                ],
+                                if (_effectiveMarketerHubPhase == 'contract') ...[
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: () => unawaited(_openMarketerListingContractDetails()),
+                                    icon: const Icon(Icons.article_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'تفاصيل العقد (قراءة)'
+                                          : 'Contract details (read-only)',
+                                    ),
+                                  ),
+                                ],
+                                if (_effectiveMarketerHubPhase == 'signed') ...[
+                                  const SizedBox(height: 8),
+                                  FilledButton.icon(
+                                    onPressed: () => unawaited(_openMarketingListingStatusPage()),
+                                    icon: const Icon(Icons.verified_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'إصدار التصاريح'
+                                          : 'Issue permits',
+                                    ),
+                                  ),
+                                ],
+                                if (_effectiveMarketingRequestId
+                                    .isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: () => unawaited(_openMarketingListingStatusPage()),
+                                    icon: const Icon(Icons.dashboard_customize_outlined),
+                                    label: Text(
+                                      widget.isAr
+                                          ? 'لوحة الطلب والتعاقد'
+                                          : 'Request & contract hub',
+                                    ),
+                                  ),
+                                ],
                               ],
                             ],
                           ),
@@ -3975,6 +4979,11 @@ $licLine
                                     isOwner: _isListingOwner,
                                     isPublishingMarketer: _isPublishingMarketer,
                                     isAr: widget.isAr,
+                                    listingRequestId:
+                                        _effectiveMarketingRequestId.trim(),
+                                    currentUserId: _isGuest
+                                        ? null
+                                        : widget.currentUserId.trim(),
                                   ),
                                 ),
                                 if (_property.bedrooms != null)
@@ -4034,8 +5043,12 @@ $licLine
                                 title: widget.isAr
                                     ? 'رقم الإعلان'
                                     : 'Listing code',
-                                value: _property.listingPublicCode!.trim(),
-                                copyValue: _property.listingPublicCode!.trim(),
+                                value: DisplayIds.tenDigit(
+                                  _property.listingPublicCode,
+                                ),
+                                copyValue: DisplayIds.tenDigit(
+                                  _property.listingPublicCode,
+                                ),
                                 copiedMessage: widget.isAr
                                     ? 'تم نسخ رقم الإعلان'
                                     : 'Listing code copied',
@@ -4046,6 +5059,10 @@ $licLine
                                 icon: Icons.location_city_outlined,
                                 title: widget.isAr ? 'المدينة' : 'City',
                                 value: _property.city.trim(),
+                                copyValue: _property.city.trim(),
+                                copiedMessage: widget.isAr
+                                    ? 'تم نسخ المدينة'
+                                    : 'City copied',
                               ),
                             ],
                             if ((_property.province ?? '').trim().isNotEmpty ||
@@ -4058,6 +5075,13 @@ $licLine
                                   (_property.province ?? '').trim(),
                                   (_property.region ?? '').trim(),
                                 ].where((e) => e.isNotEmpty).join(' - '),
+                                copyValue: [
+                                  (_property.province ?? '').trim(),
+                                  (_property.region ?? '').trim(),
+                                ].where((e) => e.isNotEmpty).join(' - '),
+                                copiedMessage: widget.isAr
+                                    ? 'تم النسخ'
+                                    : 'Copied',
                               ),
                             ],
                             if ((_property.location ?? '').trim().isNotEmpty ||
@@ -4072,6 +5096,13 @@ $licLine
                                   (_property.location ?? '').trim(),
                                   (_property.addressLine ?? '').trim(),
                                 ].where((e) => e.isNotEmpty).join(' - '),
+                                copyValue: [
+                                  (_property.location ?? '').trim(),
+                                  (_property.addressLine ?? '').trim(),
+                                ].where((e) => e.isNotEmpty).join(' - '),
+                                copiedMessage: widget.isAr
+                                    ? 'تم نسخ الموقع'
+                                    : 'Location copied',
                               ),
                             ],
                             if ((_property.status ?? '').trim().isNotEmpty ||
@@ -4088,6 +5119,13 @@ $licLine
                                   (_property.status ?? '').trim(),
                                   (_property.workflowStage ?? '').trim(),
                                 ].where((e) => e.isNotEmpty).join(' / '),
+                                copyValue: [
+                                  (_property.status ?? '').trim(),
+                                  (_property.workflowStage ?? '').trim(),
+                                ].where((e) => e.isNotEmpty).join(' / '),
+                                copiedMessage: widget.isAr
+                                    ? 'تم النسخ'
+                                    : 'Copied',
                               ),
                             ],
                             if (_property.availabilityDate != null) ...[
@@ -4100,6 +5138,12 @@ $licLine
                                 value: _fmtDateTime(
                                   _property.availabilityDate!.toLocal(),
                                 ),
+                                copyValue: _fmtDateTime(
+                                  _property.availabilityDate!.toLocal(),
+                                ),
+                                copiedMessage: widget.isAr
+                                    ? 'تم النسخ'
+                                    : 'Copied',
                               ),
                             ],
                           ],
@@ -4111,55 +5155,20 @@ $licLine
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Text(
-                              widget.isAr ? 'الأسعار والرسوم' : 'Pricing',
+                              widget.isAr
+                                  ? 'الأسعار والرسوم (الفاتورة)'
+                                  : 'Pricing & invoice',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
                             const SizedBox(height: 10),
-                            _PriceRow(
-                              title:
-                                  widget.isAr ? 'السعر الأساسي' : 'Base price',
-                              value: _basePrice,
-                              currencyCode: _currencyCode,
+                            // — تفصيل الفاتورة الموحّد (مشترك مع شاشة الإضافة
+                            //   والتعديل والمعاينة الحيّة).
+                            ListingPricingBreakdown(
+                              invoice: _invoice,
                               isAr: widget.isAr,
-                              bold: true,
-                            ),
-                            const SizedBox(height: 6),
-                            _PriceRow(
-                              title: widget.isAr ? 'الضريبة (5%)' : 'VAT (5%)',
-                              value: _vatAmount,
-                              currencyCode: _currencyCode,
-                              isAr: widget.isAr,
-                            ),
-                            const SizedBox(height: 6),
-                            _PriceRow(
-                              title: widget.isAr
-                                  ? 'الإجمالي بعد الضريبة'
-                                  : 'Total after VAT',
-                              value: _totalAfterVat,
-                              currencyCode: _currencyCode,
-                              isAr: widget.isAr,
-                            ),
-                            const SizedBox(height: 6),
-                            _PriceRow(
-                              title: widget.isAr
-                                  ? 'عمولة المنصة (2.5%)'
-                                  : 'Platform fee (2.5%)',
-                              value: _platformFee,
-                              currencyCode: _currencyCode,
-                              isAr: widget.isAr,
-                            ),
-                            const Divider(height: 24),
-                            _PriceRow(
-                              title: widget.isAr
-                                  ? 'الإجمالي النهائي'
-                                  : 'Final total',
-                              value: _finalTotal,
-                              currencyCode: _currencyCode,
-                              isAr: widget.isAr,
-                              bold: true,
-                              big: true,
+                              showTitle: false,
                             ),
                           ],
                         ),
@@ -4234,21 +5243,13 @@ $licLine
                                     icon: const Icon(Icons.call_outlined),
                                     label: Text(widget.isAr ? 'اتصال' : 'Call'),
                                   ),
-                                  FilledButton.icon(
-                                    onPressed: _openingChat
-                                        ? null
-                                        : () async {
-                                            if (!_canOpenMarketerChat) {
-                                              _snack(
-                                                widget.isAr
-                                                    ? 'لا يوجد مسوّق مسؤول عن هذا الإعلان للمراسلة بعد.'
-                                                    : 'No marketer is assigned for chat yet.',
-                                                isError: true,
-                                              );
-                                              return;
-                                            }
-                                            await _openChatWithMarketer();
-                                          },
+                                  if (_showMarketerChatButton)
+                                    FilledButton.icon(
+                                      onPressed: _openingChat
+                                          ? null
+                                          : () async {
+                                              await _openChatWithMarketer();
+                                            },
                                     style: FilledButton.styleFrom(
                                       backgroundColor: const Color(0xFF25D366),
                                       foregroundColor: Colors.white,
@@ -4382,12 +5383,17 @@ $licLine
             ),
           ],
         ),
+        bottomNavigationBar: _showGuestCompleteDealBar
+            ? _guestParticipationBottomBar(context)
+            : _showBuyerCompleteDealBar
+                ? _buyerCompleteDealBottomBar(context)
+                : null,
       ),
     );
   }
 }
 
-/// على الويب العريض: بطاقات بشكل شبكي (Wrap) مع حواف مميّزة لموثوق العقاري.
+/// على الويب العريض: بطاقات بشكل شبكي (Wrap) مع حواف مميّزة لموثوق لاين العقارية.
 class _DetailsFlow extends StatelessWidget {
   final bool mosaic;
   final double tileWidth;
@@ -4486,40 +5492,53 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final rtl = Directionality.of(context) == TextDirection.rtl;
+    final showCopy = (copyValue ?? '').trim().isNotEmpty;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 20, color: const Color(0xFF0F766E)),
+        Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Icon(icon, size: 20, color: const Color(0xFF0F766E)),
+        ),
         const SizedBox(width: 10),
         Expanded(
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.w900),
+              Expanded(
+                flex: 4,
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  height: 1.3,
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 7,
+                child: Text(
+                  value,
+                  textAlign: rtl ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        if ((copyValue ?? '').trim().isNotEmpty) ...[
-          const SizedBox(width: 6),
+        if (showCopy) ...[
+          const SizedBox(width: 4),
           IconButton(
-            tooltip: 'Copy',
+            tooltip: rtl ? 'نسخ' : 'Copy',
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints.tightFor(width: 30, height: 30),
             padding: EdgeInsets.zero,
             iconSize: 16,
-            icon: const Icon(Icons.copy_rounded),
+            icon: Icon(Icons.copy_rounded, color: cs.primary),
             onPressed: () async {
               final v = copyValue!.trim();
               await Clipboard.setData(ClipboardData(text: v));
@@ -4527,7 +5546,7 @@ class _InfoRow extends StatelessWidget {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   behavior: SnackBarBehavior.floating,
-                  content: Text(copiedMessage ?? 'Copied'),
+                  content: Text(copiedMessage ?? (rtl ? 'تم النسخ' : 'Copied')),
                 ),
               );
             },
@@ -4660,6 +5679,104 @@ class _Pill extends StatelessWidget {
   }
 }
 
+class _MarketerContract72Countdown extends StatefulWidget {
+  const _MarketerContract72Countdown({
+    required this.startAt,
+    required this.isAr,
+    required this.supabase,
+  });
+
+  final DateTime startAt;
+  final bool isAr;
+  final SupabaseClient supabase;
+
+  @override
+  State<_MarketerContract72Countdown> createState() =>
+      _MarketerContract72CountdownState();
+}
+
+class _MarketerContract72CountdownState extends State<_MarketerContract72Countdown> {
+  late DateTime _deadline;
+  Timer? _t;
+  bool _syncedAfterExpiry = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _deadline = widget.startAt.toLocal().add(const Duration(hours: 72));
+    _t = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (mounted) setState(() {});
+      if (!_syncedAfterExpiry && DateTime.now().isAfter(_deadline)) {
+        _syncedAfterExpiry = true;
+        unawaited(
+          MarketingFlowService(widget.supabase).syncExpiredContractCreationWindows(),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  String _fmtRemaining(Duration d) {
+    if (d.isNegative) return widget.isAr ? '٠' : '0';
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    if (widget.isAr) {
+      return '$hس $mد';
+    }
+    return '${h}h ${m}m';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final now = DateTime.now();
+    final left = _deadline.difference(now);
+    final expired = left.isNegative;
+
+    return Material(
+      color: expired
+          ? cs.errorContainer.withValues(alpha: 0.45)
+          : cs.primaryContainer.withValues(alpha: 0.4),
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              expired ? Icons.timer_off_outlined : Icons.timer_outlined,
+              color: expired ? cs.error : cs.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                expired
+                    ? (widget.isAr
+                        ? 'انتهت مهلة ٧٢ ساعة لإنشاء العقد. حدّث الصفحة أو ارجع إلى «إدارتي» — قد يُعاد طرح الطلب تلقائياً.'
+                        : 'The 72-hour window to create the contract has ended. Refresh or check «My hub» — the request may reopen for offers.')
+                    : (widget.isAr
+                        ? 'المتبقي لإنشاء العقد: ${_fmtRemaining(left)} (مهلة ٧٢ ساعة من قبول المالك).'
+                        : 'Time left to create the contract: ${_fmtRemaining(left)} (72h from owner acceptance).'),
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: expired ? cs.onErrorContainer : cs.onPrimaryContainer,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MonoBox extends StatelessWidget {
   final String label;
   final String value;
@@ -4712,6 +5829,7 @@ class _PriceRow extends StatelessWidget {
   final bool isAr;
   final bool bold;
   final bool big;
+  final bool highlight;
 
   const _PriceRow({
     required this.title,
@@ -4720,6 +5838,7 @@ class _PriceRow extends StatelessWidget {
     required this.isAr,
     this.bold = false,
     this.big = false,
+    this.highlight = false,
   });
 
   String _fmt(num v) {
@@ -4756,19 +5875,39 @@ class _PriceRow extends StatelessWidget {
             style: valueStyle,
           );
 
-    return Row(
+    final row = Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          title,
-          style: TextStyle(
-            color: cs.onSurfaceVariant,
-            fontWeight: bold ? FontWeight.w900 : FontWeight.w700,
-            fontSize: big ? 16 : 14,
+        Flexible(
+          flex: 5,
+          child: Text(
+            title,
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontWeight: bold ? FontWeight.w900 : FontWeight.w700,
+              fontSize: big ? 16 : 14,
+            ),
           ),
         ),
-        Flexible(child: trailing),
+        const SizedBox(width: 8),
+        Flexible(flex: 6, child: trailing),
       ],
+    );
+
+    if (!highlight) return row;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F766E).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF0F766E).withValues(alpha: 0.22),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: row,
+      ),
     );
   }
 }

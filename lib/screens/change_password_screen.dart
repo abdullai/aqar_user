@@ -1,11 +1,12 @@
-// lib/screens/change_password_screen.dart
+﻿// lib/screens/change_password_screen.dart
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/input/password_arabic_script_guard.dart';
 import '../l10n/app_localizations.dart';
-import '../main.dart' show langNotifier, themeModeNotifier;
+import '../main.dart' show langNotifier, themeModeNotifier, suspendAutoLock;
 import '../widgets/app_logo_loading.dart';
 import '../widgets/field_group_frame.dart';
 
@@ -66,6 +67,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   @override
   void initState() {
     super.initState();
+    // تنبيه Chrome لكلمة المرور لا يجب أن يفعّل قفل/خروج الخلفية.
+    suspendAutoLock.value = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (Supabase.instance.client.auth.currentUser == null) {
@@ -76,6 +79,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
 
   @override
   void dispose() {
+    suspendAutoLock.value = false;
     _current.dispose();
     _next.dispose();
     _confirm.dispose();
@@ -222,7 +226,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextField(
+                        AqarTextField(
                           controller: _current,
                           obscureText: _obscure1,
                           enabled: !_busy,
@@ -247,7 +251,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        TextField(
+                        AqarTextField(
                           controller: _next,
                           obscureText: _obscure2,
                           enabled: !_busy,
@@ -272,7 +276,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                           ),
                         ),
                         const SizedBox(height: 14),
-                        TextField(
+                        AqarTextField(
                           controller: _confirm,
                           obscureText: _obscure3,
                           enabled: !_busy,

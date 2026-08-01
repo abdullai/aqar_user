@@ -74,6 +74,14 @@ enum ListingWorkflowStage {
     String? legacyStatus,
     DateTime? publishedAt,
   }) {
+    // مرحلة workflow صريحة «بانتظار المسوقين» تسبق legacy status قديم (active/published)
+    // بعد إعادة طرح الطلب في السوق — كان يُعرض «منشور» ويُحظر تقديم العرض خطأً.
+    final wsEarly = tryParse(workflowStage);
+    if (wsEarly == ListingWorkflowStage.waitingMarketers ||
+        wsEarly == ListingWorkflowStage.addedByOwner) {
+      return wsEarly!;
+    }
+
     final st = (legacyStatus ?? '').trim().toLowerCase();
     final publishedLike = publishedAt != null ||
         const {
@@ -116,9 +124,16 @@ enum ListingWorkflowStage {
     final direct = tryParse(workflowStage);
     if (direct != null) return direct;
 
+    // owner_action_required (v8 — أتمتة 72h) → يَظهر في تبويب «لم يُتَّخذ إجراء»
+    final wsRaw = (workflowStage ?? '').trim().toLowerCase();
+    if (wsRaw == 'owner_action_required') {
+      return ListingWorkflowStage.inactive72h;
+    }
+
     if (const {
       'inactive_72h',
       'inactive72h',
+      'owner_action_required',
     }.contains(st)) {
       return ListingWorkflowStage.inactive72h;
     }

@@ -1,5 +1,8 @@
-﻿import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+﻿import 'dart:async' show unawaited;
+
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -14,6 +17,7 @@ import '../services/verification_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/email_domain_suggestions_field.dart';
 import '../widgets/field_group_frame.dart';
+import '../core/navigation/post_auth_navigation.dart';
 
 class VerificationRequestScreen extends StatefulWidget {
   const VerificationRequestScreen({super.key});
@@ -246,7 +250,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TextField(
+                    AqarTextField(
                       controller: _falLicense,
                       keyboardType: TextInputType.number,
                       maxLength: 10,
@@ -298,7 +302,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: TextField(
+                          child: AqarTextField(
                             controller: _brokerName,
                             decoration: InputDecoration(
                               labelText: t.verBrokerNameLabel,
@@ -329,7 +333,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       hintText: t.verBrokerEmailHint,
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _brokerPhone,
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
@@ -342,7 +346,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _city,
                       decoration: InputDecoration(
                         labelText: t.verCityLabel,
@@ -353,7 +357,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _district,
                       decoration: InputDecoration(
                         labelText: t.verDistrictLabel,
@@ -364,7 +368,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _region,
                       decoration: InputDecoration(
                         labelText: t.verRegionLabel,
@@ -375,7 +379,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _licenseType,
                       readOnly: true,
                       decoration: InputDecoration(
@@ -383,7 +387,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _licenseStatus,
                       readOnly: true,
                       maxLines: 2,
@@ -404,7 +408,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TextField(
+                    AqarTextField(
                       controller: _officeName,
                       decoration: InputDecoration(
                         labelText: t.verOfficeNameLabel,
@@ -415,7 +419,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _crNo,
                       keyboardType: TextInputType.number,
                       inputFormatters: [
@@ -428,7 +432,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
+                    AqarTextField(
                       controller: _unifiedCr,
                       keyboardType: TextInputType.number,
                       maxLength: 10,
@@ -471,7 +475,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
               FieldGroupFrame(
                 title: t.fieldGroupVerificationOptionalLicenseTitle,
                 subtitle: t.fieldGroupVerificationOptionalLicenseSubtitle,
-                child: TextField(
+                child: AqarTextField(
                   controller: _falLicense,
                   decoration: InputDecoration(
                     labelText: t.verFalLicenseLabel,
@@ -504,7 +508,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                   ),
                   if (_partOfTeam) ...[
                     const SizedBox(height: 8),
-                    TextField(
+                    AqarTextField(
                       controller: _teamJoinCode,
                       keyboardType: TextInputType.number,
                       maxLength: 10,
@@ -529,7 +533,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                     ),
                   ],
                   const SizedBox(height: 12),
-                  TextField(
+                  AqarTextField(
                     controller: _note,
                     maxLines: 3,
                     decoration: InputDecoration(
@@ -799,7 +803,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
       }
 
       if (!mounted) return;
-      Navigator.pushNamedAndRemoveUntil(context, '/userDashboard', (r) => false);
+      unawaited(PostAuthNavigation.openDashboard(context));
     } catch (e) {
       setState(() {
         _err = '$e';

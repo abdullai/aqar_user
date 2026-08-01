@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import '../models/saudi_location.dart';
 
@@ -8,27 +10,29 @@ class SaudiLocationsService {
   static final SaudiLocationsService instance = SaudiLocationsService._();
 
   List<SaudiLocation>? _cache;
+  bool _extraMerged = false;
 
-  Future<List<SaudiLocation>> loadAll() async {
-    if (_cache != null) return _cache!;
+  Future<List<SaudiLocation>> loadAll({bool? includeExtra}) async {
+    final wantExtra = includeExtra ?? !kIsWeb;
+    if (_cache != null && (!wantExtra || _extraMerged)) {
+      return _cache!;
+    }
 
     final merged = <SaudiLocation>[];
-    const paths = <String>[
-      'assets/data/saudi_locations.json',
-      'assets/data/saudi_locations_extra.json',
-    ];
-    for (final path in paths) {
-      try {
-        final raw = await rootBundle.loadString(path);
-        final list = jsonDecode(raw) as List<dynamic>;
-        for (final e in list) {
-          merged.add(
-            SaudiLocation.fromJson(Map<String, dynamic>.from(e as Map)),
-          );
-        }
-      } catch (_) {
-        // الملف الإضافي اختياري
-      }
+    if (_cache != null) {
+      merged.addAll(_cache!);
+    } else {
+      await _mergePathInto(
+        merged,
+        'assets/data/saudi_locations.json',
+      );
+    }
+    if (wantExtra && !_extraMerged) {
+      await _mergePathInto(
+        merged,
+        'assets/data/saudi_locations_extra.json',
+      );
+      _extraMerged = true;
     }
 
     final seen = <String>{};
@@ -41,6 +45,26 @@ class SaudiLocationsService {
     }
     _cache = out;
     return _cache!;
+  }
+
+  static Future<void> _mergePathInto(
+    List<SaudiLocation> merged,
+    String path,
+  ) async {
+    try {
+      final raw = await rootBundle.loadString(path);
+      if (kIsWeb) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      final list = jsonDecode(raw) as List<dynamic>;
+      for (final e in list) {
+        merged.add(
+          SaudiLocation.fromJson(Map<String, dynamic>.from(e as Map)),
+        );
+      }
+    } catch (_) {
+      // الملف الإضافي اختياري
+    }
   }
 
   /// عند غياب المحافظة في البيانات: نستخدم المدينة كمفتاح محافظة لربط هرمي واضح.

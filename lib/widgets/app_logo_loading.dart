@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:shimmer/shimmer.dart';
 
-/// Lightweight loading indicator: **no** `logoe.png` decode — shimmer + icon only.
-/// (Splash / launcher may still use `assets/logoe.png` via native config — not this widget.)
+import 'app_busy_indicator.dart';
+
+/// مؤشر تحميل بيانات — يوجّه إلى [AppBusyIndicator] الخفيف (بدون شعار التطبيق).
+/// الإبقاء على الاسم يحافظ على كل الاستدعاءات الحالية دون عبث واسع.
 class AppLogoLoading extends StatelessWidget {
   const AppLogoLoading({
     super.key,
@@ -15,26 +16,12 @@ class AppLogoLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final base = cs.surfaceContainerHighest;
-    final highlight =
-        Color.lerp(cs.primary, cs.surface, compact ? 0.38 : 0.32) ??
-            cs.primaryContainer;
-    final iconSize = size * (compact ? 0.52 : 0.58);
-
-    return Shimmer.fromColors(
-      baseColor: base,
-      highlightColor: highlight,
-      period: Duration(milliseconds: compact ? 950 : 1250),
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Icon(
-          Icons.apartment_rounded,
-          size: iconSize,
-          color: Colors.white,
-        ),
-      ),
+    final indicatorSize = compact
+        ? size.clamp(16.0, 28.0).toDouble()
+        : (size > 48 ? 36.0 : size.clamp(22.0, 40.0).toDouble());
+    return AppBusyIndicator(
+      size: indicatorSize,
+      strokeWidth: compact ? 2.2 : 3.0,
     );
   }
 }

@@ -1,8 +1,31 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-/// بطاقة عقارية موحّدة (إعلان / طلب) — صف: بيانات + صورة مربّعة 1:1، وذيل أزرار اختياري.
+import '../core/branding/aqar_brand_colors.dart';
+
+/// بطاقة عقارية موحّدة (إعلان / طلب) — صف بيانات+صورة أو صورة عريضة أعلى البيانات.
+///
+/// الصورة تمتد بارتفاع عمود البيانات (يمين المستخدم في العربية) دون فراغ أسفلها.
 class UnifiedRealEstateCard extends StatelessWidget {
+  static const double imageCornerRadius = 16;
+  static const double minListCardHeight = 168;
+
+  final BoxDecoration decoration;
+  final bool isAr;
+  final UnifiedCardKind kind;
+  final Widget dataColumn;
+  final Widget imageColumn;
+  final VoidCallback? onCardTap;
+  /// نقر مزدوج — إضافة/إزالة المفضلة (إعلانات).
+  final VoidCallback? onCardDoubleTap;
+  final Widget? footer;
+  final Widget? belowMainRow;
+  final bool webHoverShell;
+  final double cardRadius;
+  final bool fullWidthHeroImage;
+  /// نسبة صورة/رأس البطاقة عند [fullWidthHeroImage] (الطلبات يمكن أن تكون أعرض وأقصر).
+  final double heroAspectRatio;
+
   const UnifiedRealEstateCard({
     super.key,
     required this.decoration,
@@ -11,123 +34,192 @@ class UnifiedRealEstateCard extends StatelessWidget {
     required this.dataColumn,
     required this.imageColumn,
     this.onCardTap,
+    this.onCardDoubleTap,
     this.footer,
+    this.belowMainRow,
     this.webHoverShell = true,
-    this.cardRadius = 20,
+    this.cardRadius = 24,
+    this.fullWidthHeroImage = false,
+    this.heroAspectRatio = 2.4,
   });
-
-  static const double imageCornerRadius = 15;
-  static const double minListCardHeight = 190;
-
-  final BoxDecoration decoration;
-  final bool isAr;
-  final UnifiedCardKind kind;
-  final Widget dataColumn;
-  final Widget imageColumn;
-  final VoidCallback? onCardTap;
-  final Widget? footer;
-  final bool webHoverShell;
-  final double cardRadius;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final kindColors = _kindColors(kind, cs);
 
-    Widget core = Container(
-      decoration: decoration,
-      constraints: const BoxConstraints(minHeight: minListCardHeight),
-      child: Material(
-        color: Colors.transparent,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              borderRadius: BorderRadius.vertical(
-                top: Radius.circular(cardRadius),
-                bottom:
-                    footer == null ? Radius.circular(cardRadius) : Radius.zero,
-              ),
-              mouseCursor: onCardTap != null
-                  ? SystemMouseCursors.click
-                  : MouseCursor.defer,
-              onTap: onCardTap,
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Padding(
-                    padding:
-                        const EdgeInsetsDirectional.fromSTEB(10, 12, 10, 6),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final w = constraints.maxWidth;
-                        if (!w.isFinite || w <= 0) {
-                          return const SizedBox.shrink();
-                        }
-                        // بدون IntrinsicHeight + AspectRatio (يكسر الرئيسية على الويب وقد يبالغ بحجم الصورة على الجوال).
-                        final compact = w < 390;
-                        final imgSide = (w * (compact ? 0.34 : 0.38))
-                            .clamp(compact ? 104.0 : 120.0, 240.0);
-                        final gapW = w < 340 ? 7.0 : 10.0;
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          textDirection: TextDirection.ltr,
-                          children: _orderedMainAxis(
-                            data: Expanded(
+    final inkContent = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Padding(
+          padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 10, 6),
+          child: fullWidthHeroImage
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(imageCornerRadius),
+                      child: AspectRatio(
+                        aspectRatio: heroAspectRatio,
+                        child: imageColumn,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    dataColumn,
+                  ],
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    var w = constraints.maxWidth;
+                    if (!w.isFinite || w <= 0) {
+                      final mq = MediaQuery.sizeOf(context).width;
+                      w = (mq - 24).clamp(200.0, mq);
+                    }
+                    if (!w.isFinite || w <= 0) {
+                      // لا تُرجع فراغاً قابلاً للضغط فقط — اعرض البيانات على الأقل.
+                      return dataColumn;
+                    }
+                    final compact = w < 390;
+                    final gapW = w < 340 ? 10.0 : 14.0;
+                    // صورة أوضح بجانب البيانات (~45% مثل dealapp) — بيانات مريحة بجانبها.
+                    const minDataW = 160.0;
+                    final maxImg = (w - gapW - minDataW).clamp(120.0, 260.0);
+                    final imgWidth = (w * (compact ? 0.40 : 0.46))
+                        .clamp(compact ? 118.0 : 140.0, maxImg);
+                    // IntrinsicHeight يعطي Row ارتفاعاً محدوداً حتى يعمل
+                    // CrossAxisAlignment.stretch + StackFit.expand في الصورة
+                    // دون Null check على الويب بعد إزالة equal-height.
+                    return IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        textDirection: TextDirection.ltr,
+                        children: _orderedMainAxis(
+                          data: Expanded(
+                            child: Padding(
+                              padding: EdgeInsetsDirectional.only(
+                                start: isAr ? 2 : 0,
+                                end: isAr ? 0 : 2,
+                                top: 2,
+                                bottom: 2,
+                              ),
                               child: Align(
-                                alignment: AlignmentDirectional.topStart,
+                                alignment: AlignmentDirectional.centerStart,
                                 child: dataColumn,
                               ),
                             ),
-                            gap: SizedBox(width: gapW),
-                            image: SizedBox(
-                              width: imgSide,
-                              height: imgSide,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(
-                                  UnifiedRealEstateCard.imageCornerRadius,
-                                ),
-                                child: imageColumn,
-                              ),
+                          ),
+                          gap: SizedBox(width: gapW),
+                          image: SizedBox(
+                            width: imgWidth,
+                            child: ClipRRect(
+                              borderRadius:
+                                  BorderRadius.circular(imageCornerRadius),
+                              child: imageColumn,
                             ),
                           ),
-                        );
-                      },
-                    ),
-                  ),
-                  Positioned(
-                    top: 6,
-                    left: isAr ? 6 : null,
-                    right: isAr ? null : 6,
-                    child: _KindPill(
-                      label: kind == UnifiedCardKind.ad
-                          ? (isAr ? 'إعلان' : 'Listing')
-                          : (isAr ? 'طلب' : 'Request'),
-                      background: kindColors.background,
-                      foreground: kindColors.foreground,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (footer != null)
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(10, 0, 10, 8),
-                child: footer!,
-              ),
-          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
         ),
-      ),
+        Positioned(
+          top: 6,
+          // زاوية الصورة دائماً (يمين المستخدم في العربية) — لا يغطي العنوان/التاريخ.
+          left: isAr ? null : 6,
+          right: isAr ? 6 : null,
+          child: _KindPill(
+            label: kind == UnifiedCardKind.ad
+                ? (isAr ? 'إعلان' : 'Listing')
+                : (isAr ? 'طلب' : 'Request'),
+            background: kindColors.background,
+            foreground: kindColors.foreground,
+          ),
+        ),
+      ],
     );
 
-    if (webHoverShell) {
-      core = _WebHoverScaleShell(child: core);
+    Widget face({required bool fillHeight}) {
+      final hasTail = belowMainRow != null || footer != null;
+      final tail = Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (belowMainRow != null)
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 6),
+              child: belowMainRow!,
+            ),
+          if (footer != null)
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 8),
+              child: footer!,
+            )
+          else if (belowMainRow != null)
+            const SizedBox(height: 8),
+        ],
+      );
+
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(cardRadius),
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          width: double.infinity,
+          height: fillHeight ? double.infinity : null,
+          decoration: decoration,
+          constraints: const BoxConstraints(minHeight: minListCardHeight),
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              mainAxisSize: fillHeight ? MainAxisSize.max : MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // بدون ClipRect — قصّ الارتفاع كان يغطي المبلغ ورقم الإعلان.
+                InkWell(
+                  borderRadius: BorderRadius.vertical(
+                    top: Radius.circular(cardRadius),
+                    bottom: hasTail
+                        ? Radius.zero
+                        : Radius.circular(cardRadius),
+                  ),
+                  mouseCursor: onCardTap != null
+                      ? SystemMouseCursors.click
+                      : MouseCursor.defer,
+                  onTap: onCardTap,
+                  onDoubleTap: onCardDoubleTap,
+                  child: inkContent,
+                ),
+                if (fillHeight && hasTail) const Spacer(),
+                if (hasTail)
+                  Material(
+                    type: MaterialType.transparency,
+                    child: tail,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
     }
-    return RepaintBoundary(child: core);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // لا تملأ الارتفاع بـ infinity داخل IntrinsicHeight — كان يُخفي البطاقات.
+        // الصف يوحّد الارتفاع عبر stretch؛ البطاقة تبقى بمحتواها الطبيعي.
+        Widget core = face(fillHeight: false);
+
+        final hoverShell = footer == null &&
+            belowMainRow == null &&
+            (webHoverShell && !kIsWeb);
+        if (hoverShell) {
+          core = _WebHoverScaleShell(child: core);
+        }
+        return RepaintBoundary(child: core);
+      },
+    );
   }
 
-  /// عربي: الصورة يمين المستخدم | إنجليزي: الصورة يسار المستخدم ([Row] باتجاه LTR ثابت).
   List<Widget> _orderedMainAxis({
     required Widget data,
     required Widget gap,
@@ -151,18 +243,14 @@ class _KindColors {
 _KindColors _kindColors(UnifiedCardKind kind, ColorScheme cs) {
   switch (kind) {
     case UnifiedCardKind.ad:
-      return _KindColors(
-        background:
-            Color.lerp(cs.primaryContainer, Colors.green.shade700, 0.35) ??
-                cs.primaryContainer,
-        foreground: cs.onPrimaryContainer,
+      return const _KindColors(
+        background: AqarBrandColors.primary,
+        foreground: Colors.white,
       );
     case UnifiedCardKind.request:
-      return _KindColors(
-        background:
-            Color.lerp(cs.tertiaryContainer, Colors.orange.shade800, 0.42) ??
-                cs.tertiaryContainer,
-        foreground: cs.onTertiaryContainer,
+      return const _KindColors(
+        background: Color(0xFFEA580C),
+        foreground: Colors.white,
       );
   }
 }
@@ -180,135 +268,143 @@ class _KindPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final labelWidget = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          color: foreground,
+          height: 1.0,
+          fontFamily: 'Cairo',
+        ),
+      ),
+    );
     return IgnorePointer(
       ignoring: true,
-      child: Material(
-        color: background,
-        borderRadius: BorderRadius.circular(8),
-        elevation: 1,
-        shadowColor: Colors.black26,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              color: foreground,
-              height: 1.0,
-            ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: AqarBrandColors.gold.withValues(alpha: 0.55),
+            width: 1.1,
           ),
         ),
+        child: labelWidget,
       ),
     );
   }
 }
 
-/// صف أيقونات للمواصفات: مساحة | غرف | حي.
+/// صف مواصفات مريح — أيقونة + نص غامق بدون حدود/خلفيات متضاربة.
 class UnifiedCardSpecRow extends StatelessWidget {
   const UnifiedCardSpecRow({
     super.key,
     required this.bankColor,
     required this.areaText,
     required this.roomsText,
-    required this.districtText,
+    this.districtText = '',
+    this.locationParts = const [],
+    this.extraChips = const [],
   });
 
   final Color bankColor;
   final String areaText;
   final String roomsText;
   final String districtText;
+  final List<String> locationParts;
+  final List<String> extraChips;
+
+  static const _locIcons = <IconData>[
+    Icons.public_outlined,
+    Icons.account_balance_outlined,
+    Icons.location_city_outlined,
+    Icons.holiday_village_outlined,
+  ];
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final segments = <_SpecSeg>[];
+    final isDark = cs.brightness == Brightness.dark;
+    final chips = <({IconData? icon, String text})>[];
     if (areaText.trim().isNotEmpty) {
-      segments.add(_SpecSeg(Icons.straighten_outlined, areaText));
+      chips.add((icon: Icons.straighten_outlined, text: areaText.trim()));
     }
     if (roomsText.trim().isNotEmpty) {
-      segments.add(_SpecSeg(Icons.bed_outlined, roomsText));
+      chips.add((icon: Icons.bed_outlined, text: roomsText.trim()));
     }
-    if (districtText.trim().isNotEmpty) {
-      segments.add(_SpecSeg(Icons.location_on_outlined, districtText));
+    final locs = locationParts
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+    if (locs.isNotEmpty) {
+      for (var i = 0; i < locs.length; i++) {
+        chips.add((
+          icon: _locIcons[i.clamp(0, _locIcons.length - 1)],
+          text: locs[i],
+        ));
+      }
+    } else if (districtText.trim().isNotEmpty) {
+      chips.add((
+        icon: Icons.location_on_outlined,
+        text: districtText.trim(),
+      ));
     }
-    if (segments.isEmpty) return const SizedBox.shrink();
+    for (final e in extraChips) {
+      final t = e.trim();
+      if (t.isNotEmpty) chips.add((icon: null, text: t));
+    }
+    if (chips.isEmpty) return const SizedBox.shrink();
 
-    return Row(
+    final chipFg = isDark ? cs.onSurface : const Color(0xFF0B1F1A);
+    final iconFg = isDark ? cs.primary : bankColor;
+
+    return Wrap(
+      spacing: 14,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        for (var i = 0; i < segments.length; i++) ...[
-          if (i > 0)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                '|',
+        for (final chip in chips)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (chip.icon != null) ...[
+                Icon(chip.icon!, size: 15, color: iconFg),
+                const SizedBox(width: 4),
+              ] else ...[
+                Container(
+                  width: 5,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: AqarBrandColors.gold,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                chip.text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: cs.outline,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w800,
-                  fontSize: 12,
+                  color: chipFg,
+                  height: 1.1,
+                  fontFamily: 'Cairo',
                 ),
               ),
-            ),
-          Expanded(
-            child: _SpecCell(
-              icon: segments[i].icon,
-              text: segments[i].text,
-              iconColor: bankColor,
-              valueColor: cs.onSurfaceVariant,
-            ),
+            ],
           ),
-        ],
       ],
     );
   }
 }
 
-class _SpecSeg {
-  const _SpecSeg(this.icon, this.text);
-  final IconData icon;
-  final String text;
-}
-
-class _SpecCell extends StatelessWidget {
-  const _SpecCell({
-    required this.icon,
-    required this.text,
-    required this.iconColor,
-    required this.valueColor,
-  });
-
-  final IconData icon;
-  final String text;
-  final Color iconColor;
-  final Color valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 15, color: iconColor),
-        const SizedBox(width: 4),
-        Expanded(
-          child: Text(
-            text,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-              color: valueColor,
-              height: 1.1,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// شارة كاميرا + عدد الصور — زاوية أسفل الصورة.
 class UnifiedCardImagePhotoBadge extends StatelessWidget {
   const UnifiedCardImagePhotoBadge({
     super.key,
@@ -351,7 +447,6 @@ class UnifiedCardImagePhotoBadge extends StatelessWidget {
   }
 }
 
-/// زر أيقونة دائرية شبه شفافة على الصورة.
 class UnifiedCardImageCircleIconButton extends StatelessWidget {
   const UnifiedCardImageCircleIconButton({
     super.key,

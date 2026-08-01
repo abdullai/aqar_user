@@ -15,6 +15,23 @@ class UsersProfilesSafeSelect {
     'user_id',
   ];
 
+  /// هوية وطنية / رقم موحّد للتعبئة التلقائية في نماذج REGA والتصاريح.
+  static const List<String> nationalIdColumnAttempts = [
+    'user_id,username,unified_national_number,national_id',
+    'user_id,username',
+    'user_id',
+  ];
+
+  /// أسماء رباعية/ثلاثية كاملة + هاتف ورخصة (لعروض التسويق وغيرها).
+  static const List<String> structuredLegalNameColumns = [
+    'user_id,username,first_name_ar,second_name_ar,third_name_ar,fourth_name_ar,'
+        'first_name_en,second_name_en,third_name_en,fourth_name_en,'
+        'full_name_ar,full_name_en,full_name,office_name,avatar_url,account_type,phone,license_no',
+    'user_id,username,full_name,full_name_ar,full_name_en,office_name,avatar_url,account_type,phone,license_no',
+    'user_id,username',
+    'user_id',
+  ];
+
   static Future<Map<String, Map<String, dynamic>>> fetchProfilesByIds(
     SupabaseClient sb,
     Iterable<String> ids, {

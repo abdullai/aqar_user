@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'compound_display_name.dart';
+
 /// Localized time-of-day greeting for the dashboard app bar.
 @immutable
 abstract final class DashboardGreeting {
@@ -7,7 +9,6 @@ abstract final class DashboardGreeting {
   static String appBarLine({
     required bool isAr,
     required String displayName,
-    required bool isMarketingAccountType,
   }) {
     final name = displayName.trim();
     if (name.isEmpty) {
@@ -16,11 +17,8 @@ abstract final class DashboardGreeting {
 
     final salute = salutationOnly(isAr: isAr);
 
-    final broker = isMarketingAccountType
-        ? (isAr ? '، شريكنا العقاري' : ', real estate partner')
-        : '';
-
-    return '$salute، $name$broker';
+    // بدون «شريكنا العقاري» في شريط العنوان — الاسم يظهر في السطر التالي في الواجهة.
+    return '$salute، $name';
   }
 
   /// توقيت السعودية (UTC+3 بلا DST) — التحية لا تعتمد على ساعة الجهاز.
@@ -28,33 +26,22 @@ abstract final class DashboardGreeting {
     return DateTime.now().toUtc().add(const Duration(hours: 3));
   }
 
-  /// تحية حسب وقت المملكة (للعرض في سطر منفصل عن الاسم الرباعي).
+  /// تحية حسب وقت المملكة: صباح الخير (5–12) أو مساء الخير (باقي اليوم).
   static String salutationOnly({required bool isAr}) {
     final h = _nowSaudiArabia().hour;
     if (h >= 5 && h < 12) {
       return isAr ? 'صباح الخير' : 'Good morning';
     }
-    if (h >= 12 && h < 18) {
-      return isAr ? 'طاب يومك' : 'Good afternoon';
-    }
     return isAr ? 'مساء الخير' : 'Good evening';
   }
 
   static String firstChunk(String fullName) {
-    final t = fullName.trim();
-    if (t.isEmpty) return '';
-    final parts = t.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
-    return parts.isNotEmpty ? parts.first : t;
+    final u = CompoundDisplayName.units(fullName);
+    return u.isNotEmpty ? u.first : fullName.trim();
   }
 
-  /// For narrow toolbars (phone / small web): first + last token; single token unchanged.
-  /// When [compact] is false, returns the full trimmed string.
+  /// For narrow toolbars: first + last **compound unit**; otherwise full normalized name.
   static String displayNameForAppBar(String fullName, {required bool compact}) {
-    final t = fullName.trim();
-    if (t.isEmpty) return '';
-    if (!compact) return t;
-    final parts = t.split(RegExp(r'\s+')).where((s) => s.isNotEmpty).toList();
-    if (parts.length <= 1) return parts.first;
-    return '${parts.first} ${parts.last}';
+    return CompoundDisplayName.forToolbar(fullName, compact: compact);
   }
 }

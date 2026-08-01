@@ -39,7 +39,37 @@ class Property {
   final String? location;
 
   final double area;
+
+  /// المبلغ الذي أدخله المعلن في حقل «السعر الإجمالي».
+  /// — قاعدة العرض الموحّدة لكل **بطاقات الإعلان العقاري** في التطبيق
+  ///   (الرئيسية، صفحتي، إعلاناتي/طلباتي للمسوّق، السلة، صفقاتي، نتائج البحث،
+  ///   وأي مكان آخر فيه بطاقة): تُعرض قيمة `price` كما أدخلها المعلن **دون**
+  ///   إضافة أو خصم أي ضريبة أو عمولة تسويق.
+  /// — تفصيل الفاتورة (الأساسي/الضريبة/العمولة/المجموع النهائي) يُعرض **فقط**
+  ///   داخل صفحة تفاصيل الإعلان عند الضغط على البطاقة، وفي صفحات الفوترة
+  ///   والإيصالات. لاستخراج المبلغ النهائي استخدم `finalTotalPrice`.
   final double price;
+
+  /// هل `price` يحوي ضريبة القيمة المضافة 5%؟
+  /// — `true`  → السعر الأساسي = price / (1 + vatRate)؛ الضريبة ضمن المبلغ.
+  /// — `false` → السعر الأساسي = price؛ تُضاف الضريبة على الإجمالي.
+  final bool priceIncludesVat;
+
+  /// نسبة ضريبة القيمة المضافة المعتمدة لهذا العقار (افتراضي 5%).
+  /// نخزّنها لكل عقار لضمان استرجاع الفاتورة كما كانت لحظة النشر إن تغيّرت النسبة.
+  final double vatRate;
+
+  /// طريقة احتساب عمولة التسويق: `none` | `percent` | `fixed`.
+  final String marketingCommissionKind;
+
+  /// نسبة العمولة عند `marketingCommissionKind == 'percent'` (افتراضي 0.025 = 2.5%).
+  final double marketingCommissionRate;
+
+  /// مبلغ مقطوع عند `marketingCommissionKind == 'fixed'`.
+  final double marketingCommissionAmount;
+
+  /// `true` عندما تُحقن صورة افتراضية (شعار التطبيق) لأن المعلن لم يرفع وسائط.
+  final bool defaultCoverUsed;
 
   final String currency;
   final bool negotiable;
@@ -155,6 +185,9 @@ class Property {
   /// دلائلية/إرشادات منظّمة للعقار (JSON من الخادم، مثلاً items[])
   final Map<String, dynamic>? listingGuidance;
 
+  /// بيانات المنشأة المرتبطة بالإعلان (org_unit_id، أسماء، رمز فال المعروض، العدد…).
+  final Map<String, dynamic>? orgListingSnapshot;
+
   /// من [listingGuidance.usage]: { residential, commercial } — يختارهما المالك عند الإنشاء.
   bool get usageSuitableResidential {
     final g = listingGuidance;
@@ -188,6 +221,17 @@ class Property {
       (videoUrl ?? '').trim().isNotEmpty &&
       (images.isEmpty || coverPrimaryPrefersVideo);
 
+  /// أوّل صورة مُخزَّنة كرابط شبكة مباشر (`http/https`) في [images] إن وُجدت.
+  /// للمسارات النسبية في التخزين: حوّلها إلى رابط عام عبر دلو `property-images` في Supabase.
+  String? get primaryNetworkImageUrl {
+    for (final raw in images) {
+      final s = raw.trim();
+      if (s.isEmpty) continue;
+      if (s.startsWith('http://') || s.startsWith('https://')) return s;
+    }
+    return null;
+  }
+
   const Property({
     required this.id,
     required this.ownerId,
@@ -199,6 +243,12 @@ class Property {
     required this.city,
     required this.area,
     required this.price,
+    this.priceIncludesVat = true,
+    this.vatRate = 0.05,
+    this.marketingCommissionKind = 'none',
+    this.marketingCommissionRate = 0.025,
+    this.marketingCommissionAmount = 0.0,
+    this.defaultCoverUsed = false,
     required this.isAuction,
     required this.images,
     required this.views,
@@ -271,6 +321,7 @@ class Property {
     this.buildingNumber,
     this.marketingLicenseSnapshot,
     this.listingGuidance,
+    this.orgListingSnapshot,
   });
 
   /// هل يظهر اسم المالك/المعلن للجمهور (موافقة المسوق أو طلب المالك).
@@ -330,6 +381,71 @@ class Property {
     if (u == null || u.isEmpty) return null;
     return u;
   }
+
+  // -- بداية حسابات الفاتورة (الأساسي/الضريبة/العمولة/الإجمالي) -------------------
+  //
+  // المنطق متطابق مع `fn_listing_invoice_breakdown` في الترحيل v9 على Supabase،
+  // وتستهلكه شاشات تفاصيل الإعلان وبطاقات «صفحتي» والمعاينة الحيّة عند الإضافة.
+  // الإعلانات القديمة (قبل تطبيق الترحيل) تأتي بقيم افتراضية: شامل ضريبة + بدون عمولة،
+  // فيعود `finalTotalPrice == price` تماماً لضمان عدم تغيّر المبالغ المعروضة سابقاً.
+
+  static double _round2(double v) {
+    if (v.isNaN || v.isInfinite) return 0;
+    return (v * 100).round() / 100.0;
+  }
+
+  /// السعر الأساسي قبل الضريبة (مبلغ المالك الفعلي).
+  double get effectiveBasePrice {
+    final p = price.toDouble();
+    if (priceIncludesVat) {
+      return _round2(p / (1.0 + vatRate));
+    }
+    return _round2(p);
+  }
+
+  /// قيمة ضريبة القيمة المضافة (موجبة دائماً).
+  double get vatAmount => _round2(effectiveBasePrice * vatRate);
+
+  /// الإجمالي الشامل للضريبة فقط (قبل عمولة التسويق).
+  /// — عند `priceIncludesVat == true`: يساوي `price` (الذي أدخله المعلن).
+  /// — عند `priceIncludesVat == false`: يساوي `price + VAT`.
+  double get totalWithVat => _round2(effectiveBasePrice + vatAmount);
+
+  /// قيمة عمولة التسويق (مبلغ سعودي/عملة الإعلان).
+  double get marketingCommissionTotal {
+    switch (marketingCommissionKind) {
+      case 'percent':
+        return _round2(effectiveBasePrice * marketingCommissionRate);
+      case 'fixed':
+        return _round2(marketingCommissionAmount);
+      case 'none':
+      default:
+        return 0.0;
+    }
+  }
+
+  /// الإجمالي النهائي: الأساسي ± الضريبة + عمولة التسويق (المبلغ الذي يستحقّه البائع/المسوّق).
+  /// — لا تستخدمه في عرض البطاقات؛ هو خاص بصفحة تفاصيل الإعلان والفواتير
+  ///   والإيصالات فقط حسب القاعدة الموحَّدة لعرض الأسعار.
+  double get finalTotalPrice => _round2(totalWithVat + marketingCommissionTotal);
+
+  /// السعر المعروض على **كل** بطاقات الإعلان في التطبيق (الرئيسية، صفحتي،
+  /// إعلاناتي/طلباتي للمسوّق، السلة، صفقاتي، نتائج البحث، …).
+  /// — قيمة `price` نفسها (المبلغ الذي أدخله المعلن في حقل «السعر الإجمالي»)،
+  ///   دون أي إضافة أو خصم لضريبة أو عمولة. تفصيل الفاتورة يظهر فقط داخل
+  ///   صفحة تفاصيل الإعلان وفي الإيصالات.
+  double get displayTotalPrice => price.toDouble();
+
+  /// المرادف الواضح لقاعدة عرض البطاقات (نفس `displayTotalPrice`).
+  /// — يُترك للأماكن التي تحتاج تسمية صريحة («سعر بطاقة الرئيسية»).
+  double get homeCardPrice => price.toDouble();
+
+  /// `true` عندما يوجد فعلاً عنصر إضافي (ضريبة مضافة أو عمولة) ليُعرَض في الفاتورة.
+  /// — يبقى `true` أيضاً عند «شامل الضريبة» لأن سطر الضريبة الداخلية يظهر للمستفيد.
+  bool get hasInvoiceDetails =>
+      vatAmount > 0 || marketingCommissionTotal > 0;
+
+  // -- نهاية حسابات الفاتورة ---------------------------------------------------
 
   /// تاريخ العرض المعتمد: النشر ثم الإنشاء
   DateTime get displayDate => publishedAt ?? createdAt;
@@ -511,6 +627,27 @@ class Property {
     return null;
   }
 
+  /// تطبيع قيمة عمود `marketing_commission_kind` (يحرس من قيم غريبة).
+  static String _normalizeCommissionKind(dynamic raw) {
+    final s = (raw ?? '').toString().trim().toLowerCase();
+    switch (s) {
+      case 'percent':
+      case 'percentage':
+      case '%':
+        return 'percent';
+      case 'fixed':
+      case 'flat':
+      case 'amount':
+        return 'fixed';
+      case '':
+      case 'none':
+      case 'null':
+        return 'none';
+      default:
+        return 'none';
+    }
+  }
+
   static DateTime? _tryParseDt(dynamic v) {
     if (v == null) return null;
     if (v is DateTime) return v.toLocal();
@@ -657,6 +794,15 @@ class Property {
       addressLine: _trimOrNull(json['address_line']),
       area: _toDouble0(json['area']),
       price: _toDouble0(json['price']),
+      priceIncludesVat: _toBool(json['price_includes_vat']) ?? true,
+      vatRate: _toDouble(json['vat_rate']) ?? 0.05,
+      marketingCommissionKind:
+          _normalizeCommissionKind(json['marketing_commission_kind']),
+      marketingCommissionRate:
+          _toDouble(json['marketing_commission_rate']) ?? 0.025,
+      marketingCommissionAmount:
+          _toDouble(json['marketing_commission_amount']) ?? 0.0,
+      defaultCoverUsed: _toBool(json['default_cover_used']) ?? false,
       currency: ((json['currency'] as String?) ?? 'SAR').trim(),
       negotiable: _toBool(json['negotiable']) ?? false,
       isAuction: _toBool(json['is_auction']) ?? false,
@@ -701,6 +847,11 @@ class Property {
         return rega;
       }(),
       listingGuidance: _objectMap(json['listing_guidance']),
+      orgListingSnapshot: () {
+        final o = _objectMap(json['org_listing']);
+        if (o != null && o.isNotEmpty) return o;
+        return _objectMap(json['org_unit']);
+      }(),
       isFeatured: _toBool(json['is_featured']),
       homeFeedSuppressed: _toBool(json['home_feed_suppressed']) ?? false,
       editCount: _toInt(json['edit_count']) ?? 0,
@@ -792,6 +943,15 @@ class Property {
       addressLine: rawAddress,
       area: _toDouble0(map['area']),
       price: _toDouble0(map['price']),
+      priceIncludesVat: _toBool(map['price_includes_vat']) ?? true,
+      vatRate: _toDouble(map['vat_rate']) ?? 0.05,
+      marketingCommissionKind:
+          _normalizeCommissionKind(map['marketing_commission_kind']),
+      marketingCommissionRate:
+          _toDouble(map['marketing_commission_rate']) ?? 0.025,
+      marketingCommissionAmount:
+          _toDouble(map['marketing_commission_amount']) ?? 0.0,
+      defaultCoverUsed: _toBool(map['default_cover_used']) ?? false,
       currency: ((map['currency'] as String?) ?? 'SAR').trim(),
       negotiable: _toBool(map['negotiable']) ?? false,
       isAuction: _toBool(map['is_auction']) ?? false,
@@ -836,6 +996,11 @@ class Property {
         return rega;
       }(),
       listingGuidance: _objectMap(map['listing_guidance']),
+      orgListingSnapshot: () {
+        final o = _objectMap(map['org_listing']);
+        if (o != null && o.isNotEmpty) return o;
+        return _objectMap(map['org_unit']);
+      }(),
       isFeatured: _toBool(map['is_featured']),
       homeFeedSuppressed: _toBool(map['home_feed_suppressed']) ?? false,
       editCount: _toInt(map['edit_count']) ?? 0,
@@ -892,6 +1057,12 @@ class Property {
     String? location,
     double? area,
     double? price,
+    bool? priceIncludesVat,
+    double? vatRate,
+    String? marketingCommissionKind,
+    double? marketingCommissionRate,
+    double? marketingCommissionAmount,
+    bool? defaultCoverUsed,
     String? currency,
     bool? negotiable,
     bool? isAuction,
@@ -959,6 +1130,7 @@ class Property {
     String? buildingNumber,
     Map<String, dynamic>? marketingLicenseSnapshot,
     Map<String, dynamic>? listingGuidance,
+    Map<String, dynamic>? orgListingSnapshot,
   }) {
     return Property(
       id: id ?? this.id,
@@ -976,6 +1148,15 @@ class Property {
       location: location ?? this.location,
       area: area ?? this.area,
       price: price ?? this.price,
+      priceIncludesVat: priceIncludesVat ?? this.priceIncludesVat,
+      vatRate: vatRate ?? this.vatRate,
+      marketingCommissionKind:
+          marketingCommissionKind ?? this.marketingCommissionKind,
+      marketingCommissionRate:
+          marketingCommissionRate ?? this.marketingCommissionRate,
+      marketingCommissionAmount:
+          marketingCommissionAmount ?? this.marketingCommissionAmount,
+      defaultCoverUsed: defaultCoverUsed ?? this.defaultCoverUsed,
       currency: currency ?? this.currency,
       negotiable: negotiable ?? this.negotiable,
       isAuction: isAuction ?? this.isAuction,
@@ -1049,6 +1230,7 @@ class Property {
       marketingLicenseSnapshot:
           marketingLicenseSnapshot ?? this.marketingLicenseSnapshot,
       listingGuidance: listingGuidance ?? this.listingGuidance,
+      orgListingSnapshot: orgListingSnapshot ?? this.orgListingSnapshot,
     );
   }
 }

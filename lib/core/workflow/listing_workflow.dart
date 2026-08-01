@@ -81,6 +81,12 @@ class WorkflowNotificationKeys {
   static const String propertyId = 'property_id';
   static const String listingId = 'listing_id';
   static const String entityId = 'entity_id';
+  /// فهرس تبويب فرعي داخل «صفحتي» عند فتح إشعار سير العمل.
+  /// المالك: 0..8 (تسعة تبويبات بما فيها «التصريح — 72 ساعة»)؛ المسوّق: 0..6.
+  static const String myAdsSubTab = 'my_ads_sub_tab';
+
+  /// عند ≥2: قيم [myAdsSubTab] لمالك 8 تبويبات؛ عند ≥3: 9 تبويبات؛ عند ≥4: 7 تبويبات (انظر `hub_tab_schema_v`).
+  static const String hubTabSchemaV = 'hub_tab_schema_v';
 }
 
 class WorkflowMainSections {
@@ -111,25 +117,33 @@ class ListingWorkflowMapper {
     return ListingStatus.ownerContractLike.contains(normalize(status));
   }
 
-  /// تبويبات صاحب الإعلان (صفحتي) بعد دمج التكرار: 7 تبويبات (0..6).
-  /// 0 بانتظار المسوقين، 1 تعاقد، 2 توقف 72س، 3 ملغى، 4 محجوز، 5 منشور، 6 صفقات مكتملة.
+  /// تبويبات صاحب الإعلان (صفحتي): 7 تبويبات (0..6).
+  /// 0 بانتظار المسوقين، 1 العروض المقدمة، 2 التعاقد، 3 توقف 72س، 4 ملغى، 5 محجوز، 6 صفقات مكتملة.
   static int ownerSubTabIndex(String? status) {
     final s = normalize(status);
     if (s == 'sold' || s == 'completed') return 6;
     if (s.contains('inactive') && (s.contains('72') || s.contains('72h'))) {
-      return 2;
+      return 3;
     }
     if (s.contains('cancel') ||
         s.contains('terminat') ||
         s == 'archived' ||
         s == 'contract_cancelled') {
-      return 3;
-    }
-    if (s == 'reserved' || s.contains('reservation')) {
       return 4;
     }
-    if (ListingStatus.publishedLike.contains(s)) return 5;
-    if (ListingStatus.ownerContractLike.contains(s)) return 1;
+    if (s == 'reserved' || s.contains('reservation')) {
+      return 5;
+    }
+    if (ListingStatus.publishedLike.contains(s)) return 0;
+    if (s == ListingStatus.signed ||
+        s == 'contract_signed' ||
+        s == ListingStatus.permitSubmitted ||
+        s == ListingStatus.submitted ||
+        s == ListingStatus.awaitingPermits ||
+        s == ListingStatus.pendingPermits ||
+        ListingStatus.ownerContractLike.contains(s)) {
+      return 2;
+    }
     if (ListingStatus.ownerPreContractOffers.contains(s)) return 1;
     return 0;
   }
@@ -138,21 +152,33 @@ class ListingWorkflowMapper {
     return ListingStatus.ownerPreContractOffers.contains(normalize(status));
   }
 
+  /// تبويبات المسوّق في «صفحتي» (0..4): 0 السوق، 1 عروضي، 2 تم الموافقة، 3 توقف 72س، 4 ملغى.
   static int marketerSubTabIndex(String? status) {
     final s = normalize(status);
-    if (ListingStatus.publishedLike.contains(s)) return 4;
+    if (s == 'inactive_72h' ||
+        s == 'inactive72h' ||
+        (s.contains('inactive') && (s.contains('72') || s.contains('72h')))) {
+      return 3;
+    }
+    if (s == 'cancelled' ||
+        s == 'terminated' ||
+        s == 'archived' ||
+        s == 'contract_cancelled') {
+      return 4;
+    }
+    if (ListingStatus.publishedLike.contains(s)) return 0;
     if (s == ListingStatus.permitSubmitted ||
         s == ListingStatus.submitted ||
         s == ListingStatus.awaitingPermits ||
-        s == ListingStatus.pendingPermits) {
-      return 3;
-    }
-    if (s == ListingStatus.contract ||
+        s == ListingStatus.pendingPermits ||
+        s == ListingStatus.contract ||
         s == ListingStatus.pendingMarketer ||
         s == ListingStatus.pendingOwner ||
         s == ListingStatus.signed ||
         s == ListingStatus.awaitContract ||
-        s == ListingStatus.awaitingContract) {
+        s == ListingStatus.awaitingContract ||
+        s == 'contract_signed' ||
+        s == 'marketer_selected') {
       return 2;
     }
     if (s == ListingStatus.offersReceived ||

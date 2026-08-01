@@ -1,23 +1,32 @@
-﻿import 'dart:convert';
+﻿import 'dart:async' show unawaited;
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/listing/property_listing_display.dart';
+import '../core/branding/branding_logo_image.dart';
+import '../core/input/input_normalizers.dart';
 import '../core/workflow/listing_workflow_copy.dart';
 import '../core/workflow/listing_post_publish_ui_helper.dart';
 import '../core/workflow/listing_workflow_ui_context.dart';
 import '../core/workflow/listing_workflow_stage.dart';
 import '../routes.dart';
+import '../core/navigation/post_auth_navigation.dart';
 import '../models/property.dart';
 import '../services/marketing_flow_service.dart';
 import '../services/contract_pdf_service.dart';
+import '../core/notifications/hub_workflow_sound.dart';
+import '../core/haptics/app_haptics.dart';
 import 'listing_contract_chat_page.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_confirm_dialog.dart';
+import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
 import '../shared/core/supabase_schema_selects.dart';
 import '../core/utils/app_money.dart';
@@ -467,12 +476,19 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     return qr.isNotEmpty || pdf.isNotEmpty;
   }
 
+  /// العقد «موقَّع» إذا كانت الحالة signed أو وُجد توقيع الطرفين.
+  bool _contractIsSigned(Map<String, dynamic> c) {
+    final st = (c['status'] ?? '').toString().toLowerCase().trim();
+    if (st == 'signed') return true;
+    return _contractRowFullySigned(c);
+  }
+
+  /// النشر من العقد — للمسوّق فقط؛ المالك لا ينشر الإعلان العام.
   bool _canPublishFromContract(
       Map<String, dynamic> row, Map<String, dynamic> c) {
     final u = (_sb.auth.currentUser?.id ?? '').trim();
     if (u.isEmpty) return false;
-    final st = (c['status'] ?? '').toString().toLowerCase().trim();
-    if (st != 'signed') return false;
+    if (!_contractIsSigned(c)) return false;
     final stage = ListingWorkflowStage.resolve(
       workflowStage: (row['workflow_stage'] ?? '').toString(),
       legacyStatus: (row['status'] ?? '').toString(),
@@ -482,14 +498,32 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         stage == ListingWorkflowStage.reserved) {
       return false;
     }
-    // Hide contract publishing once permit flow is started.
     if (stage == ListingWorkflowStage.permitPending ||
         stage == ListingWorkflowStage.permitIssued) {
       return false;
     }
-    final oid = (row['owner_id'] ?? '').toString().trim();
-    final mid = (c['marketer_id'] ?? '').toString().trim();
-    return u == oid || u == mid;
+    final mid = (c['marketer_id'] ??
+            row['selected_marketer_id'] ??
+            '')
+        .toString()
+        .trim();
+    return u == mid;
+  }
+
+  bool _ownerPastContractSign(Map<String, dynamic> row) {
+    if (!_isOwner(row)) return false;
+    final wf = ListingWorkflowUiContext.fromListingRequest(
+      Map<String, dynamic>.from(row),
+    ).stage;
+    if (wf == ListingWorkflowStage.contractSigned ||
+        wf == ListingWorkflowStage.permitPending ||
+        wf == ListingWorkflowStage.permitIssued ||
+        wf == ListingWorkflowStage.published ||
+        wf == ListingWorkflowStage.reserved) {
+      return true;
+    }
+    if (_contract != null && _contractIsSigned(_contract!)) return true;
+    return false;
   }
 
   String _contractBodyDisplay(Map<String, dynamic> c) {
@@ -500,11 +534,16 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         : b;
   }
 
-  Future<void> _runContractAction(Future<void> Function() fn) async {
+  Future<void> _runContractAction(
+    Future<void> Function() fn, {
+    void Function()? onSuccess,
+  }) async {
+    if (_contractBusy) return;
     setState(() => _contractBusy = true);
     try {
       await fn();
       if (!mounted) return;
+      onSuccess?.call();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -554,7 +593,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ListingWorkflowCopy.btnReturnContract(_isAr)),
-        content: TextField(
+        content: AqarTextField(
           controller: ctrl,
           maxLines: 4,
           decoration: InputDecoration(
@@ -597,6 +636,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
   }
 
   Future<void> _confirmSignContract(String contractId) async {
+    if (_contractBusy) return;
     final hasSig = await _currentUserHasKycSignature();
     if (!hasSig) {
       if (!mounted) return;
@@ -622,7 +662,14 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       cancelLabel: _isAr ? 'إلغاء' : 'Cancel',
     );
     if (!ok || !mounted) return;
-    await _runContractAction(() => _flow.ownerSignListingContract(contractId));
+    await _runContractAction(
+      () => _flow.ownerSignListingContract(contractId),
+      onSuccess: () {
+        // تنبيه المسوّق عبر إشعار Realtime؛ هنا نغطي أيضاً وضع المالك بعد التوقيع.
+        playHubWorkflowSound(HubWorkflowSoundKind.contractSuccess);
+        AppHaptics.medium();
+      },
+    );
   }
 
   Future<void> _promptCancelContract(String contractId) async {
@@ -643,7 +690,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ListingWorkflowCopy.btnCancelContract(_isAr)),
-        content: TextField(
+        content: AqarTextField(
           controller: ctrl,
           maxLines: 3,
           decoration: InputDecoration(
@@ -757,9 +804,59 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         m.toString().trim().isNotEmpty;
   }
 
+  Future<void> _openStoredContractPdfUrl(String raw) async {
+    final url = raw.trim();
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_isAr ? 'رابط PDF غير صالح' : 'Invalid PDF link')),
+      );
+      return;
+    }
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isAr
+                ? 'تعذّر فتح ملف PDF. جرّب من المتصفح.'
+                : 'Could not open PDF. Try in browser.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _openContractPdfAction(
+    String contractId,
+    Map<String, dynamic> c,
+  ) async {
+    final stored = (c['contract_pdf_url'] ?? '').toString().trim();
+    if (stored.isNotEmpty) {
+      await _openStoredContractPdfUrl(stored);
+      return;
+    }
+    if (_contractIsSigned(c) || _contractRowFullySigned(c)) {
+      await _exportContractPdf(contractId, c);
+      return;
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _isAr
+              ? 'ملف PDF غير جاهز بعد — يُنشأ بعد اكتمال توقيع الطرفين.'
+              : 'PDF not ready yet — available after both parties sign.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _exportContractPdf(
       String contractId, Map<String, dynamic> c) async {
-    if (!_contractRowFullySigned(c)) return;
+    if (!_contractIsSigned(c) && !_contractRowFullySigned(c)) return;
     final body = (c['contract_body'] ?? c['contract_text'] ?? '').toString();
     try {
       final ownerId = (c['owner_id'] ?? '').toString().trim();
@@ -770,6 +867,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       final mkSig = mkId.isNotEmpty
           ? await ContractPdfService.downloadUserSignaturePng(_sb, mkId)
           : null;
+      final vt = (c['verify_public_token'] ?? '').toString().trim();
       final bytes = await ContractPdfService.buildListingContractFullPdf(
         contractId: contractId,
         isAr: _isAr,
@@ -778,6 +876,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         marketerSignedAtIso: c['marketer_signed_at']?.toString(),
         marketerSignaturePng: mkSig,
         ownerSignaturePng: ownerSig,
+        verifyQrToken: vt.isEmpty ? null : vt,
       );
       await Share.shareXFiles(
         [
@@ -943,7 +1042,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
               ? 'طلب مراجعة إدارية / إيقاف التسويق'
               : 'Request admin review / stop marketing',
         ),
-        content: TextField(
+        content: AqarTextField(
           controller: ctrl,
           maxLines: 4,
           decoration: InputDecoration(
@@ -995,6 +1094,9 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     final isOwner = _isOwner(row);
     final isMarketer = _isPartyMarketer(row);
     final st = (c['status'] ?? '').toString().toLowerCase().trim();
+    final ownerSignedAt = c['owner_signed_at'];
+    final ownerAlreadySigned = ownerSignedAt != null &&
+        ownerSignedAt.toString().trim().isNotEmpty;
     final contractId = (c['id'] ?? '').toString().trim();
     final cs = Theme.of(context).colorScheme;
 
@@ -1086,35 +1188,57 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
               st != 'cancelled' &&
               (isOwner || isMarketer)) ...[
             const SizedBox(height: 10),
+            if (st == 'signed' && isOwner)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  _isAr
+                      ? 'تم توقيع العقد. يُكمّل المسوّق إصدار التصريح ثم نشر الإعلان — يمكنك فتح نسخة PDF أدناه.'
+                      : 'Contract signed. The marketer completes the permit and publishes the ad. Open the PDF below.',
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+              ),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push<void>(
-                      MaterialPageRoute<void>(
-                        builder: (_) => ListingContractChatPage(
-                          contractId: contractId,
-                          lang: widget.lang,
+                // بعد التوقيع: تُخفى «محادثة العقد» لكلا الطرفين.
+                // التواصل ينتقل إلى دردشة الإعلان (أيقونة على البطاقة في
+                // تبويب «تصاريح 72 ساعة»).
+                if (st != 'signed' && (isOwner || isMarketer))
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => ListingContractChatPage(
+                            contractId: contractId,
+                            lang: widget.lang,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.chat_outlined),
-                  label: Text(_isAr ? 'محادثة العقد' : 'Contract chat'),
-                ),
+                      );
+                    },
+                    icon: const Icon(Icons.chat_outlined),
+                    label: Text(_isAr ? 'محادثة العقد' : 'Contract chat'),
+                  ),
                 OutlinedButton.icon(
-                  onPressed: _contractRowFullySigned(c)
-                      ? () => _exportContractPdf(contractId, c)
+                  onPressed: _contractIsSigned(c) ||
+                          (c['contract_pdf_url'] ?? '')
+                              .toString()
+                              .trim()
+                              .isNotEmpty
+                      ? () => _openContractPdfAction(contractId, c)
                       : null,
                   icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: Text(_isAr ? 'PDF' : 'PDF'),
+                  label: Text(_isAr ? 'عقد PDF' : 'Contract PDF'),
                 ),
               ],
             ),
           ],
-          if (isOwner && st == 'pending_owner') ...[
+          if (isOwner && st == 'pending_owner' && !ownerAlreadySigned) ...[
             const SizedBox(height: 12),
             if (_contractBusy)
               const Center(
@@ -1123,43 +1247,97 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
                 child: AppLogoLoading(),
               ))
             else ...[
-              OutlinedButton.icon(
-                onPressed: contractId.isEmpty
-                    ? null
-                    : () => _showReviewContractDialog(c),
-                icon: const Icon(Icons.article_outlined),
-                label: Text(ListingWorkflowCopy.btnReviewContract(_isAr)),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: contractId.isEmpty
-                    ? null
-                    : () => _promptReturnContract(contractId),
-                icon: const Icon(Icons.undo_outlined),
-                label: Text(ListingWorkflowCopy.btnReturnContract(_isAr)),
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: contractId.isEmpty
-                    ? null
-                    : () => _confirmSignContract(contractId),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                icon: const Icon(Icons.draw_outlined),
-                label: Text(ListingWorkflowCopy.btnSignContract(_isAr)),
-              ),
-              const SizedBox(height: 8),
-              TextButton.icon(
-                onPressed: contractId.isEmpty
-                    ? null
-                    : () => _promptCancelContract(contractId),
-                icon: Icon(Icons.cancel_outlined, color: cs.error),
-                label: Text(
-                  ListingWorkflowCopy.btnCancelContract(_isAr),
-                  style: TextStyle(color: cs.error),
-                ),
+              LayoutBuilder(
+                builder: (ctx, cts) {
+                  final wide = cts.maxWidth >= 560;
+                  final reviewBtn = SizedBox(
+                    width: wide ? double.infinity : null,
+                    child: OutlinedButton.icon(
+                      onPressed: contractId.isEmpty
+                          ? null
+                          : () => _showReviewContractDialog(c),
+                      icon: const Icon(Icons.article_outlined),
+                      label: Text(ListingWorkflowCopy.btnReviewContract(_isAr)),
+                    ),
+                  );
+                  final signBtn = SizedBox(
+                    width: wide ? double.infinity : null,
+                    child: FilledButton.icon(
+                      onPressed: contractId.isEmpty
+                          ? null
+                          : () => _confirmSignContract(contractId),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.draw_outlined),
+                      label: Text(ListingWorkflowCopy.btnSignContract(_isAr)),
+                    ),
+                  );
+                  if (wide) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: reviewBtn),
+                            const SizedBox(width: 10),
+                            Expanded(child: signBtn),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: contractId.isEmpty
+                              ? null
+                              : () => _promptReturnContract(contractId),
+                          icon: const Icon(Icons.undo_outlined),
+                          label: Text(
+                              ListingWorkflowCopy.btnReturnContract(_isAr)),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: contractId.isEmpty
+                              ? null
+                              : () => _promptCancelContract(contractId),
+                          icon: Icon(Icons.cancel_outlined, color: cs.error),
+                          label: Text(
+                            ListingWorkflowCopy.btnCancelContract(_isAr),
+                            style: TextStyle(color: cs.error),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      reviewBtn,
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: contractId.isEmpty
+                            ? null
+                            : () => _promptReturnContract(contractId),
+                        icon: const Icon(Icons.undo_outlined),
+                        label: Text(
+                            ListingWorkflowCopy.btnReturnContract(_isAr)),
+                      ),
+                      const SizedBox(height: 8),
+                      signBtn,
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: contractId.isEmpty
+                            ? null
+                            : () => _promptCancelContract(contractId),
+                        icon: Icon(Icons.cancel_outlined, color: cs.error),
+                        label: Text(
+                          ListingWorkflowCopy.btnCancelContract(_isAr),
+                          style: TextStyle(color: cs.error),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ],
           ],
@@ -1252,51 +1430,92 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
   }
 
   String _formatMoney(double value, String currency) {
-    final f = NumberFormat('#,###');
+    final f = NumberFormat('#,###', 'en');
     final cur = currency.trim().isEmpty ? 'SAR' : currency.trim();
     final sym = cur.toUpperCase() == 'SAR'
         ? AppMoney.saudiRiyalSignUnicode
         : cur.toUpperCase();
     if (value <= 0) return '';
-    return '${f.format(value)} $sym';
+    return '${normalizeAsciiDigits(f.format(value))} $sym';
+  }
+
+  String _fmtDeedDate(dynamic raw) {
+    if (raw == null) return '';
+    final s = raw.toString().trim();
+    if (s.isEmpty) return '';
+    final dt = DateTime.tryParse(s);
+    if (dt != null) {
+      return DateFormat('yyyy-MM-dd').format(dt.toLocal());
+    }
+    return normalizeAsciiDigits(s);
+  }
+
+  String _pickDeedNumber(Map<String, dynamic> syn) {
+    for (final src in <dynamic>[
+      _propPreview?['deed_number'],
+      syn['deed_number'],
+      _payloadDetail['deed_number'],
+      _payloadDetail['preview_deed_number'],
+      _row?['deed_number'],
+    ]) {
+      final v = normalizeAsciiDigits((src ?? '').toString().trim());
+      if (v.isNotEmpty) return v;
+    }
+    return '';
+  }
+
+  String _pickDeedDate(Map<String, dynamic> syn) {
+    for (final src in <dynamic>[
+      _propPreview?['deed_date'],
+      syn['deed_date'],
+      _payloadDetail['deed_date'],
+      _payloadDetail['preview_deed_date'],
+      _row?['deed_date'],
+    ]) {
+      final v = _fmtDeedDate(src);
+      if (v.isNotEmpty) return v;
+    }
+    return '';
   }
 
   Widget _heroImageBlock(ColorScheme cs) {
     final urls = _heroImageUrls;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final heroH = (screenW * 0.52).clamp(180.0, 300.0);
+
+    Widget fallback() => Container(
+          height: heroH,
+          width: double.infinity,
+          color: cs.primary.withValues(alpha: 0.08),
+          alignment: Alignment.center,
+          child: BrandingLogoImage(
+            size: (heroH * 0.55).clamp(96.0, 160.0),
+            fit: BoxFit.contain,
+            errorIcon: Icons.apartment_rounded,
+          ),
+        );
+
     if (urls.isEmpty) {
-      return AspectRatio(
-        aspectRatio: 16 / 9,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-            border: Border.all(
-              color: cs.outlineVariant.withValues(alpha: 0.4),
-            ),
-          ),
-          child: Icon(
-            Icons.photo_library_outlined,
-            size: 52,
-            color: cs.onSurfaceVariant,
-          ),
-        ),
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: fallback(),
       );
     }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
-      child: AspectRatio(
-        aspectRatio: 16 / 9,
+      child: SizedBox(
+        height: heroH,
+        width: double.infinity,
         child: Stack(
           fit: StackFit.expand,
           children: [
             Image.network(
               urls.first,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => ColoredBox(
-                color: cs.surfaceContainerHighest,
-                child: Icon(Icons.broken_image_outlined,
-                    color: cs.onSurfaceVariant),
-              ),
+              width: double.infinity,
+              height: heroH,
+              errorBuilder: (_, __, ___) => fallback(),
             ),
             if (urls.length > 1)
               PositionedDirectional(
@@ -1325,35 +1544,6 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
               ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _detailLine(ColorScheme cs, String label, String value) {
-    if (value.trim().isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 118,
-            child: Text(
-              label,
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1398,8 +1588,8 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     );
     final areaLine = areaVal > 0
         ? (_isAr
-            ? '${areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2)} م²'
-            : '${areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2)} m²')
+            ? '${normalizeAsciiDigits(areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2))} م²'
+            : '${normalizeAsciiDigits(areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2))} m²')
         : '';
 
     final typeLabel = PropertyListingDisplay.typeLabelForRequestRow(syn, _isAr);
@@ -1409,132 +1599,172 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         PropertyListingDisplay.usageTuplesFromPayload(_payloadDetail, _isAr);
 
     final address =
-        (_propPreview?['address_line'] ?? _payloadDetail['address_line'] ?? '')
+        (_propPreview?['address_line'] ??
+                _payloadDetail['address_line'] ??
+                row['address_line'] ??
+                row['location'] ??
+                '')
             .toString()
             .trim();
 
     final description =
         (syn['description'] ?? row['description'] ?? '').toString().trim();
 
-    final topSection = LayoutBuilder(
-      builder: (context, c) {
-        final useSideBySide = c.maxWidth >= 760;
+    final deedNo = _pickDeedNumber(syn);
+    final deedDate = _pickDeedDate(syn);
+    final publicCode = (row['listing_request_public_code'] ??
+            _propPreview?['listing_public_code'] ??
+            '')
+        .toString()
+        .trim();
+    final roundLabel = ListingWorkflowCopy.marketingRoundLabel(
+      _isAr,
+      row['marketing_round'],
+    );
+    final titleFs = MediaQuery.sizeOf(context).width < 360 ? 18.0 : 22.0;
 
-        final chips = usageTuples.isNotEmpty
-            ? Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: usageTuples.map((t) {
-                    return Chip(
-                      avatar: Icon(t.$1, size: 18, color: cs.primary),
-                      label: Text(t.$2),
-                      visualDensity: VisualDensity.compact,
-                      side: BorderSide(
-                          color: cs.outlineVariant.withValues(alpha: 0.4)),
-                    );
-                  }).toList(),
-                ),
-              )
-            : const SizedBox.shrink();
+    final chips = <Widget>[];
+    if (typeLabel.trim().isNotEmpty) {
+      chips.add(
+        Chip(
+          label: Text(typeLabel),
+          visualDensity: VisualDensity.compact,
+          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
+        ),
+      );
+    }
+    if (purposeLabel.trim().isNotEmpty) {
+      chips.add(
+        Chip(
+          label: Text(purposeLabel),
+          visualDensity: VisualDensity.compact,
+          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
+        ),
+      );
+    }
+    for (final t in usageTuples) {
+      chips.add(
+        Chip(
+          avatar: Icon(t.$1, size: 18, color: cs.primary),
+          label: Text(t.$2),
+          visualDensity: VisualDensity.compact,
+          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
+        ),
+      );
+    }
 
-        final detailCard = Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: cs.primary.withValues(alpha: 0.22)),
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.38),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                _isAr ? 'ملخص الطلب' : 'Request summary',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                  color: cs.primary,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _detailLine(cs, _isAr ? 'المدينة' : 'City', city),
-              _detailLine(cs, _isAr ? 'السعر' : 'Price', priceLine),
-              _detailLine(cs, _isAr ? 'المساحة' : 'Area', areaLine),
-              _detailLine(
-                  cs, _isAr ? 'نوع العقار' : 'Property type', typeLabel),
-              _detailLine(cs, _isAr ? 'الغرض' : 'Purpose', purposeLabel),
-              _detailLine(cs, _isAr ? 'العنوان' : 'Address', address),
-              _detailLine(
-                cs,
-                _isAr ? 'المعلن' : 'Advertiser',
-                _ownerDisplayName.trim(),
-              ),
-              if (row['marketing_round'] != null)
-                _detailLine(
-                  cs,
-                  _isAr ? 'جولة التسويق' : 'Marketing round',
-                  '${row['marketing_round']}',
-                ),
-            ],
-          ),
-        );
+    final summaryRows = <RequestSummaryRow>[
+      if (publicCode.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'رقم الطلب' : 'Request no.',
+          value: normalizeAsciiDigits(publicCode),
+        ),
+      if (city.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'المدينة' : 'City',
+          value: city,
+        ),
+      if (priceLine.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'السعر' : 'Price',
+          value: priceLine,
+          emphasize: true,
+        ),
+      if (areaLine.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'المساحة' : 'Area',
+          value: areaLine,
+        ),
+      if (typeLabel.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'نوع العقار' : 'Property type',
+          value: typeLabel,
+        ),
+      if (purposeLabel.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'الغرض' : 'Purpose',
+          value: purposeLabel,
+        ),
+      if (address.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'العنوان' : 'Address',
+          value: address,
+        ),
+      if (_ownerDisplayName.trim().isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'الشريك المعلن' : 'Listing partner',
+          value: _ownerDisplayName.trim(),
+        ),
+      if (deedNo.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'رقم الصك' : 'Deed number',
+          value: deedNo,
+        ),
+      if (deedDate.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'تاريخ الصك' : 'Deed date',
+          value: deedDate,
+        ),
+      RequestSummaryRow(
+        label: _isAr ? 'جولة التسويق' : 'Marketing round',
+        value: roundLabel,
+      ),
+      RequestSummaryRow(
+        label: _isAr ? 'حالة الطلب' : 'Request status',
+        value: _isAr ? wfCtx.statusLabelAr : wfCtx.statusLabelEn,
+      ),
+    ];
 
-        final textBlock = Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              displayTitle,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-              ),
+    final topSection = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _heroImageBlock(cs),
+        const SizedBox(height: 14),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            displayTitle,
+            maxLines: 2,
+            style: TextStyle(
+              fontSize: titleFs,
+              fontWeight: FontWeight.w900,
+              height: 1.2,
             ),
-            const SizedBox(height: 8),
-            chips,
-            detailCard,
-            if (description.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                _isAr ? 'الوصف' : 'Description',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                description,
-                style: TextStyle(
-                  height: 1.4,
-                  color: cs.onSurface.withValues(alpha: 0.92),
-                ),
-              ),
-            ],
-          ],
-        );
-
-        if (useSideBySide) {
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 5, child: _heroImageBlock(cs)),
-              const SizedBox(width: 16),
-              Expanded(flex: 6, child: textBlock),
-            ],
-          );
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _heroImageBlock(cs),
-            const SizedBox(height: 14),
-            textBlock,
-          ],
-        );
-      },
+          ),
+        ),
+        if (chips.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: chips,
+          ),
+        ],
+        const SizedBox(height: 12),
+        RequestSummaryTable(
+          title: _isAr ? 'ملخص الطلب' : 'Request summary',
+          rows: summaryRows,
+        ),
+        if (description.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(
+            _isAr ? 'الوصف' : 'Description',
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            description,
+            style: TextStyle(
+              height: 1.4,
+              color: cs.onSurface.withValues(alpha: 0.92),
+            ),
+          ),
+        ],
+      ],
     );
 
     return SingleChildScrollView(
@@ -1592,6 +1822,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
                     compact: false,
                     dense: true,
                     deadline: wfCtx.primaryDeadline,
+                    permitSoundContextId: widget.requestId,
                   ),
                 ],
               ],
@@ -1617,19 +1848,18 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
               final isMarketer = _isPartyMarketer(row);
               final wf = wfCtx.stage;
 
-              final oid = (row['owner_id'] ?? '').toString().trim();
               final mid =
                   (row['selected_marketer_id'] ?? row['marketer_id'] ?? '')
                       .toString()
                       .trim();
               final canPublishAfterPermit =
-                  uid.isNotEmpty && (uid == oid || uid == mid);
+                  uid.isNotEmpty && uid == mid;
 
               if (wf == ListingWorkflowStage.contractSigned && isMarketer) {
                 return FilledButton.icon(
                   onPressed: () {
-                    Navigator.pushNamed(
-                      context,
+                    Navigator.of(context, rootNavigator: true)
+                        .pushNamed(
                       AppRoutes.submitPermits,
                       arguments: {
                         'requestId': widget.requestId,
@@ -1773,11 +2003,10 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
             }),
           ],
           const SizedBox(height: 14),
-          if (wfCtx.showOwnerOffersEntry)
+          if (wfCtx.showOwnerOffersEntry && !_ownerPastContractSign(row))
             FilledButton.icon(
               onPressed: () {
-                Navigator.pushNamed(
-                  context,
+                Navigator.of(context, rootNavigator: true).pushNamed(
                   AppRoutes.ownerOffers,
                   arguments: {
                     'requestId': widget.requestId,
@@ -1811,7 +2040,8 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
           ],
           if (_isOwner(row) &&
               !isPublished &&
-              !_hasMarketingEscalationRequest(row)) ...[
+              !_hasMarketingEscalationRequest(row) &&
+              !_ownerPastContractSign(row)) ...[
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: _contractBusy ? null : _promptMarketingAdminEscalation,
@@ -1819,18 +2049,21 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
               label: Text(_isAr ? 'طلب مراجعة إدارية' : 'Request admin review'),
             ),
           ],
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: () =>
-                Navigator.pushNamed(context, AppRoutes.inAppNotifications),
-            icon: const Icon(Icons.notifications_active_outlined),
-            label:
-                Text(_isAr ? 'الإشعارات داخل التطبيق' : 'In-app notifications'),
-          ),
+          if (!_ownerPastContractSign(row)) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.of(context, rootNavigator: true)
+                  .pushNamed(AppRoutes.inAppNotifications),
+              icon: const Icon(Icons.notifications_active_outlined),
+              label: Text(
+                  _isAr ? 'الإشعارات داخل التطبيق' : 'In-app notifications'),
+            ),
+          ],
           const SizedBox(height: 10),
           ElevatedButton.icon(
-            onPressed: () => Navigator.pushNamedAndRemoveUntil(
-                context, '/userDashboard', (r) => false),
+            onPressed: () => unawaited(
+                PostAuthNavigation.openDashboard(context),
+              ),
             icon: const Icon(Icons.home_outlined),
             label: Text(_isAr ? 'العودة للرئيسية' : 'Back to Home'),
           ),

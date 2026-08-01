@@ -9,11 +9,15 @@ import 'package:http/http.dart' as http;
 import '../l10n/app_localizations.dart';
 import '../shared/core/supabase_config.dart';
 
-/// خدمة مركزية لفحص الاتصال — مصدر واحد للتحقق من الشبكة + إمكانية الوصول للخادم.
+/// خدمة مركزية لفحص الاتصال — مصدر واحد للتحقق من الشبكة.
+///
+/// **قاعدة صارمة:** حالة «متصل» المستخدمة لحجب اللمس/الدخول تعتمد فقط على
+/// رابط الشبكة (Wi‑Fi/بيانات)، وليس على نجاح HTTP إلى Supabase.
+/// فحص الخادم اختياري وتشخيصي فقط — فشله لا يعني قطع الإنترنت ولا يجمّد التطبيق.
 class ConnectivityGuard {
   static final Connectivity _connectivity = Connectivity();
 
-  /// فحص سريع عبر المكوّن فقط (بدون HTTP).
+  /// فحص سريع عبر المكوّن فقط (بدون HTTP). فشل الفحص → نفترض الاتصال متاحاً.
   static Future<bool> hasPluginLink() async {
     try {
       final result = await _connectivity
@@ -26,22 +30,16 @@ class ConnectivityGuard {
     }
   }
 
-  /// فحص فوري كما كان سابقاً (لتوافق الاستدعاءات القديمة).
+  /// فحص فوري لتوافق الاستدعاءات القديمة — رابط الشبكة فقط.
   static Future<bool> hasInternet() async => hasPluginLink();
 
-  /// تحقق صارم: رابط شبكة + (على الموبايل) استجابة HTTP من مشروع Supabase.
+  /// هل يمكن اعتبار الجهاز «متصلاً» لواجهة التطبيق؟
   ///
-  /// **الويب:** لا نستدعي جذر PostgREST هنا — طلبات مثل `HEAD/GET …/rest/v1/` قد تعيد
-  /// 401 في الـ console مع مفتاح publishable **دون** أن تعني فشل جلب `properties`.
-  /// نعتمد على المكوّن فقط؛ نجاح/فشل البيانات يظهر من استعلامات [SupabaseClient] نفسها.
-  static Future<bool> hasReachableInternet() async {
-    final linked = await hasPluginLink();
-    if (!linked) return false;
-    if (kIsWeb) return true;
-    return probeBackendReachable();
-  }
+  /// لا يعتمد على استجابة Supabase. طلب HTTP بطيء/فاشل بعد الدخول كان يضع
+  /// `IgnorePointer` على كامل التطبيق فيبدو معلّقاً بعد تسجيل الدخول أو الضيف.
+  static Future<bool> hasReachableInternet() async => hasPluginLink();
 
-  /// طلب خفيف لجذر PostgREST (بدون `/auth/v1/health`). مفتاح anon غير صالح → 401.
+  /// تشخيص اختياري: هل مشروع Supabase يرد؟ لا يُستخدم لحجب اللمس.
   static Future<bool> probeBackendReachable() async {
     final base = SupabaseConfig.supabaseUrl.replaceAll(RegExp(r'/+$'), '');
     final key = SupabaseConfig.supabaseAnonKey;
@@ -49,24 +47,21 @@ class ConnectivityGuard {
     final isPublishable = key.startsWith('sb_publishable_');
     final headers = <String, String>{
       'apikey': key,
-      // ملاحظة مهمة:
-      // - مفاتيح sb_publishable_* ليست JWT ولا تصلح كـ Bearer token.
-      // - إرسالها داخل Authorization يسبب 401 متكرر على /rest/v1/ في الويب.
       if (!isPublishable) 'Authorization': 'Bearer $key',
     };
-    // تجنّب HEAD على /rest/v1/ (غالباً 401 في المتصفح مع مفتاح publishable ويملأ الـ console).
-    // جذر المشروع يستجيب غالباً بـ 404 — يكفي لإثبات الوصول للشبكة دون ضوضاء.
-    try {
-      final root = await http
-          .get(Uri.parse('$base/'))
-          .timeout(const Duration(seconds: 8));
-      if (root.statusCode > 0 && root.statusCode < 600) return true;
-    } catch (_) {}
+    if (!kIsWeb) {
+      try {
+        final root = await http
+            .get(Uri.parse('$base/'))
+            .timeout(const Duration(seconds: 5));
+        if (root.statusCode > 0 && root.statusCode < 600) return true;
+      } catch (_) {}
+    }
     final restRoot = Uri.parse('$base/rest/v1/');
     try {
       final res = await http
           .get(restRoot, headers: headers)
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 5));
       if (res.statusCode > 0 && res.statusCode < 600) return true;
     } catch (_) {}
     return false;

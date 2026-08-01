@@ -205,12 +205,24 @@ BEGIN
         'my_org_context',
         'my_pending_org_join_banner',
         'open_property_auction_session',
+        'org_browse_public',
         'org_decide_join_request',
+        'org_decide_leave_request',
+        'org_effective_seat_limit',
         'org_get_my_recruit_join_code',
         'org_list_pending_join_requests',
+        'org_owner_remove_alumni_row',
+        'org_owner_remove_member',
         'org_owner_revoke_member_device',
+        'org_owner_unban_user',
+        'org_public_profile',
+        'org_purchase_extra_seats',
+        'org_renew_fal_license',
         'org_submit_join_request',
+        'org_submit_join_request_by_org',
+        'org_submit_leave_request',
         'org_update_member_permissions',
+        'org_update_profile',
         'owner_decline_listing_offer',
         'owner_delete_property_cascade',
         'owner_edit_property',
@@ -277,7 +289,8 @@ BEGIN
         'get_security_username_for_login',
         'signup_phone_taken',
         'signup_unified_national_taken',
-        'signup_username_taken'
+        'signup_username_taken',
+        'org_preview_by_invite_code'
       )
   LOOP
     EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO anon, authenticated, service_role', f.signature);
@@ -368,5 +381,6 @@ WHERE n.nspname = 'public'
     'get_security_username_for_login',
     'signup_phone_taken',
     'signup_unified_national_taken',
-    'signup_username_taken'
+    'signup_username_taken',
+    'org_preview_by_invite_code'
   );

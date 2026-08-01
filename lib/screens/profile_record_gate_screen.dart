@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/auth/safe_sign_out_service.dart';
 import '../widgets/app_logo_loading.dart';
 
 /// عند غياب صف [users_profiles] أو فشل تحميله — لا يُسمح باستخدام التطبيق قبل الإصلاح.
@@ -25,11 +25,8 @@ class _ProfileRecordGateScreenState extends State<ProfileRecordGateScreen> {
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
   Future<void> _signOut() async {
-    try {
-      await Supabase.instance.client.auth.signOut();
-    } catch (_) {}
     if (!mounted) return;
-    Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
+    await SafeSignOutService.signOutAndNavigateToLogin(context);
   }
 
   Future<void> _retry() async {

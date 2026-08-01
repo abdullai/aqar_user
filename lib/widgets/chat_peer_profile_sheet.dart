@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/chat_inbox_service.dart';
 import '../services/chat_peer_service.dart';
 
 import 'app_logo_loading.dart';
+import 'user_presence_strip.dart';
 
 String _initialLetter(String name) {
   final t = name.trim();
@@ -86,6 +88,10 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
 
   bool _ratingBusy = false;
 
+  bool _blocked = false;
+
+  bool _blockBusy = false;
+
   @override
   void initState() {
     super.initState();
@@ -109,6 +115,9 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
       final my =
           await ChatPeerService.fetchMyStarsForPeer(widget.sb, widget.userId);
 
+      final blocked =
+          await ChatInboxService(widget.sb).isUserBlocked(widget.userId);
+
       if (!mounted) return;
 
       setState(() {
@@ -119,6 +128,8 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
         _ratingCount = summary.count;
 
         _myStars = my ?? 0;
+
+        _blocked = blocked;
 
         _loading = false;
       });
@@ -173,6 +184,41 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
     }
   }
 
+  Future<void> _toggleBlock() async {
+    final me = widget.sb.auth.currentUser?.id ?? '';
+    if (me.isEmpty || me == widget.userId || _blockBusy) return;
+    setState(() => _blockBusy = true);
+    final svc = ChatInboxService(widget.sb);
+    try {
+      if (_blocked) {
+        await svc.unblockUser(widget.userId);
+      } else {
+        await svc.blockUser(widget.userId);
+      }
+      if (!mounted) return;
+      setState(() => _blocked = !_blocked);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _blocked
+                ? (widget.isAr ? 'تم حظر المستخدم' : 'User blocked')
+                : (widget.isAr ? 'تم فك الحظر' : 'User unblocked'),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(widget.isAr ? 'تعذّر تنفيذ الحظر' : 'Block action failed'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _blockBusy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -220,7 +266,24 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
 
     final canRate = me.isNotEmpty && me != widget.userId;
 
+    final canBlock = canRate;
+
     final wide = MediaQuery.sizeOf(context).width >= 720;
+
+    final blockActions = canBlock
+        ? Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: FilledButton.tonalIcon(
+              onPressed: _blockBusy ? null : _toggleBlock,
+              icon: Icon(_blocked ? Icons.lock_open_rounded : Icons.block_rounded),
+              label: Text(
+                _blocked
+                    ? (ar ? 'فك الحظر' : 'Unblock')
+                    : (ar ? 'حظر المستخدم' : 'Block user'),
+              ),
+            ),
+          )
+        : const SizedBox.shrink();
 
     final header = Column(
       mainAxisSize: MainAxisSize.min,
@@ -277,6 +340,8 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
             fontSize: 14,
           ),
         ),
+        const SizedBox(height: 6),
+        UserPresenceStrip(userId: widget.userId, isAr: ar, compact: false),
         if (phone.isNotEmpty) ...[
           const SizedBox(height: 10),
           SelectableText(
@@ -378,7 +443,9 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
                     SingleChildScrollView(
                       child: Padding(
                         padding: const EdgeInsets.only(top: 12),
-                        child: header,
+                        child: Column(
+                          children: [header, blockActions],
+                        ),
                       ),
                     ),
                     SingleChildScrollView(
@@ -396,25 +463,17 @@ class _PeerProfileBodyState extends State<_PeerProfileBody> {
       );
     }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        header,
-        const SizedBox(height: 12),
-        Theme(
-          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-          child: ExpansionTile(
-            initiallyExpanded: true,
-            title: Text(
-              ar ? 'التقييم والخيارات' : 'Rating & options',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            childrenPadding:
-                const EdgeInsets.only(left: 8, right: 8, bottom: 12),
-            children: [ratingCard],
-          ),
-        ),
-      ],
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          blockActions,
+          const SizedBox(height: 16),
+          ratingCard,
+        ],
+      ),
     );
   }
 }

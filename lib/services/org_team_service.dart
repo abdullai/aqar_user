@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/utils/users_profiles_safe_select.dart';
@@ -11,6 +13,43 @@ class OrgTeamService {
   OrgTeamService(this._sb);
 
   final SupabaseClient _sb;
+
+  /// بعد التسجيل: طلب انضمام يُنشأ عند أول جلسة مسجّلة.
+  static const prefPendingSignupOrgJoinId = 'pending_signup_org_join_id_v1';
+  static const prefPendingSignupOrgJoinIntro = 'pending_signup_org_join_intro_v1';
+
+  /// معاينة منشأة برمز فال/دعوة (قبل تسجيل الدخول).
+  Future<Map<String, dynamic>> orgPreviewByInviteCode(String code) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_preview_by_invite_code',
+        params: {'p_code': code.trim()},
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+    } catch (_) {}
+    return {'ok': false, 'error': 'rpc_failed'};
+  }
+
+  /// يقرأ المفتاح المحفوظ عند التسجيل ثم يُرسل طلب الانضمام مرة واحدة.
+  Future<Map<String, dynamic>> consumePendingSignupOrgJoin() async {
+    final p = await SharedPreferences.getInstance();
+    final oid = p.getString(prefPendingSignupOrgJoinId)?.trim() ?? '';
+    final intro = p.getString(prefPendingSignupOrgJoinIntro)?.trim() ?? '';
+    if (oid.isEmpty) {
+      return {'ok': true, 'skipped': true};
+    }
+    final msg = intro.isEmpty ? null : intro;
+    final res = await submitJoinRequestByOrgId(orgId: oid, message: msg);
+    if (res['ok'] == true) {
+      await p.remove(prefPendingSignupOrgJoinId);
+      await p.remove(prefPendingSignupOrgJoinIntro);
+    }
+    return res;
+  }
 
   Future<String?> ensureMyOrgUnit() async {
     try {
@@ -37,8 +76,15 @@ class OrgTeamService {
   /// نسخة الشروط النشطة (SECURITY DEFINER على الخادم؛ يتطلب GRANT EXECUTE للمستخدم المسجّل).
   /// قبول الشروط: `acceptTerms` → RPC `accept_terms_v1` يحدّث `users_profiles.terms_version_accepted`.
   Future<Map<String, dynamic>?> activeLegalVersion() async {
+    const timeout = Duration(seconds: 8);
     try {
-      final rows = await _sb.rpc('get_active_legal_version');
+      if (kIsWeb) {
+        final fromTable = await _activeLegalVersionFromTable(timeout: timeout);
+        if (fromTable != null) return fromTable;
+      }
+      final rows = await _sb
+          .rpc('get_active_legal_version')
+          .timeout(timeout, onTimeout: () => throw TimeoutException('rpc'));
       if (rows is List && rows.isNotEmpty) {
         final first = rows.first;
         if (first is Map) {
@@ -48,7 +94,29 @@ class OrgTeamService {
         }
       }
     } catch (_) {}
+    if (!kIsWeb) {
+      return _activeLegalVersionFromTable(timeout: timeout);
+    }
     return null;
+  }
+
+  Future<Map<String, dynamic>?> _activeLegalVersionFromTable({
+    required Duration timeout,
+  }) async {
+    try {
+      final row = await _sb
+          .from('legal_documents_versions')
+          .select('version, title_ar, title_en, body_ar, body_en')
+          .lte('effective_at', DateTime.now().toUtc().toIso8601String())
+          .order('effective_at', ascending: false)
+          .limit(1)
+          .maybeSingle()
+          .timeout(timeout, onTimeout: () => throw TimeoutException('table'));
+      if (row == null) return null;
+      return Map<String, dynamic>.from(row);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> myProfileGates() async {
@@ -136,7 +204,7 @@ class OrgTeamService {
       final row = await _sb
           .from('org_units')
           .select(
-            'id, account_type, base_seat_limit, purchased_extra_seats, created_at, recruit_join_code',
+            'id, account_type, base_seat_limit, purchased_extra_seats, created_at, recruit_join_code, fal_public_code',
           )
           .eq('owner_user_id', uid)
           .maybeSingle();
@@ -244,29 +312,125 @@ class OrgTeamService {
     }
   }
 
-  Future<Map<String, dynamic>> inviteMember({
+  /// دعوة عضو (هوية + جوال) — يتطلب `20260517240000_org_team_invitations_workflow.sql`.
+  Future<Map<String, dynamic>> createTeamInvitation({
     required String nationalId,
-    required String tempPassword,
-    Map<String, dynamic>? permissions,
+    required String mobile,
   }) async {
     try {
-      final res = await _sb.functions.invoke(
-        'org_invite_member',
-        body: {
-          'national_id': nationalId.replaceAll(RegExp(r'\D'), ''),
-          'temp_password': tempPassword,
-          'permissions': permissions ?? <String, dynamic>{},
+      final raw = await _sb.rpc(
+        'org_create_team_invitation',
+        params: {
+          'p_national_id': nationalId.replaceAll(RegExp(r'\D'), ''),
+          'p_mobile': mobile.replaceAll(RegExp(r'\D'), ''),
         },
       );
-      if (res.data is Map) {
-        final m = Map<String, dynamic>.from(res.data as Map);
-        if (m['ok'] == true) return m;
-        return {'ok': false, 'error': m['error'] ?? 'unknown'};
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
       }
       return {'ok': false, 'error': 'bad_response'};
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
     }
+  }
+
+  Future<List<Map<String, dynamic>>> listTeamInvitations() async {
+    try {
+      final raw = await _sb.rpc('org_list_team_invitations');
+      Iterable<dynamic>? rows;
+      if (raw is List) {
+        rows = raw;
+      } else if (raw is String) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) rows = decoded;
+      }
+      if (rows == null) return [];
+      return rows
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } catch (_) {}
+    return [];
+  }
+
+  Future<Map<String, dynamic>> updateTeamInvitation({
+    required String invitationId,
+    required String nationalId,
+    required String mobile,
+  }) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_update_team_invitation',
+        params: {
+          'p_invitation_id': invitationId,
+          'p_national_id': nationalId.replaceAll(RegExp(r'\D'), ''),
+          'p_mobile': mobile.replaceAll(RegExp(r'\D'), ''),
+        },
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  /// تحقق قبل التسجيل (بدون جلسة).
+  Future<Map<String, dynamic>> verifyTeamInvitation({
+    required String nationalId,
+    required String mobile,
+  }) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_verify_team_invitation',
+        params: {
+          'p_national_id': nationalId.replaceAll(RegExp(r'\D'), ''),
+          'p_mobile': mobile.replaceAll(RegExp(r'\D'), ''),
+        },
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> completeTeamInvitation(String invitationId) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_complete_team_invitation',
+        params: {'p_invitation_id': invitationId},
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  @Deprecated('Use createTeamInvitation instead')
+  Future<Map<String, dynamic>> inviteMember({
+    required String nationalId,
+    required String tempPassword,
+    Map<String, dynamic>? permissions,
+  }) async {
+    return createTeamInvitation(
+      nationalId: nationalId,
+      mobile: tempPassword,
+    );
   }
 
   Future<void> updateMemberPermissions({
@@ -337,7 +501,9 @@ class OrgTeamService {
 
   Future<List<Map<String, dynamic>>> listPendingJoinRequests() async {
     try {
-      final raw = await _sb.rpc('org_list_pending_join_requests');
+      final raw = await _sb
+          .rpc('org_list_pending_join_requests')
+          .timeout(const Duration(seconds: 8));
       if (raw is List) {
         return raw
             .map((e) => Map<String, dynamic>.from(e as Map))
@@ -413,6 +579,7 @@ class OrgTeamService {
     required String requestId,
     required bool approve,
     Map<String, dynamic>? permissions,
+    String? rejectReason,
   }) async {
     try {
       final raw = await _sb.rpc(
@@ -421,7 +588,194 @@ class OrgTeamService {
           'p_request_id': requestId,
           'p_approve': approve,
           'p_permissions': permissions ?? <String, dynamic>{},
+          if (rejectReason != null && rejectReason.trim().isNotEmpty)
+            'p_reject_reason': rejectReason.trim(),
         },
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> browsePublicOrganizations({
+    int limit = 40,
+  }) async {
+    try {
+      final raw = await _sb.rpc('org_browse_public', params: {'limit_n': limit});
+      if (raw is List) {
+        return raw
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+      }
+      if (raw is String) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            return decoded
+                .map((e) => Map<String, dynamic>.from(e as Map))
+                .toList();
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<Map<String, dynamic>?> publicOrganizationProfile(String orgId) async {
+    final id = orgId.trim();
+    if (id.isEmpty) return null;
+    try {
+      final raw = await _sb.rpc('org_public_profile', params: {'p_org_id': id});
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>> submitJoinRequestByOrgId({
+    required String orgId,
+    String? message,
+    String? verificationRequestId,
+  }) async {
+    try {
+      final params = <String, dynamic>{
+        'p_org_id': orgId.trim(),
+        'p_message': message,
+      };
+      if (verificationRequestId != null && verificationRequestId.isNotEmpty) {
+        final vid = int.tryParse(
+          verificationRequestId.replaceAll(RegExp(r'\D'), ''),
+        );
+        if (vid != null) params['p_verification_request_id'] = vid;
+      }
+      final raw = await _sb.rpc(
+        'org_submit_join_request_by_org',
+        params: params,
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> renewFalLicense() async {
+    try {
+      final raw = await _sb.rpc('org_renew_fal_license');
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateOrgProfile(Map<String, dynamic> patch) async {
+    try {
+      final raw = await _sb.rpc('org_update_profile', params: {'p_patch': patch});
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> submitLeaveRequest() async {
+    try {
+      final raw = await _sb.rpc('org_submit_leave_request');
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> decideLeaveRequest({
+    required String requestId,
+    required bool approve,
+  }) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_decide_leave_request',
+        params: {
+          'p_request_id': requestId,
+          'p_approve': approve,
+        },
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> ownerUnbanUser(String userId) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_owner_unban_user',
+        params: {'p_user_id': userId},
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> ownerRemoveAlumniRow(String alumniId) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_owner_remove_alumni_row',
+        params: {'p_alumni_id': alumniId},
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'bad_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> ownerRemoveMember(String memberUserId) async {
+    try {
+      final raw = await _sb.rpc(
+        'org_owner_remove_member',
+        params: {'p_member_user_id': memberUserId},
       );
       if (raw is Map) {
         return Map<String, dynamic>.from(
@@ -455,24 +809,157 @@ class OrgTeamService {
     return const [];
   }
 
-  Future<bool> insertOrgTeamChannelPost({
+  /// يُرجع [id] المنشور عند النجاح (للمزامنة الفورية مع messages بعد الـ trigger).
+  Future<String?> insertOrgTeamChannelPost({
     required String orgId,
     required String body,
   }) async {
     final uid = _sb.auth.currentUser?.id;
-    if (uid == null) return false;
+    if (uid == null) return null;
     final t = body.trim();
-    if (t.isEmpty) return false;
+    if (t.isEmpty) return null;
     try {
-      await _sb.from('org_team_channel_posts').insert({
+      final row = await _sb.from('org_team_channel_posts').insert({
         'org_id': orgId.trim(),
         'author_id': uid,
         'body': t,
-      });
-      return true;
+      }).select('id').maybeSingle();
+      final id = (row?['id'] ?? '').toString().trim();
+      return id.isEmpty ? null : id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Sum of listings/ads created by each member (best-effort; depends on RLS).
+  Future<Map<String, Map<String, int>>> fetchOrgMemberContribution(
+    String orgId,
+  ) async {
+    final out = <String, Map<String, int>>{};
+    final members = await listMembers(orgId);
+    for (final m in members) {
+      final id = '${m['user_id'] ?? ''}';
+      if (id.isEmpty) continue;
+      out[id] = {'properties': 0, 'ads': 0, 'views': 0};
+    }
+    if (out.isEmpty) return out;
+    final ids = out.keys.toList();
+    try {
+      final props = await _sb
+          .from('properties')
+          .select('owner_id')
+          .inFilter('owner_id', ids);
+      for (final row in props as List<dynamic>) {
+        final r = Map<String, dynamic>.from(row as Map);
+        final uid = '${r['owner_id'] ?? ''}';
+        if (!out.containsKey(uid)) continue;
+        out[uid]!['properties'] = (out[uid]!['properties'] ?? 0) + 1;
+      }
+    } catch (_) {}
+    try {
+      final adsRows = await _sb
+          .from('ads')
+          .select('created_by')
+          .inFilter('created_by', ids);
+      for (final row in adsRows as List<dynamic>) {
+        final r = Map<String, dynamic>.from(row as Map);
+        final uid = '${r['created_by'] ?? ''}';
+        if (!out.containsKey(uid)) continue;
+        out[uid]!['ads'] = (out[uid]!['ads'] ?? 0) + 1;
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  /// آخر نشاط مسجّل لكل عضو (من org_activity_log).
+  Future<Map<String, String>> fetchLatestActivitySummaryByUserIds(
+    String orgId,
+    List<String> userIds,
+  ) async {
+    final out = <String, String>{};
+    if (userIds.isEmpty) return out;
+    try {
+      final rows = await _sb
+          .from('org_activity_log')
+          .select('actor_user_id, action, created_at')
+          .eq('org_id', orgId)
+          .inFilter('actor_user_id', userIds)
+          .order('created_at', ascending: false)
+          .limit(200) as List<dynamic>;
+      for (final row in rows) {
+        final m = Map<String, dynamic>.from(row as Map);
+        final uid = '${m['actor_user_id'] ?? ''}';
+        if (uid.isEmpty || out.containsKey(uid)) continue;
+        final a = '${m['action'] ?? ''}';
+        final t = '${m['created_at'] ?? ''}';
+        out[uid] = a.isEmpty ? t : '$a · $t';
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  Future<bool> isPlatformStaffUser() async {
+    try {
+      final raw = await _sb.rpc('is_platform_staff');
+      return raw == true;
     } catch (_) {
       return false;
     }
+  }
+
+  Future<Map<String, dynamic>> platformStaffBanUser({
+    required String userId,
+    required String reason,
+    String banType = 'permanent',
+    DateTime? banUntil,
+    bool canJoinOtherOrgs = true,
+    bool blocksApp = true,
+  }) async {
+    try {
+      String? untilStr;
+      if (banUntil != null) {
+        untilStr =
+            '${banUntil.year}-${banUntil.month.toString().padLeft(2, '0')}-${banUntil.day.toString().padLeft(2, '0')}';
+      }
+      final raw = await _sb.rpc(
+        'platform_staff_ban_user',
+        params: {
+          'p_user_id': userId,
+          'p_reason': reason.trim(),
+          'p_ban_type': banType,
+          'p_ban_until': untilStr,
+          'p_can_join_other_orgs': canJoinOtherOrgs,
+          'p_blocks_app': blocksApp,
+        },
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+    return {'ok': false, 'error': 'bad_response'};
+  }
+
+  Future<Map<String, dynamic>> platformStaffTerminateSessions(
+    String userId,
+  ) async {
+    try {
+      final raw = await _sb.rpc(
+        'platform_staff_terminate_user_sessions',
+        params: {'p_user_id': userId},
+      );
+      if (raw is Map) {
+        return Map<String, dynamic>.from(
+          raw.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+    return {'ok': false, 'error': 'bad_response'};
   }
 }
 

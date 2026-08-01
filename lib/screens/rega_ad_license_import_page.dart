@@ -1,6 +1,7 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../widgets/app_logo_loading.dart';
@@ -10,9 +11,13 @@ import '../widgets/app_logo_loading.dart';
 class RegaAdLicenseImportPage extends StatefulWidget {
   final bool isAr;
 
+  /// عند `true`: يخفي سهم الرجوع الداخلي — الشريط الأعلى للداشبورد يعرضه.
+  final bool embedAppBar;
+
   const RegaAdLicenseImportPage({
     super.key,
     required this.isAr,
+    this.embedAppBar = false,
   });
 
   static final RegExp _uuidRe = RegExp(
@@ -282,7 +287,7 @@ class _RegaElanWebImportDialogState extends State<_RegaElanWebImportDialog> {
                     : 'Paste the Elan details URL or the page UUID.',
               ),
               const SizedBox(height: 8),
-              TextField(
+              AqarTextField(
                 controller: _linkCtrl,
                 decoration: InputDecoration(
                   labelText: isAr ? 'الرابط' : 'URL',
@@ -301,7 +306,7 @@ class _RegaElanWebImportDialogState extends State<_RegaElanWebImportDialog> {
                     : 'Then copy all visible text from the page and paste below.',
               ),
               const SizedBox(height: 8),
-              TextField(
+              AqarTextField(
                 controller: _pasteCtrl,
                 maxLines: 8,
                 decoration: InputDecoration(
@@ -508,6 +513,7 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
       textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: !widget.embedAppBar,
           title: Text(
             _t('ربط التصريح مع الهيئة', 'Link permit with REGA'),
           ),
@@ -520,7 +526,7 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextField(
+                  AqarTextField(
                     controller: _urlCtrl,
                     decoration: InputDecoration(
                       labelText: _t(

@@ -28,8 +28,14 @@ class MarketPropertyRequestRow {
   /// مسار في `property-images` (اختياري) لغلاف الطلب.
   final String? coverImageStoragePath;
 
-  /// درجة الإلحاح (مرن … طلب فوري).
+  /// `true` عند استخدام الغلاف الذكي (شعار المنصة) بدل صورة المستخدم.
+  final bool defaultCoverUsed;
+
+  /// درجة الإلحاح (عادي … طلب فوري).
   final MarketPropertyRequestPriority requestPriority;
+
+  /// وقت تفعيل دفع «فوري» (إن وُجد في الخادم).
+  final DateTime? instantPaidAt;
 
   /// حالة دورة حياة الطلب في الخادم (قد تكون فارغة في صفوف قديمة).
   final String status;
@@ -63,7 +69,9 @@ class MarketPropertyRequestRow {
     required this.showRequesterName,
     required this.requesterPublicName,
     this.coverImageStoragePath,
+    this.defaultCoverUsed = false,
     this.requestPriority = MarketPropertyRequestPriority.standard,
+    this.instantPaidAt,
     this.status = '',
     this.editCount = 0,
     this.maxEdits = 3,
@@ -77,6 +85,34 @@ class MarketPropertyRequestRow {
   /// تاريخ إنشاء الطلب للعرض في الرئيسية: الأحدث إنشاءً أولاً.
   DateTime get sortTime =>
       createdAt ?? updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+
+  bool get isInstantPaid =>
+      requestPriority == MarketPropertyRequestPriority.immediate;
+
+  String get regionLabel {
+    try {
+      final raw = details['region'] ??
+          details['region_ar'] ??
+          details['region_en'] ??
+          '';
+      final fromDetails = raw.toString().trim();
+      if (fromDetails.isNotEmpty) return fromDetails;
+    } catch (_) {}
+    return '';
+  }
+
+  String get governorateLabel {
+    try {
+      return (details['governorate'] ??
+              details['governorate_ar'] ??
+              details['governorate_en'] ??
+              '')
+          .toString()
+          .trim();
+    } catch (_) {
+      return '';
+    }
+  }
 
   /// خليط الرئيسية يعتمد على الإنشاء فقط حتى لا تقفز الطلبات القديمة عند تعديلها.
   DateTime get homeFeedTimelineSortAt => sortTime;
@@ -175,8 +211,12 @@ class MarketPropertyRequestRow {
       showRequesterName: m['show_requester_name'] == true,
       requesterPublicName: (m['requester_public_name'] as String?)?.trim(),
       coverImageStoragePath: (m['cover_image_storage_path'] as String?)?.trim(),
+      defaultCoverUsed: m['default_cover_used'] == true,
       requestPriority:
           MarketPropertyRequestPriority.parse(m['request_priority']),
+      instantPaidAt: m['instant_paid_at'] != null
+          ? DateTime.tryParse(m['instant_paid_at'].toString())
+          : null,
       status: (m['status'] ?? '').toString().trim().toLowerCase(),
       editCount: int.tryParse('${m['edit_count'] ?? 0}') ?? 0,
       maxEdits: int.tryParse('${m['max_edits'] ?? 3}') ?? 3,

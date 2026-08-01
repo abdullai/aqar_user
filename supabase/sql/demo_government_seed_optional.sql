@@ -1,0 +1,27 @@
+-- =============================================================================
+-- OPTIONAL demo seed — government / compliance UAT ONLY
+-- =============================================================================
+-- Do NOT run against production. Use a dedicated Supabase demo project.
+-- Replace :demo_user_id with a real auth.users.id from that project.
+-- Uncomment blocks as needed after validating FKs and RLS in demo.
+-- =============================================================================
+--
+-- Example (commented):
+--
+-- INSERT INTO public.regc_user_complaints (user_id, subject, body, status)
+-- VALUES (
+--   ':demo_user_id'::uuid,
+--   'Demo complaint',
+--   'Synthetic body for regulator walkthrough.',
+--   'open'
+-- );
+--
+-- INSERT INTO public.regc_consent_preferences (user_id, analytics_cookies, marketing_cookies, essential_ack)
+-- VALUES (':demo_user_id'::uuid, false, false, true)
+-- ON CONFLICT (user_id) DO UPDATE SET
+--   analytics_cookies = EXCLUDED.analytics_cookies,
+--   marketing_cookies = EXCLUDED.marketing_cookies,
+--   essential_ack = EXCLUDED.essential_ack,
+--   updated_at = now();
+
+SELECT 'demo_government_seed_optional.sql — no-op placeholder; edit and run in demo DB only.' AS note;

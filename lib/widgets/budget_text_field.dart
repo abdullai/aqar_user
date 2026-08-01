@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 
 import 'saudi_riyal_symbol_icon.dart';
@@ -68,7 +69,7 @@ class _BudgetTextFieldState extends State<BudgetTextField> {
     final color = cs.onSurfaceVariant;
     final h = _symbolSize(context);
 
-    return TextField(
+    return AqarTextField(
       controller: widget.controller,
       enabled: widget.enabled,
       keyboardType: widget.keyboardType,

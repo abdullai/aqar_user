@@ -6,6 +6,42 @@ abstract final class ListingWorkflowCopy {
 
   static String t(bool isAr, String ar, String en) => isAr ? ar : en;
 
+  /// نص جولة التسويق (بدل الرقم وحده).
+  static String marketingRoundLabel(bool isAr, dynamic roundRaw) {
+    final n = roundRaw is num
+        ? roundRaw.toInt()
+        : int.tryParse(roundRaw?.toString().trim() ?? '') ?? 0;
+    if (n <= 0) {
+      return isAr ? 'جولة التسويق' : 'Marketing round';
+    }
+    if (isAr) {
+      switch (n) {
+        case 1:
+          return 'الجولة الأولى';
+        case 2:
+          return 'الجولة الثانية';
+        case 3:
+          return 'الجولة الثالثة';
+        case 4:
+          return 'الجولة الرابعة';
+        case 5:
+          return 'الجولة الخامسة';
+        default:
+          return 'الجولة رقم $n';
+      }
+    }
+    switch (n) {
+      case 1:
+        return 'First round';
+      case 2:
+        return 'Second round';
+      case 3:
+        return 'Third round';
+      default:
+        return 'Round $n';
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // أزرار مشتركة
   // ---------------------------------------------------------------------------
@@ -19,7 +55,8 @@ abstract final class ListingWorkflowCopy {
 
   static String btnRetry(bool isAr) => t(isAr, 'إعادة المحاولة', 'Retry');
 
-  static String btnSendOffer(bool isAr) => t(isAr, 'إرسال العرض', 'Send offer');
+  static String btnSendOffer(bool isAr) =>
+      t(isAr, 'إرسال عرض تسويقي', 'Send marketing offer');
 
   static String btnSubmit(bool isAr) => t(isAr, 'إرسال', 'Submit');
 
@@ -242,8 +279,11 @@ abstract final class ListingWorkflowCopy {
   // ---------------------------------------------------------------------------
   // شارات / عناوين المالك — عروض
   // ---------------------------------------------------------------------------
-  static String ownerSelectedMarketerBadge(bool isAr) =>
-      t(isAr, 'تم اختيار هذا المسوق', 'This marketer is selected');
+  static String ownerSelectedMarketerBadge(bool isAr) => t(
+        isAr,
+        'التعاقد — يُكمل المسوّق إصدار التصريح عبر الهيئة العامة للعقار ثم النشر',
+        'Contracting — the marketer completes REGA permits externally, then publishes',
+      );
 
   static String ownerOffersTitle(bool isAr) =>
       t(isAr, 'عروض المسوقين', 'Marketer offers');
@@ -260,7 +300,7 @@ abstract final class ListingWorkflowCopy {
   static String ownerOffersEmptyBody(bool isAr) => t(
         isAr,
         'عندما يقدّم المسوقون عروضهم ستظهر هنا. يمكنك سحب الشاشة للتحديث.',
-        'When marketers submit offers they will appear here. Pull to refresh.',
+        'When marketers complete deals they will appear here. Pull to refresh.',
       );
 
   static String loadFailedTitle(bool isAr) =>
@@ -288,6 +328,24 @@ abstract final class ListingWorkflowCopy {
     final s = error.toString().toLowerCase();
     if (s.contains('listing_banned_under_review')) {
       return listingBannedUnderReview(isAr);
+    }
+    if (s.contains('round_no') &&
+        (s.contains('does not exist') ||
+            s.contains('undefined_column') ||
+            s.contains('42703'))) {
+      return t(
+        isAr,
+        'تحديث قاعدة البيانات مطلوب لإعادة الطلب للسوق. تواصل مع الدعم أو طبّق ترحيل round_no.',
+        'A database update is required to return this request to market. Contact support or apply the round_no migration.',
+      );
+    }
+    if (s.contains('no_owner_action_pending') ||
+        s.contains('invalid_stage_for_relist')) {
+      return t(
+        isAr,
+        'لا يمكن إعادة الطلب من حالته الحالية. حدّث الصفحة أو تواصل مع الدعم.',
+        'This request cannot be returned to market from its current state. Refresh or contact support.',
+      );
     }
     return rpcFailed(isAr, error);
   }
@@ -319,8 +377,8 @@ abstract final class ListingWorkflowCopy {
 
   static String snackOfferSubmitted(bool isAr) => t(
         isAr,
-        'تم إرسال عرضك بنجاح.',
-        'Your offer was submitted.',
+        'تم إتمام صفقتك بنجاح.',
+        'Your deal was submitted.',
       );
 
   static String snackInviteAccepted(bool isAr) =>
@@ -334,15 +392,19 @@ abstract final class ListingWorkflowCopy {
 
   static String btnPublishFromContract(bool isAr) => t(
         isAr,
-        'نشر الإعلان من العقد',
-        'Publish listing from contract',
+        'نشر الإعلان',
+        'Publish listing',
       );
 
-  static String snackPublishedFromContract(bool isAr) => t(
+  /// بعد ناجح النشر (مسار تصريح أو عقد — دون تمييز «من العقد» في واجهة المستخدم).
+  static String snackPublishedListingSuccess(bool isAr) => t(
         isAr,
-        'تم نشر العقار وربطه بالطلب.',
-        'The property was published and linked to the request.',
+        'تم نشر الإعلان وربطه بالطلب.',
+        'The listing was published and linked to the request.',
       );
+
+  static String snackPublishedFromContract(bool isAr) =>
+      snackPublishedListingSuccess(isAr);
 
   static String publishedBannerTitle(bool isAr) => t(
         isAr,
@@ -388,8 +450,8 @@ abstract final class ListingWorkflowCopy {
       case ListingWorkflowStage.marketerSelected:
         return t(
           isAr,
-          'تم اختيار مسوّق لهذا الطلب — لا يقبل تقديم عروض جديدة في هذه المرحلة.',
-          'A marketer has been selected — new offers are not accepted at this stage.',
+          'تم اختيار مسوّق لهذا الطلب — لا يقبل إتمام صفقات جديدة في هذه المرحلة.',
+          'A marketer has been selected — new deals are not accepted at this stage.',
         );
       case ListingWorkflowStage.contractPending:
       case ListingWorkflowStage.contractSent:
@@ -397,8 +459,8 @@ abstract final class ListingWorkflowCopy {
       case ListingWorkflowStage.contractSigned:
         return t(
           isAr,
-          'الطلب في مرحلة التعاقد — لا يمكن تقديم عرض تسويق جديد الآن.',
-          'The request is in the contracting stage — you cannot submit a new marketing offer now.',
+          'الطلب في مرحلة التعاقد — لا يمكن إتمام صفقة تسويق جديدة الآن.',
+          'The request is in the contracting stage — you cannot complete a new marketing deal now.',
         );
       case ListingWorkflowStage.permitPending:
         return t(
@@ -428,14 +490,14 @@ abstract final class ListingWorkflowCopy {
       case ListingWorkflowStage.contractCancelled:
         return t(
           isAr,
-          'أُلغي عقد التسويق لهذا الطلب — لا يمكن تقديم عرض جديد حتى يعيد المالك طرح الطلب إن لزم.',
+          'أُلغي عقد التسويق لهذا الطلب — لا يمكن إتمام صفقة جديدة حتى يعيد المالك طرح الطلب إن لزم.',
           'The marketing contract was cancelled — you cannot submit a new offer until the owner relists if needed.',
         );
       case ListingWorkflowStage.cancelled:
       case ListingWorkflowStage.terminated:
         return t(
           isAr,
-          'هذا الطلب ملغى أو مُنهى — لا يمكن تقديم عرض.',
+          'هذا الطلب ملغى أو مُنهى — لا يمكن إتمام الصفقة.',
           'This request is cancelled or terminated.',
         );
       case ListingWorkflowStage.archived:
@@ -448,8 +510,8 @@ abstract final class ListingWorkflowCopy {
       case ListingWorkflowStage.waitingMarketers:
         return t(
           isAr,
-          'لا يمكن تقديم عرض حاليًا — راجع حالة الطلب أو الدعوة.',
-          'You cannot submit an offer right now — check the request or invite status.',
+          'لا يمكن إتمام الصفقة حاليًا — راجع حالة الطلب أو الدعوة.',
+          'You cannot complete a deal right now — check the request or invite status.',
         );
     }
   }
@@ -459,8 +521,8 @@ abstract final class ListingWorkflowCopy {
       case 'declined':
         return t(
           isAr,
-          'هذه الدعوة مرفوضة — لا يمكن إرسال عرض منها.',
-          'This invite was declined — you cannot submit an offer.',
+          'هذه الدعوة مرفوضة — لا يمكن إتمام الصفقة منها.',
+          'This invite was declined — you cannot complete a deal.',
         );
       case 'expired':
         return t(
@@ -471,8 +533,8 @@ abstract final class ListingWorkflowCopy {
       default:
         return t(
           isAr,
-          'لا يمكن إرسال عرض من حالة الدعوة الحالية.',
-          'You cannot submit an offer for this invite in its current state.',
+          'لا يمكن إتمام الصفقة من حالة الدعوة الحالية.',
+          'You cannot complete a deal for this invite in its current state.',
         );
     }
   }

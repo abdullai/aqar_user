@@ -8,7 +8,7 @@
 		<key>CFBundleDevelopmentRegion</key>
 		<string>$(DEVELOPMENT_LANGUAGE)</string>
 		<key>CFBundleDisplayName</key>
-		<string>Motawoq Real Estate</string>
+		<string>Mawthuq Line Real Estate App</string>
 		<key>CFBundleExecutable</key>
 		<string>$(EXECUTABLE_NAME)</string>
 		<key>CFBundleIdentifier</key>
@@ -93,6 +93,7 @@
 				<key>CFBundleURLSchemes</key>
 				<array>
 					<string>aqar</string>
+					<string>motawoq</string>
 				</array>
 			</dict>
 		</array>

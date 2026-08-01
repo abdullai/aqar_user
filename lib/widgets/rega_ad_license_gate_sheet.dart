@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -313,7 +314,7 @@ class _RegaAdLicenseGateBodyState extends State<_RegaAdLicenseGateBody> {
                     ),
                   ],
                   const SizedBox(height: 16),
-                  TextField(
+                  AqarTextField(
                     controller: _adLicenseCtrl,
                     keyboardType: TextInputType.number,
                     inputFormatters: latinDigitsOnlyFormatters(maxLength: 10),
@@ -324,7 +325,7 @@ class _RegaAdLicenseGateBodyState extends State<_RegaAdLicenseGateBody> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
+                  AqarTextField(
                     controller: _pasteCtrl,
                     minLines: 4,
                     maxLines: 10,

@@ -1,7 +1,8 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:aqar_user/main.dart'; // themeModeNotifier + langNotifier + recoveryFlowNotifier
 import 'package:aqar_user/services/auth_service.dart';
 import 'package:aqar_user/widgets/app_logo_loading.dart';
+import '../core/branding/branding_logo_image.dart';
 import 'package:aqar_user/widgets/field_group_frame.dart';
 import 'package:aqar_user/l10n/app_localizations.dart';
 
@@ -206,6 +208,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
     try {
       final sb = Supabase.instance.client;
+      if (sb.auth.currentSession == null) return;
       await sb
           .rpc(
             'log_security_event',
@@ -528,17 +531,10 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
-            child: Image.asset(
-              'assets/logo.png',
+            child: BrandingLogoImage(
               fit: BoxFit.contain,
               filterQuality: FilterQuality.high,
-              errorBuilder: (_, __, ___) => Center(
-                child: Icon(
-                  Icons.lock_reset_rounded,
-                  size: 64,
-                  color: _bankColor,
-                ),
-              ),
+              errorIcon: Icons.lock_reset_rounded,
             ),
           ),
         ),
@@ -849,7 +845,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   }
 
   Widget _buildUsernameField() {
-    return TextField(
+    return AqarTextField(
       controller: _usernameCtrl,
       focusNode: _usernameFocus,
       keyboardType: TextInputType.number,
@@ -886,7 +882,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     required TextInputAction textInputAction,
     required ValueChanged<String> onSubmitted,
   }) {
-    return TextField(
+    return AqarTextField(
       controller: controller,
       focusNode: focusNode,
       obscureText: obscure,

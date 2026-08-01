@@ -1,27 +1,36 @@
 // lib/screens/marketer_dashboard_page.dart
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/session/web_session_ttl.dart';
+import '../theme.dart';
 import '../core/share/listing_deep_link.dart';
 import '../core/utils/dashboard_greeting.dart';
 import '../l10n/app_localizations.dart';
-import '../routes.dart';
-import '../services/marketing_flow_service.dart';
+import '../main.dart' show langNotifier;
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
-import 'marketer_request_details_page.dart';
 import 'org_join_requests_desk_page.dart';
 import 'org_monitor_dashboard_page.dart';
 import 'org_team_chat_hub_page.dart';
 import 'org_team_management_page.dart';
 
-/// لوحة المسوّق: دعوات أوضح + مركز عمل + تبويب «فريق العمل» عند الارتباط بمؤسسة.
+/// لوحة «إدارتي» للمسوّق: **فريق العمل ومركز العمل** فقط.
+/// السوق العقاري والدعوات والعروض والتعاقد — من تبويب **صفحتي** في الشريط السفلي.
 class MarketerDashboardPage extends StatefulWidget {
   final String lang;
-  const MarketerDashboardPage({super.key, required this.lang});
+
+  /// عند `true`: لا يُعرض سهم الرجوع هنا لأن شريط اللوحة الخارجي يوفّر الرجوع (عرض عريض).
+  final bool suppressImpliedLeading;
+
+  const MarketerDashboardPage({
+    super.key,
+    required this.lang,
+    this.suppressImpliedLeading = false,
+  });
 
   @override
   State<MarketerDashboardPage> createState() => _MarketerDashboardPageState();
@@ -29,18 +38,16 @@ class MarketerDashboardPage extends StatefulWidget {
 
 class _MarketerDashboardPageState extends State<MarketerDashboardPage>
     with SingleTickerProviderStateMixin {
-  final _svc = MarketingFlowService(Supabase.instance.client);
   final _sb = Supabase.instance.client;
 
   late final TabController _tabCtrl;
 
   bool _loading = true;
   String? _err;
-  List<Map<String, dynamic>> _invites = const [];
   Map<String, dynamic>? _orgCtx;
   Map<String, dynamic> _profileRow = const {};
 
-  bool get _isAr => widget.lang.toLowerCase() != 'en';
+  bool get _isAr => langNotifier.value != 'en';
 
   bool get _hasOrgDesk {
     final id = (_orgCtx?['org_id'] ?? '').toString().trim();
@@ -49,21 +56,10 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
 
   bool get _orgOwner => _orgCtx != null && _orgCtx!['is_owner'] == true;
 
-  int get _pendingInvitesCount {
-    return _invites.where((e) {
-      final s = (e['status'] ?? '').toString().toLowerCase().trim();
-      return s.isEmpty ||
-          s == 'pending' ||
-          s == 'sent' ||
-          s == 'new' ||
-          s == 'invited';
-    }).length;
-  }
-
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl = TabController(length: 2, vsync: this);
     unawaited(touchWebSessionActivity());
     _load();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -83,7 +79,6 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
       _err = null;
     });
     try {
-      final rows = await _svc.marketerInvites();
       final orgCtx = await OrgTeamService(_sb).myOrgContext();
       Map<String, dynamic> prof = {};
       try {
@@ -103,7 +98,6 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
       } catch (_) {}
       if (!mounted) return;
       setState(() {
-        _invites = rows;
         _orgCtx = orgCtx;
         _profileRow = prof;
       });
@@ -142,254 +136,70 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
     return pick(_profileRow['username']);
   }
 
-  Map<String, dynamic>? _inviteRequestMap(Map<String, dynamic> inv) {
-    final raw = inv['listing_requests'];
-    if (raw is Map) return Map<String, dynamic>.from(raw);
-    if (raw is List && raw.isNotEmpty && raw.first is Map) {
-      return Map<String, dynamic>.from(raw.first as Map);
-    }
-    return null;
-  }
-
-  String _inviteTitleLine(Map<String, dynamic> inv) {
-    final req = _inviteRequestMap(inv);
-    final title = (req?['title'] ?? '').toString().trim();
-    if (title.isNotEmpty) {
-      return title;
-    }
-    final rid = (inv['request_id'] ?? '').toString();
-    return _isAr ? 'طلب تسويق' : 'Marketing request';
-  }
-
-  String _inviteSubtitleLine(Map<String, dynamic> inv) {
-    final req = _inviteRequestMap(inv);
-    final city = (req?['city'] ?? '').toString().trim();
-    final rid = (inv['request_id'] ?? '').toString();
-    final shortId = rid.length > 8 ? '${rid.substring(0, 8)}…' : rid;
-    final st = _statusLabel((inv['status'] ?? '').toString());
-    if (city.isNotEmpty) {
-      return _isAr ? '$city • $st • $shortId' : '$city • $st • $shortId';
-    }
-    return _isAr ? '$st • $shortId' : '$st • $shortId';
-  }
-
-  String _statusLabel(String raw) {
-    final s = raw.trim().toLowerCase();
-    if (_isAr) {
-      return switch (s) {
-        'pending' || '' => 'بانتظار الرد',
-        'submitted' => 'تم الإرسال',
-        'seen' => 'تمت المشاهدة',
-        'accepted' => 'مقبولة',
-        'approved' => 'معتمدة',
-        'owner_accepted' || 'selected' => 'مقبولة من المالك',
-        'owner_rejected' || 'rejected' => 'مرفوضة',
-        'declined' => 'مرفوضة',
-        'expired' => 'منتهية',
-        'cancelled' || 'canceled' => 'ملغاة',
-        'withdrawn' => 'مسحوبة',
-        _ => s.isEmpty ? '—' : s,
-      };
-    }
-    return s.isEmpty ? 'pending' : s;
-  }
-
-  Future<void> _openInviteDetail(String inviteId, String requestId) async {
-    try {
-      await _svc.markInviteSeen(inviteId);
-    } catch (_) {}
-    if (!mounted) return;
-    await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => MarketerRequestDetailsPage(
-          lang: widget.lang,
-          inviteId: inviteId,
-          requestId: requestId,
-        ),
-      ),
-    );
-    if (mounted) await _load();
-  }
-
-  Widget _tabWithBadge(
-      {required Widget icon, required String label, int count = 0}) {
-    if (count <= 0) {
-      return Tab(
-        height: 52,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            icon,
-            const SizedBox(height: 2),
-            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        ),
-      );
-    }
-    final cs = Theme.of(context).colorScheme;
-    return Tab(
-      height: 52,
-      child: Badge(
-        backgroundColor: cs.error,
-        label: Text(
-          count > 99 ? '99+' : '$count',
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            color: cs.onError,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            icon,
-            const SizedBox(height: 2),
-            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInvitesTab(AppLocalizations? t) {
-    if (_loading) {
-      return const Center(child: AppLogoLoading());
-    }
-    if (_err != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(_err!, textAlign: TextAlign.center),
-        ),
-      );
-    }
-    if (_invites.isEmpty) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(24),
-        children: [
-          const SizedBox(height: 48),
-          Icon(
-            Icons.mark_email_unread_outlined,
-            size: 64,
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _isAr ? 'لا توجد دعوات حالياً' : 'No invitations yet',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _isAr
-                ? 'عندما يدعوك مالك لطلب تسويق سيظهر الطلب هنا مع عنوانه ومدينته.'
-                : 'When an owner invites you, the request appears here with title and city.',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-          ),
-        ],
-      );
-    }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: _invites.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (_, i) {
-          final inv = _invites[i];
-          final inviteId = (inv['id'] ?? '').toString();
-          final requestId = (inv['request_id'] ?? '').toString();
-
-          return ListTile(
-            leading: CircleAvatar(
-              backgroundColor:
-                  Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
-              child: Icon(
-                Icons.forward_to_inbox_rounded,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-            title: Text(
-              _inviteTitleLine(inv),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
-            subtitle: Text(_inviteSubtitleLine(inv)),
-            trailing: const Icon(Icons.chevron_left_rounded),
-            onTap: () => _openInviteDetail(inviteId, requestId),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildDeskHubTab(AppLocalizations? t) {
+  Widget _buildDeskHubTab() {
     final cs = Theme.of(context).colorScheme;
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      physics: kIsWeb && AqarScrollBehavior.isCompactTouchLike(context)
+          ? const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            )
+          : const AlwaysScrollableScrollPhysics(),
       children: [
+        Card(
+          elevation: 0,
+          color: cs.primaryContainer.withValues(alpha: 0.35),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.45)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.list_alt_rounded, color: cs.primary, size: 36),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isAr
+                            ? 'السوق العقاري وطلبات التسويق'
+                            : 'Real estate market & requests',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isAr
+                            ? 'دعوات المالك، إتمام الصفقات، التعاقد، التصاريح، والمنشور — كلها من تبويب «صفحتي» في الشريط السفلي، وليس من إدارتي.'
+                            : 'Owner invites, deals, contracting, permits, and publishing are under «My page» in the bottom bar — not in My desk.',
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
         Text(
           _isAr
-              ? 'اختصارات العمل — عروضك والعقود والتصاريح تظهر أيضاً في «صفحتي».'
-              : 'Shortcuts — your pipeline also appears under «My ads».',
+              ? 'هنا تركز «إدارتي» على عمل المؤسسة والفريق فقط.'
+              : 'My desk here focuses on organization and team work only.',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: cs.onSurfaceVariant,
                 fontWeight: FontWeight.w600,
               ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          elevation: 0,
-          color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
-          ),
-          child: Column(
-            children: [
-              ListTile(
-                leading: Icon(Icons.notifications_active_outlined,
-                    color: cs.primary),
-                title: Text(
-                  t?.notificationsTitle ??
-                      (_isAr ? 'التنبيهات' : 'Notifications'),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                subtitle: Text(
-                  _isAr
-                      ? 'عروض، عقود، وتحديثات الطلبات'
-                      : 'Offers, contracts, and request updates',
-                ),
-                onTap: () => Navigator.pushNamed(
-                  context,
-                  AppRoutes.inAppNotifications,
-                ),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.insights_outlined, color: cs.primary),
-                title: Text(
-                  t?.marketInsightsTitle ??
-                      (_isAr ? 'رؤى السوق' : 'Market insights'),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                subtitle: Text(
-                  _isAr ? 'مؤشرات من الخادم' : 'Server-driven market snapshot',
-                ),
-                onTap: () => Navigator.pushNamed(
-                  context,
-                  AppRoutes.marketInsights,
-                ),
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -402,8 +212,11 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
         padding: const EdgeInsets.all(24),
         children: [
           const SizedBox(height: 40),
-          Icon(Icons.groups_outlined,
-              size: 56, color: cs.onSurfaceVariant.withValues(alpha: 0.5)),
+          Icon(
+            Icons.groups_outlined,
+            size: 56,
+            color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
           const SizedBox(height: 16),
           Text(
             _isAr
@@ -437,6 +250,11 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
 
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      physics: kIsWeb && AqarScrollBehavior.isCompactTouchLike(context)
+          ? const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            )
+          : const AlwaysScrollableScrollPhysics(),
       children: [
         Text(
           deskNote(),
@@ -546,14 +364,50 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
     final t = AppLocalizations.of(context);
     final cs = Theme.of(context).colorScheme;
     final salute = DashboardGreeting.salutationOnly(isAr: _isAr);
-    final partner = _isAr ? 'شريكنا العقاري' : 'our real estate partner';
-    final line1 = '$salute، $partner';
-    final name = _quadName();
+    final mqW = MediaQuery.sizeOf(context).width;
+    final rawName = _quadName();
+    final name = rawName.isEmpty
+        ? ''
+        : DashboardGreeting.displayNameForAppBar(
+            rawName,
+            compact: mqW < 480,
+          );
+
+    if (_loading) {
+      return Directionality(
+        textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: !widget.suppressImpliedLeading,
+            title: Text(_isAr ? 'إدارتي' : 'My desk'),
+          ),
+          body: const Center(child: AppLogoLoading()),
+        ),
+      );
+    }
+    if (_err != null) {
+      return Directionality(
+        textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: !widget.suppressImpliedLeading,
+            title: Text(_isAr ? 'إدارتي' : 'My desk'),
+          ),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(_err!, textAlign: TextAlign.center),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: !widget.suppressImpliedLeading,
           toolbarHeight: 72,
           title: LayoutBuilder(
             builder: (ctx, c) {
@@ -563,7 +417,7 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    line1,
+                    salute,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -574,20 +428,13 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
                   ),
                   if (name.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment:
-                          _isAr ? Alignment.centerRight : Alignment.centerLeft,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: c.maxWidth),
-                        child: Text(
-                          name,
-                          maxLines: 1,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 17,
-                          ),
-                        ),
+                    Text(
+                      name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 17,
                       ),
                     ),
                   ],
@@ -595,34 +442,41 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
               );
             },
           ),
-          actions: [
-            IconButton(
-              tooltip: t?.notificationsTitle,
-              icon: const Icon(Icons.notifications_outlined),
-              onPressed: () => Navigator.pushNamed(
-                context,
-                AppRoutes.inAppNotifications,
-              ),
-            ),
-          ],
           bottom: TabBar(
             controller: _tabCtrl,
             isScrollable: true,
             tabAlignment: TabAlignment.start,
             tabs: [
-              _tabWithBadge(
-                icon: const Icon(Icons.mark_email_unread_outlined, size: 20),
-                label: t?.marketerTabInvites ??
-                    (_isAr ? '🏢 السوق العقاري' : 'Real estate market'),
-                count: _pendingInvitesCount,
+              Tab(
+                height: 52,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.dashboard_customize_outlined,
+                        size: 20, color: cs.primary),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isAr ? 'مركز العمل' : 'Desk',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-              _tabWithBadge(
-                icon: const Icon(Icons.dashboard_customize_outlined, size: 20),
-                label: _isAr ? 'مركز العمل' : 'Desk',
-              ),
-              _tabWithBadge(
-                icon: const Icon(Icons.groups_outlined, size: 20),
-                label: _isAr ? 'فريق العمل' : 'Team',
+              Tab(
+                height: 52,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.groups_outlined, size: 20),
+                    const SizedBox(height: 2),
+                    Text(
+                      _isAr ? 'فريق العمل' : 'Team',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -630,8 +484,7 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
         body: TabBarView(
           controller: _tabCtrl,
           children: [
-            _buildInvitesTab(t),
-            _buildDeskHubTab(t),
+            _buildDeskHubTab(),
             _buildOrgTeamTab(t),
           ],
         ),

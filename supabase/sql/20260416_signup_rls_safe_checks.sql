@@ -9,17 +9,46 @@ BEGIN;
 
 CREATE OR REPLACE FUNCTION public.signup_username_taken(p_username text)
 RETURNS boolean
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  v text := regexp_replace(trim(coalesce(p_username, '')), '\D', '', 'g');
+  by_username boolean;
+BEGIN
+  IF v IS NULL OR length(v) < 1 THEN
+    RETURN false;
+  END IF;
+
   SELECT EXISTS (
     SELECT 1
     FROM public.users_profiles up
     WHERE nullif(trim(both from up.username::text), '') IS NOT NULL
-      AND trim(both from up.username::text) = trim(both from p_username::text)
-  );
+      AND regexp_replace(trim(both from up.username::text), '\D', '', 'g') = v
+  ) INTO by_username;
+
+  IF by_username THEN
+    RETURN true;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'users_profiles'
+      AND column_name = 'national_id'
+  ) THEN
+    RETURN EXISTS (
+      SELECT 1
+      FROM public.users_profiles up
+      WHERE up.national_id IS NOT NULL
+        AND regexp_replace(coalesce(up.national_id::text, ''), '\D', '', 'g') = v
+    );
+  END IF;
+
+  RETURN false;
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.signup_phone_taken(p_phone text)
@@ -29,11 +58,22 @@ STABLE
 SECURITY DEFINER
 SET search_path = public
 AS $$
+  WITH v AS (
+    SELECT nullif(regexp_replace(trim(coalesce(p_phone, '')), '\D', '', 'g'), '') AS d
+  )
   SELECT EXISTS (
     SELECT 1
-    FROM public.users_profiles up
-    WHERE up.phone IS NOT NULL
-      AND trim(both from up.phone::text) = trim(both from p_phone::text)
+    FROM public.users_profiles up, v
+    WHERE v.d IS NOT NULL
+      AND length(v.d) >= 9
+      AND (
+        (up.phone IS NOT NULL
+          AND regexp_replace(trim(both from up.phone::text), '\D', '', 'g') = v.d)
+        OR (
+          up.contact_phone IS NOT NULL
+          AND regexp_replace(coalesce(up.contact_phone::text, ''), '\D', '', 'g') = v.d
+        )
+      )
   );
 $$;
 

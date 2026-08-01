@@ -55,10 +55,19 @@ class SaudiDistrictsService {
         final en = loc.cityEn.trim();
         if (ar.isEmpty || en.isEmpty || ar == en) continue;
         final listAr = base[ar];
-        if (listAr == null || listAr.isEmpty) continue;
-        final existingEn = base[en];
-        if (existingEn != null && existingEn.isNotEmpty) continue;
-        base[en] = List<String>.from(listAr);
+        final listEn = base[en];
+        // AR → EN
+        if (listAr != null &&
+            listAr.isNotEmpty &&
+            (listEn == null || listEn.isEmpty)) {
+          base[en] = List<String>.from(listAr);
+        }
+        // EN → AR (ملف الأحياء غالباً بمفاتيح إنجليزية فقط)
+        if (listEn != null &&
+            listEn.isNotEmpty &&
+            (listAr == null || listAr.isEmpty)) {
+          base[ar] = List<String>.from(listEn);
+        }
       }
     } catch (_) {}
     return base;
@@ -68,12 +77,23 @@ class SaudiDistrictsService {
   Future<List<String>> districtsForCity(String cityLabel) async {
     final c = cityLabel.trim();
     if (c.isEmpty) return const [];
-    final all = await loadAll();
+    final all = await loadMergedWithCityAliases();
     final direct = all[c];
     if (direct != null && direct.isNotEmpty) return direct;
+    final norm = _norm(c);
     for (final e in all.entries) {
-      if (e.key == c) return e.value;
+      if (_norm(e.key) == norm) return e.value;
     }
     return const [];
   }
+
+  static String _norm(String s) => s
+      .trim()
+      .toLowerCase()
+      .replaceAll('أ', 'ا')
+      .replaceAll('إ', 'ا')
+      .replaceAll('آ', 'ا')
+      .replaceAll('ى', 'ي')
+      .replaceAll('ة', 'ه')
+      .replaceAll(RegExp(r'\s+'), ' ');
 }

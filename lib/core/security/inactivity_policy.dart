@@ -12,9 +12,9 @@ abstract final class InactivityPolicy {
   /// عدّ تنازلي بالثواني ثم قفل أو تسجيل خروج إن لم يُجب المستخدم.
   static const Duration promptCountdown = Duration(minutes: 1);
 
-  /// ويب وسطح المكتب: عدّاد أقصر ثم تسجيل خروج تلقائي (مع طبقة ضبابية).
-  static const Duration webDesktopAutoLogoutCountdown = Duration(seconds: 30);
+  /// ويب وسطح المكتب: عدّاد أوضح قبل الخروج التلقائي.
+  static const Duration webDesktopAutoLogoutCountdown = Duration(seconds: 60);
 
-  /// ويب/سطح مكتب: مدة خمول قبل تنبيه القفل (15 دقيقة).
-  static const Duration webDesktopIdleBeforeLock = Duration(minutes: 15);
+  /// ويب/سطح مكتب: مدة خمول قبل تنبيه القفل (أقصر حتى تظهر النافذة فعلياً).
+  static const Duration webDesktopIdleBeforeLock = Duration(minutes: 10);
 }

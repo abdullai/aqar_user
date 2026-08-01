@@ -48,6 +48,10 @@ abstract final class SupabaseSchemaSelects {
 property_images(sort_order,path,file_name)
 ''';
 
+  /// بدون تضمين `property_images` — يُستخدم عند غياب سياسة RLS للصور على Supabase
+  /// (بدونها PostgREST يعيد 401 للاستعلام المضمّن وليس 200+[]).
+  static const String propertiesListingWithoutImageEmbed = '*';
+
   /// عقارات مرتبطة بعدة طلبات (معاينة).
   static const String propertiesPreviewByRequestId = '''
 *,
@@ -62,11 +66,18 @@ property_images(path,file_name,sort_order)
   static const String listingRequestsLookup = '''
 id,
 owner_id,
+listing_request_public_code,
 title,
 city,
 price,
 request_price,
 preview_price,
+price_includes_vat,
+vat_rate,
+marketing_commission_kind,
+marketing_commission_rate,
+marketing_commission_amount,
+default_cover_used,
 description,
 status,
 marketer_id,
@@ -96,6 +107,11 @@ contract_sent_at,
 contract_signed_at,
 permit_deadline_at,
 inactive_72h_at,
+owner_action_required_at,
+owner_action_reason,
+prev_selected_marketer_id,
+contract_deadline_at,
+auto_expired_at,
 owner_viewed_offers_at,
 marketing_cancel_request_at,
 marketing_cancel_request_reason,

@@ -4,6 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'core/branding/app_branding.dart';
 import 'firebase_options.dart';
 
 @pragma('vm:entry-point')
@@ -23,7 +24,9 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   if (data.isEmpty) return;
 
   final body = (data['body'] ?? data['body_ar'] ?? '').toString().trim();
-  final title = (data['title'] ?? data['title_ar'] ?? 'موثوق العقاري').toString().trim();
+  final title = (data['title'] ?? data['title_ar'] ?? AppBranding.brandNameAr)
+      .toString()
+      .trim();
   if (title.isEmpty && body.isEmpty) return;
 
   final kind = (data['kind'] ?? 'property').toString();
@@ -46,7 +49,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     await android?.createNotificationChannel(
       AndroidNotificationChannel(
         channelId,
-        'موثوق العقاري',
+        AppBranding.brandNameAr,
         description: 'محادثات، حجوزات، وتنبيهات',
         importance: Importance.high,
       ),
@@ -57,12 +60,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
   await plugin.show(
     id,
-    title.isEmpty ? 'موثوق العقاري' : title,
-    body,
+    title.isEmpty
+        ? AppBranding.brandNameAr
+        : AppBranding.normalizeUserFacing(title, isAr: true),
+    AppBranding.normalizeUserFacing(body, isAr: true),
     NotificationDetails(
       android: AndroidNotificationDetails(
         channelId,
-        'موثوق العقاري',
+        AppBranding.brandNameAr,
         channelDescription: 'محادثات، حجوزات، وتنبيهات',
         importance: Importance.high,
         priority: Priority.high,

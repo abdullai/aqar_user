@@ -11,7 +11,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/session/return_after_auth.dart';
+import '../core/auth/auth_local_sign_out.dart';
 import '../l10n/app_localizations.dart';
+import 'compliance_audit_service.dart';
 
 class UserSessionCoordinationService {
   UserSessionCoordinationService._();
@@ -19,6 +21,7 @@ class UserSessionCoordinationService {
   static GlobalKey<NavigatorState>? navigatorKey;
 
   static RealtimeChannel? _channel;
+  static Timer? _webEpochPoll;
   static int? _localEpoch;
 
   static Future<void> afterSignIn(
@@ -56,6 +59,11 @@ class UserSessionCoordinationService {
 
     unawaited(_tryAuditLogin(uid));
 
+    if (kIsWeb) {
+      _startWebSessionEpochPolling(sb, uid);
+      return;
+    }
+
     try {
       _channel = sb
           .channel('user_session_$uid')
@@ -69,17 +77,7 @@ class UserSessionCoordinationService {
               value: uid,
             ),
             callback: (payload) {
-              final m = Map<String, dynamic>.from(payload.newRecord);
-              final ep = (m['session_epoch'] as num?)?.toInt();
-              if (ep == null || _localEpoch == null) return;
-              if (ep > _localEpoch!) {
-                unawaited(
-                  _kickOutBecauseNewerSessionElsewhere(
-                    lastCity: '${m['last_signin_city'] ?? ''}'.trim(),
-                    lastDevice: '${m['last_signin_device'] ?? ''}'.trim(),
-                  ),
-                );
-              }
+              _onSessionEpochRow(Map<String, dynamic>.from(payload.newRecord));
             },
           )
           .subscribe();
@@ -88,6 +86,40 @@ class UserSessionCoordinationService {
         debugPrint('[session] realtime subscribe failed: $e');
       }
     }
+  }
+
+  static void _onSessionEpochRow(Map<String, dynamic> m) {
+    final ep = (m['session_epoch'] as num?)?.toInt();
+    if (ep == null || _localEpoch == null) return;
+    if (ep > _localEpoch!) {
+      unawaited(
+        _kickOutBecauseNewerSessionElsewhere(
+          lastCity: '${m['last_signin_city'] ?? ''}'.trim(),
+          lastDevice: '${m['last_signin_device'] ?? ''}'.trim(),
+        ),
+      );
+    }
+  }
+
+  static void _startWebSessionEpochPolling(SupabaseClient sb, String uid) {
+    _webEpochPoll?.cancel();
+    // رصد فوري تقريباً على الويب (كان 50ث يفوّت الدخول من جهاز آخر).
+    Future<void> poll() async {
+      try {
+        final row = await sb
+            .from('user_session_state')
+            .select('session_epoch,last_signin_city,last_signin_device')
+            .eq('user_id', uid)
+            .maybeSingle();
+        if (row == null) return;
+        _onSessionEpochRow(Map<String, dynamic>.from(row));
+      } catch (_) {}
+    }
+
+    unawaited(poll());
+    _webEpochPoll = Timer.periodic(const Duration(seconds: 8), (_) {
+      unawaited(poll());
+    });
   }
 
   static Future<void> _tryAuditLogin(String uid) async {
@@ -99,6 +131,11 @@ class UserSessionCoordinationService {
         'created_at': DateTime.now().toUtc().toIso8601String(),
       });
     } catch (_) {}
+    unawaited(
+      ComplianceAuditService.instance.log('auth.login', {
+        'platform': _platformLabel(),
+      }),
+    );
   }
 
   static String _platformLabel() {
@@ -130,22 +167,52 @@ class UserSessionCoordinationService {
           final hint = l10n?.securitySessionSupersededChooseHint ??
               '• Keep using this device: makes this session active again.\n'
                   '• Sign out here: closes only this device.';
-          return AlertDialog(
-            title: Text(
-              l10n?.securitySessionSupersededTitle ?? 'Session notice',
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
             ),
-            content: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    body,
-                    style: TextStyle(color: cs.onSurface),
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: cs.error.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.security_rounded,
+                      size: 32,
+                      color: cs.error,
+                    ),
                   ),
                   const SizedBox(height: 14),
                   Text(
+                    l10n?.securitySessionSupersededTitle ?? 'Session notice',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 19,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    body,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: cs.onSurface,
+                      fontWeight: FontWeight.w700,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
                     hint,
+                    textAlign: TextAlign.start,
                     style: TextStyle(
                       color: cs.onSurfaceVariant,
                       height: 1.45,
@@ -153,23 +220,49 @@ class UserSessionCoordinationService {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.of(c).pop(false),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: Text(
+                            l10n?.securitySessionSignOutThisDevice ??
+                                'Sign out here',
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () => Navigator.of(c).pop(true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: cs.primary,
+                            foregroundColor: cs.onPrimary,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          child: Text(
+                            l10n?.securitySessionContinueHere ??
+                                'Keep using this device',
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(c).pop(false),
-                child: Text(
-                  l10n?.securitySessionSignOutThisDevice ?? 'Sign out here',
-                ),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(c).pop(true),
-                child: Text(
-                  l10n?.securitySessionContinueHere ?? 'Keep using this device',
-                ),
-              ),
-            ],
           );
         },
       );
@@ -183,7 +276,7 @@ class UserSessionCoordinationService {
     try {
       final auth = Supabase.instance.client.auth;
       if (auth.currentSession != null) {
-        await auth.signOut(scope: SignOutScope.local);
+        await AuthLocalSignOut.signOutLocal(Supabase.instance.client);
       }
     } catch (_) {}
 
@@ -237,6 +330,8 @@ class UserSessionCoordinationService {
   }
 
   static void dispose() {
+    _webEpochPoll?.cancel();
+    _webEpochPoll = null;
     try {
       _channel?.unsubscribe();
     } catch (_) {}

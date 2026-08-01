@@ -99,6 +99,16 @@
                     android:host="listing" />
             </intent-filter>
 
+            <!-- تحقق العقد داخل التطبيق: motawoq://verify?... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="motawoq"
+                    android:host="verify" />
+            </intent-filter>
+
         </activity>
 
         <meta-data

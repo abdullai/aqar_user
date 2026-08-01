@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../../services/account_completion_service.dart';
 import '../../services/profile_compliance_service.dart';
 import '../profile/profile_gate_revision.dart';
@@ -35,6 +37,9 @@ enum PostAuthShellStep {
   /// تسويق بدون رقم وطني موحّد صالح
   mandatoryUnifiedNational,
 
+  /// جوال / هوية (username) / رخصة فال للمهنيين — أوسع من التوقيع فقط
+  mandatoryProfileEnrollment,
+
   /// `profile_data_revision` أقل من إصدار التطبيق المطلوب
   profileDataRevision,
 
@@ -52,6 +57,9 @@ enum PostAuthShellStep {
 
   /// الدخول للتطبيق (مع [FastLoginOfferHost])
   ready,
+
+  /// حظر منصّة يمنع استخدام التطبيق (`banned_accounts.blocks_app`).
+  platformAccountSuspended,
 }
 
 /// يحلّ أول خطوة حاجزة؛ يُستدعى بعد تحديث حالة الجهاز والامتثال.
@@ -66,6 +74,9 @@ abstract final class PostAuthGatePipeline {
     required Map<String, dynamic>? complianceRow,
     required bool dataQualityRequired,
     Map<String, dynamic>? pendingOrgJoin,
+    Map<String, dynamic>? platformBan,
+    bool complianceDeferredOnWeb = false,
+    bool profileEnrollmentDeferred = false,
   }) {
     if (loading) return PostAuthShellStep.checkingLoading;
     if (showTerms && legal != null) return PostAuthShellStep.legalTerms;
@@ -74,7 +85,20 @@ abstract final class PostAuthGatePipeline {
     if (!deviceReady) return PostAuthShellStep.deviceRegistering;
 
     if (complianceRow == null) {
+      // ويب: لا نحجب اللوحة أبداً بسبب فشل/تأخر تحميل الامتثال — يُعاد المحاولة في الخلفية.
+      if (kIsWeb) {
+        return PostAuthShellStep.ready;
+      }
+      if (complianceDeferredOnWeb) {
+        return PostAuthShellStep.ready;
+      }
       return PostAuthShellStep.profileRecordMissing;
+    }
+
+    if (platformBan != null &&
+        platformBan.isNotEmpty &&
+        platformBan['blocks_app'] != false) {
+      return PostAuthShellStep.platformAccountSuspended;
     }
 
     final joinRid = (pendingOrgJoin?['request_id'] ?? '').toString().trim();
@@ -86,6 +110,12 @@ abstract final class PostAuthGatePipeline {
       complianceRow,
     )) {
       return PostAuthShellStep.mandatoryUnifiedNational;
+    }
+    if (AccountCompletionService.needsMandatoryProfileEnrollment(
+          complianceRow,
+        ) &&
+        !profileEnrollmentDeferred) {
+      return PostAuthShellStep.mandatoryProfileEnrollment;
     }
     if (profileDataRevisionNeedsAck(complianceRow)) {
       return PostAuthShellStep.profileDataRevision;

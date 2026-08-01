@@ -26,4 +26,12 @@ abstract final class MarketingOfferFee {
   /// المبلغ المستحق من المسوق (يساوي [marketingFeeAmount] — لا ضريبة إضافية على العمولة).
   static double totalDue(double propertyBaseSar) =>
       marketingFeeAmount(propertyBaseSar);
+
+  /// ما يُعرض على بطاقات «صفحتي»/السوق: أساس العقار + ضريبة 5٪ على الأصل + أتعاب التسويق 2.5٪ من (الأصل+الضريبة).
+  static double listingDisplayTotalIncVatAndFee(double propertyBaseSar) {
+    if (propertyBaseSar <= 0) return 0;
+    final sub = propertySubtotalWithVat(propertyBaseSar);
+    final fee = marketingFeeAmount(propertyBaseSar);
+    return sub + fee;
+  }
 }

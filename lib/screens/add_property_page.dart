@@ -1,4 +1,4 @@
-// lib/screens/add_property_page.dart
+﻿// lib/screens/add_property_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -6,13 +6,15 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/branding/app_branding.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart' show suspendAutoLock;
@@ -22,22 +24,47 @@ import '../services/saudi_districts_service.dart';
 import '../services/saudi_locations_service.dart';
 import '../services/watermark_service.dart';
 import '../utils/video_duration_check.dart';
+import '../core/forms/wizard_form_draft.dart';
+import '../core/forms/wizard_step_navigation.dart';
+import '../core/forms/active_form_guard.dart';
+import '../core/forms/publish_content_fingerprint_store.dart';
+import '../core/session/app_session.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/form_exit_confirm_dialog.dart';
+import '../widgets/terms_acceptance_checkbox.dart';
+import 'platform_policies_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/field_group_frame.dart';
 import '../widgets/deed_date_calendar_dialog.dart';
+import '../widgets/listing_pricing_breakdown.dart';
+import '../widgets/adaptive_post_publish_dialog.dart';
+import '../widgets/publisher_identity_options_card.dart';
+import '../core/profile/publisher_identity_prefs.dart';
+import '../widgets/stable_select_chip.dart';
 import '../widgets/property_type_hierarchy_picker.dart';
 import '../widgets/year_built_picker_field.dart';
+import '../widgets/smart_count_field.dart';
 import '../widgets/searchable_select_field.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/listing_area_unit.dart';
+import '../core/listing/marketing_add_property_flow_config.dart';
+import '../core/subscription/app_subscription_gate.dart';
+import '../core/subscription/subscription_gate_helper.dart';
+import '../services/subscription_service.dart';
+import '../core/workflow/app_role_helper.dart';
+import '../core/session/account_role_cache.dart';
 import '../core/listing/property_type_catalog.dart';
+import '../core/listing/property_listing_display.dart';
 import '../core/utils/app_money.dart';
+import '../core/utils/display_ids.dart';
 import '../core/utils/listing_date_display.dart';
+import '../core/navigation/post_auth_navigation.dart';
 import '../services/fal_license_service.dart';
 import 'listing_request_status_page.dart';
 import 'map_picker_page.dart';
 import 'rega_ad_license_import_page.dart';
+import 'subscriptions/subscriptions_root_screen.dart';
 
 /// مصدر رخصة الإعلان (الخطوة الأولى من المعالج).
 enum _AdLicenseSource { unset, inApp, external, none }
@@ -49,11 +76,19 @@ class AddPropertyPage extends StatefulWidget {
   /// بيانات مستخرجة من بوابة الهيئة بعد التحقق من فال (للمسوّقين/المنشآت).
   final Map<String, dynamic>? initialRegaPayload;
 
+  /// مسار مسوّق/منشأة من [MarketingListingEntryPage].
+  final MarketingAddPropertyFlowConfig? marketingFlow;
+
+  /// عند `true`: لا يُعرض سهم الرجوع الداخلي — يعتمد على شريط لوحة الداشبورد.
+  final bool embedAppBar;
+
   const AddPropertyPage({
     super.key,
     required this.userId,
     required this.lang,
     this.initialRegaPayload,
+    this.marketingFlow,
+    this.embedAppBar = false,
   });
 
   @override
@@ -157,8 +192,45 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   // العملة والتفاوض والمزاد
   String _currency = 'SAR';
   bool _negotiable = false;
+  /// على السوم (بدون سعر ثابت محدد).
+  bool _priceOnSum = false;
+  /// قبول التمويل العقاري.
+  bool _acceptsMortgageFinance = false;
+  /// إقرار: لا مانع من التصرف/الانتفاع.
+  bool _noLegalObstacles = false;
+  /// صفة المعلن: owner | broker | authorized
+  String _advertiserRole = 'owner';
+  /// موقع تقريبي (لا يُعرض بدقة على خريطة الإعلانات).
+  bool _locationIsApproximate = false;
+  /// إظهار اسم/صفة المعلن مع التوثيق على بطاقات الرئيسية (اختياري).
+  bool _showOwnerNameOnCards = true;
+  PublicNameSource _pubNameSource = PublicNameSource.official;
+  PublicPhoneSource _pubPhoneSource = PublicPhoneSource.primary;
+  bool _publishPresenceOnCards = true;
+  String _officialNameCached = '';
+  String _displayAliasCached = '';
+  String _primaryPhoneCached = '';
+  String _secondaryPhoneCached = '';
+  /// عمر العقار كفئة واجهة: new | 1_5 | 6_10 | 11_20 | 20_plus
+  String? _propertyAgeBucket;
   bool _isAuction = false;
   final _currentBid = TextEditingController();
+
+  // --- فوترة الإعلان: ضريبة القيمة المضافة 5% + عمولة التسويق العقاري ---
+  // — `null` يعني أن المعلن لم يجب بعد على السؤال الأول (واجب قبل النشر).
+  bool? _priceIncludesVat;
+  // — `none` افتراضياً؛ يتحوّل إلى `percent` (2.5%) أو `fixed` (مبلغ مقطوع).
+  String _commissionKind = 'none';
+  final TextEditingController _commissionFixedCtrl = TextEditingController();
+  static const double _kVatRate = 0.05;
+  static const double _kMarketingCommissionRate = 0.025;
+  // — قفل النشر: يبقى مرفوعاً حتى انتهاء حوار النجاح ورمز الإعلان كي لا يُنشر مرتين.
+  bool _publishLock = false;
+  /// بعد نجاح النشر: اسمح بـ pop للرئيسية حتى لو بقيت الحقول ممتلئة.
+  bool _publishSucceeded = false;
+  bool _termsAccepted = false;
+  static const _draftNamespace = 'add_property_listing';
+  AppSession? _appSession;
 
   // نوع العرض (بيع/إيجار/مزاد/استثمار)
   String _purpose = 'sale';
@@ -253,7 +325,26 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   /// 0: رخصة/هيئة — 1: تصنيف — 2: خريطة — 3: موقع — 4: صك/تسعير — 5: تفاصيل — 6: وسائط
   int _wizardStep = 0;
-  static const int _kWizardLastStep = 6;
+
+  /// «بيع / إيجار / شراء» في مسار المسوّق المرخّص.
+  String _primaryPurposeGroup = 'sale';
+
+  /// تصنيف مبسّط (سكني، تجاري، …) عند عدم وجود ترخيص.
+  String _propertyCategory = 'residential';
+
+  /// غرض فرعي: إيجار (يومي/شهري/سنوي) أو بيع (مزاد/استثمار).
+  String? _subPurposeCode;
+
+  int get _kWizardLastStep =>
+      _marketingLicensedSplit ? 7 : 6;
+
+  bool get _marketingFlowActive => widget.marketingFlow != null;
+
+  bool get _marketingLicensedSplit =>
+      widget.marketingFlow?.licensedSplitSteps == true;
+
+  bool get _marketingSimplifiedForm =>
+      widget.marketingFlow?.simplifiedOwnerForm == true;
 
   /// يُدمَج في عمود `rega_payload` عند الحفظ.
   Map<String, dynamic> _regaPayloadForInsert = {};
@@ -322,6 +413,25 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   String? _selectedDistrict;
 
   bool get _isAr => widget.lang == 'ar';
+
+  String get _resolvedAccountType {
+    final fromFlow = (widget.marketingFlow?.accountType ?? '').trim();
+    if (fromFlow.isNotEmpty) return fromFlow;
+    final cached = (AccountRoleCache.snapshot?.accountType ?? '').trim();
+    if (cached.isNotEmpty) return cached;
+    return 'user';
+  }
+
+  String get _advertiserRoleLabel => SubscriptionService.planAudienceLabel(
+        isAr: _isAr,
+        accountType: _resolvedAccountType,
+      );
+
+  /// قيم الحفظ: owner للمالك/العام، broker لأي دور تسويقي/منشأة.
+  String get _advertiserRoleCode {
+    final k = AppRoleHelper.fromAccountType(_resolvedAccountType);
+    return AppRoleHelper.isMarketingRole(k) ? 'broker' : 'owner';
+  }
 
   List<String> get _currentDistrictOptions {
     final city = (_selectedCity ?? _city.text).trim();
@@ -423,11 +533,466 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _loadSaudiLocations();
     _loadOwnerName();
     _restoreTempCoords();
+    _advertiserRole = _advertiserRoleCode;
     _wireAddPropertyNumericListeners();
     _price.addListener(_onPriceOrAreaChanged);
     _area.addListener(_onPriceOrAreaChanged);
     _regaFalLicenseNo.addListener(_scheduleRegaLicenseVerify);
     _applyInitialRegaPayload();
+    _applyMarketingFlowBootstrap();
+    if (_marketingFlowActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_ensureMarketingSubscriptionForAddProperty());
+      });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _syncAdvertiserRoleFromAccount();
+      _appSession = context.read<AppSession>();
+      _appSession?.addListener(_onConnectivityForDraft);
+      ActiveFormGuard.instance.register(
+        ActiveFormGuardHandle(
+          id: 'add_property_listing',
+          hasUnsavedInput: _hasUnsavedWizardInput,
+          isPublishing: () => _saving || _publishLock,
+          onSaveDraft: () => _persistListingDraft(showSnack: false),
+          onDiscard: _clearListingDraftAndForm,
+          leaveTitleAr: 'هل تريد إغلاق الإعلان؟',
+          leaveTitleEn: 'Leave this listing?',
+        ),
+      );
+      unawaited(_restoreListingDraftIfAny());
+    });
+  }
+
+  void _syncAdvertiserRoleFromAccount() {
+    final next = _advertiserRoleCode;
+    if (_advertiserRole == next) return;
+    if (mounted) {
+      setState(() => _advertiserRole = next);
+    } else {
+      _advertiserRole = next;
+    }
+  }
+
+  void _onConnectivityForDraft() {
+    if (!_hasUnsavedWizardInput()) return;
+    if (_appSession?.hasInternet == false) {
+      unawaited(_persistListingDraft(showSnack: false));
+    }
+  }
+
+  bool _hasUnsavedWizardInput() {
+    if (_publishSucceeded) return false;
+    return _title.text.trim().isNotEmpty ||
+        _desc.text.trim().isNotEmpty ||
+        _region.text.trim().isNotEmpty ||
+        _city.text.trim().isNotEmpty ||
+        _price.text.trim().isNotEmpty ||
+        _area.text.trim().isNotEmpty ||
+        _images.isNotEmpty;
+  }
+
+  /// إغلاق نموذج الإضافة والعودة للوحة على تبويب الرئيسية (بدون إعادة بناء الويب).
+  Future<void> _popToDashboardHomeAfterPublish() async {
+    _publishSucceeded = true;
+    if (mounted) setState(() => _publishLock = false);
+    ActiveFormGuard.instance.unregister('add_property_listing');
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isNotEmpty) {
+      unawaited(
+        WizardFormDraft.clear(namespace: _draftNamespace, userId: uid),
+      );
+    }
+    if (!mounted) return;
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop(true);
+      return;
+    }
+    await PostAuthNavigation.openDashboard(context);
+  }
+
+  Map<String, dynamic> _snapshotListingDraft() {
+    return {
+      'wizard_step': _wizardStep,
+      'title': _title.text,
+      'desc': _desc.text,
+      'region': _region.text,
+      'governorate': _governorate.text,
+      'city': _city.text,
+      'location': _location.text,
+      'address_line': _addressLine.text,
+      'building_number': _buildingNumber.text,
+      'deed_number': _deedNumber.text,
+      'deed_issuer': _deedIssuer.text,
+      'price': _price.text,
+      'area': _area.text,
+      'current_bid': _currentBid.text,
+      'commission_fixed': _commissionFixedCtrl.text,
+      'video_url': _videoUrl.text,
+      'virtual_tour_url': _virtualTourUrl.text,
+      'lat': _latCtrl.text,
+      'lng': _lngCtrl.text,
+      'plan_number': _planNumber.text,
+      'parcel_number': _parcelNumber.text,
+      'obligations_detail': _obligationsDetail.text,
+      'extended_usage_notes': _extendedUsageNotes.text,
+      'rega_fal_license_no': _regaFalLicenseNo.text,
+      'purpose': _purpose,
+      'type': _type,
+      'currency': _currency,
+      'commission_kind': _commissionKind,
+      'selected_region': _selectedRegion,
+      'selected_governorate': _selectedGovernorate,
+      'usage_residential': _usageResidential,
+      'usage_commercial': _usageCommercial,
+      'negotiable': _negotiable,
+      'price_on_sum': _priceOnSum,
+      'accepts_mortgage_finance': _acceptsMortgageFinance,
+      'no_legal_obstacles': _noLegalObstacles,
+      'advertiser_role': _advertiserRole,
+      'location_is_approximate': _locationIsApproximate,
+      'property_age_bucket': _propertyAgeBucket,
+      'is_auction': _isAuction,
+      'furnished': _furnished,
+      'use_map_coords': _useMapCoords,
+      'price_includes_vat': _priceIncludesVat,
+      'property_has_obligations': _propertyHasObligations,
+      'ad_license_source': _adLicenseSource.name,
+      'bedrooms': _bedrooms,
+      'bathrooms': _bathrooms,
+      'parking_spots': _parkingSpots,
+      'year_built': _yearBuilt,
+      'image_meta': _images
+          .map((e) => {
+                'name': e.name,
+                'size': e.bytes.length,
+              })
+          .toList(),
+      'image_b64': _images.length <= 4 &&
+              _images.fold<int>(0, (s, e) => s + e.bytes.length) < 1200000
+          ? _images
+              .map((e) => {
+                    'name': e.name,
+                    'data': base64Encode(e.bytes),
+                  })
+              .toList()
+          : null,
+    };
+  }
+
+  void _applyListingDraft(Map<String, dynamic> d) {
+    _wizardStep = (d['wizard_step'] as num?)?.toInt() ?? 0;
+    _title.text = '${d['title'] ?? ''}';
+    _desc.text = '${d['desc'] ?? ''}';
+    _region.text = '${d['region'] ?? ''}';
+    _governorate.text = '${d['governorate'] ?? ''}';
+    _city.text = '${d['city'] ?? ''}';
+    _location.text = '${d['location'] ?? ''}';
+    _addressLine.text = '${d['address_line'] ?? ''}';
+    _buildingNumber.text = '${d['building_number'] ?? ''}';
+    _deedNumber.text = '${d['deed_number'] ?? ''}';
+    _deedIssuer.text = '${d['deed_issuer'] ?? ''}';
+    _price.text = '${d['price'] ?? ''}';
+    _area.text = '${d['area'] ?? ''}';
+    _currentBid.text = '${d['current_bid'] ?? ''}';
+    _commissionFixedCtrl.text = '${d['commission_fixed'] ?? ''}';
+    _videoUrl.text = '${d['video_url'] ?? ''}';
+    _virtualTourUrl.text = '${d['virtual_tour_url'] ?? ''}';
+    _latCtrl.text = '${d['lat'] ?? ''}';
+    _lngCtrl.text = '${d['lng'] ?? ''}';
+    _planNumber.text = '${d['plan_number'] ?? ''}';
+    _parcelNumber.text = '${d['parcel_number'] ?? ''}';
+    _obligationsDetail.text = '${d['obligations_detail'] ?? ''}';
+    _extendedUsageNotes.text = '${d['extended_usage_notes'] ?? ''}';
+    _regaFalLicenseNo.text = '${d['rega_fal_license_no'] ?? ''}';
+    _purpose = '${d['purpose'] ?? _purpose}';
+    _type = '${d['type'] ?? _type}';
+    _currency = '${d['currency'] ?? _currency}';
+    _commissionKind = '${d['commission_kind'] ?? _commissionKind}';
+    _selectedRegion = d['selected_region']?.toString();
+    _selectedGovernorate = d['selected_governorate']?.toString();
+    _usageResidential = d['usage_residential'] == true;
+    _usageCommercial = d['usage_commercial'] == true;
+    _negotiable = d['negotiable'] == true;
+    _priceOnSum = d['price_on_sum'] == true;
+    _acceptsMortgageFinance = d['accepts_mortgage_finance'] == true;
+    _noLegalObstacles = d['no_legal_obstacles'] == true;
+    _advertiserRole = (d['advertiser_role'] ?? 'owner').toString().trim();
+    if (_advertiserRole.isEmpty) _advertiserRole = 'owner';
+    // بعد المسودة: اضبط صفة المعلن من نوع الحساب الفعلي (لا تعتمد على مسودة قديمة).
+    _advertiserRole = _advertiserRoleCode;
+    _locationIsApproximate = d['location_is_approximate'] == true;
+    _propertyAgeBucket = d['property_age_bucket']?.toString();
+    _isAuction = d['is_auction'] == true;
+    _furnished = d['furnished'] == true;
+    _useMapCoords = d['use_map_coords'] == true;
+    _priceIncludesVat = d['price_includes_vat'] as bool?;
+    _propertyHasObligations = d['property_has_obligations'] as bool?;
+    final als = '${d['ad_license_source'] ?? ''}';
+    if (als.isNotEmpty) {
+      try {
+        _adLicenseSource = _AdLicenseSource.values.byName(als);
+      } catch (_) {}
+    }
+    _bedrooms = (d['bedrooms'] as num?)?.toInt();
+    _bathrooms = (d['bathrooms'] as num?)?.toInt();
+    _parkingSpots = (d['parking_spots'] as num?)?.toInt();
+    _yearBuilt = (d['year_built'] as num?)?.toInt();
+    _images.clear();
+    final imgs = d['image_b64'];
+    if (imgs is List) {
+      for (final raw in imgs) {
+        if (raw is! Map) continue;
+        final name = '${raw['name'] ?? 'photo.jpg'}';
+        final b64 = '${raw['data'] ?? ''}';
+        if (b64.isEmpty) continue;
+        try {
+          _images.add(_PickedImage(name: name, bytes: base64Decode(b64)));
+        } catch (_) {}
+      }
+    }
+  }
+
+  Future<void> _restoreListingDraftIfAny() async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return;
+    final draft = await WizardFormDraft.load(
+      namespace: _draftNamespace,
+      userId: uid,
+    );
+    if (!mounted || draft == null || _hasUnsavedWizardInput()) return;
+    setState(() => _applyListingDraft(draft));
+    _scrollWizardStepToTop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(_isAr
+            ? 'تم استرجاع مسودة الإعلان — أكمل من حيث توقفت.'
+            : 'Listing draft restored — continue where you left off.'),
+      ),
+    );
+  }
+
+  Future<void> _persistListingDraft({bool showSnack = true}) async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return;
+    await WizardFormDraft.save(
+      namespace: _draftNamespace,
+      userId: uid,
+      data: _snapshotListingDraft(),
+    );
+    if (showSnack && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr
+              ? 'تم حفظ مسودة الإعلان.'
+              : 'Listing draft saved.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearListingDraftAndForm() async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isNotEmpty) {
+      await WizardFormDraft.clear(namespace: _draftNamespace, userId: uid);
+    }
+    _title.clear();
+    _desc.clear();
+    _region.clear();
+    _governorate.clear();
+    _city.clear();
+    _location.clear();
+    _addressLine.clear();
+    _price.clear();
+    _area.clear();
+    _wizardStep = _marketingFlowActive ? 1 : 0;
+    _termsAccepted = false;
+    _images.clear();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _handleListingFormExit() async {
+    final choice = await showFormExitConfirmDialog(
+      context: context,
+      isAr: _isAr,
+      title: _isAr ? 'هل تريد إغلاق الإعلان؟' : 'Leave this listing?',
+    );
+    if (!mounted || choice == null || choice == FormExitChoice.keepEditing) {
+      return;
+    }
+    if (choice == FormExitChoice.saveDraft) {
+      await _persistListingDraft();
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    await _clearListingDraftAndForm();
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _ensureMarketingSubscriptionForAddProperty() async {
+    if (!mounted) return;
+    final ok = await SubscriptionGateHelper.ensure(
+      context,
+      isAr: _isAr,
+      action: SubscriptionGateAction.addPropertyListing,
+      onGoSubscribe: () async {
+        if (!mounted) return;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => SubscriptionsRootScreen(
+              lang: widget.lang,
+              accountType: widget.marketingFlow?.accountType ?? '',
+              embedAppBar: !widget.embedAppBar,
+            ),
+          ),
+        );
+        if (mounted) {
+          await SubscriptionGateHelper.refresh(context, force: true);
+        }
+      },
+    );
+    if (!ok && mounted) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _applyMarketingFlowBootstrap() {
+    final flow = widget.marketingFlow;
+    if (flow == null) return;
+
+    if (flow.skipLicenseStep) {
+      _wizardStep = 1;
+      if (flow.path == MarketingListingPath.licensed) {
+        _adLicenseSource = _AdLicenseSource.inApp;
+        _propertyHasObligations = false;
+      } else {
+        _adLicenseSource = _AdLicenseSource.none;
+        _regaPayloadForInsert = {
+          ..._regaPayloadForInsert,
+          'no_license_market_consent': true,
+          'market_without_rega_license': true,
+        };
+        _usageResidential = true;
+        _subPurposeCode = 'sale';
+        _primaryPurposeGroup = 'sale';
+      }
+    }
+
+    final payload = flow.initialRegaPayload ?? widget.initialRegaPayload;
+    if (payload != null && payload.isNotEmpty) {
+      _regaPayloadForInsert = {
+        ..._regaPayloadForInsert,
+        ...payload,
+      };
+    }
+  }
+
+  /// يعيد ترتيب خطوات المعالج للمسار المرخّص (غرض → نوع → موقع → خريطة …).
+  int _wizardPaneKind(int step) {
+    if (!_marketingLicensedSplit) return step;
+    switch (step) {
+      case 1:
+        return 101;
+      case 2:
+        return 102;
+      case 3:
+        return 3;
+      case 4:
+        return 2;
+      case 5:
+        return 4;
+      case 6:
+        return 5;
+      case 7:
+        return 6;
+      default:
+        return step;
+    }
+  }
+
+  void _syncPurposeFromPrimaryGroup() {
+    switch (_primaryPurposeGroup) {
+      case 'rent':
+        _purpose = _subPurposeCode ?? 'monthly_rent';
+        break;
+      case 'purchase':
+        _purpose = 'sale';
+        break;
+      case 'sale':
+      default:
+        _purpose = _subPurposeCode ?? 'sale';
+        break;
+    }
+  }
+
+  void _applyPropertyCategoryDefaults() {
+    switch (_propertyCategory) {
+      case 'commercial':
+        _usageCommercial = true;
+        _usageResidential = false;
+        if (_type == 'villa') _type = 'commercial_building';
+        break;
+      case 'administrative':
+        _usageCommercial = true;
+        _usageResidential = false;
+        if (_type == 'villa') _type = 'office';
+        break;
+      case 'land':
+        _usageResidential = false;
+        _usageCommercial = false;
+        _type = 'land';
+        break;
+      case 'farm':
+        _usageResidential = false;
+        _usageCommercial = false;
+        _type = 'farm';
+        break;
+      case 'project':
+        _usageResidential = false;
+        _usageCommercial = true;
+        _type = 'project';
+        break;
+      case 'other':
+        _usageResidential = true;
+        _usageCommercial = true;
+        _type = 'other';
+        break;
+      case 'residential':
+      default:
+        _usageResidential = true;
+        _usageCommercial = false;
+        if (_type == 'land' || _type == 'farm' || _type == 'project') {
+          _type = 'villa';
+        }
+        break;
+    }
+  }
+
+  void _refreshAutoTitle() {
+    if (_marketingFlowActive) {
+      final city = (_selectedCity ?? _city.text).trim();
+      final typeLabel = PropertyTypeCatalog.label(_type, _isAr);
+      final purposeLabel = _purposeTypes
+          .firstWhere(
+            (e) => e['code'] == _purpose,
+            orElse: () => {'ar': '', 'en': ''},
+          );
+      final pLabel = _isAr
+          ? (purposeLabel['ar'] ?? '')
+          : (purposeLabel['en'] ?? '');
+      final parts = <String>[
+        if (typeLabel.isNotEmpty) typeLabel,
+        if (city.isNotEmpty) city,
+        if (pLabel.isNotEmpty) pLabel,
+      ];
+      if (parts.isEmpty) return;
+      _title.text = parts.join(' · ');
+      return;
+    }
+    _maybeSuggestSmartTitle();
   }
 
   void _applyInitialRegaPayload() {
@@ -519,6 +1084,37 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final a = _areaValueInSquareMeters();
     if (p == null || p <= 0 || a == null || a <= 0) return null;
     return AppMoney.roundPricePerSqm(p / a);
+  }
+
+  /// المبلغ المدخل في حقل «السعر الإجمالي» (موجب أو 0).
+  double _enteredPriceValue() {
+    return double.tryParse(
+          normalizeNumbers(_price.text).trim().replaceAll(',', ''),
+        ) ??
+        0;
+  }
+
+  /// المبلغ المدخل في حقل «العمولة المقطوعة» (موجب أو 0).
+  double _fixedCommissionValue() {
+    return double.tryParse(
+          normalizeNumbers(_commissionFixedCtrl.text)
+              .trim()
+              .replaceAll(',', ''),
+        ) ??
+        0;
+  }
+
+  /// نموذج فاتورة حيّ للمعاينة أسفل حقول السعر (يُحدَّث مع كل تغيير).
+  ListingInvoiceModel _buildLiveInvoice() {
+    return ListingInvoiceModel(
+      enteredPrice: _enteredPriceValue(),
+      priceIncludesVat: _priceIncludesVat ?? true,
+      vatRate: _kVatRate,
+      commissionKind: _commissionKind,
+      commissionRate: _kMarketingCommissionRate,
+      commissionAmount: _fixedCommissionValue(),
+      currencyCode: _currency,
+    );
   }
 
   void _scheduleRegaLicenseVerify() {
@@ -634,6 +1230,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     wireDecimal(_price);
     wireDecimal(_area);
     wireDecimal(_currentBid);
+    wireDecimal(_commissionFixedCtrl);
+    _commissionFixedCtrl.addListener(_onPriceOrAreaChanged);
     wireDigits(_buildingNumber);
     wireDigits(_deedNumber);
     wireDecimal(_streetWidth1);
@@ -648,6 +1246,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   @override
   void dispose() {
+    ActiveFormGuard.instance.unregister('add_property_listing');
+    _appSession?.removeListener(_onConnectivityForDraft);
     _title.dispose();
     _desc.dispose();
     _region.dispose();
@@ -667,6 +1267,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _area.removeListener(_onPriceOrAreaChanged);
     _area.dispose();
     _price.dispose();
+    _commissionFixedCtrl.dispose();
     _currentBid.dispose();
     _videoUrl.dispose();
     _virtualTourUrl.dispose();
@@ -704,17 +1305,27 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _adLicenseSource == _AdLicenseSource.external;
 
   bool get _canSubmit {
+    if (!_termsAccepted) return false;
+    if (!_noLegalObstacles) return false;
     if (_saving) return false;
+    if (_publishLock) return false;
     if (_uploadingVideo) return false;
     if (_uploadingLicensePdf) return false;
     if (_adLicenseSource == _AdLicenseSource.unset) return false;
     if (_propertyHasObligations == null) return false;
+    // — يجب الإجابة على سؤال «هل الإجمالي شامل ضريبة 5%؟».
+    if (_priceIncludesVat == null) return false;
+    // — اختيار «مبلغ مقطوع» يستوجب إدخال قيمة موجبة.
+    if (_commissionKind == 'fixed' && _fixedCommissionValue() <= 0) {
+      return false;
+    }
     if (_propertyHasObligations == true &&
         _obligationsDetail.text.trim().length < 3) {
       return false;
     }
-    final hasMedia = _images.isNotEmpty || _videoUrl.text.trim().isNotEmpty;
-    if (!hasMedia) return false;
+    final hasMedia = _images.isNotEmpty ||
+        _videoUrl.text.trim().isNotEmpty ||
+        (!_requiresExternalLicenseBundle);
     if (_requiresExternalLicenseBundle) {
       if (_images.isEmpty) return false;
       if (_videoUrl.text.trim().isEmpty) return false;
@@ -725,7 +1336,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final lng = _parseNullableDouble(_lngCtrl.text);
       if (lat == null || lng == null) return false;
     }
-    if (!_usageResidential && !_usageCommercial) return false;
+    if (!_marketingSimplifiedForm &&
+        !_marketingLicensedSplit &&
+        !_usageResidential &&
+        !_usageCommercial) {
+      return false;
+    }
     if (_isLand && _streetCount != null && _streetCount! > 0) {
       final widths = _buildStreetWidths();
       if (widths.length < _streetCount!) return false;
@@ -739,11 +1355,17 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       if (_deedDate == null) return false;
       if (_deedIssuer.text.trim().isEmpty) return false;
     }
+    if (_showParkingYearRow && _yearBuilt == null) return false;
     return true;
   }
 
   String _wizardScreenTitle(bool isAr) {
-    switch (_wizardStep) {
+    final pane = _wizardPaneKind(_wizardStep);
+    switch (pane) {
+      case 101:
+        return isAr ? 'نوع الإعلان' : 'Listing type';
+      case 102:
+        return isAr ? 'نوع العقار' : 'Property type';
       case 0:
         return isAr ? 'الهيئة ورخصة الإعلان' : 'REGA & ad license';
       case 1:
@@ -764,8 +1386,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   bool _validateWizardStep(int step) {
-    switch (step) {
+    final pane = _wizardPaneKind(step);
+    switch (pane) {
       case 0:
+        if (_marketingFlowActive) return true;
         if (_adLicenseSource == _AdLicenseSource.unset) {
           final msg =
               _isAr ? 'اختر مصدر رخصة الإعلان' : 'Choose ad license source';
@@ -791,17 +1415,51 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           return false;
         }
         return true;
+      case 101:
+        _syncPurposeFromPrimaryGroup();
+        return true;
+      case 102:
+        if (!(_formKeyClassification.currentState?.validate() ?? true)) {
+          return false;
+        }
+        return true;
       case 1:
-        if (!_usageResidential && !_usageCommercial) {
+        if (_marketingSimplifiedForm) {
+          _applyPropertyCategoryDefaults();
+        } else if (!_marketingLicensedSplit &&
+            !_usageResidential &&
+            !_usageCommercial) {
           final msg = _isAr
               ? 'حدد الاستخدام (سكني / تجاري)'
               : 'Select usage (residential / commercial)';
           setState(() => _error = msg);
           return false;
         }
+        if (_marketingSimplifiedForm && _propertyHasObligations == null) {
+          final msg = _isAr
+              ? 'حدد وجود التزامات على العقار'
+              : 'Indicate if the property has obligations';
+          setState(() => _error = msg);
+          return false;
+        }
+        if (_marketingSimplifiedForm &&
+            _propertyHasObligations == true &&
+            _obligationsDetail.text.trim().length < 3) {
+          final msg = _isAr
+              ? 'وضّح التزامات العقار (3 أحرف على الأقل)'
+              : 'Describe obligations (min. 3 characters)';
+          setState(() => _error = msg);
+          return false;
+        }
+        if (_marketingSimplifiedForm && _subPurposeCode == null) {
+          final msg = _isAr ? 'اختر الغرض الفرعي' : 'Select sub-purpose';
+          setState(() => _error = msg);
+          return false;
+        }
         if (!(_formKeyClassification.currentState?.validate() ?? false)) {
           return false;
         }
+        _refreshAutoTitle();
         return true;
       case 2:
         if (!_useMapCoords) return true;
@@ -819,6 +1477,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       case 3:
         return _formKeyLocation.currentState?.validate() ?? false;
       case 4:
+        _refreshAutoTitle();
         return _formKeyPricing.currentState?.validate() ?? false;
       case 5:
         if (_isLand && _streetCount != null && _streetCount! > 0) {
@@ -828,6 +1487,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             setState(() => _error = msg);
             return false;
           }
+        }
+        if (_showParkingYearRow && _yearBuilt == null) {
+          setState(() => _error = _isAr
+              ? 'سنة البناء مطلوبة'
+              : 'Year built is required');
+          return false;
         }
         return _formKeyDetails.currentState?.validate() ?? false;
       case 6:
@@ -857,6 +1522,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           return true;
         }
         if (_images.isEmpty && _videoUrl.text.trim().isEmpty) {
+          if (!_requiresExternalLicenseBundle) {
+            return true;
+          }
           final msg = _isAr ? 'أضف فيديو أو صورة' : 'Add a video or photo';
           setState(() => _error = msg);
           _scrollToKey(_listingMediaKey);
@@ -868,12 +1536,19 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
+  void _scrollWizardStepToTop() {
+    WizardStepNavigation.scrollToTop(_scrollCtrl);
+  }
+
   void _wizardPrev() {
-    if (_wizardStep <= 0) return;
+    final minStep = _marketingFlowActive ? 1 : 0;
+    if (_wizardStep <= minStep) return;
     setState(() {
       _wizardStep--;
       _error = null;
     });
+    unawaited(_persistListingDraft(showSnack: false));
+    _scrollWizardStepToTop();
   }
 
   void _wizardNext() {
@@ -883,6 +1558,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _wizardStep++;
         _error = null;
       });
+      unawaited(_persistListingDraft(showSnack: false));
+      _scrollWizardStepToTop();
+      if (_marketingLicensedSplit &&
+          _wizardPaneKind(_wizardStep) == 2 &&
+          _useMapCoords) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_openMapPicker(kingdomOverview: false));
+        });
+      }
     }
   }
 
@@ -895,6 +1579,29 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       formKey: formKey,
       saving: _saving || _picking || _uploadingVideo || _uploadingLicensePdf,
       slice: slice,
+      wizardPaneKind: _wizardPaneKind(_wizardStep),
+      marketingSimplifiedForm: _marketingSimplifiedForm,
+      primaryPurposeGroup: _primaryPurposeGroup,
+      onPrimaryPurposeGroupChanged: (v) => setState(() {
+        _primaryPurposeGroup = v;
+        _subPurposeCode = null;
+        _syncPurposeFromPrimaryGroup();
+      }),
+      propertyCategory: _propertyCategory,
+      onPropertyCategoryChanged: (v) => setState(() {
+        _propertyCategory = v;
+        _applyPropertyCategoryDefaults();
+      }),
+      subPurposeCode: _subPurposeCode,
+      onSubPurposeCodeChanged: (v) => setState(() {
+        _subPurposeCode = v;
+        _syncPurposeFromPrimaryGroup();
+      }),
+      propertyHasObligations: _propertyHasObligations,
+      onPropertyHasObligationsChanged: (v) =>
+          setState(() => _propertyHasObligations = v),
+      obligationsDetail: _obligationsDetail,
+      autoFillTitle: _marketingFlowActive,
       locationsLoading: _locationsLoading,
       regionController: _region,
       governorateController: _governorate,
@@ -932,8 +1639,29 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         final wasLand = _isLand;
         _type = v;
         if (wasLand && !_isLand) _clearLandOnlyFormFields();
+        _maybeSuggestSmartTitle();
       }),
-      onPurposeChanged: (v) => setState(() => _purpose = v),
+      onPurposeChanged: (v) => setState(() {
+        _purpose = v;
+        _maybeSuggestSmartTitle();
+      }),
+      priceOnSum: _priceOnSum,
+      onPriceOnSumChanged: (v) => setState(() {
+        _priceOnSum = v;
+        if (v) {
+          _negotiable = true;
+          if (_price.text.trim().isEmpty) _price.text = '0';
+        }
+      }),
+      acceptsMortgageFinance: _acceptsMortgageFinance,
+      onAcceptsMortgageFinanceChanged: (v) =>
+          setState(() => _acceptsMortgageFinance = v),
+      propertyAgeBucket: _propertyAgeBucket,
+      onPropertyAgeBucketChanged: (v) =>
+          setState(() => _propertyAgeBucket = v),
+      onSuggestSmartTitle: () => setState(() {
+        _maybeSuggestSmartTitle(force: true);
+      }),
       usageResidential: _usageResidential,
       usageCommercial: _usageCommercial,
       onUsageResidentialChanged: (v) => setState(() => _usageResidential = v),
@@ -945,6 +1673,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       areaUnit: _areaUnit,
       onAreaUnitChanged: (u) => setState(() => _areaUnit = u),
       computedPricePerSqm: _computedPricePerSqm(),
+      priceIncludesVat: _priceIncludesVat,
+      onPriceIncludesVatChanged: (v) => setState(() => _priceIncludesVat = v),
+      commissionKind: _commissionKind,
+      onCommissionKindChanged: (v) => setState(() {
+        _commissionKind = v;
+        if (v != 'fixed') _commissionFixedCtrl.clear();
+      }),
+      commissionFixedCtrl: _commissionFixedCtrl,
+      liveInvoice: _buildLiveInvoice(),
       currency: _currency,
       negotiable: _negotiable,
       onCurrencyChanged: (v) => setState(() => _currency = v),
@@ -1212,46 +1949,42 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   /// REGA / FAL path satisfied — enables verified marketer **direct publish** to home.
   bool _regaVerificationSatisfied() {
+    final flow = widget.marketingFlow;
+    if (flow != null) {
+      if (flow.listingRequestOnly) return false;
+      if (flow.publishToHomeFeed) return _licensedAdPayloadComplete();
+      return false;
+    }
     if (_regaVerifyOk == true) return true;
     final fv = _regaPayloadForInsert['fal_license_verify'];
-    if (fv is Map) {
-      final v = fv['valid'];
-      if (v == true) return true;
-    }
-    return false;
+    if (fv is Map && fv['valid'] == true) return true;
+    return _licensedAdPayloadComplete();
   }
 
+  bool _licensedAdPayloadComplete() {
+    String digits(dynamic raw) =>
+        raw.toString().replaceAll(RegExp(r'\D'), '');
+    final ad = digits(_regaPayloadForInsert['rega_ad_license_number']);
+    final fal = digits(_regaPayloadForInsert['fal_broker_license_number']);
+    return ad.length == 10 && fal.length == 10;
+  }
+
+  bool get _forceListingRequestPath =>
+      widget.marketingFlow?.listingRequestOnly == true;
+
   Future<bool> _isVerifiedMarketer(String userId) async {
+    // الجدول المعتمد: marketer_profiles فقط (لا marketers / is_marketer_verified).
     try {
       final m = await _sb
           .from('marketer_profiles')
           .select('is_verified')
           .eq('user_id', userId)
           .maybeSingle();
-      if (m != null) {
-        final v = m['is_verified'];
-        if (v is bool) return v;
-        if (v is num) return v != 0;
-        if (v is String) return v.toLowerCase() == 'true' || v == '1';
-      }
-    } catch (_) {}
-    try {
-      final m = await _sb
-          .from('marketers')
-          .select('is_verified')
-          .eq('user_id', userId)
-          .maybeSingle();
-      final v = m?['is_verified'];
+      if (m == null) return false;
+      final v = m['is_verified'];
       if (v is bool) return v;
       if (v is num) return v != 0;
       if (v is String) return v.toLowerCase() == 'true' || v == '1';
-    } catch (_) {}
-    try {
-      final r =
-          await _sb.rpc('is_marketer_verified', params: {'p_user_id': userId});
-      if (r is bool) return r;
-      if (r is num) return r != 0;
-      if (r is String) return r.toLowerCase() == 'true' || r == '1';
     } catch (_) {}
     return false;
   }
@@ -1576,8 +2309,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       });
 
   Future<void> _openMapPicker({bool kingdomOverview = false}) async {
-    final LatLng? initial =
-        (_lat != null && _lng != null) ? LatLng(_lat!, _lng!) : null;
+    LatLng? initial;
+    if (_lat != null && _lng != null) {
+      initial = LatLng(_lat!, _lng!);
+    } else {
+      final city = (_selectedCity ?? _city.text).trim();
+      if (city.isNotEmpty) {
+        final loc = await SaudiLocationsService.instance.findByCity(city);
+        if (loc != null && loc.lat != 0 && loc.lng != 0) {
+          initial = LatLng(loc.lat, loc.lng);
+        }
+      }
+    }
     final res = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         builder: (_) => MapPickerPage(
@@ -1598,7 +2341,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (!mounted || res == null) return;
     final lat = res['lat'];
     final lng = res['lng'];
+    final approx = res['approximate'] == true;
+    final metaCity = (res['city'] ?? '').toString().trim();
+    final metaRegion = (res['region'] ?? '').toString().trim();
+    final metaGov = (res['governorate'] ?? '').toString().trim();
+    final metaDistrict = (res['district'] ?? '').toString().trim();
     setState(() {
+      _locationIsApproximate = approx;
       _lat = (lat is num)
           ? lat.toDouble()
           : double.tryParse(lat?.toString() ?? '');
@@ -1613,9 +2362,23 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         'coords_temp_${widget.userId}',
-        jsonEncode({'lat': _lat, 'lng': _lng}),
+        jsonEncode({
+          'lat': _lat,
+          'lng': _lng,
+          'approximate': _locationIsApproximate,
+        }),
       );
-      await _fillLocationFromNearest();
+      if (metaCity.isNotEmpty || metaRegion.isNotEmpty) {
+        await _applyResolvedLocation(
+          region: metaRegion,
+          governorate: metaGov,
+          city: metaCity,
+          district: metaDistrict,
+        );
+      } else {
+        await _fillLocationFromNearest();
+      }
+      _maybeSuggestSmartTitle();
     }
   }
 
@@ -1623,26 +2386,144 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (_lat == null || _lng == null) return;
     final info = await SaudiLocationsService.instance.findNearest(_lat!, _lng!);
     if (!mounted || info == null) return;
+    final r = _isAr ? info.regionAr.trim() : info.regionEn.trim();
+    final rawG =
+        _isAr ? info.governorateAr?.trim() : info.governorateEn?.trim();
+    final g = (rawG != null && rawG.isNotEmpty) ? rawG : '';
+    final c = _isAr ? info.cityAr.trim() : info.cityEn.trim();
+    await _applyResolvedLocation(
+      region: r,
+      governorate: g.isNotEmpty ? g : c,
+      city: c,
+      district: '',
+    );
+  }
+
+  /// يضبط الهرم منطقة→محافظة→مدينة→حي بحيث تظهر في القوائم (لا تبقى المنطقة فقط).
+  Future<void> _applyResolvedLocation({
+    required String region,
+    required String governorate,
+    required String city,
+    required String district,
+  }) async {
+    final r = region.trim();
+    final gIn = governorate.trim();
+    final c = city.trim();
+    final d = district.trim();
+    if (!mounted) return;
+
     setState(() {
       _regionManual = false;
-      final r = _isAr ? info.regionAr.trim() : info.regionEn.trim();
-      _selectedRegion = r.isEmpty ? null : r;
-      _region.text = r;
-      final rawG =
-          _isAr ? info.governorateAr?.trim() : info.governorateEn?.trim();
-      final g = (rawG != null && rawG.isNotEmpty) ? rawG : r;
       _governorateManual = false;
-      _selectedGovernorate = g.isEmpty ? null : g;
-      _governorate.text = g;
       _cityManual = false;
-      final c = _isAr ? info.cityAr.trim() : info.cityEn.trim();
-      _selectedCity = c.isEmpty ? null : c;
-      _city.text = c;
-      _selectedDistrict = null;
       _districtManual = false;
+
+      if (r.isNotEmpty) {
+        _selectedRegion = r;
+        _region.text = r;
+      }
+
+      final govList = r.isEmpty
+          ? const <String>[]
+          : (_governoratesByRegion[r] ?? const <String>[]);
+      var g = gIn;
+      if (g.isEmpty && c.isNotEmpty && govList.contains(c)) {
+        g = c;
+      }
+      if (g.isEmpty && govList.length == 1) {
+        g = govList.first;
+      }
+      if (g.isNotEmpty) {
+        if (govList.contains(g)) {
+          _selectedGovernorate = g;
+          _governorate.text = g;
+        } else {
+          _governorateManual = true;
+          _selectedGovernorate = null;
+          _governorate.text = g;
+        }
+      }
+
+      final govKey = (_selectedGovernorate ?? _governorate.text).trim();
+      final cityList = govKey.isEmpty
+          ? const <String>[]
+          : (_citiesByGovernorate[govKey] ?? const <String>[]);
+      if (c.isNotEmpty) {
+        if (cityList.contains(c)) {
+          _selectedCity = c;
+          _city.text = c;
+        } else {
+          // أظهر المدينة كنص حتى لو لم تكن في القائمة بعد.
+          _cityManual = true;
+          _selectedCity = null;
+          _city.text = c;
+        }
+      }
+
+      _selectedDistrict = null;
       _location.clear();
       _syncLocationSelectionsFromControllers();
     });
+
+    final cityKey = (_selectedCity ?? _city.text).trim();
+    if (cityKey.isEmpty) return;
+
+    List<String> districts = _districtsByCity[cityKey] ?? const [];
+    if (districts.isEmpty) {
+      districts =
+          await SaudiDistrictsService.instance.districtsForCity(cityKey);
+      if (!mounted) return;
+      if (districts.isNotEmpty) {
+        setState(() {
+          _districtsByCity = Map<String, List<String>>.from(_districtsByCity)
+            ..[cityKey] = districts;
+        });
+      }
+    }
+
+    if (d.isNotEmpty) {
+      String? match;
+      for (final x in districts) {
+        if (x == d || x.contains(d) || d.contains(x)) {
+          match = x;
+          break;
+        }
+      }
+      if (match != null) {
+        await _selectDistrictValue(match);
+      } else {
+        setState(() {
+          _districtManual = true;
+          _selectedDistrict = null;
+          _location.text = d;
+        });
+      }
+    } else if (districts.length == 1) {
+      await _selectDistrictValue(districts.first);
+    }
+  }
+
+  /// عنوان إعلان ذكي من النوع + الغرض + المدينة/الحي (عندما يكون العنوان فارغاً).
+  void _maybeSuggestSmartTitle({bool force = false}) {
+    if (!force && _title.text.trim().isNotEmpty) return;
+    final typeLabel = PropertyTypeCatalog.label(_type, _isAr);
+    final purpose = _purpose.trim().toLowerCase();
+    final purposeBit = purpose.contains('rent')
+        ? (_isAr ? 'للإيجار' : 'for rent')
+        : (purpose.contains('auction')
+            ? (_isAr ? 'للمزاد' : 'for auction')
+            : (_isAr ? 'للبيع' : 'for sale'));
+    final city = (_selectedCity ?? _city.text).trim();
+    final district = (_selectedDistrict ?? _location.text).trim();
+    final suggested = PropertyListingDisplay.composeListingHeadline(
+      typeLabel: typeLabel,
+      purposeBit: purposeBit,
+      city: city,
+      district: district.isNotEmpty && district != city ? district : null,
+      isAr: _isAr,
+    );
+    if (suggested.trim().isEmpty) return;
+    _title.text = suggested.trim();
   }
 
   Future<void> _selectDistrictValue(String? value) async {
@@ -1659,6 +2540,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _districtManual = false;
       _selectedDistrict = value;
       _location.text = value;
+      _maybeSuggestSmartTitle();
     });
   }
 
@@ -1783,6 +2665,24 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       }
 
       if (mounted) setState(() {});
+      unawaited(_loadPublisherIdentityPrefs());
+    } catch (_) {}
+  }
+
+  Future<void> _loadPublisherIdentityPrefs() async {
+    try {
+      await PublisherIdentityPrefs.instance.ensureLoaded();
+      if (!mounted) return;
+      final id = PublisherIdentityPrefs.instance;
+      setState(() {
+        _pubNameSource = id.nameSource;
+        _pubPhoneSource = id.phoneSource;
+        _publishPresenceOnCards = id.publishPresenceOnCards;
+        _officialNameCached = id.officialName(isAr: _isAr);
+        _displayAliasCached = id.aliasName(isAr: _isAr);
+        _primaryPhoneCached = id.primaryPhone;
+        _secondaryPhoneCached = id.secondaryPhone;
+      });
     } catch (_) {}
   }
 
@@ -1906,6 +2806,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _selectedDistrict = null;
       _districtManual = false;
       _location.clear();
+      _maybeSuggestSmartTitle();
     });
 
     final info = await SaudiLocationsService.instance.findByCity(value);
@@ -1983,151 +2884,102 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
-  Future<void> _showSuccessChoice() async {
-    final cs = Theme.of(context).colorScheme;
-    final choice = await showDialog<String>(
+  Future<void> _showSuccessChoice({String? listingPublicCode}) async {
+    final code = (listingPublicCode ?? '').trim();
+    final choice = await showAdaptivePostPublishDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: cs.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            _isAr ? 'تم إضافة الإعلان' : 'Listing added',
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                _isAr
-                    ? 'هل تريد إضافة إعلان آخر؟'
-                    : 'Do you want to add another listing?',
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, 'back'),
-                      child: Text(
-                        _isAr ? 'الرئيسية' : 'Dashboard',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () => Navigator.pop(ctx, 'again'),
-                      icon: const Icon(Icons.add, size: 20),
-                      label: Text(
-                        _isAr ? 'إعلان آخر' : 'Add another',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+      isAr: _isAr,
+      title: _isAr ? 'تم نشر الإعلان' : 'Listing published',
+      body: _isAr
+          ? 'اختر الخطوة التالية.'
+          : 'Choose the next step.',
+      codeLine: code.isEmpty
+          ? null
+          : (_isAr
+              ? 'رقم الإعلان: ${DisplayIds.tenDigit(code)}'
+              : 'Listing no.: ${DisplayIds.tenDigit(code)}'),
+      actions: [
+        AdaptivePostPublishAction(
+          id: 'back',
+          label: _isAr ? 'الرئيسية' : 'Home',
+          outlined: true,
+        ),
+        AdaptivePostPublishAction(
+          id: 'again',
+          label: _isAr ? 'إضافة إعلان' : 'Add listing',
+          icon: Icons.add,
+          filled: true,
+        ),
+      ],
     );
     if (!mounted) return;
     if (choice == 'again') {
+      setState(() {
+        _publishLock = false;
+        _publishSucceeded = false;
+      });
       _resetForm();
+      final uid = _sb.auth.currentUser?.id ?? '';
+      if (uid.isNotEmpty) {
+        unawaited(
+          WizardFormDraft.clear(namespace: _draftNamespace, userId: uid),
+        );
+      }
       return;
     }
-    Navigator.pop(context, true);
+    // الرئيسية (أو إغلاق الحوار): أغلِق صفحة الإضافة → اللوحة تضبط التبويب 0.
+    await _popToDashboardHomeAfterPublish();
   }
 
-  Future<void> _showRequestSuccess({required String requestId}) async {
-    final cs = Theme.of(context).colorScheme;
-    final choice = await showDialog<String>(
+  Future<void> _showRequestSuccess({
+    required String requestId,
+    String? listingRequestPublicCode,
+  }) async {
+    final code = (listingRequestPublicCode ?? '').trim();
+    final choice = await showAdaptivePostPublishDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: cs.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          title: Text(
-            _isAr ? 'تم إرسال طلب التسويق' : 'Request submitted',
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                _isAr
-                    ? 'تم إرسال طلبك وسيتم مراجعته وتعيين مسوق له.'
-                    : 'Your request was sent. It will be reviewed and assigned to a marketer.',
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(ctx, 'home'),
-                      child: Text(
-                        _isAr ? 'رئيسية' : 'Home',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, 'status'),
-                      child: Text(
-                        _isAr ? 'الحالة' : 'Status',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(ctx, 'again'),
-                      child: Text(
-                        _isAr ? 'طلب آخر' : 'New',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
+      isAr: _isAr,
+      title: _isAr ? 'تم إرسال طلب التسويق' : 'Request submitted',
+      body: _isAr
+          ? 'تم إرسال طلبك وسيتم مراجعته وتعيين مسوق له.'
+          : 'Your request was sent. It will be reviewed and assigned to a marketer.',
+      codeLine: code.isEmpty
+          ? null
+          : (_isAr
+              ? 'رقم طلب التسويق: ${DisplayIds.tenDigit(code)}'
+              : 'Marketing request no.: ${DisplayIds.tenDigit(code)}'),
+      actions: [
+        AdaptivePostPublishAction(
+          id: 'home',
+          label: _isAr ? 'الرئيسية' : 'Home',
+        ),
+        AdaptivePostPublishAction(
+          id: 'status',
+          label: _isAr ? 'متابعة الطلب' : 'Follow request',
+          outlined: true,
+        ),
+        AdaptivePostPublishAction(
+          id: 'again',
+          label: _isAr ? 'إضافة إعلان' : 'Add listing',
+          filled: true,
+        ),
+      ],
     );
     if (!mounted) return;
     if (choice == 'again') {
+      setState(() {
+        _publishLock = false;
+        _publishSucceeded = false;
+      });
       _resetForm();
       return;
     }
     if (choice == 'status') {
+      setState(() {
+        _publishLock = false;
+        _publishSucceeded = true;
+      });
+      ActiveFormGuard.instance.unregister('add_property_listing');
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) =>
@@ -2135,11 +2987,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         ),
       );
       if (!mounted) return;
-      Navigator.pushNamedAndRemoveUntil(
-          context, '/userDashboard', (r) => false);
+      await _popToDashboardHomeAfterPublish();
       return;
     }
-    Navigator.pushNamedAndRemoveUntil(context, '/userDashboard', (r) => false);
+    await _popToDashboardHomeAfterPublish();
   }
 
   void _resetForm() {
@@ -2163,6 +3014,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _cityManual = false;
       _area.clear();
       _price.clear();
+      _commissionFixedCtrl.clear();
+      _priceIncludesVat = null;
+      _commissionKind = 'none';
+      _usedDefaultCover = false;
       _currentBid.clear();
       _type = 'villa';
       _purpose = 'sale';
@@ -2177,6 +3032,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _usageCommercial = false;
       _currency = 'SAR';
       _negotiable = false;
+      _priceOnSum = false;
+      _acceptsMortgageFinance = false;
+      _noLegalObstacles = false;
+      _advertiserRole = _advertiserRoleCode;
+      _locationIsApproximate = false;
+      _showOwnerNameOnCards = true;
+      _propertyAgeBucket = null;
       _bedrooms = null;
       _bathrooms = null;
       _parkingSpots = null;
@@ -2241,7 +3103,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _regaVerifyBanner = null;
       _regaVerifyOk = null;
       _error = null;
-      _wizardStep = 0;
+      _termsAccepted = false;
+      _wizardStep = _marketingFlowActive ? 1 : 0;
     });
   }
 
@@ -2369,6 +3232,25 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         'has_obligations': _propertyHasObligations,
         'detail': _obligationsDetail.text.trim(),
       },
+      // — نسخة احتياطية لخيارات الفوترة داخل listing_guidance JSONB
+      //   (مرآة للأعمدة الجديدة في الجدول؛ تُساعد عند قراءة سجلات قديمة أو نسخ احتياطية).
+      'pricing': {
+        'price_includes_vat': _priceIncludesVat ?? true,
+        'vat_rate': _kVatRate,
+        'marketing_commission_kind': _commissionKind,
+        'marketing_commission_rate': _kMarketingCommissionRate,
+        'marketing_commission_amount':
+            _commissionKind == 'fixed' ? _fixedCommissionValue() : 0,
+        'price_on_sum': _priceOnSum,
+        'negotiable': _negotiable,
+        'accepts_mortgage_finance': _acceptsMortgageFinance,
+      },
+      'deal_style': {
+        'no_legal_obstacles': _noLegalObstacles,
+        'advertiser_role': _advertiserRole,
+        'location_is_approximate': _locationIsApproximate,
+        'property_age_bucket': _propertyAgeBucket,
+      },
     };
     final ext = _extendedUsageNotes.text.trim();
     if (ext.isNotEmpty) {
@@ -2407,6 +3289,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'type': _type,
       'area': areaStoredM2,
       'price': _parseDouble(_price.text),
+      'price_includes_vat': _priceIncludesVat ?? true,
+      'vat_rate': _kVatRate,
+      'marketing_commission_kind': _commissionKind,
+      'marketing_commission_rate': _kMarketingCommissionRate,
+      'marketing_commission_amount':
+          _commissionKind == 'fixed' ? _fixedCommissionValue() : 0,
+      'default_cover_used': _usedDefaultCover,
       'currency': _currency,
       'negotiable': _negotiable,
       'is_auction': _isAuction,
@@ -2417,9 +3306,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         'workflow_stage': 'published',
         'published_by_marketer_id': ownerId,
         'published_at': publishedIso,
+        'home_feed_suppressed': false,
       } else ...<String, dynamic>{
         'status': 'waiting_mediator',
         'workflow_stage': 'waiting_marketers',
+        'home_feed_suppressed': true,
       },
       'latitude': lat,
       'longitude': lng,
@@ -2438,6 +3329,17 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'amenities': _amenitiesPayloadOrNull(),
       'address_line':
           _addressLine.text.trim().isEmpty ? null : _addressLine.text.trim(),
+      'show_advertiser_name': _showOwnerNameOnCards,
+      'owner_requests_public_name': _showOwnerNameOnCards,
+      'publisher_public_name_source': _pubNameSource.name,
+      'publisher_public_phone_source': _pubPhoneSource.name,
+      'publisher_publish_presence': _publishPresenceOnCards,
+      if (_showOwnerNameOnCards)
+        'advertiser_public_name':
+            PublisherIdentityPrefs.instance.resolvedPublicName(isAr: _isAr),
+      if (_pubPhoneSource != PublicPhoneSource.hidden)
+        'contact_phone':
+            PublisherIdentityPrefs.instance.resolvedPublicPhone(),
     };
     final deedNorm = normalizeDeedNumber(_deedNumber.text);
     payload['deed_number'] = deedNorm.isEmpty ? null : deedNorm;
@@ -2505,8 +3407,20 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'purpose': _purpose,
       'area': areaStoredM2,
       'price': _parseDouble(_price.text),
+      'price_includes_vat': _priceIncludesVat ?? true,
+      'vat_rate': _kVatRate,
+      'marketing_commission_kind': _commissionKind,
+      'marketing_commission_rate': _kMarketingCommissionRate,
+      'marketing_commission_amount':
+          _commissionKind == 'fixed' ? _fixedCommissionValue() : 0,
       'currency': _currency,
       'negotiable': _negotiable,
+      'price_on_sum': _priceOnSum,
+      'accepts_mortgage_finance': _acceptsMortgageFinance,
+      'no_legal_obstacles': _noLegalObstacles,
+      'advertiser_role': _advertiserRole,
+      'location_is_approximate': _locationIsApproximate,
+      'property_age_bucket': _propertyAgeBucket,
       'is_auction': _isAuction,
       'current_bid': _isAuction ? _parseDouble(_currentBid.text) : null,
       'latitude': lat,
@@ -2524,6 +3438,17 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               .substring(0, 10),
       'amenities': _amenitiesPayloadOrNull(),
       'extra_details': _buildExtraDetails(),
+      'show_advertiser_name': _showOwnerNameOnCards,
+      'owner_requests_public_name': _showOwnerNameOnCards,
+      'publisher_public_name_source': _pubNameSource.name,
+      'publisher_public_phone_source': _pubPhoneSource.name,
+      'publisher_publish_presence': _publishPresenceOnCards,
+      if (_showOwnerNameOnCards)
+        'advertiser_public_name':
+            PublisherIdentityPrefs.instance.resolvedPublicName(isAr: _isAr),
+      if (_pubPhoneSource != PublicPhoneSource.hidden)
+        'contact_phone':
+            PublisherIdentityPrefs.instance.resolvedPublicPhone(),
     };
     final dNorm = normalizeDeedNumber(_deedNumber.text);
     details['deed_number'] = dNorm.isEmpty ? null : dNorm;
@@ -2570,12 +3495,31 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     details['floor'] = _showFloorFields ? _floor : null;
     details['total_floors'] = _showFloorFields ? _totalFloors : null;
+    if (widget.marketingFlow?.listingRequestOnly == true) {
+      details['no_rega_ad_license'] = true;
+      details['market_without_rega_license'] = true;
+      details['market_consent'] = true;
+      if (widget.marketingFlow?.showOwnerPhoneOnMarket == true) {
+        details['show_owner_phone_on_market'] = true;
+        details['reveal_phone_from_market'] = true;
+      }
+    }
+    if (_regaPayloadForInsert.isNotEmpty) {
+      details['rega_payload'] = _regaPayloadForInsert;
+    }
     return <String, dynamic>{
       'owner_id': ownerId,
       'title': _title.text.trim(),
       'description': _desc.text.trim(),
       'city': _city.text.trim(),
       'price': _parseDouble(_price.text),
+      'price_includes_vat': _priceIncludesVat ?? true,
+      'vat_rate': _kVatRate,
+      'marketing_commission_kind': _commissionKind,
+      'marketing_commission_rate': _kMarketingCommissionRate,
+      'marketing_commission_amount':
+          _commissionKind == 'fixed' ? _fixedCommissionValue() : 0,
+      'default_cover_used': _usedDefaultCover,
       'status': 'pending',
       'workflow_stage': 'waiting_marketers',
       if (lat != null) 'lat': lat,
@@ -2596,7 +3540,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       Uint8List bytesToUpload = picked.bytes;
       try {
         bytesToUpload = await WatermarkService.addTextWatermark(picked.bytes,
-            text: '© موثوق العقاري | Motawoq Real Estate');
+            text: AppBranding.copyrightBilingual());
       } catch (_) {
         bytesToUpload = picked.bytes;
       }
@@ -2636,8 +3580,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         merged = Map<String, dynamic>.from(raw);
       }
       merged.addAll(patch);
+      if (patch['request_image_paths'] is List &&
+          (patch['request_image_paths'] as List).isNotEmpty) {
+        merged['default_cover_used'] = false;
+      }
       await _sb.from('listing_requests').update({
         'payload_json': jsonEncode(merged),
+        if ((patch['request_image_paths'] as List?)?.isNotEmpty == true)
+          'default_cover_used': false,
       }).eq('id', requestId);
     } catch (_) {}
   }
@@ -2692,24 +3642,154 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     return null;
   }
 
-  Future<void> _injectDefaultCoverIfNoMedia() async {
-    if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) return;
+  /// يمنع إعادة نشر نفس المحتوى فوراً (خصائص + طلبات تسويق خلال 24 ساعة).
+  String? _lastSuccessfulPublishFingerprint;
+
+  String _currentPublishFingerprint() {
+    return PublishContentFingerprintStore.build(
+      title: _title.text,
+      city: _city.text,
+      price: _parseDouble(_price.text),
+      area: _parseDouble(_area.text),
+      deed: normalizeDeedNumber(_deedNumber.text),
+      purpose: _purpose,
+    );
+  }
+
+  Future<String?> _blockingRecentIdenticalContentMessage(String ownerId) async {
+    final title = _title.text.trim();
+    final city = _city.text.trim();
+    if (title.isEmpty || city.isEmpty) return null;
+    final price = _parseDouble(_price.text);
+    final area = _parseDouble(_area.text);
+    final deed = normalizeDeedNumber(_deedNumber.text);
+    final fingerprint = _currentPublishFingerprint();
+    final memHit = _lastSuccessfulPublishFingerprint == fingerprint;
+    final stored = await PublishContentFingerprintStore.readIfFresh();
+    if (memHit || stored == fingerprint) {
+      return _isAr
+          ? 'لقد نشرت للتو إعلاناً بنفس البيانات. راجع «صفحتي» أو غيّر البيانات قبل إعادة النشر.'
+          : 'You just published an identical listing. Check My Page or change the data before publishing again.';
+    }
     try {
-      final bd = await rootBundle.load('assets/logo.png');
-      if (!mounted) return;
-      setState(() {
-        _images.add(
-          _PickedImage(
-            name: 'default_listing_cover.png',
-            bytes: bd.buffer.asUint8List(),
-          ),
-        );
-      });
+      final since = DateTime.now()
+          .toUtc()
+          .subtract(PublishContentFingerprintStore.window)
+          .toIso8601String();
+      final res = await _sb
+          .from('properties')
+          .select(
+            'id,title,city,price,area,deed_number,created_at,deleted_by_user',
+          )
+          .eq('owner_id', ownerId)
+          .gte('created_at', since)
+          .limit(40);
+      final list = (res as List).cast<Map<String, dynamic>>();
+      for (final row in list) {
+        if (row['deleted_by_user'] == true) continue;
+        if (_rowMatchesCurrentListingContent(
+          row,
+          title,
+          city,
+          price,
+          area,
+          deed,
+        )) {
+          return _isAr
+              ? 'يبدو أنك نشرت إعلاناً مطابقاً خلال الـ 24 ساعة الماضية. راجع «صفحتي» قبل إعادة النشر.'
+              : 'An identical listing was published in the last 24 hours. Check My Page before publishing again.';
+        }
+      }
     } catch (_) {}
+    try {
+      final since = DateTime.now()
+          .toUtc()
+          .subtract(PublishContentFingerprintStore.window)
+          .toIso8601String();
+      final res = await _sb
+          .from('listing_requests')
+          .select('id,title,city,price,area,created_at,status')
+          .eq('owner_id', ownerId)
+          .gte('created_at', since)
+          .limit(40);
+      final list = (res as List).cast<Map<String, dynamic>>();
+      for (final row in list) {
+        final st = (row['status'] ?? '').toString().toLowerCase();
+        if (st.contains('cancel') ||
+            st.contains('reject') ||
+            st == 'deleted') {
+          continue;
+        }
+        if (_rowMatchesCurrentListingContent(
+          row,
+          title,
+          city,
+          price,
+          area,
+          deed,
+        )) {
+          return _isAr
+              ? 'طلب تسويق مطابق قُدِّم منذ قليل. راجع «صفحتي» قبل إعادة الإرسال.'
+              : 'An identical marketing request was submitted recently. Check My Page before sending again.';
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  bool _rowMatchesCurrentListingContent(
+    Map<String, dynamic> row,
+    String title,
+    String city,
+    double price,
+    double area,
+    String deed,
+  ) {
+    final sameTitle =
+        (row['title'] ?? '').toString().trim().toLowerCase() ==
+            title.toLowerCase();
+    final sameCity =
+        (row['city'] ?? '').toString().trim().toLowerCase() ==
+            city.toLowerCase();
+    final rowPrice = (row['price'] as num?)?.toDouble() ?? -1;
+    final rowArea = (row['area'] as num?)?.toDouble() ?? -1;
+    final samePrice = (rowPrice - price).abs() < 0.01;
+    final sameArea = (rowArea - area).abs() < 0.01;
+    if (!(sameTitle && sameCity && samePrice && sameArea)) return false;
+    if (deed.isEmpty) return true;
+    final rowDeed =
+        normalizeDeedNumber((row['deed_number'] ?? '').toString());
+    if (rowDeed.isEmpty) return true;
+    return rowDeed == deed;
+  }
+
+  /// عند عدم رفع أي وسائط، نُعلّم الغلاف الذكي في قاعدة البيانات
+  /// ([default_cover_used]) — يُعرض محلياً حسب المنصة (ويب/تطبيق) في كل الشاشات.
+  bool _usedDefaultCover = false;
+
+  void _markSmartDefaultCoverIfNoMedia() {
+    if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) {
+      _usedDefaultCover = false;
+      return;
+    }
+    _usedDefaultCover = true;
   }
 
   Future<void> _submit() async {
     setState(() => _error = null);
+    if (!_termsAccepted) {
+      setState(() => _error = _isAr
+          ? 'يجب الموافقة على الشروط والأحكام قبل النشر.'
+          : 'You must accept the terms before publishing.');
+      return;
+    }
+    if (!_noLegalObstacles) {
+      setState(() => _error = _isAr
+          ? 'يجب تأكيد أن العقار خالٍ مما يمنع التصرف أو الانتفاع.'
+          : 'Confirm there is nothing preventing disposal or use of the property.');
+      return;
+    }
+    _maybeSuggestSmartTitle();
     final user = _sb.auth.currentUser;
     if (user == null) {
       setState(() =>
@@ -2721,11 +3801,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       setState(() => _error = _isAr ? 'غير مصرح' : 'Not allowed');
       return;
     }
-    await _injectDefaultCoverIfNoMedia();
-    if (_images.isEmpty && _videoUrl.text.trim().isEmpty) {
+    setState(() => _markSmartDefaultCoverIfNoMedia());
+    if (!_usedDefaultCover &&
+        _images.isEmpty &&
+        _videoUrl.text.trim().isEmpty) {
       setState(() => _error = _isAr
-          ? 'تعذر تحميل صورة افتراضية. أضف صورة أو فيديو.'
-          : 'Could not load default image. Add a photo or video.');
+          ? 'أضف صورة أو فيديو، أو سيُستخدم الغلاف الذكي تلقائياً.'
+          : 'Add a photo or video, or the smart cover will be used.');
       _scrollToKey(_listingMediaKey);
       return;
     }
@@ -2796,6 +3878,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         return;
       }
     }
+    if (_showParkingYearRow && _yearBuilt == null) {
+      setState(() =>
+          _error = _isAr ? 'سنة البناء مطلوبة' : 'Year built is required');
+      _scrollToKey(_formCardKey);
+      return;
+    }
+    _advertiserRole = _advertiserRoleCode;
     final dupMsg = await _blockingDuplicateSaleDeedMessage();
     if (dupMsg != null) {
       if (!mounted) return;
@@ -2816,18 +3905,68 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       );
       return;
     }
-    setState(() => _saving = true);
+    final identicalMsg = await _blockingRecentIdenticalContentMessage(ownerId);
+    if (identicalMsg != null) {
+      if (!mounted) return;
+      setState(() => _error = identicalMsg);
+      _scrollToKey(_formCardKey);
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _publishLock = true;
+    });
     try {
       final verified = await _isVerifiedMarketer(ownerId);
-      if (!verified) {
-        // فرد (معلن غير مسوّق): طلب تسويق عام — يظهر لمساري الدعوات/العروض.
+      if (!verified || _forceListingRequestPath) {
+        // فرد أو مسوّق بدون ترخيص REGA: طلب تسويق — لا يظهر في الرئيسية.
         final requestPayload = _buildRequestPayload(ownerId: ownerId);
-        final insertedReq = await _sb
-            .from('listing_requests')
-            .insert(requestPayload)
-            .select('id')
-            .single();
+        Map<String, dynamic> insertedReq;
+        try {
+          insertedReq = await _sb
+              .from('listing_requests')
+              .insert(requestPayload)
+              .select('id,listing_request_public_code')
+              .single();
+        } catch (e) {
+          final msg = e.toString().toLowerCase();
+          // — تنظيف الأعمدة الجديدة إن لم يكن الترحيل V9 قد طُبِّق على هذه البيئة.
+          var changed = false;
+          for (final col in const [
+            'price_includes_vat',
+            'vat_rate',
+            'marketing_commission_kind',
+            'marketing_commission_rate',
+            'marketing_commission_amount',
+            'default_cover_used',
+          ]) {
+            if (msg.contains(col) && msg.contains('does not exist')) {
+              requestPayload.remove(col);
+              changed = true;
+            }
+          }
+          if (changed) {
+            insertedReq = await _sb
+                .from('listing_requests')
+                .insert(requestPayload)
+                .select('id,listing_request_public_code')
+                .single();
+          } else if (msg.contains('listing_request_public_code') &&
+              (msg.contains('column') ||
+                  msg.contains('schema') ||
+                  msg.contains('could not find'))) {
+            insertedReq = await _sb
+                .from('listing_requests')
+                .insert(requestPayload)
+                .select('id')
+                .single();
+          } else {
+            rethrow;
+          }
+        }
         final requestId = insertedReq['id'] as String;
+        final reqPub =
+            (insertedReq['listing_request_public_code'] ?? '').toString().trim();
         OrgActivityService.logListingRequestCreated(requestId);
         try {
           await MarketingFlowService(_sb).notifyOwnerListingRequestSubmitted(
@@ -2839,11 +3978,34 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         try {
           await _uploadRequestImages(ownerId: ownerId, requestId: requestId);
         } catch (_) {}
+    if (!mounted) return;
+    // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
+    final fp = _currentPublishFingerprint();
+    _lastSuccessfulPublishFingerprint = fp;
+    unawaited(PublishContentFingerprintStore.save(fp));
+    await _showRequestSuccess(
+      requestId: requestId,
+      listingRequestPublicCode: reqPub.isEmpty ? null : reqPub,
+    );
+    return;
+      }
+      if (widget.marketingFlow?.publishToHomeFeed == true &&
+          !_licensedAdPayloadComplete()) {
         if (!mounted) return;
-        await _showRequestSuccess(requestId: requestId);
+        setState(() {
+          _error = _isAr
+              ? 'لا يمكن النشر في الرئيسية دون ترخيص إعلان REGA مكتمل والتحقق منه.'
+              : 'Home publish requires a complete verified REGA ad license.';
+          _saving = false;
+          _publishLock = false;
+        });
         return;
       }
-      final marketerDirectPublish = _regaVerificationSatisfied();
+      final marketerDirectPublish = _forceListingRequestPath
+          ? false
+          : (widget.marketingFlow?.publishToHomeFeed == true
+              ? _licensedAdPayloadComplete()
+              : _regaVerificationSatisfied());
       bool hasLocationColumn = true;
       Map<String, dynamic> payload = _buildPayload(
         ownerId: ownerId,
@@ -2853,7 +4015,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       Map<String, dynamic> inserted;
       try {
         inserted =
-            await _sb.from('properties').insert(payload).select('id').single();
+            await _sb
+                .from('properties')
+                .insert(payload)
+                .select('id,listing_public_code')
+                .single();
       } catch (e) {
         final msg = e.toString().toLowerCase();
         if (msg.contains('contact_phone') && msg.contains('does not exist')) {
@@ -2875,6 +4041,17 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           'rega_payload',
           'published_at',
           'published_by_marketer_id',
+          'price_includes_vat',
+          'vat_rate',
+          'marketing_commission_kind',
+          'marketing_commission_rate',
+          'marketing_commission_amount',
+          'default_cover_used',
+          'publisher_public_name_source',
+          'publisher_public_phone_source',
+          'publisher_publish_presence',
+          'advertiser_public_name',
+          'contact_phone',
         ]) {
           if (msg.contains(col) && msg.contains('does not exist')) {
             payload.remove(col);
@@ -2892,7 +4069,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           }
         }
         inserted =
-            await _sb.from('properties').insert(payload).select('id').single();
+            await _sb
+                .from('properties')
+                .insert(payload)
+                .select('id,listing_public_code')
+                .single();
       }
       final propertyId = inserted['id'] as String;
       OrgActivityService.logListingCreated(propertyId);
@@ -2913,7 +4094,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         Uint8List bytesToUpload = picked.bytes;
         try {
           bytesToUpload = await WatermarkService.addTextWatermark(picked.bytes,
-              text: '© موثوق العقاري | Motawoq Real Estate');
+              text: AppBranding.copyrightBilingual());
         } catch (_) {
           bytesToUpload = picked.bytes;
         }
@@ -2940,12 +4121,25 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           // مخطط قديم بدون media_type أو سياسة RLS مختلفة — يبقى video_url على صف العقار.
         }
       }
-      if (!mounted) return;
-      await _showSuccessChoice();
+    if (!mounted) return;
+    // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
+    final fp = _currentPublishFingerprint();
+    _lastSuccessfulPublishFingerprint = fp;
+    unawaited(PublishContentFingerprintStore.save(fp));
+    final pub = (inserted['listing_public_code'] ?? '').toString().trim();
+    await _showSuccessChoice(
+      listingPublicCode: pub.isEmpty ? null : pub,
+    );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() {
+        _error = e.toString();
+        _publishLock = false;
+      });
     } finally {
+      // — `_saving` يُعاد لـ `false` فوراً ليرفع شاشة الحفظ، أمّا `_publishLock`
+      //   فيُعاد فقط عند الفشل أو بعد إغلاق حوار النجاح (داخل _showSuccessChoice /
+      //   _showRequestSuccess) لمنع نشر الإعلان مرتين عبر الضغط المتكرر.
       if (mounted) setState(() => _saving = false);
     }
   }
@@ -3054,7 +4248,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
           ),
           content: SingleChildScrollView(
-            child: TextField(
+            child: AqarTextField(
               controller: ctrl,
               maxLines: 6,
               decoration: InputDecoration(
@@ -3319,14 +4513,50 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final pane = _wizardPaneKind(_wizardStep);
+    final stepCount =
+        _kWizardLastStep - (_marketingFlowActive ? 1 : 0) + 1;
+    final displayStep =
+        _marketingFlowActive ? _wizardStep : _wizardStep + 1;
     return Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
-        backgroundColor: cs.surface,
-        appBar: AppBar(
-          title: Text(_isAr ? 'إضافة إعلان' : 'Add Listing'),
+      child: PopScope(
+        canPop: _publishSucceeded ||
+            (!_publishLock && !_saving && !_hasUnsavedWizardInput()),
+        onPopInvokedWithResult: (didPop, result) async {
+          if (didPop || !mounted) return;
+          if (_publishSucceeded) {
+            Navigator.of(context).pop(true);
+            return;
+          }
+          if (_publishLock || _saving) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                behavior: SnackBarBehavior.floating,
+                content: Text(_isAr
+                    ? 'جاري نشر الإعلان… يرجى الانتظار حتى ظهور رقم الإعلان.'
+                    : 'Publishing in progress… please wait for the listing number.'),
+              ),
+            );
+            return;
+          }
+          await _handleListingFormExit();
+        },
+        child: Scaffold(
+          backgroundColor: cs.surface,
+          appBar: AppBar(
+            automaticallyImplyLeading:
+                !widget.embedAppBar && !_publishLock && !_saving,
+            title: Text(_isAr ? 'إضافة إعلان' : 'Add Listing'),
           actions: [
-            if (_wizardStep == 6)
+            IconButton(
+              tooltip: _isAr ? 'حفظ المسودة' : 'Save draft',
+              onPressed: (_saving || _publishLock)
+                  ? null
+                  : () => unawaited(_persistListingDraft()),
+              icon: const Icon(Icons.save_outlined),
+            ),
+            if (pane == 6)
               IconButton(
                 tooltip: _isAr ? 'إضافة صور أو فيديو' : 'Add images or video',
                 icon: (_picking || _uploadingVideo)
@@ -3342,13 +4572,26 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               ),
           ],
         ),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            controller: _scrollCtrl,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+        body: Stack(
+          children: [
+            SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: _scrollCtrl,
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 980),
+                      child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
                 _HeaderCard(
                   isAr: _isAr,
                   marketerPublishName: _marketerPublishName,
@@ -3356,8 +4599,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                 const SizedBox(height: 12),
                 Text(
                   _isAr
-                      ? 'الخطوة ${_wizardStep + 1} من 7 · ${_wizardScreenTitle(_isAr)}'
-                      : 'Step ${_wizardStep + 1} of 7 · ${_wizardScreenTitle(_isAr)}',
+                      ? 'الخطوة $displayStep من $stepCount · ${_wizardScreenTitle(_isAr)}'
+                      : 'Step $displayStep of $stepCount · ${_wizardScreenTitle(_isAr)}',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                       ),
@@ -3367,7 +4610,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: LinearProgressIndicator(
-                    value: (_wizardStep + 1) / (_kWizardLastStep + 1),
+                    value: displayStep / stepCount,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -3377,7 +4620,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Visibility(
-                        visible: _wizardStep == 0,
+                        visible: pane == 0 && !_marketingFlowActive,
                         maintainState: true,
                         child: KeyedSubtree(
                           key: _regaCardKey,
@@ -3405,7 +4648,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: _wizardStep == 1,
+                        visible:
+                            pane == 1 || pane == 101 || pane == 102,
                         maintainState: true,
                         child: _buildPropertyFormSlice(
                           AddPropertyFormSlice.classification,
@@ -3413,7 +4657,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: _wizardStep == 2,
+                        visible: pane == 2,
                         maintainState: true,
                         child: KeyedSubtree(
                           key: _coordsKey,
@@ -3421,6 +4665,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                             isAr: _isAr,
                             saving: _saving,
                             enabled: _useMapCoords,
+                            locationIsApproximate: _locationIsApproximate,
                             latController: _latCtrl,
                             lngController: _lngCtrl,
                             lat: _lat,
@@ -3461,7 +4706,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: _wizardStep == 3,
+                        visible: pane == 3,
                         maintainState: true,
                         child: _buildPropertyFormSlice(
                           AddPropertyFormSlice.location,
@@ -3469,7 +4714,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: _wizardStep == 4,
+                        visible: pane == 4,
                         maintainState: true,
                         child: _buildPropertyFormSlice(
                           AddPropertyFormSlice.pricing,
@@ -3477,7 +4722,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: _wizardStep == 5,
+                        visible: pane == 5,
                         maintainState: true,
                         child: _buildPropertyFormSlice(
                           AddPropertyFormSlice.details,
@@ -3485,7 +4730,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: _wizardStep == 6,
+                        visible: pane == 6,
                         maintainState: true,
                         child: KeyedSubtree(
                           key: _listingMediaKey,
@@ -3537,64 +4782,89 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                 ),
                 const SizedBox(height: 12),
                 if (_error != null) _ErrorBox(text: _error!, isAr: _isAr),
-                const SizedBox(height: 12),
-                LayoutBuilder(
-                  builder: (context, c) {
-                    final narrow = c.maxWidth < 520;
-                    final nextBtn = _wizardStep < 6
-                        ? FilledButton(
-                            onPressed: (_saving ||
-                                    _picking ||
-                                    _uploadingVideo ||
-                                    _uploadingLicensePdf)
-                                ? null
-                                : _wizardNext,
-                            child: Text(_isAr ? 'التالي' : 'Next'),
-                          )
-                        : FilledButton(
-                            onPressed: (_saving ||
-                                    _picking ||
-                                    _uploadingVideo ||
-                                    _uploadingLicensePdf ||
-                                    !_canSubmit)
-                                ? null
-                                : _submit,
-                            child: _saving
-                                ? SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child:
-                                        AppLogoLoading(compact: true, size: 20),
-                                  )
-                                : Text(
-                                    _isAr ? 'نشر الإعلان' : 'Publish listing'),
-                          );
-                    final backBtn = OutlinedButton(
-                      onPressed:
-                          (_wizardStep > 0 && !_saving) ? _wizardPrev : null,
-                      child: Text(_isAr ? 'السابق' : 'Back'),
-                    );
-                    if (narrow) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          backBtn,
-                          const SizedBox(height: 10),
-                          nextBtn,
-                        ],
+                if (_wizardStep >= _kWizardLastStep) ...[
+                  const SizedBox(height: 12),
+                  _DealPublishExtrasCard(
+                    isAr: _isAr,
+                    saving: _saving || _publishLock,
+                    noLegalObstacles: _noLegalObstacles,
+                    onNoLegalObstaclesChanged: (v) =>
+                        setState(() => _noLegalObstacles = v),
+                    advertiserRoleLabel: _advertiserRoleLabel,
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      _isAr
+                          ? 'إظهار اسمي/صفتي مع رمز التوثيق على بطاقات الرئيسية'
+                          : 'Show my name/role with verification on Home cards',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        height: 1.25,
+                      ),
+                    ),
+                    subtitle: Text(
+                      _isAr
+                          ? 'يمكن إخفاؤه لاحقاً؛ يظهر للزوار عند التفعيل فقط.'
+                          : 'Visitors see it only when enabled.',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    value: _showOwnerNameOnCards,
+                    onChanged: (_saving || _publishLock)
+                        ? null
+                        : (v) => setState(() => _showOwnerNameOnCards = v),
+                  ),
+                  if (_showOwnerNameOnCards) ...[
+                    const SizedBox(height: 8),
+                    PublisherIdentityOptionsCard(
+                      isAr: _isAr,
+                      compact: true,
+                      enabled: !(_saving || _publishLock),
+                      nameSource: _pubNameSource,
+                      phoneSource: _pubPhoneSource,
+                      publishPresence: _publishPresenceOnCards,
+                      officialName: _officialNameCached,
+                      displayAlias: _displayAliasCached,
+                      primaryPhone: _primaryPhoneCached,
+                      secondaryPhone: _secondaryPhoneCached,
+                      onNameSourceChanged: (v) async {
+                        await PublisherIdentityPrefs.instance.setNameSource(v);
+                        if (!mounted) return;
+                        setState(() => _pubNameSource = v);
+                      },
+                      onPhoneSourceChanged: (v) async {
+                        await PublisherIdentityPrefs.instance.setPhoneSource(v);
+                        if (!mounted) return;
+                        setState(() => _pubPhoneSource = v);
+                      },
+                      onPublishPresenceChanged: (v) async {
+                        await PublisherIdentityPrefs.instance
+                            .setPublishPresenceOnCards(v);
+                        if (!mounted) return;
+                        setState(() => _publishPresenceOnCards = v);
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  TermsAcceptanceCheckbox(
+                    isAr: _isAr,
+                    value: _termsAccepted,
+                    onChanged: (_saving || _publishLock)
+                        ? null
+                        : (v) => setState(() => _termsAccepted = v == true),
+                    onOpenTerms: () {
+                      Navigator.of(context).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              PlatformPoliciesScreen(isAr: _isAr),
+                        ),
                       );
-                    }
-                    return Row(
-                      children: [
-                        Expanded(child: backBtn),
-                        const SizedBox(width: 12),
-                        Expanded(flex: 2, child: nextBtn),
-                      ],
-                    );
-                  },
-                ),
-                const SizedBox(height: 18),
-                if (kIsWeb && _wizardStep == 6)
+                    },
+                  ),
+                ],
+                if (kIsWeb && pane == 6) ...[
+                  const SizedBox(height: 12),
                   Text(
                     _isAr
                         ? 'على الويب: اختر الملفات من جهازك للرفع.'
@@ -3605,10 +4875,137 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         .bodySmall
                         ?.copyWith(color: cs.onSurfaceVariant),
                   ),
-              ],
-            ),
+                ],
+                const SizedBox(height: 8),
+                    ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Material(
+                elevation: 8,
+                color: cs.surface,
+                shadowColor: Colors.black26,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: LayoutBuilder(
+                    builder: (context, c) {
+                      final narrow = c.maxWidth < 520;
+                      final nextBtn = _wizardStep < _kWizardLastStep
+                          ? FilledButton(
+                              onPressed: (_saving ||
+                                      _publishLock ||
+                                      _picking ||
+                                      _uploadingVideo ||
+                                      _uploadingLicensePdf)
+                                  ? null
+                                  : _wizardNext,
+                              child: Text(_isAr ? 'التالي' : 'Next'),
+                            )
+                          : FilledButton(
+                              onPressed: (_saving ||
+                                      _publishLock ||
+                                      _picking ||
+                                      _uploadingVideo ||
+                                      _uploadingLicensePdf ||
+                                      !_canSubmit)
+                                  ? null
+                                  : _submit,
+                              child: (_saving || _publishLock)
+                                  ? Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SizedBox(
+                                          width: 22,
+                                          height: 22,
+                                          child: AppLogoLoading(
+                                              compact: true, size: 20),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Flexible(
+                                          child: Text(
+                                            _isAr
+                                                ? 'جاري مراجعة التفاصيل والنشر…'
+                                                : 'Reviewing details & publishing…',
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Text(
+                                      _isAr
+                                          ? 'نشر الإعلان'
+                                          : 'Publish listing'),
+                            );
+                      final backBtn = OutlinedButton(
+                        onPressed: (_wizardStep >
+                                    (_marketingFlowActive ? 1 : 0) &&
+                                !_saving)
+                            ? _wizardPrev
+                            : null,
+                        child: Text(_isAr ? 'السابق' : 'Back'),
+                      );
+                      if (narrow) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            nextBtn,
+                            const SizedBox(height: 8),
+                            backBtn,
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(child: backBtn),
+                          const SizedBox(width: 12),
+                          Expanded(flex: 2, child: nextBtn),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
+            if (_saving)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  child: Center(
+                    child: Material(
+                      elevation: 8,
+                      borderRadius: BorderRadius.circular(16),
+                      color: cs.surface,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const AppLogoLoading(compact: true, size: 44),
+                            const SizedBox(height: 14),
+                            Text(
+                              _isAr
+                                  ? 'جاري مراجعة التفاصيل والنشر'
+                                  : 'Reviewing details & publishing',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
       ),
     );
   }
@@ -3721,23 +5118,23 @@ class _AdLicenseStepCard extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            ChoiceChip(
-              showCheckmark: false,
-              label: Text(isAr ? 'من داخل التطبيق' : 'In-app'),
+            StableSelectChip(
+              label: isAr ? 'من داخل التطبيق' : 'In-app',
+              exclusive: true,
               selected: adLicenseSource == _AdLicenseSource.inApp,
               onSelected: (_) =>
                   onAdLicenseSourceChanged(_AdLicenseSource.inApp),
             ),
-            ChoiceChip(
-              showCheckmark: false,
-              label: Text(isAr ? 'من خارج التطبيق' : 'Outside app'),
+            StableSelectChip(
+              label: isAr ? 'من خارج التطبيق' : 'Outside app',
+              exclusive: true,
               selected: adLicenseSource == _AdLicenseSource.external,
               onSelected: (_) =>
                   onAdLicenseSourceChanged(_AdLicenseSource.external),
             ),
-            ChoiceChip(
-              showCheckmark: false,
-              label: Text(isAr ? 'لا يوجد بعد' : 'None yet'),
+            StableSelectChip(
+              label: isAr ? 'لا يوجد بعد' : 'None yet',
+              exclusive: true,
               selected: adLicenseSource == _AdLicenseSource.none,
               onSelected: (_) =>
                   onAdLicenseSourceChanged(_AdLicenseSource.none),
@@ -3753,7 +5150,7 @@ class _AdLicenseStepCard extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
           ),
           const SizedBox(height: 6),
-          TextFormField(
+          AqarTextFormField(
             controller: regaFalLicenseNo,
             keyboardType: TextInputType.number,
             inputFormatters: latinDigitsOnlyFormatters(maxLength: 10),
@@ -3803,15 +5200,15 @@ class _AdLicenseStepCard extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            ChoiceChip(
-              showCheckmark: false,
-              label: Text(isAr ? 'نعم' : 'Yes'),
+            StableSelectChip(
+              label: isAr ? 'نعم' : 'Yes',
+              exclusive: true,
               selected: propertyHasObligations == true,
               onSelected: (_) => onPropertyHasObligationsChanged(true),
             ),
-            ChoiceChip(
-              showCheckmark: false,
-              label: Text(isAr ? 'لا' : 'No'),
+            StableSelectChip(
+              label: isAr ? 'لا' : 'No',
+              exclusive: true,
               selected: propertyHasObligations == false,
               onSelected: (_) => onPropertyHasObligationsChanged(false),
             ),
@@ -3819,7 +5216,7 @@ class _AdLicenseStepCard extends StatelessWidget {
         ),
         if (propertyHasObligations == true) ...[
           const SizedBox(height: 10),
-          TextFormField(
+          AqarTextFormField(
             controller: obligationsDetail,
             minLines: 2,
             maxLines: 4,
@@ -4420,6 +5817,7 @@ class _CoordsCard extends StatelessWidget {
   final bool isAr;
   final bool saving;
   final bool enabled;
+  final bool locationIsApproximate;
   final TextEditingController latController;
   final TextEditingController lngController;
   final double? lat;
@@ -4434,6 +5832,7 @@ class _CoordsCard extends StatelessWidget {
     required this.isAr,
     required this.saving,
     required this.enabled,
+    this.locationIsApproximate = false,
     required this.latController,
     required this.lngController,
     required this.lat,
@@ -4482,6 +5881,36 @@ class _CoordsCard extends StatelessWidget {
             ),
           ),
         ],
+        if (enabled && has) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Chip(
+              avatar: Icon(
+                locationIsApproximate
+                    ? Icons.my_location_outlined
+                    : Icons.location_on_outlined,
+                size: 18,
+                color: locationIsApproximate
+                    ? cs.tertiary
+                    : const Color(0xFF0F766E),
+              ),
+              label: Text(
+                locationIsApproximate
+                    ? (isAr ? 'موقع تقريبي' : 'Approximate location')
+                    : (isAr ? 'موقع محدد' : 'Exact location'),
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              backgroundColor: (locationIsApproximate
+                      ? cs.tertiaryContainer
+                      : const Color(0xFFCCFBF1))
+                  .withValues(alpha: 0.65),
+              side: BorderSide.none,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+        ],
         const SizedBox(height: 12),
         SizedBox(
           height: 48,
@@ -4506,7 +5935,7 @@ class _CoordsCard extends StatelessWidget {
             builder: (context, c) {
               final narrow = c.maxWidth < 560;
 
-              final latField = TextFormField(
+              final latField = AqarTextFormField(
                 controller: latController,
                 enabled: !saving,
                 onChanged: onLatChanged,
@@ -4531,7 +5960,7 @@ class _CoordsCard extends StatelessWidget {
                 },
               );
 
-              final lngField = TextFormField(
+              final lngField = AqarTextFormField(
                 controller: lngController,
                 enabled: !saving,
                 onChanged: onLngChanged,
@@ -4645,11 +6074,107 @@ class _PickedImage {
 // Form Card - النموذج الرئيسي
 // =======================
 
+/// إقرار قانوني + صفة المعلن الفعلية (من نوع الحساب) قبل الموافقة على الشروط.
+class _DealPublishExtrasCard extends StatelessWidget {
+  final bool isAr;
+  final bool saving;
+  final bool noLegalObstacles;
+  final ValueChanged<bool> onNoLegalObstaclesChanged;
+  final String advertiserRoleLabel;
+
+  const _DealPublishExtrasCard({
+    required this.isAr,
+    required this.saving,
+    required this.noLegalObstacles,
+    required this.onNoLegalObstaclesChanged,
+    required this.advertiserRoleLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: FieldGroupTheme.boxDecoration(context),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isAr ? 'تأكيدات قبل النشر' : 'Confirmations before publish',
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 10),
+          CheckboxListTile(
+            value: noLegalObstacles,
+            onChanged: saving
+                ? null
+                : (v) => onNoLegalObstaclesChanged(v == true),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              isAr
+                  ? 'أقر بأن العقار خالٍ مما يمنع التصرف أو الانتفاع به'
+                  : 'I confirm nothing prevents disposal or use of the property',
+              style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            isAr ? 'صفة مقدم الإعلان' : 'Advertiser capacity',
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          InputDecorator(
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.badge_outlined, color: cs.primary, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    advertiserRoleLabel,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      height: 1.25,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FormCard extends StatelessWidget {
   final bool isAr;
   final GlobalKey<FormState> formKey;
   final bool saving;
   final AddPropertyFormSlice slice;
+  final int wizardPaneKind;
+  final bool marketingSimplifiedForm;
+  final String primaryPurposeGroup;
+  final ValueChanged<String> onPrimaryPurposeGroupChanged;
+  final String propertyCategory;
+  final ValueChanged<String> onPropertyCategoryChanged;
+  final String? subPurposeCode;
+  final ValueChanged<String?> onSubPurposeCodeChanged;
+  final bool? propertyHasObligations;
+  final ValueChanged<bool?> onPropertyHasObligationsChanged;
+  final TextEditingController obligationsDetail;
+  final bool autoFillTitle;
+
+  static void _noopPurposeGroup(String _) {}
+  static void _noopCategory(String _) {}
+  static void _noopSubPurpose(String? _) {}
+  static void _noopObligations(bool? _) {}
 
   final bool locationsLoading;
   final TextEditingController regionController;
@@ -4701,6 +6226,14 @@ class _FormCard extends StatelessWidget {
   final ListingAreaUnit areaUnit;
   final ValueChanged<ListingAreaUnit> onAreaUnitChanged;
   final double? computedPricePerSqm;
+
+  // ----- فوترة: ضريبة 5% + عمولة تسويق -----
+  final bool? priceIncludesVat;
+  final ValueChanged<bool> onPriceIncludesVatChanged;
+  final String commissionKind; // none | percent | fixed
+  final ValueChanged<String> onCommissionKindChanged;
+  final TextEditingController commissionFixedCtrl;
+  final ListingInvoiceModel liveInvoice;
 
   final String currency;
   final bool negotiable;
@@ -4817,12 +6350,33 @@ class _FormCard extends StatelessWidget {
   final bool showFurnishedRow;
   final bool showFloorFieldsRow;
 
+  /// سعر محدد مقابل «على السوم» (أسلوب Deal).
+  final bool priceOnSum;
+  final ValueChanged<bool>? onPriceOnSumChanged;
+  final bool acceptsMortgageFinance;
+  final ValueChanged<bool>? onAcceptsMortgageFinanceChanged;
+  final String? propertyAgeBucket;
+  final ValueChanged<String?>? onPropertyAgeBucketChanged;
+  final VoidCallback? onSuggestSmartTitle;
+
   /// اختيار سريع للمدن (الرياض / جدة / مكة) — يُمرَّر فقط لشريحة الموقع.
   const _FormCard({
     required this.isAr,
     required this.formKey,
     required this.saving,
     required this.slice,
+    this.wizardPaneKind = 1,
+    this.marketingSimplifiedForm = false,
+    this.primaryPurposeGroup = 'sale',
+    this.onPrimaryPurposeGroupChanged = _noopPurposeGroup,
+    this.propertyCategory = 'residential',
+    this.onPropertyCategoryChanged = _noopCategory,
+    this.subPurposeCode,
+    this.onSubPurposeCodeChanged = _noopSubPurpose,
+    this.propertyHasObligations,
+    this.onPropertyHasObligationsChanged = _noopObligations,
+    required this.obligationsDetail,
+    this.autoFillTitle = false,
     required this.locationsLoading,
     required this.regionController,
     required this.governorateController,
@@ -4869,6 +6423,12 @@ class _FormCard extends StatelessWidget {
     required this.areaUnit,
     required this.onAreaUnitChanged,
     required this.computedPricePerSqm,
+    required this.priceIncludesVat,
+    required this.onPriceIncludesVatChanged,
+    required this.commissionKind,
+    required this.onCommissionKindChanged,
+    required this.commissionFixedCtrl,
+    required this.liveInvoice,
     required this.currency,
     required this.negotiable,
     required this.onCurrencyChanged,
@@ -4972,6 +6532,13 @@ class _FormCard extends StatelessWidget {
     required this.showParkingYearRow,
     required this.showFurnishedRow,
     required this.showFloorFieldsRow,
+    this.priceOnSum = false,
+    this.onPriceOnSumChanged,
+    this.acceptsMortgageFinance = false,
+    this.onAcceptsMortgageFinanceChanged,
+    this.propertyAgeBucket,
+    this.onPropertyAgeBucketChanged,
+    this.onSuggestSmartTitle,
   });
 
   String _label(Map<String, String> item) =>
@@ -5045,6 +6612,194 @@ class _FormCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             if (slice == AddPropertyFormSlice.classification) ...[
+              if (wizardPaneKind == 101) ...[
+                Text(
+                  isAr ? 'نوع الإعلان' : 'Listing type',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SegmentedButton<String>(
+                  segments: [
+                    ButtonSegment(
+                      value: 'sale',
+                      label: Text(isAr ? 'بيع' : 'Sale'),
+                    ),
+                    ButtonSegment(
+                      value: 'rent',
+                      label: Text(isAr ? 'إيجار' : 'Rent'),
+                    ),
+                    ButtonSegment(
+                      value: 'purchase',
+                      label: Text(isAr ? 'شراء' : 'Purchase'),
+                    ),
+                  ],
+                  selected: {primaryPurposeGroup},
+                  onSelectionChanged: saving
+                      ? null
+                      : (s) => onPrimaryPurposeGroupChanged(s.first),
+                ),
+              ] else if (wizardPaneKind == 102) ...[
+                Text(
+                  isAr ? 'نوع العقار' : 'Property type',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                PropertyTypeHierarchyPicker(
+                  value: type,
+                  isAr: isAr,
+                  saving: saving,
+                  onChanged: onTypeChanged,
+                ),
+              ] else if (marketingSimplifiedForm) ...[
+                DropdownButtonFormField<String>(
+                  value: propertyCategory,
+                  decoration: deco(isAr ? 'تصنيف العقار' : 'Property category'),
+                  items: MarketingAddPropertyFlowConfig.propertyCategoryOptions
+                      .map(
+                        (e) => DropdownMenuItem<String>(
+                          value: e['code'],
+                          child: Text(isAr ? e['ar']! : e['en']!),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: saving
+                      ? null
+                      : (v) {
+                          if (v != null) onPropertyCategoryChanged(v);
+                        },
+                ),
+                const SizedBox(height: 12),
+                PropertyTypeHierarchyPicker(
+                  value: type,
+                  isAr: isAr,
+                  saving: saving,
+                  onChanged: onTypeChanged,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  isAr ? 'الغرض' : 'Purpose',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<String>(
+                  segments: [
+                    ButtonSegment(
+                      value: 'sale',
+                      label: Text(isAr ? 'بيع' : 'Sale'),
+                    ),
+                    ButtonSegment(
+                      value: 'rent',
+                      label: Text(isAr ? 'إيجار' : 'Rent'),
+                    ),
+                  ],
+                  selected: {primaryPurposeGroup == 'rent' ? 'rent' : 'sale'},
+                  onSelectionChanged: saving
+                      ? null
+                      : (s) => onPrimaryPurposeGroupChanged(s.first),
+                ),
+                const SizedBox(height: 10),
+                if (primaryPurposeGroup == 'rent')
+                  DropdownButtonFormField<String>(
+                    value: subPurposeCode ??
+                        (purpose.startsWith('daily')
+                            ? 'daily_rent'
+                            : purpose.startsWith('yearly')
+                                ? 'yearly_rent'
+                                : 'monthly_rent'),
+                    decoration: deco(isAr ? 'مدة الإيجار' : 'Rent term'),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'daily_rent',
+                        child: Text(isAr ? 'يومي' : 'Daily'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'monthly_rent',
+                        child: Text(isAr ? 'شهري' : 'Monthly'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'yearly_rent',
+                        child: Text(isAr ? 'سنوي' : 'Yearly'),
+                      ),
+                    ],
+                    onChanged: saving ? null : onSubPurposeCodeChanged,
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    value: subPurposeCode ??
+                        (purpose == 'auction'
+                            ? 'auction'
+                            : purpose == 'investment'
+                                ? 'investment'
+                                : 'sale'),
+                    decoration: deco(isAr ? 'نوع البيع' : 'Sale type'),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'sale',
+                        child: Text(isAr ? 'بيع' : 'Sale'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'auction',
+                        child: Text(isAr ? 'مزاد' : 'Auction'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'investment',
+                        child: Text(isAr ? 'استثمار' : 'Investment'),
+                      ),
+                    ],
+                    onChanged: saving ? null : onSubPurposeCodeChanged,
+                  ),
+                const SizedBox(height: 14),
+                Text(
+                  isAr ? 'هل على العقار التزامات؟' : 'Property obligations?',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    StableSelectChip(
+                      label: isAr ? 'نعم' : 'Yes',
+                      exclusive: true,
+                      selected: propertyHasObligations == true,
+                      enabled: !saving,
+                      onSelected: (_) =>
+                          onPropertyHasObligationsChanged(true),
+                    ),
+                    StableSelectChip(
+                      label: isAr ? 'لا' : 'No',
+                      exclusive: true,
+                      selected: propertyHasObligations == false,
+                      enabled: !saving,
+                      onSelected: (_) =>
+                          onPropertyHasObligationsChanged(false),
+                    ),
+                  ],
+                ),
+                if (propertyHasObligations == true) ...[
+                  const SizedBox(height: 8),
+                  AqarTextFormField(
+                    controller: obligationsDetail,
+                    enabled: !saving,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: deco(
+                      isAr ? 'تفاصيل الالتزامات' : 'Obligation details',
+                    ),
+                  ),
+                ],
+              ] else ...[
               // 1. نوع العقار (هرمي: مجموعة + فرعي)
               PropertyTypeHierarchyPicker(
                 value: type,
@@ -5066,31 +6821,23 @@ class _FormCard extends StatelessWidget {
                 spacing: 10,
                 runSpacing: 8,
                 children: [
-                  FilterChip(
-                    label: Text(isAr ? 'سكني' : 'Residential'),
+                  StableSelectChip(
+                    label: isAr ? 'سكني' : 'Residential',
                     selected: usageResidential,
-                    onSelected:
-                        saving ? null : (v) => onUsageResidentialChanged(v),
-                    avatar: Icon(
-                      usageResidential
-                          ? Icons.check_circle
-                          : Icons.circle_outlined,
-                      size: 18,
-                      color: usageResidential ? const Color(0xFF0F766E) : null,
-                    ),
+                    enabled: !saving,
+                    onSelected: onUsageResidentialChanged,
+                    selectedColor:
+                        const Color(0xFF0F766E).withOpacity(0.22),
+                    checkColor: const Color(0xFF0F766E),
                   ),
-                  FilterChip(
-                    label: Text(isAr ? 'تجاري' : 'Commercial'),
+                  StableSelectChip(
+                    label: isAr ? 'تجاري' : 'Commercial',
                     selected: usageCommercial,
-                    onSelected:
-                        saving ? null : (v) => onUsageCommercialChanged(v),
-                    avatar: Icon(
-                      usageCommercial
-                          ? Icons.check_circle
-                          : Icons.circle_outlined,
-                      size: 18,
-                      color: usageCommercial ? const Color(0xFF0F766E) : null,
-                    ),
+                    enabled: !saving,
+                    onSelected: onUsageCommercialChanged,
+                    selectedColor:
+                        const Color(0xFF0F766E).withOpacity(0.22),
+                    checkColor: const Color(0xFF0F766E),
                   ),
                 ],
               ),
@@ -5114,20 +6861,14 @@ class _FormCard extends StatelessWidget {
                     final col = _purposeAccentColor(code);
                     return Padding(
                       padding: const EdgeInsetsDirectional.only(end: 8),
-                      child: FilterChip(
-                        label: Text(_label(e)),
+                      child: StableSelectChip(
+                        label: _label(e),
+                        exclusive: true,
                         selected: sel,
-                        onSelected:
-                            saving ? null : (_) => onPurposeChanged(code),
+                        enabled: !saving,
+                        onSelected: (_) => onPurposeChanged(code),
                         selectedColor: col.withOpacity(0.22),
-                        checkmarkColor: col,
-                        side: BorderSide(
-                          color: sel ? col : cs.outlineVariant.withOpacity(0.5),
-                        ),
-                        labelStyle: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: sel ? col : cs.onSurface,
-                        ),
+                        checkColor: col,
                       ),
                     );
                   }).toList(),
@@ -5152,6 +6893,7 @@ class _FormCard extends StatelessWidget {
                 decoration: deco(isAr ? 'الغرض (قائمة)' : 'Purpose (list)'),
               ),
               const SizedBox(height: 12),
+              ],
             ],
             if (slice == AddPropertyFormSlice.location) ...[
               if (locationsLoading)
@@ -5167,7 +6909,7 @@ class _FormCard extends StatelessWidget {
 
                   final Widget regionField;
                   if (regionManual) {
-                    regionField = TextFormField(
+                    regionField = AqarTextFormField(
                       controller: regionController,
                       enabled: !saving,
                       decoration: deco(isAr ? 'المنطقة' : 'Region'),
@@ -5290,7 +7032,7 @@ class _FormCard extends StatelessWidget {
 
                   final Widget governorateField;
                   if (governorateManual) {
-                    governorateField = TextFormField(
+                    governorateField = AqarTextFormField(
                       controller: governorateController,
                       enabled: !saving,
                       decoration: deco(isAr ? 'المحافظة' : 'Governorate'),
@@ -5420,7 +7162,7 @@ class _FormCard extends StatelessWidget {
 
                   final Widget cityField;
                   if (cityManual) {
-                    cityField = TextFormField(
+                    cityField = AqarTextFormField(
                       controller: cityController,
                       enabled: !saving,
                       decoration: deco(isAr ? 'المدينة' : 'City'),
@@ -5545,7 +7287,7 @@ class _FormCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               if (districtOptions.isEmpty)
-                TextFormField(
+                AqarTextFormField(
                   controller: locationController,
                   enabled: !saving,
                   decoration: deco(
@@ -5558,7 +7300,7 @@ class _FormCard extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    TextFormField(
+                    AqarTextFormField(
                       controller: locationController,
                       enabled: !saving,
                       decoration:
@@ -5670,7 +7412,7 @@ class _FormCard extends StatelessWidget {
                 builder: (context, c) {
                   final narrow = c.maxWidth < 560;
                   Widget field(TextEditingController ctrl, String lab) {
-                    return TextFormField(
+                    return AqarTextFormField(
                       controller: ctrl,
                       enabled: !saving,
                       decoration: deco(lab),
@@ -5731,7 +7473,7 @@ class _FormCard extends StatelessWidget {
               const SizedBox(height: 12),
 
               if (showBuildingNumber) ...[
-                TextFormField(
+                AqarTextFormField(
                   controller: buildingNumber,
                   enabled: !saving,
                   decoration: deco(isAr
@@ -5742,7 +7484,7 @@ class _FormCard extends StatelessWidget {
               ],
 
               // 9. العنوان الوطني
-              TextFormField(
+              AqarTextFormField(
                 controller: addressLineController,
                 enabled: !saving,
                 decoration: deco(isAr
@@ -5776,7 +7518,7 @@ class _FormCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              TextFormField(
+              AqarTextFormField(
                 controller: deedNumber,
                 enabled: !saving,
                 decoration: deco(isAr ? 'رقم الصك' : 'Deed number'),
@@ -5801,49 +7543,69 @@ class _FormCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      deedDate == null
-                          ? (isAr
-                              ? 'تاريخ الصك: غير محدد'
-                              : 'Deed date: not set')
-                          : (isAr
-                              ? 'تاريخ الصك: ${ListingDateDisplay.formatCardDateTime(
-                                  DateTime(
-                                    deedDate!.year,
-                                    deedDate!.month,
-                                    deedDate!.day,
-                                  ),
-                                  isAr: true,
-                                )}'
-                              : 'Deed date: ${ListingDateDisplay.formatCardDateTime(
-                                  DateTime(
-                                    deedDate!.year,
-                                    deedDate!.month,
-                                    deedDate!.day,
-                                  ),
-                                  isAr: false,
-                                )}'),
-                      style: TextStyle(
-                        color: cs.onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
+              FormField<DateTime>(
+                key: ValueKey(
+                  deedDate?.millisecondsSinceEpoch ?? 'deed-date-empty',
+                ),
+                initialValue: deedDate,
+                validator: (_) {
+                  if (!requiresDeed) return null;
+                  if (deedDate == null) {
+                    return isAr ? 'مطلوب' : 'Required';
+                  }
+                  return null;
+                },
+                builder: (field) {
+                  final formatted = deedDate == null
+                      ? null
+                      : ListingDateDisplay.formatCardDateTime(
+                          DateTime(
+                            deedDate!.year,
+                            deedDate!.month,
+                            deedDate!.day,
+                          ),
+                          isAr: isAr,
+                        );
+                  return InkWell(
+                    onTap: saving ? null : onPickDeedDate,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InputDecorator(
+                      decoration: deco(isAr ? 'تاريخ الصك' : 'Deed date')
+                          .copyWith(
+                        errorText: field.errorText,
+                        hintText: isAr ? 'اختر التاريخ' : 'Select date',
+                        suffixIcon: deedDate != null && !saving
+                            ? IconButton(
+                                tooltip: isAr ? 'مسح' : 'Clear',
+                                onPressed: onClearDeedDate,
+                                icon: const Icon(Icons.clear),
+                              )
+                            : Icon(
+                                Icons.calendar_today_outlined,
+                                color: cs.onSurfaceVariant,
+                              ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          formatted ??
+                              (isAr ? 'اختر التاريخ' : 'Select date'),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: formatted == null
+                                ? cs.onSurfaceVariant
+                                : (saving
+                                    ? cs.onSurfaceVariant
+                                    : cs.onSurface),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: saving ? null : onPickDeedDate,
-                    child: Text(isAr ? 'اختيار' : 'Pick'),
-                  ),
-                  if (deedDate != null)
-                    TextButton(
-                      onPressed: saving ? null : onClearDeedDate,
-                      child: Text(isAr ? 'مسح' : 'Clear'),
-                    ),
-                ],
+                  );
+                },
               ),
-              TextFormField(
+              const SizedBox(height: 12),
+              AqarTextFormField(
                 controller: deedIssuer,
                 enabled: !saving,
                 decoration:
@@ -5857,10 +7619,29 @@ class _FormCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 12),
-              TextFormField(
+              AqarTextFormField(
                 controller: title,
-                enabled: !saving,
-                decoration: deco(isAr ? 'عنوان الإعلان' : 'Title'),
+                enabled: !saving && !autoFillTitle,
+                readOnly: autoFillTitle,
+                decoration: deco(
+                  isAr
+                      ? (autoFillTitle
+                          ? 'عنوان الإعلان (يُعبّأ تلقائياً)'
+                          : 'عنوان الإعلان')
+                      : (autoFillTitle
+                          ? 'Title (auto-filled)'
+                          : 'Title'),
+                ).copyWith(
+                  suffixIcon: (autoFillTitle || onSuggestSmartTitle == null)
+                      ? null
+                      : IconButton(
+                          tooltip: isAr
+                              ? 'اقتراح عنوان ذكي'
+                              : 'Suggest smart title',
+                          onPressed: saving ? null : onSuggestSmartTitle,
+                          icon: const Icon(Icons.auto_awesome_outlined),
+                        ),
+                ),
                 validator: (v) {
                   if ((v ?? '').trim().isEmpty) {
                     return isAr ? 'مطلوب' : 'Required';
@@ -5869,7 +7650,7 @@ class _FormCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 12),
-              TextFormField(
+              AqarTextFormField(
                 controller: desc,
                 enabled: !saving,
                 maxLines: 4,
@@ -5883,7 +7664,31 @@ class _FormCard extends StatelessWidget {
               ),
               const SizedBox(height: 12),
 
-              // 10. المساحة والسعر
+              Text(
+                isAr ? 'طريقة التسعير' : 'Pricing mode',
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              AbsorbPointer(
+                absorbing: saving || onPriceOnSumChanged == null,
+                child: SegmentedButton<bool>(
+                  segments: [
+                    ButtonSegment(
+                      value: false,
+                      label: Text(isAr ? 'سعر محدد' : 'Fixed price'),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      label: Text(isAr ? 'على السوم' : 'On sum'),
+                    ),
+                  ],
+                  selected: {priceOnSum},
+                  onSelectionChanged: (s) => onPriceOnSumChanged?.call(s.first),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // 10. المساحة والسعر + أسئلة الضريبة والعمولة + معاينة الفاتورة الحيّة
               LayoutBuilder(
                 builder: (context, c) {
                   final narrow = c.maxWidth < 700;
@@ -5908,7 +7713,7 @@ class _FormCard extends StatelessWidget {
                     decoration: deco(isAr ? 'وحدة المساحة' : 'Area unit'),
                   );
 
-                  final areaField = TextFormField(
+                  final areaField = AqarTextFormField(
                     controller: area,
                     enabled: !saving,
                     keyboardType:
@@ -5926,14 +7731,19 @@ class _FormCard extends StatelessWidget {
                     },
                   );
 
-                  final priceField = TextFormField(
+                  final priceField = AqarTextFormField(
                     controller: price,
-                    enabled: !saving,
+                    enabled: !saving && !priceOnSum,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: latinDecimalNumberFormatters(),
-                    decoration: deco(isAr ? 'السعر الإجمالي' : 'Total price'),
+                    decoration: deco(
+                      priceOnSum
+                          ? (isAr ? 'السعر (على السوم)' : 'Price (on sum)')
+                          : (isAr ? 'السعر الإجمالي' : 'Total price'),
+                    ),
                     validator: (v) {
+                      if (priceOnSum) return null;
                       final s = _AddPropertyPageState.normalizeNumbers(v ?? '')
                           .trim();
                       if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
@@ -5963,50 +7773,73 @@ class _FormCard extends StatelessWidget {
                           ),
                   );
 
-                  if (narrow) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
+                  final vatQuestion = _VatInclusionQuestion(
+                    isAr: isAr,
+                    saving: saving,
+                    value: priceIncludesVat,
+                    onChanged: onPriceIncludesVatChanged,
+                  );
+
+                  final commissionQuestion = _CommissionKindQuestion(
+                    isAr: isAr,
+                    saving: saving,
+                    value: commissionKind,
+                    onChanged: onCommissionKindChanged,
+                    fixedAmountCtrl: commissionFixedCtrl,
+                    currencyCode: currency,
+                  );
+
+                  final livePreview = (price.text.trim().isEmpty ||
+                          priceIncludesVat == null)
+                      ? const SizedBox.shrink()
+                      : Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: ListingPricingBreakdown(
+                            invoice: liveInvoice,
+                            isAr: isAr,
+                            title: isAr
+                                ? 'معاينة الفاتورة (حسب اختيارك)'
+                                : 'Live invoice preview',
+                          ),
+                        );
+
+                  final stackedHeader = narrow
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Expanded(flex: 3, child: areaField),
-                            const SizedBox(width: 10),
-                            Expanded(flex: 2, child: unitField),
+                            Row(
+                              children: [
+                                Expanded(flex: 3, child: areaField),
+                                const SizedBox(width: 10),
+                                Expanded(flex: 2, child: unitField),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            priceField,
                           ],
-                        ),
-                        const SizedBox(height: 10),
-                        priceField,
-                        const SizedBox(height: 10),
-                        ppmField,
-                      ],
-                    );
-                  }
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(flex: 2, child: areaField),
+                            const SizedBox(width: 10),
+                            Expanded(child: unitField),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 2, child: priceField),
+                          ],
+                        );
 
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            flex: 2,
-                            child: areaField,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: unitField,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            flex: 2,
-                            child: priceField,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: ppmField,
-                          ),
-                        ],
-                      ),
+                      stackedHeader,
+                      const SizedBox(height: 12),
+                      vatQuestion,
+                      const SizedBox(height: 10),
+                      commissionQuestion,
+                      const SizedBox(height: 12),
+                      ppmField,
+                      livePreview,
                     ],
                   );
                 },
@@ -6015,8 +7848,8 @@ class _FormCard extends StatelessWidget {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   isAr
-                      ? 'سعر المتر = السعر الإجمالي ÷ المساحة (بالم²).'
-                      : 'Price/m² = total price ÷ area (m²).',
+                      ? 'سعر المتر = السعر الإجمالي ÷ المساحة (بالم²). يستخدم النظام السعر الأساسي (دون الضريبة) في حسابات الفاتورة.'
+                      : 'Price/m² = total price ÷ area (m²). Invoice calculations use the base price (excluding VAT).',
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
@@ -6025,6 +7858,21 @@ class _FormCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 12),
+
+              // تمويل عقاري (بيع) — أسلوب Deal
+              if (!purpose.toLowerCase().contains('rent')) ...[
+                SwitchListTile(
+                  value: acceptsMortgageFinance,
+                  onChanged: saving ? null : onAcceptsMortgageFinanceChanged,
+                  title: Text(
+                    isAr
+                        ? 'يقبل التمويل العقاري / الرهن'
+                        : 'Accepts mortgage finance',
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                const SizedBox(height: 8),
+              ],
 
               // 11. العملة والتفاوض
               LayoutBuilder(
@@ -6085,7 +7933,7 @@ class _FormCard extends StatelessWidget {
 
               if (isAuction) ...[
                 const SizedBox(height: 12),
-                TextFormField(
+                AqarTextFormField(
                   controller: currentBid,
                   enabled: !saving,
                   keyboardType:
@@ -6108,26 +7956,29 @@ class _FormCard extends StatelessWidget {
               const SizedBox(height: 12),
             ],
             if (slice == AddPropertyFormSlice.details) ...[
-              // 13. غرف النوم ودورات المياه (حسب نوع العقار)
+              // 13. غرف النوم ودورات المياه — إدخال ذكي (أرقام + قائمة).
               if (showResidentialBedBath && !isWarehouse) ...[
                 LayoutBuilder(
                   builder: (context, c) {
                     final narrow = c.maxWidth < 700;
-
-                    final bedroomsField = DropdownButtonFormField<int>(
+                    final bedroomsField = SmartCountField(
+                      label: isAr ? 'غرف النوم' : 'Bedrooms',
                       value: bedrooms,
-                      items: _intItems(0, 10),
-                      onChanged: saving ? null : onBedroomsChanged,
-                      decoration: deco(isAr ? 'غرف النوم' : 'Bedrooms'),
+                      onChanged: saving ? (_) {} : onBedroomsChanged,
+                      isAr: isAr,
+                      enabled: !saving,
+                      min: 0,
+                      maxPreset: 12,
                     );
-
-                    final bathroomsField = DropdownButtonFormField<int>(
+                    final bathroomsField = SmartCountField(
+                      label: isAr ? 'دورات المياه' : 'Bathrooms',
                       value: bathrooms,
-                      items: _intItems(0, 10),
-                      onChanged: saving ? null : onBathroomsChanged,
-                      decoration: deco(isAr ? 'دورات المياه' : 'Bathrooms'),
+                      onChanged: saving ? (_) {} : onBathroomsChanged,
+                      isAr: isAr,
+                      enabled: !saving,
+                      min: 0,
+                      maxPreset: 12,
                     );
-
                     if (narrow) {
                       return Column(
                         children: [
@@ -6137,7 +7988,6 @@ class _FormCard extends StatelessWidget {
                         ],
                       );
                     }
-
                     return Row(
                       children: [
                         Expanded(child: bedroomsField),
@@ -6150,18 +8000,20 @@ class _FormCard extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
 
-              // 14. مواقف السيارات وسنة البناء (حسب نوع العقار)
+              // 14. مواقف السيارات وسنة البناء (سنة البناء إجبارية حتى السنة الحالية).
               if (showParkingYearRow) ...[
                 LayoutBuilder(
                   builder: (context, c) {
                     final narrow = c.maxWidth < 700;
 
-                    final parkingField = DropdownButtonFormField<int>(
+                    final parkingField = SmartCountField(
+                      label: isAr ? 'مواقف السيارات' : 'Parking spots',
                       value: parkingSpots,
-                      items: _intItems(0, 10),
-                      onChanged: saving ? null : onParkingChanged,
-                      decoration:
-                          deco(isAr ? 'مواقف السيارات' : 'Parking spots'),
+                      onChanged: saving ? (_) {} : onParkingChanged,
+                      isAr: isAr,
+                      enabled: !saving,
+                      min: 0,
+                      maxPreset: 12,
                     );
 
                     final yearField = YearBuiltPickerField(
@@ -6170,7 +8022,8 @@ class _FormCard extends StatelessWidget {
                       enabled: !saving,
                       isAr: isAr,
                       minYear: 1950,
-                      maxYear: DateTime.now().year + 1,
+                      maxYear: DateTime.now().year,
+                      requiredField: true,
                     );
 
                     if (narrow) {
@@ -6289,21 +8142,18 @@ class _FormCard extends StatelessWidget {
                     'yard': isAr ? 'حوش' : 'Yard',
                   };
 
-                  return FilterChip(
-                    label: Text(labels[key] ?? key),
+                  return StableSelectChip(
+                    label: labels[key] ?? key,
                     selected: value,
-                    onSelected: saving
-                        ? null
-                        : (v) {
-                            onAmenityToggle(key, v);
-                          },
+                    enabled: !saving,
+                    onSelected: (v) => onAmenityToggle(key, v),
                   );
                 }).toList(),
               ),
               const SizedBox(height: 12),
 
               // 18. الروابط (الفيديو يُضاف من بطاقة الوسائط أعلى الصفحة)
-              TextFormField(
+              AqarTextFormField(
                 controller: virtualTourUrl,
                 enabled: !saving,
                 decoration: deco(isAr
@@ -6355,6 +8205,231 @@ class _FormCard extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// السؤال الأول: «هل الإجمالي شامل ضريبة القيمة المضافة 5%؟»
+class _VatInclusionQuestion extends StatelessWidget {
+  final bool isAr;
+  final bool saving;
+  final bool? value;
+  final ValueChanged<bool> onChanged;
+
+  const _VatInclusionQuestion({
+    required this.isAr,
+    required this.saving,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final missing = value == null;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: missing
+            ? cs.errorContainer.withValues(alpha: 0.18)
+            : cs.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: missing
+              ? cs.error.withValues(alpha: 0.45)
+              : cs.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.receipt_long_outlined,
+                  size: 18, color: cs.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isAr
+                      ? 'هل الإجمالي شامل ضريبة القيمة المضافة 5%؟'
+                      : 'Does the total include 5% VAT?',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              StableSelectChip(
+                label: isAr ? 'نعم — شامل' : 'Yes — included',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == true,
+                enabled: !saving,
+                onSelected: (_) => onChanged(true),
+              ),
+              StableSelectChip(
+                label: isAr ? 'لا — يضاف 5%' : 'No — add 5%',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == false,
+                enabled: !saving,
+                onSelected: (_) => onChanged(false),
+              ),
+            ],
+          ),
+          if (missing)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                isAr
+                    ? 'الإجابة مطلوبة قبل النشر لضمان وضوح الفاتورة.'
+                    : 'Answer required before publishing for invoice clarity.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: cs.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// السؤال الثاني: «هل إجمالي السعر يحوي عمولة التسويق 2.5% أم مبلغ مقطوع؟»
+class _CommissionKindQuestion extends StatelessWidget {
+  final bool isAr;
+  final bool saving;
+  final String value; // none | percent | fixed
+  final ValueChanged<String> onChanged;
+  final TextEditingController fixedAmountCtrl;
+  final String currencyCode;
+
+  const _CommissionKindQuestion({
+    required this.isAr,
+    required this.saving,
+    required this.value,
+    required this.onChanged,
+    required this.fixedAmountCtrl,
+    required this.currencyCode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.percent, size: 18, color: cs.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isAr
+                      ? 'هل إجمالي السعر يحوي عمولة التسويق العقاري؟'
+                      : 'Does the total include marketing commission?',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              StableSelectChip(
+                label: isAr ? 'لا توجد عمولة' : 'No commission',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == 'none',
+                enabled: !saving,
+                onSelected: (_) => onChanged('none'),
+              ),
+              StableSelectChip(
+                label: isAr ? 'عمولة 2.5%' : '2.5% commission',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == 'percent',
+                enabled: !saving,
+                onSelected: (_) => onChanged('percent'),
+              ),
+              StableSelectChip(
+                label: isAr ? 'مبلغ مقطوع' : 'Fixed amount',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == 'fixed',
+                enabled: !saving,
+                onSelected: (_) => onChanged('fixed'),
+              ),
+            ],
+          ),
+          if (value == 'fixed') ...[
+            const SizedBox(height: 8),
+            AqarTextFormField(
+              controller: fixedAmountCtrl,
+              enabled: !saving,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: latinDecimalNumberFormatters(),
+              decoration: InputDecoration(
+                labelText: isAr
+                    ? 'مبلغ العمولة المقطوع ($currencyCode)'
+                    : 'Fixed commission amount ($currencyCode)',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              validator: (v) {
+                if (value != 'fixed') return null;
+                final s = _AddPropertyPageState.normalizeNumbers(v ?? '')
+                    .trim();
+                if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
+                final n = double.tryParse(s);
+                if (n == null || n <= 0) {
+                  return isAr ? 'أدخل مبلغاً موجباً' : 'Enter a positive amount';
+                }
+                return null;
+              },
+            ),
+          ],
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              isAr
+                  ? 'عمولة التسويق العقاري المعتمدة عادةً 2.5% من السعر الأساسي وتُحسب بعد ضبط ضريبة القيمة المضافة.'
+                  : 'Standard real-estate marketing commission is 2.5% of the base price, computed after adjusting VAT.',
+              style: TextStyle(
+                fontSize: 11,
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

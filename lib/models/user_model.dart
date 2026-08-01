@@ -40,7 +40,6 @@ class AppUser {
       case UserRole.manager:
         return 'manager';
       case UserRole.user:
-      default:
         return 'user';
     }
   }

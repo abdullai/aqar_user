@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -41,7 +42,6 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
   bool _showOwnerNameOnListing = true;
   bool _showMarketerBrandOnListing = false;
   bool _listingPrefsLoaded = false;
-  String? _qrPath;
   Uint8List? _qrBytes;
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
@@ -113,7 +113,6 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
       final bytes = await x.readAsBytes();
       setState(() {
         _qrBytes = bytes;
-        _qrPath = null;
       });
     } finally {
       suspendAutoLock.value = false;
@@ -265,7 +264,7 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextField(
+                        AqarTextField(
                           controller: _licenseNo,
                           decoration: InputDecoration(
                             labelText:
@@ -273,7 +272,7 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
+                        AqarTextField(
                           controller: _issueDate,
                           decoration: InputDecoration(
                             labelText: _t(
@@ -281,14 +280,14 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
+                        AqarTextField(
                           controller: _expiryDate,
                           decoration: InputDecoration(
                             labelText: _t('تاريخ الانتهاء', 'Expiry date'),
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
+                        AqarTextField(
                           controller: _falLicense,
                           decoration: InputDecoration(
                             labelText: _t(
@@ -297,7 +296,7 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
+                        AqarTextField(
                           controller: _deedDocNo,
                           decoration: InputDecoration(
                             labelText: _t(
@@ -306,7 +305,7 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        TextField(
+                        AqarTextField(
                           controller: _notes,
                           maxLines: 3,
                           decoration: InputDecoration(
@@ -327,7 +326,7 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextField(
+                        AqarTextField(
                           controller: _marketerEntity,
                           decoration: InputDecoration(
                             labelText: _t(
@@ -366,7 +365,7 @@ class _SubmitPermitsPageState extends State<SubmitPermitsPage> {
                         ),
                         if (_showMarketerBrandOnListing) ...[
                           const SizedBox(height: 8),
-                          TextField(
+                          AqarTextField(
                             controller: _marketerBrandImageUrl,
                             keyboardType: TextInputType.url,
                             decoration: InputDecoration(

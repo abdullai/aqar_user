@@ -1,10 +1,9 @@
-import 'dart:async';
-import 'dart:convert';
+﻿import 'dart:async';
 
 import 'package:flutter/foundation.dart'
     show kDebugMode, kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -13,6 +12,8 @@ import 'package:aqar_user/l10n/app_localizations.dart';
 import '../core/location/map_picker_geolocation.dart';
 import '../core/location/map_engine_hint.dart';
 import '../core/permissions/runtime_permission_helper.dart';
+import '../services/saudi_districts_service.dart';
+import '../services/saudi_locations_service.dart';
 import '../widgets/app_logo_loading.dart';
 
 class MapPickerPage extends StatefulWidget {
@@ -67,6 +68,12 @@ class _MapPickerPageState extends State<MapPickerPage> {
 
   String? _locationHint;
 
+  /// بيانات مكان من البحث (مدينة/حي) — تُعاد مع التأكيد لملء النموذج بدقة.
+  String? _pickedCity;
+  String? _pickedRegion;
+  String? _pickedGovernorate;
+  String? _pickedDistrict;
+
   /// أندرويد: هواوي/هونر بدون GMS — نفضّل مسار Petal Maps الخارجي.
   MapEngineHint _mapEngineHint = MapEngineHint.googleMaps;
 
@@ -88,10 +95,12 @@ class _MapPickerPageState extends State<MapPickerPage> {
       (widget.pinTitle ?? '').trim(),
       (widget.pinSubtitle ?? '').trim(),
     ].where((s) => s.isNotEmpty && s != _pinTitle).toList(growable: false);
-    if (parts.isNotEmpty) return parts.join(' - ');
+    if (parts.isNotEmpty) {
+      return parts.take(3).join(' · ');
+    }
     return widget.isAr
-        ? 'اضغط على الدبوس للتقريب أو اسحبه لتعديل الموقع'
-        : 'Tap the pin to zoom, or drag it to adjust';
+        ? 'اسحب الدبوس أو اضغط الخريطة لتحديد الموقع بدقة'
+        : 'Drag the pin or tap the map to set the exact spot';
   }
 
   @override
@@ -116,10 +125,10 @@ class _MapPickerPageState extends State<MapPickerPage> {
     _marker = Marker(
       markerId: const MarkerId('picked'),
       position: _selected,
-      draggable: true,
-      onDragEnd: _onTap,
-      onTap: _focusSelectedMarker,
+      draggable: false,
+      consumeTapEvents: false,
       infoWindow: InfoWindow(title: _pinTitle, snippet: _pinSubtitle),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
     );
     _init();
   }
@@ -152,8 +161,19 @@ class _MapPickerPageState extends State<MapPickerPage> {
 
   Future<void> _init() async {
     await _loadSaudiLocations();
-    final kingdomPick = widget.kingdomOverview && widget.initial == null;
-    if (kingdomPick) {
+    // نقطة ممرَّرة مسبقاً: لا تستبدلها بـ GPS (يحرّك الدبوس بعيداً عن الاختيار).
+    if (widget.initial != null) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _locationHint = widget.isAr
+              ? 'الموقع المحدد. يمكنك السحب أو البحث أو زر موقعي الحالي.'
+              : 'Pinned location. Drag, search, or use current location.';
+        });
+      }
+      return;
+    }
+    if (widget.kingdomOverview) {
       if (mounted) {
         setState(() {
           _loading = false;
@@ -180,15 +200,19 @@ class _MapPickerPageState extends State<MapPickerPage> {
     super.dispose();
   }
 
+  /// تحريك برمجي للكاميرا — لا نُحدّث الحقول من onCameraIdle أثناءه مرتين بلا داعٍ.
+  bool _programmaticCamera = false;
+
   void _setSelected(LatLng pos, {bool syncFields = true}) {
     _selected = pos;
+    // دبوس خفيف مزامَن مع المركز؛ الاعتماد البصري على صليب الوسط (أثبت على الويب).
     _marker = Marker(
       markerId: const MarkerId('picked'),
       position: pos,
-      draggable: true,
-      onDragEnd: _onTap,
-      onTap: _focusSelectedMarker,
+      draggable: false,
+      consumeTapEvents: false,
       infoWindow: InfoWindow(title: _pinTitle, snippet: _pinSubtitle),
+      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
     );
 
     if (!syncFields) return;
@@ -198,16 +222,41 @@ class _MapPickerPageState extends State<MapPickerPage> {
 
   Future<void> _loadSaudiLocations() async {
     try {
-      final raw =
-          await rootBundle.loadString('assets/data/saudi_locations.json');
-      final data = json.decode(raw);
-
-      if (data is List) {
-        _saLocations = data
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList();
+      final cities = await SaudiLocationsService.instance.loadAll();
+      final districtsMap =
+          await SaudiDistrictsService.instance.loadMergedWithCityAliases();
+      final out = <Map<String, dynamic>>[];
+      for (final c in cities) {
+        final city = widget.isAr ? c.cityAr.trim() : c.cityEn.trim();
+        final region = widget.isAr ? c.regionAr.trim() : c.regionEn.trim();
+        final gov = widget.isAr
+            ? (c.governorateAr?.trim() ?? '')
+            : (c.governorateEn?.trim() ?? '');
+        if (city.isEmpty || c.lat == 0 && c.lng == 0) continue;
+        out.add({
+          'city': city,
+          'region': region,
+          'governorate': gov.isNotEmpty ? gov : city,
+          'district': '',
+          'lat': c.lat,
+          'lng': c.lng,
+        });
+        final districts = districtsMap[city] ??
+            districtsMap[c.cityAr] ??
+            districtsMap[c.cityEn] ??
+            const <String>[];
+        for (final d in districts.take(80)) {
+          out.add({
+            'city': city,
+            'region': region,
+            'governorate': gov.isNotEmpty ? gov : city,
+            'district': d,
+            'lat': c.lat,
+            'lng': c.lng,
+          });
+        }
       }
+      _saLocations = out;
     } catch (e) {
       if (kDebugMode) {
         print('[DBG][MAP] saudi_locations load failed: $e');
@@ -271,12 +320,16 @@ class _MapPickerPageState extends State<MapPickerPage> {
           if (!mounted) return;
           setState(() {
             _setSelected(latlng);
+            _pickedCity = null;
+            _pickedRegion = null;
+            _pickedGovernorate = null;
+            _pickedDistrict = null;
             _loading = false;
             _locationHint = widget.isAr
-                ? 'تم جلب الموقع الحالي. على الويب قد تكون الدقة تقريبية، ويمكنك تعديل النقطة يدويًا.'
-                : 'Current location loaded. On web, accuracy may be approximate; you can adjust the pin manually.';
+                ? 'تم جلب الموقع الحالي بدقة. على الويب قد تكون تقريبية — عدّل الدبوس إن لزم.'
+                : 'Current location set. On web it may be approximate — adjust the pin if needed.';
           });
-          await _moveToLocation(latlng, zoom: 16);
+          await _moveToLocation(latlng, zoom: 17);
           return;
         case MapPickerLocateStatus.failed:
           break;
@@ -311,14 +364,19 @@ class _MapPickerPageState extends State<MapPickerPage> {
     });
 
     if (_mapReady && _controller != null) {
+      _programmaticCamera = true;
       try {
         await _controller!.animateCamera(
           CameraUpdate.newLatLngZoom(pos, zoom),
         );
-        await _controller!.showMarkerInfoWindow(const MarkerId('picked'));
       } catch (e) {
         if (kDebugMode) {
           print('[DBG][MAP] animateCamera failed: $e');
+        }
+      } finally {
+        _programmaticCamera = false;
+        if (mounted) {
+          setState(() => _setSelected(_selected, syncFields: true));
         }
       }
     }
@@ -327,25 +385,119 @@ class _MapPickerPageState extends State<MapPickerPage> {
   void _onTap(LatLng pos) {
     setState(() {
       _setSelected(pos);
+      // النقر اليدوي يلغي بيانات البحث السابقة — يُملأ النموذج من أقرب مدينة.
+      _pickedCity = null;
+      _pickedRegion = null;
+      _pickedGovernorate = null;
+      _pickedDistrict = null;
     });
     unawaited(_focusSelectedMarker());
   }
 
   Future<void> _focusSelectedMarker() async {
     if (_controller == null || !_mapReady) return;
+    _programmaticCamera = true;
     try {
       await _controller!.animateCamera(
         CameraUpdate.newLatLngZoom(_selected, 17),
       );
-      await _controller!.showMarkerInfoWindow(const MarkerId('picked'));
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _programmaticCamera = false;
+    }
   }
 
+  bool _approximateLocation = false;
+
   void _confirm() {
-    Navigator.pop(context, <String, double>{
-      'lat': _selected.latitude,
-      'lng': _selected.longitude,
-    });
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        var approx = _approximateLocation;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      widget.isAr ? 'اختيار الموقع' : 'Choose location',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      widget.isAr
+                          ? 'بإمكانك اختيار موقع محدد أو تقريبي للعقار'
+                          : 'You can choose a specific or approximate location',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _PrecisionCard(
+                            selected: !approx,
+                            title: widget.isAr ? 'موقع محدد' : 'Exact',
+                            subtitle: widget.isAr
+                                ? 'يظهر على خريطة الإعلانات'
+                                : 'Shown on the ads map',
+                            onTap: () => setLocal(() => approx = false),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _PrecisionCard(
+                            selected: approx,
+                            title: widget.isAr ? 'موقع تقريبي' : 'Approximate',
+                            subtitle: widget.isAr
+                                ? 'لا يظهر بدقة على خريطة الإعلانات'
+                                : 'Not shown precisely on the ads map',
+                            onTap: () => setLocal(() => approx = true),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: () {
+                        _approximateLocation = approx;
+                        Navigator.pop(ctx);
+                        Navigator.pop(context, <String, dynamic>{
+                          'lat': _selected.latitude,
+                          'lng': _selected.longitude,
+                          'approximate': approx,
+                          if ((_pickedCity ?? '').trim().isNotEmpty)
+                            'city': _pickedCity!.trim(),
+                          if ((_pickedRegion ?? '').trim().isNotEmpty)
+                            'region': _pickedRegion!.trim(),
+                          if ((_pickedGovernorate ?? '').trim().isNotEmpty)
+                            'governorate': _pickedGovernorate!.trim(),
+                          if ((_pickedDistrict ?? '').trim().isNotEmpty)
+                            'district': _pickedDistrict!.trim(),
+                        });
+                      },
+                      child: Text(widget.isAr ? 'تأكيد' : 'Confirm'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   /// بديل عند فشل الخريطة المضمّنة (هواوي/هونر بدون GMS أو تعطيل WebGL).
@@ -394,14 +546,22 @@ class _MapPickerPageState extends State<MapPickerPage> {
     final lat = (latValue as num).toDouble();
     final lng = (lngValue as num).toDouble();
     final pos = LatLng(lat, lng);
+    final city = (loc['city'] ?? '').toString().trim();
+    final district = (loc['district'] ?? '').toString().trim();
 
     setState(() {
       _results.clear();
-      _searchCtrl.text = (loc['city'] ?? '').toString();
+      _searchCtrl.text = district.isNotEmpty ? '$district — $city' : city;
       _locationHint = null;
+      _pickedCity = city.isEmpty ? null : city;
+      _pickedRegion = (loc['region'] ?? '').toString().trim();
+      if ((_pickedRegion ?? '').isEmpty) _pickedRegion = null;
+      _pickedGovernorate = (loc['governorate'] ?? '').toString().trim();
+      if ((_pickedGovernorate ?? '').isEmpty) _pickedGovernorate = null;
+      _pickedDistrict = district.isEmpty ? null : district;
     });
 
-    await _moveToLocation(pos, zoom: 15);
+    await _moveToLocation(pos, zoom: district.isNotEmpty ? 14.5 : 15);
   }
 
   @override
@@ -487,13 +647,48 @@ class _MapPickerPageState extends State<MapPickerPage> {
                     zoomGesturesEnabled: true,
                     tiltGesturesEnabled: true,
                     onTap: _onTap,
+                    onCameraMove: (CameraPosition pos) {
+                      // مركز الكاميرا = الموقع الدقيق المختار.
+                      _selected = pos.target;
+                    },
+                    onCameraIdle: () {
+                      if (!mounted || _programmaticCamera) return;
+                      setState(
+                        () => _setSelected(_selected, syncFields: true),
+                      );
+                    },
+                  ),
+                  // دبوس ثابت في وسط الشاشة — لا يختفي مثل Markers على الويب.
+                  const IgnorePointer(
+                    child: Center(
+                      child: Padding(
+                        // طرف الدبوس على مركز الخريطة.
+                        padding: EdgeInsets.only(bottom: 36),
+                        child: Icon(
+                          Icons.location_on_rounded,
+                          size: 44,
+                          color: Color(0xE00F766E),
+                          shadows: [
+                            Shadow(
+                              blurRadius: 6,
+                              color: Color(0x66000000),
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
                   Positioned(
                     top: 10,
                     left: 10,
                     right: 10,
                     child: SafeArea(
-                      child: Column(
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 520),
+                          child: Column(
                         children: [
                           if (_mapEngineHint ==
                                   MapEngineHint.huaweiPetalPreferred &&
@@ -602,13 +797,13 @@ class _MapPickerPageState extends State<MapPickerPage> {
                           Material(
                             elevation: 4,
                             borderRadius: BorderRadius.circular(14),
-                            child: TextField(
+                            child: AqarTextField(
                               controller: _searchCtrl,
                               onChanged: _search,
                               decoration: InputDecoration(
                                 hintText: isAr
-                                    ? 'ابحث بالمدينة أو المنطقة أو الحي'
-                                    : 'Search by city, region, or district',
+                                    ? 'ابحث عن الأحياء أو المدن أو المناطق'
+                                    : 'Search neighborhoods, cities, or regions',
                                 border: InputBorder.none,
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 14,
@@ -670,105 +865,86 @@ class _MapPickerPageState extends State<MapPickerPage> {
                             ),
                         ],
                       ),
+                        ),
+                      ),
                     ),
                   ),
-                  Positioned(
-                    bottom: 18,
-                    left: 16,
-                    right: 16,
-                    child: SafeArea(
+                  if (_loading)
+                    Container(
+                      color: Colors.black12,
+                      child: const Center(
+                        child: AppLogoLoading(),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Material(
+              elevation: 10,
+              color: Theme.of(context).colorScheme.surface,
+              shadowColor: Colors.black.withValues(alpha: 0.12),
+              child: SafeArea(
+                top: false,
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 640),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Material(
-                            color: Theme.of(context).colorScheme.surface,
-                            elevation: 10,
-                            shadowColor: Colors.black.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(18),
-                            clipBehavior: Clip.antiAlias,
-                            child: InkWell(
-                              onTap: _focusSelectedMarker,
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.my_location_rounded,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Container(
-                                      width: 46,
-                                      height: 46,
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primaryContainer,
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: Icon(
-                                        Icons.location_pin,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onPrimaryContainer,
+                                    Text(
+                                      _pinTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 14.5,
                                       ),
                                     ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            _pinTitle,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w900,
-                                              fontSize: 15.5,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            _pinSubtitle,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 12.5,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Directionality(
-                                            textDirection: TextDirection.ltr,
-                                            child: Text(
-                                              '${_selected.latitude.toStringAsFixed(6)}, '
-                                              '${_selected.longitude.toStringAsFixed(6)}',
-                                              style: TextStyle(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .primary,
-                                                fontWeight: FontWeight.w800,
-                                                fontFeatures: const [
-                                                  FontFeature.tabularFigures(),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
+                                    const SizedBox(height: 2),
+                                    Directionality(
+                                      textDirection: TextDirection.ltr,
+                                      child: Text(
+                                        '${_selected.latitude.toStringAsFixed(6)}, '
+                                        '${_selected.longitude.toStringAsFixed(6)}',
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 12.5,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 10),
                           Row(
                             children: [
                               Expanded(
                                 flex: 2,
-                                child: ElevatedButton.icon(
+                                child: FilledButton.icon(
                                   icon: const Icon(Icons.check),
                                   label: Text(
                                     isAr ? 'اعتماد الموقع' : 'Confirm location',
@@ -793,17 +969,70 @@ class _MapPickerPageState extends State<MapPickerPage> {
                       ),
                     ),
                   ),
-                  if (_loading)
-                    Container(
-                      color: Colors.black12,
-                      child: const Center(
-                        child: AppLogoLoading(),
-                      ),
-                    ),
-                ],
+                ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrecisionCard extends StatelessWidget {
+  const _PrecisionCard({
+    required this.selected,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final border = selected ? cs.primary : cs.outlineVariant;
+    final bg = selected
+        ? cs.primary.withValues(alpha: 0.12)
+        : cs.surfaceContainerHighest.withValues(alpha: 0.35);
+    return Material(
+      color: bg,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: border, width: selected ? 1.6 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  color: selected ? cs.primary : cs.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurfaceVariant,
+                  height: 1.25,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

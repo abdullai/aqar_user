@@ -24,16 +24,18 @@ class SubmitOfferPage extends StatelessWidget {
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(ListingWorkflowCopy.t(_isAr, 'إرسال عرض تسويق', 'Submit offer')),
+          title: Text(ListingWorkflowCopy.t(_isAr, 'إتمام صفقة تسويق', 'Complete deal')),
         ),
-        body: MarketingOfferSubmitPanel(
-          requestId: requestId,
-          inviteId: inviteId,
-          isAr: _isAr,
-          showDragHandle: false,
-          onSuccess: () {
-            Navigator.of(context).pop(true);
-          },
+        body: SafeArea(
+          child: MarketingOfferSubmitPanel(
+            requestId: requestId,
+            inviteId: inviteId,
+            isAr: _isAr,
+            showDragHandle: false,
+            onSuccess: () {
+              Navigator.of(context).pop(true);
+            },
+          ),
         ),
       ),
     );

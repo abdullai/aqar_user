@@ -89,7 +89,7 @@ class VerificationService {
       final res = await _sb.from('verification_requests').insert(row).select('id').single();
       inserted = Map<String, dynamic>.from(res);
     } on PostgrestException catch (e) {
-      final msg = e.message ?? '';
+      final msg = e.message;
       if (extraPayload != null &&
           (msg.contains('extra_payload') ||
               msg.contains('schema cache') ||
@@ -135,7 +135,7 @@ class VerificationService {
     try {
       await _sb.from('users_profiles').update(profile).eq('user_id', uid);
     } on PostgrestException catch (e) {
-      final msg = e.message ?? '';
+      final msg = e.message;
       if (msg.contains('contact_email') ||
           msg.contains('contact_phone') ||
           msg.contains('rega_fal_snapshot') ||

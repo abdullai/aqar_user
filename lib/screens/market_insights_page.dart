@@ -20,7 +20,14 @@ enum _LeaderboardFilter { all, individuals, marketers }
 class MarketInsightsPage extends StatefulWidget {
   final String lang;
 
-  const MarketInsightsPage({super.key, required this.lang});
+  /// عند `true`: بدون [AppBar] (للدمج مع شريط لوحة التحكم الخارجية).
+  final bool embedAppBar;
+
+  const MarketInsightsPage({
+    super.key,
+    required this.lang,
+    this.embedAppBar = false,
+  });
 
   @override
   State<MarketInsightsPage> createState() => _MarketInsightsPageState();
@@ -271,76 +278,109 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                l10n.marketInsightsTitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+    final titleRow = Row(
+      children: [
+        Expanded(
+          child: Text(
+            l10n.marketInsightsTitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (_backgroundRefreshing) ...[
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: cs.primary,
             ),
-            if (_backgroundRefreshing) ...[
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.primary,
+          ),
+          const SizedBox(width: 8),
+        ],
+      ],
+    );
+    final actions = [
+      IconButton(
+        tooltip: l10n.marketInsightsShareSummary,
+        icon: const Icon(Icons.share_outlined),
+        onPressed: _snap == null ? null : () => _shareSummary(l10n),
+      ),
+      IconButton(
+        tooltip: l10n.marketInsightsCopySummary,
+        icon: const Icon(Icons.copy_outlined),
+        onPressed: _snap == null ? null : () => _copySummary(l10n),
+      ),
+    ];
+    final tabBar = TabBar(
+      controller: _tabController,
+      isScrollable: true,
+      tabs: [
+        Tab(text: l10n.marketInsightsTabOverview),
+        Tab(text: l10n.marketInsightsTabAnalytics),
+        Tab(text: l10n.marketInsightsTabCommunity),
+      ],
+    );
+    final bodyContent = _loading && _snap == null
+        ? Center(child: CircularProgressIndicator(color: cs.primary))
+        : _err != null && _snap == null
+            ? _buildErrorState(context, l10n, theme, cs)
+            : _snap == null
+                ? const SizedBox.shrink()
+                : TabBarView(
+                    controller: _tabController,
+                    children: [
+                      _buildOverviewTab(context, l10n, theme, cs),
+                      _materializedTabs.contains(1)
+                          ? _buildAnalyticsTab(context, l10n, theme, cs)
+                          : _tabPlaceholder(context, cs),
+                      _materializedTabs.contains(2)
+                          ? _MarketInsightsCommunityTab(
+                              snap: _snap!,
+                              formatNum: _num,
+                              accountLabel: (k) => _accountLabel(context, k),
+                              onReload: () => _load(),
+                            )
+                          : _tabPlaceholder(context, cs),
+                    ],
+                  );
+
+    if (widget.embedAppBar) {
+      return Scaffold(
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Material(
+              color: cs.surface,
+              elevation: 0.5,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: Row(
+                  children: [
+                    Expanded(child: titleRow),
+                    ...actions,
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-            ],
+            ),
+            Material(
+              color: cs.surface,
+              child: tabBar,
+            ),
+            Expanded(child: bodyContent),
           ],
         ),
-        actions: [
-          IconButton(
-            tooltip: l10n.marketInsightsShareSummary,
-            icon: const Icon(Icons.share_outlined),
-            onPressed: _snap == null ? null : () => _shareSummary(l10n),
-          ),
-          IconButton(
-            tooltip: l10n.marketInsightsCopySummary,
-            icon: const Icon(Icons.copy_outlined),
-            onPressed: _snap == null ? null : () => _copySummary(l10n),
-          ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabs: [
-            Tab(text: l10n.marketInsightsTabOverview),
-            Tab(text: l10n.marketInsightsTabAnalytics),
-            Tab(text: l10n.marketInsightsTabCommunity),
-          ],
-        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: titleRow,
+        actions: actions,
+        bottom: tabBar,
       ),
-      body: _loading && _snap == null
-          ? Center(child: CircularProgressIndicator(color: cs.primary))
-          : _err != null && _snap == null
-              ? _buildErrorState(context, l10n, theme, cs)
-              : _snap == null
-                  ? const SizedBox.shrink()
-                  : TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildOverviewTab(context, l10n, theme, cs),
-                        _materializedTabs.contains(1)
-                            ? _buildAnalyticsTab(context, l10n, theme, cs)
-                            : _tabPlaceholder(context, cs),
-                        _materializedTabs.contains(2)
-                            ? _MarketInsightsCommunityTab(
-                                snap: _snap!,
-                                formatNum: _num,
-                                accountLabel: (k) =>
-                                    _accountLabel(context, k),
-                                onReload: () => _load(),
-                              )
-                            : _tabPlaceholder(context, cs),
-                      ],
-                    ),
+      body: bodyContent,
     );
   }
 

@@ -14,11 +14,11 @@ INSERT INTO public.legal_documents_versions (
 )
 VALUES (
   '2026-04-05-SA',
-  'الشروط والأحكام وسياسة الخصوصية — موثوق العقاري',
-  'Terms of Use & Privacy Policy — Motawoq Real Estate',
+  'الشروط والأحكام وسياسة الخصوصية — مؤسسة موثوق لاين العقارية',
+  'Terms of Use & Privacy Policy — Mawthuq Line Real Estate Establishment',
   $ar$
 1) التعريف
-منصة «موثوق العقاري» تتيح عرض العقارات والتواصل والخدمات المرتبطة بالتسويق العقاري وفق الأنظمة المعمول بها في المملكة العربية السعودية.
+منصة «مؤسسة موثوق لاين العقارية» تتيح عرض العقارات والتواصل والخدمات المرتبطة بالتسويق العقاري وفق الأنظمة المعمول بها في المملكة العربية السعودية.
 
 2) قبول الشروط
 باستخدامك للتطبيق أو الموقع الإلكتروني فإنك تقر بقراءة هذه الوثيقة وموافقتك على ما ورد فيها. إن لم توافق، يُرجى عدم استخدام الخدمة.
@@ -49,7 +49,7 @@ VALUES (
 $ar$,
   $en$
 1) About
-Motawoq Real Estate provides property listings, messaging, and related marketing workflows in line with applicable laws in the Kingdom of Saudi Arabia.
+Mawthuq Line Real Estate Establishment provides property listings, messaging, and related marketing workflows in line with applicable laws in the Kingdom of Saudi Arabia.
 
 2) Acceptance
 By using the app or website you confirm that you have read and agree to this document. If you do not agree, please do not use the service.

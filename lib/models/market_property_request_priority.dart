@@ -56,12 +56,12 @@ enum MarketPropertyRequestPriority {
         MarketPropertyRequestPriority.flexible => 1,
       };
 
-  /// يُضاف إلى وقت الفرز لرفع الطلبات الأكثر إلحاحاً في خليط الرئيسية.
+  /// يُضاف إلى وقت الفرز للأولويات القديمة (غير «فوري» — يُدار عبر [InstantMarketRequestFeed]).
   int get mixedFeedTimeBoostMs => switch (this) {
-        MarketPropertyRequestPriority.immediate => 86400000 * 90,
-        MarketPropertyRequestPriority.urgent => 86400000 * 45,
-        MarketPropertyRequestPriority.priority => 86400000 * 14,
+        MarketPropertyRequestPriority.immediate => 0,
+        MarketPropertyRequestPriority.urgent => 86400000 * 7,
+        MarketPropertyRequestPriority.priority => 86400000 * 3,
         MarketPropertyRequestPriority.standard => 0,
-        MarketPropertyRequestPriority.flexible => -86400000 * 3,
+        MarketPropertyRequestPriority.flexible => -86400000 * 2,
       };
 }

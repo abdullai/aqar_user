@@ -1,30 +1,45 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:intl/intl.dart' show DateFormat, NumberFormat;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/branding/branding_logo_image.dart';
+import '../core/input/input_normalizers.dart';
 import '../core/marketing/listing_request_marketing_price.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/chat_display_initials.dart';
 import '../core/marketing/marketing_offer_fee.dart';
 import '../core/workflow/listing_workflow_copy.dart';
 import '../core/workflow/listing_workflow_ui_context.dart';
+import '../core/haptics/app_haptics.dart';
+import '../core/notifications/app_sound_coordinator.dart';
+import '../core/notifications/hub_workflow_sound.dart';
 import '../services/chat_peer_service.dart';
 import '../services/marketing_flow_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
+import '../widgets/user_presence_strip.dart';
+import '../core/presence/presence_display_prefs.dart';
 
 /// مراجعة عروض المسوقين وقبول عرض واحد عبر `accept_listing_offer`.
 class OwnerOffersPage extends StatefulWidget {
   final String requestId;
   final String lang;
+  /// عند فتح الصفحة من BottomSheet في «صفحتي».
+  final bool embeddedInSheet;
+  /// بعد قبول عرض بنجاح (إغلاق الورقة وتحريك تبويب التعاقد في الواجهة الأم).
+  final VoidCallback? onOfferAccepted;
 
   const OwnerOffersPage({
     super.key,
     required this.requestId,
     this.lang = 'ar',
+    this.embeddedInSheet = false,
+    this.onOfferAccepted,
   });
 
   @override
@@ -42,6 +57,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
   List<Map<String, dynamic>> _offers = const [];
   Map<String, ({double avg, int count})> _ratingByMarketerId = const {};
   String? _busyOfferId;
+  bool _acceptInFlight = false;
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
@@ -150,6 +166,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
   }
 
   bool _canTapAccept(Map<String, dynamic> o) {
+    if (_acceptInFlight) return false;
     final id = (o['id'] ?? '').toString();
     if (!_canOwnerDecide(o)) return false;
     if (_anotherOfferWasSelected(id)) return false;
@@ -241,59 +258,29 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     return const SizedBox.shrink();
   }
 
-  /// بعد [accept_listing_offer]: مرحلة `marketer_selected` ولا يوجد `contract_id` بعد.
-  bool _canStartContractForOffer(Map<String, dynamic> o) {
-    if (!_isAcceptedWinner(o)) return false;
-    final wf =
-        (_request?['workflow_stage'] ?? '').toString().toLowerCase().trim();
-    if (wf != 'marketer_selected') return false;
-    final cid = (_request?['contract_id'] ?? '').toString().trim();
-    return cid.isEmpty;
-  }
-
-  Future<void> _startContract(Map<String, dynamic> o) async {
-    final id = (o['id'] ?? '').toString();
-    if (id.isEmpty || !_canStartContractForOffer(o)) return;
-
-    setState(() => _busyOfferId = id);
-    try {
-      await _svc.createListingContractFromOffer(id);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content:
-              Text(ListingWorkflowCopy.snackContractFromOfferCreated(_isAr)),
-        ),
-      );
-      await _reload();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(ListingWorkflowCopy.rpcFailedFriendly(_isAr, e))),
-      );
-    } finally {
-      if (mounted) setState(() => _busyOfferId = null);
-    }
-  }
-
   Future<void> _accept(Map<String, dynamic> o) async {
     final id = (o['id'] ?? '').toString();
     if (id.isEmpty || !_canTapAccept(o)) return;
 
-    setState(() => _busyOfferId = id);
+    setState(() {
+      _busyOfferId = id;
+      _acceptInFlight = true;
+    });
     try {
+      AppHaptics.medium();
       await _svc.acceptListingOfferById(id);
-      try {
-        await _svc.createListingContractFromOffer(id);
-      } catch (_) {
-        // Some backends may create the draft contract as part of acceptance.
-      }
+      if (!mounted) return;
+      playHubWorkflowSound(HubWorkflowSoundKind.contractSuccess);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(ListingWorkflowCopy.snackOfferAccepted(_isAr))),
       );
       await _reload();
+      if (!mounted) return;
+      if (widget.embeddedInSheet) {
+        Navigator.of(context).pop();
+      }
+      widget.onOfferAccepted?.call();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -301,63 +288,98 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
             content: Text(ListingWorkflowCopy.rpcFailedFriendly(_isAr, e))),
       );
     } finally {
-      if (mounted) setState(() => _busyOfferId = null);
+      if (mounted) {
+        setState(() {
+          _busyOfferId = null;
+          _acceptInFlight = false;
+        });
+      }
     }
   }
 
   Future<void> _decline(Map<String, dynamic> o) async {
     final id = (o['id'] ?? '').toString();
-    if (id.isEmpty) return;
+    if (id.isEmpty || _acceptInFlight) return;
 
     final reasonCtl = TextEditingController();
+    final allowRetryHolder = <bool>[false];
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(ListingWorkflowCopy.t(_isAr, 'رفض العرض', 'Decline offer')),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                ListingWorkflowCopy.t(
-                  _isAr,
-                  'لن يُعتمد هذا العرض. يمكنك توضيح السبب للمسوّق (اختياري).',
-                  'This offer will be declined. You may add a reason for the marketer (optional).',
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              title: Text(
+                ListingWorkflowCopy.t(_isAr, 'رفض العرض', 'Decline offer'),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      _isAr
+                          ? 'لن يُعتمد هذا العرض. يمكنك إضافة ملاحظة للمسوّق (اختياري).'
+                          : 'This offer will be declined. Optional note to the marketer.',
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile.adaptive(
+                      value: allowRetryHolder[0],
+                      onChanged: (v) =>
+                          setLocal(() => allowRetryHolder[0] = v),
+                      title: Text(
+                        _isAr
+                            ? 'هل ترغب في إتاحة الفرصة للمسوق لرؤية إعلانك وإتمام صفقة أخرى؟'
+                            : 'Allow this marketer to see your listing and submit another offer?',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          height: 1.35,
+                        ),
+                      ),
+                      subtitle: Text(
+                        _isAr
+                            ? 'عند التفعيل: يُسجَّل الاعتذار ويُسمح بإعادة الظهور في «السوق العقاري» لهذا المسوّق عندما ينطبق ذلك على الطلب.'
+                            : 'When enabled: softer decline and retry visibility for this marketer when allowed on the request.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    AqarTextField(
+                      controller: reasonCtl,
+                      maxLines: 3,
+                      maxLength: 500,
+                      decoration: InputDecoration(
+                        labelText: _isAr
+                            ? 'ملاحظة (اختياري)'
+                            : 'Note (optional)',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: reasonCtl,
-                maxLines: 3,
-                maxLength: 500,
-                decoration: InputDecoration(
-                  labelText: ListingWorkflowCopy.t(
-                    _isAr,
-                    'سبب الرفض (اختياري)',
-                    'Reason (optional)',
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(ListingWorkflowCopy.t(_isAr, 'إلغاء', 'Cancel')),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Theme.of(ctx).colorScheme.error,
+                    foregroundColor: Theme.of(ctx).colorScheme.onError,
                   ),
-                  border: const OutlineInputBorder(),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(ListingWorkflowCopy.t(_isAr, 'رفض', 'Decline')),
                 ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(ListingWorkflowCopy.t(_isAr, 'إلغاء', 'Cancel')),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
-              foregroundColor: Theme.of(ctx).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(ListingWorkflowCopy.t(_isAr, 'رفض', 'Decline')),
-          ),
-        ],
-      ),
+              ],
+            );
+          },
+        );
+      },
     );
     final reasonText = reasonCtl.text.trim();
     reasonCtl.dispose();
@@ -365,102 +387,44 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
 
     setState(() => _busyOfferId = id);
     try {
-      await _svc.ownerDeclineOffer(
-        offerId: id,
-        requestId: widget.requestId,
-        ownerReason: reasonText.isEmpty ? null : reasonText,
-        declineKind: 'reject',
-      );
+      AppHaptics.medium();
+      final allowMarketerRetry = allowRetryHolder[0];
+      if (allowMarketerRetry) {
+        await _svc.ownerDeclineOffer(
+          offerId: id,
+          requestId: widget.requestId,
+          ownerReason: reasonText.isEmpty ? null : reasonText,
+          declineKind: 'apology',
+        );
+        await _svc.ownerSetAllowPreviousMarketersRetry(
+          requestId: widget.requestId,
+          allow: true,
+        );
+      } else {
+        await _svc.ownerDeclineOffer(
+          offerId: id,
+          requestId: widget.requestId,
+          ownerReason: reasonText.isEmpty ? null : reasonText,
+          declineKind: 'reject',
+        );
+        await _svc.ownerSetAllowPreviousMarketersRetry(
+          requestId: widget.requestId,
+          allow: false,
+        );
+      }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ListingWorkflowCopy.snackOfferDeclined(_isAr))),
-      );
-      await _reload();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(ListingWorkflowCopy.rpcFailedFriendly(_isAr, e))),
-      );
-    } finally {
-      if (mounted) setState(() => _busyOfferId = null);
-    }
-  }
-
-  /// اعتذار للمسوّق: لا يُحسب ضمن حدّ 3 رفض؛ يُبلّغ بلهجة أخف (بعد ترحيل SQL).
-  Future<void> _apology(Map<String, dynamic> o) async {
-    final id = (o['id'] ?? '').toString();
-    if (id.isEmpty) return;
-
-    final reasonCtl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(ListingWorkflowCopy.t(
-            _isAr, 'اعتذار عن العرض', 'Apologize to marketer')),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                ListingWorkflowCopy.t(
-                  _isAr,
-                  'يُسجَّل كاعتذار وليس كرفض ضمن حدّ المسوّقين. يمكنك شرح السبب (اختياري).',
-                  'Recorded as an apology, not counted toward the marketer decline cap. Optional reason.',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: reasonCtl,
-                maxLines: 3,
-                maxLength: 500,
-                decoration: InputDecoration(
-                  labelText: ListingWorkflowCopy.t(
-                    _isAr,
-                    'سبب الاعتذار (اختياري)',
-                    'Apology note (optional)',
-                  ),
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(ListingWorkflowCopy.t(_isAr, 'إلغاء', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(
-                ListingWorkflowCopy.t(_isAr, 'إرسال الاعتذار', 'Send apology')),
-          ),
-        ],
-      ),
-    );
-    final reasonText = reasonCtl.text.trim();
-    reasonCtl.dispose();
-    if (ok != true || !mounted) return;
-
-    setState(() => _busyOfferId = id);
-    try {
-      await _svc.ownerDeclineOffer(
-        offerId: id,
-        requestId: widget.requestId,
-        ownerReason: reasonText.isEmpty ? null : reasonText,
-        declineKind: 'apology',
-      );
+      if (_isAr) {
+        await AppSoundCoordinator.playUiEffect(
+          assetPath: 'sounds/in_app_chime.wav',
+        );
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            ListingWorkflowCopy.t(
-              _isAr,
-              'تم تسجيل الاعتذار وإشعار المسوّق.',
-              'Apology recorded; marketer notified.',
-            ),
+            _isAr
+                ? 'تم تسجيل رفض العرض وتحديث حالة الطلب.'
+                : 'Offer declined and request updated.',
           ),
         ),
       );
@@ -482,9 +446,13 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     if (dt == null) return null;
     final loc = _isAr ? 'ar_SA' : 'en_US';
     try {
-      return DateFormat.yMMMd(loc).add_Hm().format(dt.toLocal());
+      return _fmtNumericUi(
+        DateFormat.yMMMd(loc).add_Hm().format(dt.toLocal()),
+      );
     } catch (_) {
-      return DateFormat('yyyy-MM-dd HH:mm').format(dt.toLocal());
+      return _fmtNumericUi(
+        DateFormat('yyyy-MM-dd HH:mm').format(dt.toLocal()),
+      );
     }
   }
 
@@ -492,11 +460,14 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     if (v == null) return null;
     final dt = DateTime.tryParse(v.toString());
     if (dt == null) return null;
-    final loc = _isAr ? 'ar_SA' : 'en_US';
     try {
-      return DateFormat.yMMMd(loc).format(dt.toLocal());
+      return normalizeAsciiDigits(
+        DateFormat('yyyy-MM-dd').format(dt.toLocal()),
+      );
     } catch (_) {
-      return DateFormat('yyyy-MM-dd').format(dt.toLocal());
+      return normalizeAsciiDigits(
+        DateFormat('yyyy-MM-dd').format(dt.toLocal()),
+      );
     }
   }
 
@@ -505,53 +476,10 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final dt = DateTime.tryParse(v.toString());
     if (dt == null) return null;
     try {
-      return DateFormat.Hm().format(dt.toLocal());
+      return normalizeAsciiDigits(DateFormat('HH:mm').format(dt.toLocal()));
     } catch (_) {
-      return DateFormat('HH:mm').format(dt.toLocal());
+      return normalizeAsciiDigits(DateFormat('HH:mm').format(dt.toLocal()));
     }
-  }
-
-  Widget _detailRow(ColorScheme cs, String label, String value,
-      {IconData? icon}) {
-    final v = value.trim();
-    if (v.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 16, color: cs.primary),
-            const SizedBox(width: 6),
-          ],
-          SizedBox(
-            width: 112,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: SelectableText(
-              v,
-              style: TextStyle(
-                color: cs.onSurface,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                height: 1.25,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   static const Color _brandTeal = Color(0xFF0F766E);
@@ -575,36 +503,134 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
 
   List<String> _propertyImageUrls() {
     final prop = _linkedProperty;
-    if (prop == null) return const [];
-    final imgs = prop['property_images'];
-    if (imgs is! List || imgs.isEmpty) return const [];
-    final rows = imgs.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-      ..sort((a, b) {
-        final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
-        final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
-        return sa.compareTo(sb);
-      });
-    return rows
-        .map((row) => (row['path'] ?? row['file_name'] ?? '').toString().trim())
-        .where((path) => path.isNotEmpty)
-        .map((path) {
-          if (path.startsWith('http')) return path;
-          return Supabase.instance.client.storage
-              .from('property-images')
-              .getPublicUrl(path);
-        })
-        .where((url) => url.trim().isNotEmpty)
-        .toList(growable: false);
+    if (prop != null && prop['default_cover_used'] != true) {
+      final imgs = prop['property_images'];
+      if (imgs is List && imgs.isNotEmpty) {
+        final rows =
+            imgs.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+              ..sort((a, b) {
+                final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
+                final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
+                return sa.compareTo(sb);
+              });
+        final fromProp = rows
+            .map((row) =>
+                (row['path'] ?? row['file_name'] ?? '').toString().trim())
+            .where((path) => path.isNotEmpty)
+            .map((path) {
+              if (path.startsWith('http')) return path;
+              return Supabase.instance.client.storage
+                  .from('property-images')
+                  .getPublicUrl(path);
+            })
+            .where((url) => url.trim().isNotEmpty)
+            .toList(growable: false);
+        if (fromProp.isNotEmpty) return fromProp;
+      }
+    }
+
+    final req = _request;
+    if (req == null) return const [];
+
+    String toPublic(String path) {
+      final s = path.trim();
+      if (s.isEmpty) return '';
+      if (s.startsWith('http://') || s.startsWith('https://')) return s;
+      return Supabase.instance.client.storage
+          .from('property-images')
+          .getPublicUrl(s);
+    }
+
+    final out = <String>[];
+    void addPaths(dynamic raw) {
+      if (raw is! List) return;
+      for (final e in raw) {
+        final u = toPublic(e.toString());
+        if (u.isNotEmpty && !out.contains(u)) out.add(u);
+      }
+    }
+
+    addPaths(req['preview_image_urls']);
+    final payload = req['payload_json'] ?? req['payload'];
+    if (payload is Map) {
+      for (final key in const [
+        'request_image_paths',
+        'image_paths',
+        'image_urls',
+        'images',
+      ]) {
+        addPaths(payload[key]);
+      }
+      final prim =
+          (payload['primary_image'] ?? payload['primaryImage'] ?? '')
+              .toString()
+              .trim();
+      if (prim.isNotEmpty) {
+        final u = toPublic(prim);
+        if (u.isNotEmpty && !out.contains(u)) out.add(u);
+      }
+    }
+    return out;
   }
 
-  String? _heroImageUrl() {
+  String? _heroImageUrlFromProperty() {
     final urls = _propertyImageUrls();
     return urls.isEmpty ? null : urls.first;
   }
 
+  String? _heroImageUrl() => _heroImageUrlFromProperty();
+
+  /// أرقام لاتينية دائماً في عروض المسوقين (ويب/تطبيق).
+  String _fmtNumericUi(String s) => normalizeAsciiDigits(s);
+
   String _fmtMoney(num n) {
-    final f = NumberFormat('#,##0', _isAr ? 'ar' : 'en');
-    return f.format(n);
+    final f = NumberFormat('#,##0', 'en');
+    return _fmtNumericUi(f.format(n));
+  }
+
+  String _fmtDeedDate(dynamic raw) {
+    if (raw == null) return '';
+    final s = raw.toString().trim();
+    if (s.isEmpty) return '';
+    final dt = DateTime.tryParse(s);
+    if (dt != null) {
+      return DateFormat('yyyy-MM-dd').format(dt.toLocal());
+    }
+    return normalizeAsciiDigits(s);
+  }
+
+  String _pickDeedNumber() {
+    final p = (_linkedProperty?['deed_number'] ?? '').toString().trim();
+    if (p.isNotEmpty) return normalizeAsciiDigits(p);
+    final req = _request;
+    if (req == null) return '';
+    for (final key in const ['deed_number', 'preview_deed_number']) {
+      final v = (req[key] ?? '').toString().trim();
+      if (v.isNotEmpty) return normalizeAsciiDigits(v);
+    }
+    final payload = req['payload_json'] ?? req['payload'];
+    if (payload is Map) {
+      final v = (payload['deed_number'] ?? '').toString().trim();
+      if (v.isNotEmpty) return normalizeAsciiDigits(v);
+    }
+    return '';
+  }
+
+  String _pickDeedDate() {
+    final p = _fmtDeedDate(_linkedProperty?['deed_date']);
+    if (p.isNotEmpty) return p;
+    final req = _request;
+    if (req == null) return '';
+    for (final key in const ['deed_date', 'preview_deed_date']) {
+      final v = _fmtDeedDate(req[key]);
+      if (v.isNotEmpty) return v;
+    }
+    final payload = req['payload_json'] ?? req['payload'];
+    if (payload is Map) {
+      final v = _fmtDeedDate(payload['deed_date']);
+      if (v.isNotEmpty) return v;
+    }
+    return '';
   }
 
   String _accountTypeHuman(Map<String, dynamic> o) {
@@ -681,39 +707,107 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final req = _request;
     if (req == null) return const SizedBox.shrink();
 
-    final title = (req['title'] ?? '').toString().trim();
-    final city = (req['city'] ?? '').toString().trim();
-    final loc = (req['location'] ?? _linkedProperty?['location'] ?? '')
+    final title = (req['title'] ?? _linkedProperty?['title'] ?? '')
+        .toString()
+        .trim();
+    final city = (req['city'] ?? _linkedProperty?['city'] ?? '')
+        .toString()
+        .trim();
+    final loc = (req['location'] ??
+            req['address_line'] ??
+            _linkedProperty?['location'] ??
+            _linkedProperty?['address_line'] ??
+            '')
         .toString()
         .trim();
     final price = _propertyBasePriceSar;
     final url = _heroImageUrl();
+    final deedNo = _pickDeedNumber();
+    final deedDate = _pickDeedDate();
+    final roundLabel = ListingWorkflowCopy.marketingRoundLabel(
+      _isAr,
+      req['marketing_round'],
+    );
+    final screenW = MediaQuery.sizeOf(context).width;
+    final heroH = (screenW * 0.52).clamp(180.0, 280.0);
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeOutCubic,
-      builder: (context, t, child) {
-        return Opacity(
-          opacity: t,
-          child: Transform.translate(
-            offset: Offset(0, (1 - t) * 12),
-            child: child,
-          ),
-        );
-      },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(22),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            SizedBox(
-              height: 210,
+    final summaryRows = <RequestSummaryRow>[
+      RequestSummaryRow(
+        label: _isAr ? 'المرجع' : 'Reference',
+        value: _listingReferenceLine(),
+      ),
+      if (title.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'العنوان' : 'Title',
+          value: title,
+          emphasize: true,
+        ),
+      if (city.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'المدينة' : 'City',
+          value: city,
+        ),
+      if (loc.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'الموقع' : 'Location',
+          value: loc,
+        ),
+      if (price > 0)
+        RequestSummaryRow(
+          label: _isAr ? 'قيمة العقار' : 'Property value',
+          value:
+              '${_fmtMoney(price)} ${AppMoney.saudiRiyalSignUnicode}',
+          emphasize: true,
+        ),
+      if (deedNo.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'رقم الصك' : 'Deed number',
+          value: deedNo,
+        ),
+      if (deedDate.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'تاريخ الصك' : 'Deed date',
+          value: deedDate,
+        ),
+      RequestSummaryRow(
+        label: _isAr ? 'جولة التسويق' : 'Marketing round',
+        value: roundLabel,
+      ),
+      RequestSummaryRow(
+        label: _isAr ? 'عروض الشركاء' : 'Partner offers',
+        value: _isAr
+            ? '${_offers.length} عرض'
+            : '${_offers.length} offer(s)',
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 380),
+          curve: Curves.easeOutCubic,
+          builder: (context, t, child) {
+            return Opacity(
+              opacity: t,
+              child: Transform.translate(
+                offset: Offset(0, (1 - t) * 10),
+                child: child,
+              ),
+            );
+          },
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: SizedBox(
+              height: heroH,
               width: double.infinity,
               child: url != null
                   ? CachedNetworkImage(
                       imageUrl: url,
                       fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: heroH,
                       placeholder: (_, __) => Container(
                         color: _brandTeal.withValues(alpha: 0.12),
                         alignment: Alignment.center,
@@ -726,113 +820,31 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                       errorWidget: (_, __, ___) => Container(
                         color: _brandTeal.withValues(alpha: 0.12),
                         alignment: Alignment.center,
-                        child: Icon(
-                          Icons.apartment_rounded,
-                          size: 56,
-                          color: _brandTeal.withValues(alpha: 0.65),
+                        child: const BrandingLogoImage(
+                          size: 120,
+                          fit: BoxFit.contain,
+                          errorIcon: Icons.apartment_rounded,
                         ),
                       ),
                     )
                   : Container(
-                      color: _brandTeal.withValues(alpha: 0.14),
+                      color: _brandTeal.withValues(alpha: 0.12),
                       alignment: Alignment.center,
-                      child: Icon(
-                        Icons.apartment_rounded,
-                        size: 64,
-                        color: _brandTeal.withValues(alpha: 0.55),
+                      child: const BrandingLogoImage(
+                        size: 132,
+                        fit: BoxFit.contain,
+                        errorIcon: Icons.apartment_rounded,
                       ),
                     ),
             ),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.05),
-                      Colors.black.withValues(alpha: 0.72),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            PositionedDirectional(
-              start: 16,
-              end: 16,
-              bottom: 14,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _listingReferenceLine(),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      height: 1.25,
-                    ),
-                  ),
-                  if (title.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        height: 1.15,
-                      ),
-                    ),
-                  ],
-                  if (city.isNotEmpty || loc.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.location_on_outlined,
-                          size: 16,
-                          color: Colors.white70,
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            loc.isNotEmpty ? loc : city,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (price > 0) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      _isAr
-                          ? 'قيمة العقار: ${_fmtMoney(price)} ${AppMoney.saudiRiyalSignUnicode}'
-                          : 'Property: ${_fmtMoney(price)} SAR',
-                      style: TextStyle(
-                        color: Colors.amber.shade100,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        const SizedBox(height: 12),
+        RequestSummaryTable(
+          title: _isAr ? 'بيانات العقار' : 'Property details',
+          rows: summaryRows,
+        ),
+      ],
     );
   }
 
@@ -918,6 +930,14 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
+          leading: widget.embeddedInSheet
+              ? IconButton(
+                  tooltip: _isAr ? 'إغلاق' : 'Close',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  icon: const Icon(Icons.close),
+                )
+              : null,
+          automaticallyImplyLeading: !widget.embeddedInSheet,
           title: Text(ListingWorkflowCopy.ownerOffersTitle(_isAr)),
           actions: [
             if (Navigator.of(context).canPop())
@@ -964,56 +984,22 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                                       compact: true,
                                       dense: true,
                                       deadline: ctxModel.primaryDeadline,
+                                      permitSoundContextId: widget.requestId,
                                     ),
-                                    const SizedBox(height: 12),
-                                    _buildDeclineCapBanner(cs),
-                                    const SizedBox(height: 4),
-                                  ],
-                                  _buildPropertyHero(cs),
-                                  const SizedBox(height: 16),
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 280),
-                                    curve: Curves.easeOutCubic,
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      color: cs.surfaceContainerHighest
-                                          .withValues(alpha: 0.45),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color:
-                                            _brandTeal.withValues(alpha: 0.22),
-                                      ),
-                                    ),
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        const Icon(
-                                          Icons.info_outline_rounded,
-                                          color: _brandTeal,
-                                          size: 22,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Text(
-                                            ListingWorkflowCopy
-                                                .ownerOffersIntro(_isAr),
-                                            style: TextStyle(
-                                              color: cs.onSurfaceVariant,
-                                              fontWeight: FontWeight.w600,
-                                              height: 1.4,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 20),
+                                  const SizedBox(height: 12),
+                                  _buildDeclineCapBanner(cs),
+                                  const SizedBox(height: 4),
+                                ],
+                                _buildPropertyHero(cs),
+                                const SizedBox(height: 16),
                                   Text(
                                     _isAr
-                                        ? 'عروض التسويق العقاري'
-                                        : 'Marketing offers',
+                                        ? (_offers.isEmpty
+                                            ? 'بانتظار عروض الشركاء المسوّقين'
+                                            : 'عروض الشركاء المسوّقين')
+                                        : (_offers.isEmpty
+                                            ? 'Waiting for partner marketer offers'
+                                            : 'Partner marketer offers'),
                                     style: TextStyle(
                                       fontWeight: FontWeight.w900,
                                       fontSize: 18,
@@ -1023,8 +1009,8 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                                   const SizedBox(height: 4),
                                   Text(
                                     _isAr
-                                        ? 'قارِن الجهات واختَر مسوّقاً واحداً فقط للمتابعة.'
-                                        : 'Compare marketers and select one to proceed.',
+                                        ? 'قارِن الجهات واختَر شريكاً موثوقاً واحداً للمتابعة.'
+                                        : 'Compare parties and choose one trusted partner to proceed.',
                                     style: TextStyle(
                                       color: cs.onSurfaceVariant,
                                       fontSize: 12.5,
@@ -1068,279 +1054,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     );
   }
 
-  void _openOfferDetails(Map<String, dynamic> o) {
-    final mid = (o['marketer_id'] ?? '').toString().trim();
-    final rating = mid.isEmpty ? null : _ratingByMarketerId[mid];
-    final name = (o['_marketer_display_name'] ?? '').toString().trim();
-    final phone = (o['_marketer_phone'] ?? '').toString().trim();
-    final license = (o['_marketer_license_no'] ?? '').toString().trim();
-    final notes = (o['notes'] ?? '').toString().trim();
-    final declineReason = (o['owner_decline_reason'] ?? '').toString().trim();
-    final declineKindModal = (o['decline_kind'] ?? 'reject').toString().trim();
-    final statusRaw = (o['status'] ?? '').toString();
-    final id = (o['id'] ?? '').toString();
-    final busy = _busyOfferId == id;
-    final canAccept = _canTapAccept(o);
-    final canDecline = _canOwnerDecide(o) && !_anotherOfferWasSelected(id);
-    final propertyImages = _propertyImageUrls();
-    final cs = Theme.of(context).colorScheme;
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        final apology = declineKindModal == 'apology';
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    ListingWorkflowCopy.t(
-                      _isAr,
-                      'تفاصيل العرض والمسوّق',
-                      'Offer & marketer details',
-                    ),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
-                      color: cs.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  if (propertyImages.isNotEmpty) ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: AspectRatio(
-                        aspectRatio: 16 / 9,
-                        child: CachedNetworkImage(
-                          imageUrl: propertyImages.first,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => Container(
-                            color: _brandTeal.withValues(alpha: 0.12),
-                            alignment: Alignment.center,
-                            child: const SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                          errorWidget: (_, __, ___) => Container(
-                            color: _brandTeal.withValues(alpha: 0.12),
-                            alignment: Alignment.center,
-                            child:
-                                const Icon(Icons.apartment_rounded, size: 48),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (propertyImages.length > 1) ...[
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 78,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: propertyImages.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemBuilder: (_, i) => ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: AspectRatio(
-                              aspectRatio: 1.25,
-                              child: CachedNetworkImage(
-                                imageUrl: propertyImages[i],
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-                  ],
-                  if (rating != null && rating.count > 0) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.star_rounded,
-                            color: Colors.amber.shade700, size: 26),
-                        const SizedBox(width: 6),
-                        Text(
-                          ListingWorkflowCopy.t(
-                            _isAr,
-                            '${rating.avg.toStringAsFixed(1)} من 5 • ${rating.count} تقييم',
-                            '${rating.avg.toStringAsFixed(1)} / 5 • ${rating.count} ratings',
-                          ),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  Text(
-                    name.isNotEmpty
-                        ? name
-                        : ListingWorkflowCopy.t(
-                            _isAr,
-                            'شريكنا المسوّق العقاري',
-                            'Our real-estate partner',
-                          ),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 17,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    ListingWorkflowCopy.t(
-                      _isAr,
-                      'نوع الجهة: ${_accountTypeHuman(o)}',
-                      'Entity: ${_accountTypeHuman(o)}',
-                    ),
-                    style: TextStyle(
-                      color: cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  if (license.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      ListingWorkflowCopy.t(
-                        _isAr,
-                        'رقم الترخيص: $license',
-                        'License no.: $license',
-                      ),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ],
-                  if (phone.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      phone,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  Text(
-                    _amountLine(o),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    ListingWorkflowCopy.offerStatusLong(_isAr, statusRaw),
-                    style: TextStyle(
-                      color: cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
-                    ),
-                  ),
-                  if (notes.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      ListingWorkflowCopy.t(
-                        _isAr,
-                        'تفاصيل إضافية من المسوّق',
-                        'Additional details from marketer',
-                      ),
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(notes, style: const TextStyle(height: 1.35)),
-                  ],
-                  if (declineReason.isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    Material(
-                      color: apology
-                          ? cs.primaryContainer.withValues(alpha: 0.45)
-                          : cs.errorContainer.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              ListingWorkflowCopy.t(
-                                _isAr,
-                                apology
-                                    ? 'ملاحظة الاعتذار (للمسوّق)'
-                                    : 'سبب الرفض (للمسوّق)',
-                                apology
-                                    ? 'Apology note (shared with marketer)'
-                                    : 'Decline reason (shared with marketer)',
-                              ),
-                              style: TextStyle(
-                                fontWeight: FontWeight.w900,
-                                color: apology ? cs.primary : cs.error,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(declineReason),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  if (canAccept || canDecline) ...[
-                    if (canAccept)
-                      FilledButton.icon(
-                        onPressed: (_loading || _refreshing || busy)
-                            ? null
-                            : () {
-                                Navigator.pop(ctx);
-                                _accept(o);
-                              },
-                        icon: const Icon(Icons.check_circle_outline),
-                        label: Text(
-                          ListingWorkflowCopy.btnAcceptOffer(_isAr),
-                        ),
-                      ),
-                    if (canAccept && canDecline) const SizedBox(height: 10),
-                    if (canDecline)
-                      OutlinedButton.icon(
-                        onPressed: (_loading || _refreshing || busy)
-                            ? null
-                            : () {
-                                Navigator.pop(ctx);
-                                _decline(o);
-                              },
-                        icon: const Icon(Icons.cancel_outlined),
-                        label: Text(
-                          ListingWorkflowCopy.btnDeclineOffer(_isAr),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: cs.error,
-                          side: BorderSide(
-                            color: cs.error.withValues(alpha: 0.55),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                  ],
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: Text(ListingWorkflowCopy.t(_isAr, 'إغلاق', 'Close')),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildOfferCard(Map<String, dynamic> o, ColorScheme cs) {
     final id = (o['id'] ?? '').toString();
     final name = (o['_marketer_display_name'] ?? '').toString().trim();
@@ -1348,7 +1061,9 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final statusRaw = (o['status'] ?? '').toString();
     final winner = _isAcceptedWinner(o);
     final canAccept = _canTapAccept(o);
-    final canDecline = _canOwnerDecide(o) && !_anotherOfferWasSelected(id);
+    final canDecline = _canOwnerDecide(o) &&
+        !_anotherOfferWasSelected(id) &&
+        !_acceptInFlight;
     final notes = (o['notes'] ?? '').toString().trim();
     final shortStatus = ListingWorkflowCopy.offerStatusShort(_isAr, statusRaw);
     final longStatus = ListingWorkflowCopy.offerStatusLong(_isAr, statusRaw);
@@ -1406,36 +1121,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
               ),
               const SizedBox(height: 12),
             ],
-            if (_canStartContractForOffer(o)) ...[
-              FilledButton(
-                onPressed: (_loading || _refreshing || busy)
-                    ? null
-                    : () => _startContract(o),
-                style: FilledButton.styleFrom(
-                  backgroundColor: cs.primaryContainer.withValues(alpha: 0.85),
-                  foregroundColor: cs.onPrimaryContainer,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-                child: busy
-                    ? SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: cs.onPrimaryContainer,
-                        ),
-                      )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.description_outlined),
-                          const SizedBox(width: 8),
-                          Text(ListingWorkflowCopy.btnStartContract(_isAr)),
-                        ],
-                      ),
-              ),
-              const SizedBox(height: 12),
-            ],
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1471,17 +1156,32 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                                 'مسوّق عقاري',
                                 'Marketer',
                               ),
+                        maxLines: 6,
+                        softWrap: true,
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 16.5,
                         ),
                       ),
+                      // سطر حالة المسوّق (متصل الآن / آخر ظهور) لحظيّ —
+                      // يحدّث عبر Realtime ولا يحتاج تحديث الصفحة. يظهر لكل
+                      // مسوّق قدّم عرضاً داخل تبويب «العروض المقدّمة» للمالك
+                      // وعند الانتقال إلى تبويب «بانتظار التعاقد» يبقى ظاهراً.
+                      if (mid.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        UserPresenceStrip(
+                          userId: mid,
+                          isAr: _isAr,
+                          compact: true,
+                          surface: PresenceDisplaySurface.listingCards,
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Text(
                         ListingWorkflowCopy.t(
                           _isAr,
-                          'نوع الجهة: ${_accountTypeHuman(o)}',
-                          'Entity: ${_accountTypeHuman(o)}',
+                          'شريك: ${_accountTypeHuman(o)}',
+                          'Partner: ${_accountTypeHuman(o)}',
                         ),
                         style: TextStyle(
                           color: cs.onSurfaceVariant,
@@ -1489,149 +1189,77 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                           fontSize: 13,
                         ),
                       ),
-                      if (phone.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.phone_outlined,
-                              size: 15,
-                              color: cs.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: SelectableText(
-                                phone,
-                                style: TextStyle(
-                                  color: cs.onSurface,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      if (license.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.verified_user_outlined,
-                              size: 15,
-                              color: cs.primary,
-                            ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: SelectableText(
-                                ListingWorkflowCopy.t(
-                                  _isAr,
-                                  'ترخيص: $license',
-                                  'License: $license',
-                                ),
-                                style: TextStyle(
-                                  color: cs.onSurface,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                     ],
                   ),
                 ),
                 Chip(
-                  label: Text(
-                    _isAr
-                        ? 'شريكنا المهتم: $shortStatus'
-                        : 'Interested partner: $shortStatus',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
+                  label: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      shortStatus,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            Align(
-              alignment: _isAr ? Alignment.centerRight : Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => _openOfferDetails(o),
-                icon: const Icon(Icons.open_in_full_rounded, size: 18),
-                label: Text(
-                  ListingWorkflowCopy.t(
-                    _isAr,
-                    'تفاصيل العرض',
-                    'Offer details',
+            RequestSummaryTable(
+              title: _isAr ? 'بيانات الشريك والعرض' : 'Partner & offer details',
+              rows: [
+                  RequestSummaryRow(
+                    label: _isAr ? 'اسم الشريك' : 'Partner name',
+                    value: name.isNotEmpty
+                        ? name
+                        : ListingWorkflowCopy.t(
+                            _isAr,
+                            'شريك مسوّق',
+                            'Partner marketer',
+                          ),
+                    emphasize: true,
                   ),
-                ),
-              ),
-            ),
-            if (rating != null && rating.count > 0) ...[
-              Row(
-                children: [
-                  Icon(Icons.star_rounded,
-                      color: Colors.amber.shade700, size: 20),
-                  const SizedBox(width: 4),
-                  Text(
-                    ListingWorkflowCopy.t(
-                      _isAr,
-                      '${rating.avg.toStringAsFixed(1)} • ${rating.count} تقييم',
-                      '${rating.avg.toStringAsFixed(1)} • ${rating.count} ratings',
-                    ),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurfaceVariant,
-                      fontSize: 13,
-                    ),
+                  RequestSummaryRow(
+                    label: _isAr ? 'نوع الجهة' : 'Entity type',
+                    value: _accountTypeHuman(o),
                   ),
-                ],
-              ),
-              const SizedBox(height: 8),
-            ],
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.38),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: cs.outlineVariant.withValues(alpha: 0.42),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _detailRow(
-                      cs,
-                      _isAr ? 'حالة الشريك' : 'Partner status',
-                      longStatus,
-                      icon: Icons.verified_outlined,
+                  if (phone.isNotEmpty)
+                    RequestSummaryRow(
+                      label: _isAr ? 'الجوال' : 'Phone',
+                      value: _fmtNumericUi(phone),
                     ),
-                    _detailRow(
-                      cs,
-                      _isAr ? 'قيمة العرض' : 'Offer amount',
-                      _amountLine(o),
-                      icon: Icons.payments_outlined,
+                  if (license.isNotEmpty)
+                    RequestSummaryRow(
+                      label: _isAr ? 'ترخيص الشريك' : 'Partner license',
+                      value: normalizeAsciiDigits(license),
                     ),
-                    _detailRow(
-                      cs,
-                      _isAr ? 'تاريخ التقديم' : 'Submitted date',
-                      _fmtDateOnly(o['created_at']) ?? '—',
-                      icon: Icons.calendar_today_outlined,
+                  RequestSummaryRow(
+                    label: _isAr ? 'حالة الشريك' : 'Partner status',
+                    value: longStatus,
+                  ),
+                  RequestSummaryRow(
+                    label: _isAr ? 'قيمة العرض' : 'Offer amount',
+                    value: _amountLine(o),
+                    emphasize: true,
+                  ),
+                  RequestSummaryRow(
+                    label: _isAr ? 'تاريخ التقديم' : 'Submitted date',
+                    value: _fmtDateOnly(o['created_at']) ?? '—',
+                  ),
+                  RequestSummaryRow(
+                    label: _isAr ? 'وقت التقديم' : 'Submitted time',
+                    value: _fmtTimeOnly(o['created_at']) ?? '—',
+                  ),
+                  if (rating != null && rating.count > 0)
+                    RequestSummaryRow(
+                      label: _isAr ? 'تقييم الشريك' : 'Partner rating',
+                      value: _isAr
+                          ? '${_fmtNumericUi(rating.avg.toStringAsFixed(1))} • ${_fmtNumericUi('${rating.count}')} تقييم'
+                          : '${rating.avg.toStringAsFixed(1)} • ${rating.count} ratings',
                     ),
-                    _detailRow(
-                      cs,
-                      _isAr ? 'وقت التقديم' : 'Submitted time',
-                      _fmtTimeOnly(o['created_at']) ?? '—',
-                      icon: Icons.schedule_outlined,
-                    ),
-                  ],
-                ),
-              ),
+              ],
             ),
             if (notes.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -1702,7 +1330,10 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                 children: [
                   if (canAccept)
                     FilledButton(
-                      onPressed: (_loading || _refreshing || busy)
+                      onPressed: (_loading ||
+                              _refreshing ||
+                              busy ||
+                              _acceptInFlight)
                           ? null
                           : () => _accept(o),
                       style: FilledButton.styleFrom(
@@ -1738,37 +1369,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                   if (canAccept && canDecline) const SizedBox(height: 10),
                   if (canDecline) ...[
                     OutlinedButton.icon(
-                      onPressed: (_loading || _refreshing || busy)
-                          ? null
-                          : () => _apology(o),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: cs.primary,
-                        side: BorderSide(
-                          color: cs.primary.withValues(alpha: 0.45),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      icon: Icon(
-                        Icons.front_hand_outlined,
-                        size: 22,
-                        color: cs.primary,
-                      ),
-                      label: Text(
-                        ListingWorkflowCopy.t(
-                          _isAr,
-                          'اعتذار للمسوّق',
-                          'Apologize to marketer',
-                        ),
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 14.5,
-                          color: cs.primary,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    OutlinedButton.icon(
-                      onPressed: (_loading || _refreshing || busy)
+                      onPressed: (_loading || _refreshing || busy || _acceptInFlight)
                           ? null
                           : () => _decline(o),
                       style: OutlinedButton.styleFrom(

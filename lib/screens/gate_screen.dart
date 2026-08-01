@@ -7,11 +7,13 @@ import 'package:provider/provider.dart';
 import 'package:aqar_user/l10n/app_localizations.dart';
 
 import '../core/session/app_session.dart';
+import '../core/session/web_session_ttl.dart';
 import '../core/theme/app_appearance_bridge.dart';
 import '../widgets/field_group_frame.dart';
 
 // ✅ Internet guard
 import '../services/connectivity_guard.dart';
+import '../core/navigation/post_auth_navigation.dart';
 
 class GateScreen extends StatelessWidget {
   const GateScreen({super.key});
@@ -88,14 +90,14 @@ class GateScreen extends StatelessWidget {
                         syncSessionAppearanceNotifiers?.call() ??
                             Future.value(),
                       );
+                      unawaited(touchWebGuestActivity());
 
                       if (!context.mounted) return;
 
-                      // العودة لنقطة البداية المنطقية
-                      Navigator.of(context).pushNamedAndRemoveUntil(
-                        '/',
-                        (r) => false,
-                      );
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!context.mounted) return;
+                        unawaited(PostAuthNavigation.openDashboard(context));
+                      });
                     },
                     child: Text(_isAr ? 'الدخول كضيف' : 'Continue as guest'),
                   ),

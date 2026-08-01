@@ -1,0 +1,15 @@
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -DUNICODE
+    - -D_UNICODE
+    - -DWIN32
+    - -D_WINDOWS
+    - --target=x86_64-pc-windows-msvc
+    - -ID:/Flutter/flutter/bin/cache/artifacts/engine/windows-x64/cpp_client_wrapper/include
+    - -ID:/Flutter/flutter/bin/cache/artifacts/engine/windows-x64
+    - -I.
+    - -I..
+Diagnostics:
+  Suppress: '*'
+  UnusedIncludes: None

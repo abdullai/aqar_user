@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
 
@@ -6,6 +7,9 @@ class AqarShimmer {
   AqarShimmer._();
 
   static Widget wrap(BuildContext context, {required Widget child}) {
+    // الويب: Shimmer يُحرّك gradient shader وكان يُجمّد اللوحة بعد الدخول.
+    if (kIsWeb) return child;
+
     final cs = Theme.of(context).colorScheme;
     final base = cs.surfaceContainerHighest;
     final highlight = Color.lerp(cs.primary, cs.surface, 0.42) ?? cs.primaryContainer;
@@ -94,6 +98,7 @@ class PropertyCardSkeletonList extends StatelessWidget {
     this.topPadding = 8,
     this.header,
     this.bottomPadding = 24,
+    this.scrollController,
   });
 
   final int count;
@@ -103,9 +108,13 @@ class PropertyCardSkeletonList extends StatelessWidget {
   /// Optional title / message above the skeleton cards (e.g. tab-specific loading).
   final Widget? header;
 
+  /// Optional scroll controller (e.g. dashboard tab onboarding scroll).
+  final ScrollController? scrollController;
+
   @override
   Widget build(BuildContext context) {
     return ListView(
+      controller: scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.fromLTRB(12, topPadding, 12, bottomPadding),
@@ -188,14 +197,17 @@ class CartRowSkeletonList extends StatelessWidget {
     super.key,
     this.count = 4,
     this.topPadding = 12,
+    this.scrollController,
   });
 
   final int count;
   final double topPadding;
+  final ScrollController? scrollController;
 
   @override
   Widget build(BuildContext context) {
     return ListView(
+      controller: scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
       keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: EdgeInsets.fromLTRB(12, topPadding, 12, 24),

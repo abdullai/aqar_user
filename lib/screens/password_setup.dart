@@ -1,9 +1,10 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signature/signature.dart';
@@ -20,8 +21,11 @@ import '../core/utils/signature_blue_ink.dart';
 import '../core/config/app_config.dart';
 import '../services/commercial_reg_service.dart';
 import '../services/name_translation_service.dart';
+import '../services/org_team_service.dart';
 import '../services/profile_compliance_service.dart';
 import 'fal_license_web_verify_page.dart';
+import '../services/fal_license_service.dart';
+import '../models/fal_license_verify_result.dart';
 
 class PasswordSetupScreen extends StatefulWidget {
   const PasswordSetupScreen({super.key});
@@ -83,7 +87,20 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   bool _obscure1 = true;
   bool _obscure2 = true;
 
+  static const String _accountTypeTeamMember = 'team_member';
+
   String _accountType = 'individual_seller';
+
+  /// `create` | `join` — legacy route args (لم يعد يُستخدم للانضمام بالرمز).
+  String _orgOnboarding = 'create';
+  String? _joinOrgId;
+  Map<String, dynamic>? _joinOrgPreview;
+
+  String? _teamInvitationId;
+  Map<String, dynamic>? _teamInvitePreview;
+  bool _teamInviteVerified = false;
+  bool _teamVerifyingInvite = false;
+  bool _teamJoinExpanded = false;
 
   bool _falVerified = false;
   String? _falOwnerName;
@@ -120,20 +137,33 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   ThemeMode get _currentTheme => themeModeNotifier.value;
   bool get _isLight => _currentTheme == ThemeMode.light;
 
+  bool get _isTeamMemberSignup => _accountType == _accountTypeTeamMember;
+
   bool get _isProfessionalAccount =>
-      _accountType == 'marketer' ||
-      _accountType == 'office' ||
-      _accountType == 'company' ||
-      _accountType == 'institution';
+      !_isTeamMemberSignup &&
+      (_accountType == 'marketer' ||
+          _accountType == 'office' ||
+          _accountType == 'company' ||
+          _accountType == 'institution');
+
+  bool get _isJoinExistingOrg =>
+      !_isTeamMemberSignup &&
+      _orgOnboarding == 'join' &&
+      (_joinOrgId != null && _joinOrgId!.trim().isNotEmpty);
+
+  bool get _profKycRequired =>
+      _isProfessionalAccount && !_isJoinExistingOrg;
 
   /// مكتب / مؤسسة / شركة — يتطلب السجل التجاري الموحّد (استعلام وزارة التجارة).
   bool get _needsUnifiedCommercialReg =>
-      _accountType == 'office' ||
-      _accountType == 'institution' ||
-      _accountType == 'company';
+      _profKycRequired &&
+      (_accountType == 'office' ||
+          _accountType == 'institution' ||
+          _accountType == 'company');
 
   bool get _showProfessionalDetails =>
       !_isProfessionalAccount ||
+      _isJoinExistingOrg ||
       (_falVerified &&
           (!_needsUnifiedCommercialReg || _commercialVerified));
 
@@ -149,6 +179,44 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       _isLight ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
   Color get _iconColor =>
       _isLight ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
+
+  bool _routeArgsApplied = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_routeArgsApplied) return;
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map) {
+      final at = args['account_type']?.toString();
+      if (at != null && at.trim().isNotEmpty) {
+        _routeArgsApplied = true;
+        final v = at.trim();
+        final oo = args['org_onboarding']?.toString().trim();
+        final joinId = args['join_org_id']?.toString().trim();
+        final jpRaw = args['join_org_preview'];
+        Map<String, dynamic>? jp;
+        if (jpRaw is Map) {
+          jp = Map<String, dynamic>.from(
+            jpRaw.map((k, v) => MapEntry(k.toString(), v)),
+          );
+        }
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          setState(() {
+            _accountType = v;
+            if (oo == 'join' || oo == 'create') {
+              _orgOnboarding = oo!;
+            }
+            if (joinId != null && joinId.isNotEmpty) {
+              _joinOrgId = joinId;
+            }
+            _joinOrgPreview = jp;
+          });
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -1028,30 +1096,50 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     });
 
     try {
-      late final Map<String, dynamic> map;
+      // استدعاء فوري لخدمة الهيئة العامة للعقار عبر Edge Function `verify_fal_license`
+      // — يُعيد البيانات في نفس الصفحة دون فتح متصفّح/WebView منفصل.
+      // الـ WebView القديم متاح كاحتياطي يدوي لمستخدمي سطح المكتب.
+      final FalLicenseVerifyResult res =
+          await FalLicenseService(Supabase.instance.client).verify(license);
+      if (!mounted) return;
 
-      final result = await Navigator.push<Map<String, dynamic>?>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => FalLicenseWebVerifyPage(licenseNo: license),
-        ),
-      );
+      final Map<String, dynamic> map = <String, dynamic>{
+        'valid': res.valid,
+        'status': res.status,
+        'owner_name': (res.brokerName ?? '').trim(),
+        'broker_email': (res.email ?? '').trim(),
+        'broker_mobile': (res.mobile ?? '').trim(),
+        'broker_national_id': (res.nationalId ?? '').trim(),
+        'start_date': (res.startDateIso ?? '').trim(),
+        'end_date': (res.endDateIso ?? '').trim(),
+        'license_type': (res.licenseType ?? '').trim(),
+        'license_no': (res.licenseNo ?? '').trim(),
+        'city': (res.city ?? '').trim(),
+        'district': (res.district ?? '').trim(),
+        'region': (res.region ?? '').trim(),
+        'source': (res.source ?? '').trim(),
+        if ((res.errorMessage ?? '').trim().isNotEmpty)
+          '_error_detail': res.errorMessage,
+      };
 
-      if (result == null) {
-        setState(() {
-          _falVerified = false;
-          _falOwnerName = null;
-          _falStartDate = null;
-          _falEndDate = null;
-          _falStatus = null;
-          _err = _isAr
-              ? 'تم إغلاق صفحة التحقق قبل اكتمال العملية.'
-              : 'Verification page was closed before completion.';
-        });
-        return;
+      // عند تعذُّر الاستجابة من الخدمة المباشرة (شبكة/أصل): نسمح بإكمال
+      // التحقق يدوياً عبر صفحة الهيئة في WebView كاحتياطي اختياري.
+      final bool serverUnavailable =
+          !res.valid && (res.status == 'network_error' || res.status == 'bad_response');
+      if (serverUnavailable) {
+        final Map<String, dynamic>? fallback =
+            await Navigator.push<Map<String, dynamic>?>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => FalLicenseWebVerifyPage(licenseNo: license),
+          ),
+        );
+        if (!mounted) return;
+        if (fallback != null) {
+          _applyFalVerificationMap(Map<String, dynamic>.from(fallback));
+          return;
+        }
       }
-
-      map = Map<String, dynamic>.from(result);
 
       _applyFalVerificationMap(map);
     } catch (e) {
@@ -1133,7 +1221,75 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     } catch (_) {}
   }
 
+  Future<void> _verifyTeamInvitation() async {
+    final nid = _normalizeDigits(_nidCtrl.text).trim();
+    final phoneLocal = _normalizeSaudiPhoneForInput(_phoneCtrl.text).trim();
+    if (nid.length != 10) {
+      setState(() {
+        _err = _isAr
+            ? 'أدخل رقم هوية/إقامة من 10 أرقام.'
+            : 'Enter a 10-digit national ID / Iqama.';
+      });
+      return;
+    }
+    if (!_isValidPhoneLocal05(phoneLocal)) {
+      setState(() {
+        _err = _isAr
+            ? 'رقم الجوال: 10 أرقام تبدأ بـ 05.'
+            : 'Mobile: 10 digits starting with 05.';
+      });
+      return;
+    }
+    setState(() {
+      _teamVerifyingInvite = true;
+      _err = null;
+      _ok = null;
+      _teamInviteVerified = false;
+      _teamJoinExpanded = false;
+      _teamInvitationId = null;
+      _teamInvitePreview = null;
+    });
+    final res = await OrgTeamService(Supabase.instance.client).verifyTeamInvitation(
+      nationalId: nid,
+      mobile: phoneLocal,
+    );
+    if (!mounted) return;
+    setState(() => _teamVerifyingInvite = false);
+    if (res['ok'] == true) {
+      setState(() {
+        _teamInviteVerified = true;
+        _teamInvitationId = res['invitation_id']?.toString();
+        _teamInvitePreview = res;
+        _ok = _isAr
+            ? 'تم التحقق من العضوية. اضغط «انضمام» لإكمال البيانات.'
+            : 'Membership verified. Tap Join to complete your profile.';
+      });
+      return;
+    }
+    final msgAr = (res['message_ar'] ?? '').toString();
+    final msgEn = (res['message_en'] ?? '').toString();
+    setState(() {
+      _teamInviteVerified = false;
+      _err = _isAr
+          ? (msgAr.isNotEmpty
+              ? msgAr
+              : 'عليك التواصل مع المسوق أو مدير المنشأة لتعديل بياناتك ثم العودة لإكمال إنشاء الحساب.')
+          : (msgEn.isNotEmpty
+              ? msgEn
+              : 'Contact your manager to update your invitation details.');
+    });
+  }
+
   Future<void> _createAccount() async {
+    if (_isTeamMemberSignup && !_teamJoinExpanded) {
+      setState(() {
+        _err = _isAr
+            ? 'اضغط «انضمام» بعد التحقق من العضوية.'
+            : 'Tap Join after verifying your invitation.';
+      });
+      return;
+    }
+
     setState(() {
       _busy = true;
       _err = null;
@@ -1151,7 +1307,19 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     final p2 = _p2.text.trim();
     final unifiedNatDigits = normalizeUnifiedNationalInput(_unifiedNatCtrl.text);
 
-    if (_isProfessionalAccount) {
+    if (_isTeamMemberSignup) {
+      if (!_teamInviteVerified || _teamInvitationId == null) {
+        setState(() {
+          _busy = false;
+          _err = _isAr
+              ? 'تحقق من العضوية أولاً.'
+              : 'Verify your team invitation first.';
+        });
+        return;
+      }
+    }
+
+    if (_profKycRequired) {
       if (!_isValidFalLicense(falLicense)) {
         setState(() {
           _busy = false;
@@ -1210,7 +1378,9 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           return;
         }
       }
+    }
 
+    if (_isProfessionalAccount) {
       if (!isValidUnifiedNationalNumberDigits(unifiedNatDigits)) {
         setState(() {
           _busy = false;
@@ -1323,7 +1493,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       return;
     }
 
-    if (_pendingSignaturePng == null || _pendingSignaturePng!.isEmpty) {
+    if (ProfileComplianceService.kProfileSignatureRequired &&
+        (_pendingSignaturePng == null || _pendingSignaturePng!.isEmpty)) {
       setState(() {
         _busy = false;
         _err = _isAr
@@ -1432,16 +1603,19 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         'p_third_name_en': null,
         'p_fourth_name_en': null,
         'p_locale': locale,
-        'account_type': _accountType,
+        'account_type': _isTeamMemberSignup
+            ? (_teamInvitePreview?['org_account_type']?.toString() ??
+                'office')
+            : _accountType,
         'verification_status': 'none',
-        'fal_license': _isProfessionalAccount ? falLicense : null,
-        'fal_start_date': _isProfessionalAccount
+        'fal_license': _profKycRequired ? falLicense : null,
+        'fal_start_date': _profKycRequired
             ? _falStartDate?.toIso8601String().split('T').first
             : null,
-        'fal_end_date': _isProfessionalAccount
+        'fal_end_date': _profKycRequired
             ? _falEndDate?.toIso8601String().split('T').first
             : null,
-        'office_name': _isProfessionalAccount
+        'office_name': _profKycRequired
             ? (_needsUnifiedCommercialReg
                 ? (((_commercialSnapshot?['entity_name_ar'] ?? '')
                         .toString()
@@ -1496,18 +1670,21 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         data: {
           'username': username,
           'phone': phoneE164,
-          'account_type': _accountType,
+          'account_type': _isTeamMemberSignup
+            ? (_teamInvitePreview?['org_account_type']?.toString() ??
+                'office')
+            : _accountType,
           'locale': locale,
           'full_name': parts['fullRaw'] ?? assembledName,
-          'fal_license': _isProfessionalAccount ? falLicense : null,
-          'fal_start_date': _isProfessionalAccount
+          'fal_license': _profKycRequired ? falLicense : null,
+          'fal_start_date': _profKycRequired
               ? _falStartDate?.toIso8601String().split('T').first
               : null,
-          'fal_end_date': _isProfessionalAccount
+          'fal_end_date': _profKycRequired
               ? _falEndDate?.toIso8601String().split('T').first
               : null,
-          'fal_owner_name': _isProfessionalAccount ? _falOwnerName : null,
-          'fal_status': _isProfessionalAccount ? _falStatus : null,
+          'fal_owner_name': _profKycRequired ? _falOwnerName : null,
+          'fal_status': _profKycRequired ? _falStatus : null,
           if (_needsUnifiedCommercialReg)
             'unified_commercial_reg_no': _normalizeDigits(_unifiedCrCtrl.text)
                 .replaceAll(RegExp(r'[^0-9]'), ''),
@@ -1555,6 +1732,20 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               );
             } catch (_) {}
           }
+          if (_isTeamMemberSignup && _teamInvitationId != null) {
+            final link = await OrgTeamService(sb).completeTeamInvitation(
+              _teamInvitationId!,
+            );
+            if (link['ok'] != true && mounted) {
+              setState(() {
+                _busy = false;
+                _err = _isAr
+                    ? 'تم إنشاء الحساب لكن تعذر ربطه بالفريق: ${link['error'] ?? ''}'
+                    : 'Account created but team link failed: ${link['error'] ?? ''}';
+              });
+              return;
+            }
+          }
           await _clearPendingProfile();
         } catch (_) {
           await _savePendingProfile(profileParams);
@@ -1568,19 +1759,29 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       if (!mounted) return;
       setState(() => _busy = false);
 
-      final successMsg = signUpRes.session != null
+      final loc = AppLocalizations.of(context);
+      final successMsg = _isTeamMemberSignup
           ? (_isAr
-              ? 'تم إنشاء الحساب وحفظ البيانات.'
-              : 'Account created and profile saved.')
-          : (_isAr
-              ? 'تم إنشاء الحساب. افتح البريد لتأكيده ثم سجّل الدخول.'
-              : 'Account created. Confirm email then sign in.');
+              ? 'تم إنشاء حسابك وربطه بالفريق. سجّل الدخول للمتابعة.'
+              : 'Account created and linked to your team. Sign in to continue.')
+          : _isJoinExistingOrg
+          ? (loc?.registerSignupJoinPendingSnackbar ??
+              (_isAr
+                  ? 'تم إنشاء الحساب. بعد تسجيل الدخول يُرسَل طلب الانضمام ويُفعَّل الحساب بموافقة المدير.'
+                  : 'Account created. After you sign in, your join request is sent and the owner must approve it.'))
+          : (signUpRes.session != null
+              ? (_isAr
+                  ? 'تم إنشاء الحساب وحفظ البيانات.'
+                  : 'Account created and profile saved.')
+              : (_isAr
+                  ? 'تم إنشاء الحساب. افتح البريد لتأكيده ثم سجّل الدخول.'
+                  : 'Account created. Confirm email then sign in.'));
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
           content: Text(successMsg),
-          duration: const Duration(seconds: 3),
+          duration: const Duration(seconds: 4),
         ),
       );
 
@@ -1588,6 +1789,18 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(AppConfig.prefGuestModeKey, false);
         await prefs.setString(AppConfig.prefEntryModeKey, 'user');
+        if (_isJoinExistingOrg) {
+          final jid = _joinOrgId?.trim() ?? '';
+          if (jid.isNotEmpty) {
+            await prefs.setString(OrgTeamService.prefPendingSignupOrgJoinId, jid);
+            final intro = loc?.registerPendingJoinIntro ??
+                (_isAr ? 'طلب انضمام عبر التسجيل.' : 'Join request via signup.');
+            await prefs.setString(
+              OrgTeamService.prefPendingSignupOrgJoinIntro,
+              intro,
+            );
+          }
+        }
       } catch (_) {}
 
       await Future<void>.delayed(const Duration(milliseconds: 450));
@@ -1604,9 +1817,25 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     } on AuthException catch (e) {
       setState(() {
         _busy = false;
+        final raw = e.message.toString();
+        final low = raw.toLowerCase();
+        final isDbNewUser = low.contains('database error saving new user') ||
+            low.contains('unexpected_failure');
         _err = _isAr
-            ? 'خطأ في إنشاء الحساب: ${e.message}'
-            : 'Sign up error: ${e.message}';
+            ? (isDbNewUser
+                ? 'تعذّر إنشاء الحساب على الخادم (خطأ قاعدة البيانات عند حفظ المستخدم). '
+                    'جرّب لاحقاً، أو تأكّد أنّ رقم الجوال/الهوية غير مسجّلين مسبقاً. '
+                    'إن استمر الخطأ: طبّق على Supabase الهجرة '
+                    'supabase/migrations/20260505130000_signup_profile_trigger_and_phone_lookup_fix.sql'
+                    ' ثم أعد المحاولة.\n($raw)'
+                : 'خطأ في إنشاء الحساب: $raw')
+            : (isDbNewUser
+                ? 'Could not create the account (database error while saving the user). '
+                    'Try again later, or confirm your phone and national ID are not already registered. '
+                    'If this persists, apply migration '
+                    'supabase/migrations/20260505130000_signup_profile_trigger_and_phone_lookup_fix.sql '
+                    'on Supabase, then retry.\n($raw)'
+                : 'Sign up error: $raw');
       });
     } on PostgrestException catch (e) {
       setState(() {
@@ -1802,8 +2031,12 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           value: 'institution',
           child: Text(_isAr ? 'مؤسسة عقارية' : 'Real-estate institution'),
         ),
+        DropdownMenuItem(
+          value: _accountTypeTeamMember,
+          child: Text(_isAr ? 'عضو ضمن فريق' : 'Team member'),
+        ),
       ],
-      onChanged: _busy
+      onChanged: _busy || _isJoinExistingOrg
           ? null
           : (v) {
               if (v == null || v == _accountType) return;
@@ -1812,6 +2045,11 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                 _err = null;
                 _ok = null;
                 _emailFromRegulatorSnapshot = null;
+                _teamInvitationId = null;
+                _teamInvitePreview = null;
+                _teamInviteVerified = false;
+                _teamVerifyingInvite = false;
+                _teamJoinExpanded = false;
 
                 _falVerified = false;
                 _falOwnerName = null;
@@ -1845,7 +2083,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextFormField(
+        AqarTextFormField(
           controller: _falLicenseCtrl,
           focusNode: _falLicenseFocus,
           enabled: !_busy && !_verifyingFal,
@@ -1974,7 +2212,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           ),
         ),
         const SizedBox(height: 6),
-        TextFormField(
+        AqarTextFormField(
           controller: _unifiedCrCtrl,
           focusNode: _unifiedCrFocus,
           enabled: !_busy && !_commercialBusy && _falVerified,
@@ -2072,7 +2310,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   }
 
   Widget _fieldNationalId() {
-    return TextFormField(
+    return AqarTextFormField(
       controller: _nidCtrl,
       focusNode: _nidFocus,
       enabled: !_busy,
@@ -2098,7 +2336,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   }
 
   Widget _fieldUnifiedNationalNumber() {
-    return TextFormField(
+    return AqarTextFormField(
       controller: _unifiedNatCtrl,
       focusNode: _unifiedNatFocus,
       enabled: !_busy,
@@ -2120,7 +2358,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   }
 
   Widget _fieldPhone() {
-    return TextFormField(
+    return AqarTextFormField(
       controller: _phoneCtrl,
       focusNode: _phoneFocus,
       enabled: !_busy,
@@ -2169,7 +2407,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       },
       fieldViewBuilder:
           (context, textEditingController, focusNode, onFieldSubmitted) {
-        return TextFormField(
+        return AqarTextFormField(
           controller: textEditingController,
           focusNode: focusNode,
           enabled: !_busy,
@@ -2245,14 +2483,14 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         ? 'الأول، الثاني، الثالث، والأخير — يُستخدم في العقود والوثائق الرسمية.'
         : 'First, second, third, and family name — used on contracts and official documents.';
 
-    TextFormField field({
+    Widget field({
       required TextEditingController controller,
       required FocusNode focus,
       required FocusNode nextFocus,
       required String hint,
       TextInputAction action = TextInputAction.next,
     }) {
-      return TextFormField(
+      return AqarTextFormField(
         controller: controller,
         focusNode: focus,
         enabled: !_busy && !lockName,
@@ -2782,7 +3020,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   }
 
   Widget _fieldPassword1() {
-    return TextFormField(
+    return AqarTextFormField(
       controller: _p1,
       focusNode: _p1Focus,
       enabled: !_busy,
@@ -2810,7 +3048,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   }
 
   Widget _fieldPassword2() {
-    return TextFormField(
+    return AqarTextFormField(
       controller: _p2,
       focusNode: _p2Focus,
       enabled: !_busy,
@@ -2843,6 +3081,159 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     );
   }
 
+  Widget _teamInvitePreviewBanner() {
+    final p = _teamInvitePreview;
+    if (!_teamInviteVerified || p == null || p['ok'] != true) {
+      return const SizedBox.shrink();
+    }
+    final name = _isAr
+        ? (p['inviter_full_name_ar'] ?? p['inviter_full_name_en'] ?? '').toString().trim()
+        : (p['inviter_full_name_en'] ?? p['inviter_full_name_ar'] ?? '').toString().trim();
+    final phone = (p['inviter_phone'] ?? '').toString().trim();
+    final reqAt = p['requested_at'];
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _isLight ? const Color(0xFFE8F5E9) : const Color(0xFF1A2E24),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _fieldBorder, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.verified_user_outlined, color: _bankColor, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _isAr ? 'بيانات من طلب الانضمام' : 'Invitation details',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                    color: _textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (name.isNotEmpty)
+            Text(
+              name,
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 16,
+                color: _textPrimary,
+              ),
+            ),
+          if (phone.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${_isAr ? 'جوال المدعو' : 'Inviter mobile'}: $phone',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: _textSecondary,
+              ),
+            ),
+          ],
+          if (reqAt != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '${_isAr ? 'تاريخ الطلب' : 'Requested'}: $reqAt',
+              style: TextStyle(fontSize: 12.5, color: _textSecondary),
+            ),
+          ],
+          const SizedBox(height: 12),
+          if (!_teamJoinExpanded)
+            FilledButton(
+              onPressed: _busy
+                  ? null
+                  : () => setState(() => _teamJoinExpanded = true),
+              child: Text(_isAr ? 'انضمام' : 'Join'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _joinOrgPreviewBanner() {
+    final p = _joinOrgPreview;
+    if (p == null || p['ok'] != true) return const SizedBox.shrink();
+    var nameAr = (p['display_name_ar'] ?? '').toString().trim();
+    var nameEn = (p['display_name_en'] ?? '').toString().trim();
+    final title = _isAr
+        ? (nameAr.isNotEmpty ? nameAr : nameEn)
+        : (nameEn.isNotEmpty ? nameEn : nameAr);
+    final code = (p['fal_public_code'] ?? '').toString().trim();
+    final loc = AppLocalizations.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _isLight ? const Color(0xFFE0F2FE) : const Color(0xFF1A2740),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _fieldBorder, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.groups_outlined, color: _bankColor, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  loc?.registerOrgPreviewTitle ??
+                      (_isAr ? 'تأكيد المنشأة' : 'Organization to join'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                    color: _textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+              color: _textPrimary,
+            ),
+          ),
+          if (code.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              loc?.registerOrgPreviewFal(code) ??
+                  (_isAr ? 'رمز العرض: $code' : 'Code: $code'),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: _textSecondary,
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Text(
+            loc?.registerJoinFlowHint ??
+                (_isAr
+                    ? 'بعد إتمام التسجيل وتسجيل الدخول يُرسَل طلب الانضمام إلى مدير المنشأة للموافقة.'
+                    : 'After signup and sign-in, a join request is sent to the owner.'),
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.35,
+              color: _textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _card({required double maxWidth, required bool allowScroll}) {
     final cardColor = _isLight
         ? Colors.white.withOpacity(0.98)
@@ -2864,7 +3255,15 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          _isProfessionalAccount
+          _isTeamMemberSignup
+              ? (_teamJoinExpanded
+                  ? (_isAr
+                      ? 'أكمل الاسم والبريد وكلمة المرور.'
+                      : 'Complete name, email, and password.')
+                  : (_isAr
+                      ? 'أدخل هويتك وجوالك ثم تحقق من العضوية.'
+                      : 'Enter your ID and mobile, then verify membership.'))
+              : _isProfessionalAccount
               ? (_showProfessionalDetails
                   ? (_needsUnifiedCommercialReg && !_commercialVerified
                       ? (_isAr
@@ -2888,9 +3287,69 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           ),
         ),
         const SizedBox(height: 18),
+        if (_isJoinExistingOrg && _joinOrgPreview != null) ...[
+          _joinOrgPreviewBanner(),
+          const SizedBox(height: 14),
+        ],
         _fieldAccountType(),
         const SizedBox(height: 12),
-        if (_isProfessionalAccount) ...[
+        if (_isTeamMemberSignup) ...[
+          _fieldNationalId(),
+          const SizedBox(height: 12),
+          AqarTextFormField(
+            controller: _phoneCtrl,
+            focusNode: _phoneFocus,
+            enabled: !_busy && !_teamJoinExpanded,
+            keyboardType: TextInputType.phone,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9٠-٩۰-۹]')),
+              LengthLimitingTextInputFormatter(10),
+            ],
+            decoration: _dec(
+              context,
+              hint: _isAr ? 'رقم الجوال (05xxxxxxxx)' : 'Mobile (05xxxxxxxx)',
+              icon: Icons.phone_iphone_outlined,
+              suffix: _teamInviteVerified
+                  ? Icon(Icons.verified_rounded, color: _bankColor)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (!_teamInviteVerified)
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: (_busy || _teamVerifyingInvite)
+                    ? null
+                    : _verifyTeamInvitation,
+                child: _teamVerifyingInvite
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(_isAr ? 'التأكد من العضوية' : 'Verify membership'),
+              ),
+            ),
+          if (_teamInviteVerified) ...[
+            const SizedBox(height: 12),
+            _teamInvitePreviewBanner(),
+          ],
+          if (_teamJoinExpanded) ...[
+            const SizedBox(height: 12),
+            _fieldEmailWithInlineAutocomplete(),
+            const SizedBox(height: 12),
+            _fieldQuadName(),
+            const SizedBox(height: 12),
+            _fieldPassword1(),
+            const SizedBox(height: 12),
+            _fieldPassword2(),
+            if (ProfileComplianceService.kProfileSignatureRequired) ...[
+              const SizedBox(height: 16),
+              _signupSignatureBlock(),
+            ],
+          ],
+        ] else if (_isProfessionalAccount) ...[
           _fieldFalLicense(),
           if (_falVerified && _needsUnifiedCommercialReg) ...[
             const SizedBox(height: 12),
@@ -2911,8 +3370,10 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
             _fieldPassword1(),
             const SizedBox(height: 12),
             _fieldPassword2(),
-            const SizedBox(height: 16),
-            _signupSignatureBlock(),
+            if (ProfileComplianceService.kProfileSignatureRequired) ...[
+              const SizedBox(height: 16),
+              _signupSignatureBlock(),
+            ],
           ],
         ] else ...[
           _fieldNationalId(),
@@ -2926,8 +3387,10 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           _fieldPassword1(),
           const SizedBox(height: 12),
           _fieldPassword2(),
-          const SizedBox(height: 16),
-          _signupSignatureBlock(),
+          if (ProfileComplianceService.kProfileSignatureRequired) ...[
+            const SizedBox(height: 16),
+            _signupSignatureBlock(),
+          ],
         ],
         const SizedBox(height: 14),
         if (_err != null) _messageBox(text: _err!, isError: true),
@@ -2947,6 +3410,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
             ),
             onPressed: (_busy ||
                     _verifyingFal ||
+                    (_isTeamMemberSignup &&
+                        (!_teamInviteVerified || !_teamJoinExpanded)) ||
                     (_isProfessionalAccount && !_showProfessionalDetails))
                 ? null
                 : _createAccount,

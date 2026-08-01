@@ -1,5 +1,6 @@
-import 'package:aqar_user/l10n/app_localizations.dart';
+﻿import 'package:aqar_user/l10n/app_localizations.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/notifications/in_app_notification_catalog.dart';
@@ -50,6 +51,9 @@ class ListingReportReasons {
   static const String impersonation = 'impersonation';
   static const String licenseMismatch = 'license_mismatch';
   static const String harassment = 'harassment';
+  static const String fraudFinancial = 'fraud_financial';
+  static const String illegalContent = 'illegal_content';
+  static const String privacyViolation = 'privacy_violation';
   static const String other = 'other';
 
   static const List<String> orderedKeys = <String>[
@@ -59,8 +63,20 @@ class ListingReportReasons {
     impersonation,
     licenseMismatch,
     harassment,
+    fraudFinancial,
+    illegalContent,
+    privacyViolation,
     other,
   ];
+
+  /// أسباب تتطلب شرحاً موثقاً قبل الإرسال.
+  static const Set<String> keysRequiringLegalNote = {
+    fraudFinancial,
+    illegalContent,
+    privacyViolation,
+    impersonation,
+    other,
+  };
 
   static String label(AppLocalizations l10n, String key) {
     switch (key) {
@@ -76,6 +92,12 @@ class ListingReportReasons {
         return l10n.listingReportReasonLicenseMismatch;
       case harassment:
         return l10n.listingReportReasonHarassment;
+      case fraudFinancial:
+        return l10n.listingReportReasonFraudFinancial;
+      case illegalContent:
+        return l10n.listingReportReasonIllegalContent;
+      case privacyViolation:
+        return l10n.listingReportReasonPrivacyViolation;
       case other:
         return l10n.listingReportReasonOther;
       default:
@@ -299,14 +321,20 @@ class _ReportFormSheet extends StatefulWidget {
 
 class _ReportFormSheetState extends State<_ReportFormSheet> {
   final _note = TextEditingController();
+  final _legalNote = TextEditingController();
   final _selected = <String>{};
   bool _busy = false;
 
   AppLocalizations get _l => widget.l10n;
 
+  bool get _needsLegalNote => _selected.any(
+        ListingReportReasons.keysRequiringLegalNote.contains,
+      );
+
   @override
   void dispose() {
     _note.dispose();
+    _legalNote.dispose();
     super.dispose();
   }
 
@@ -324,9 +352,22 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
       );
       return;
     }
+    if (_needsLegalNote && _legalNote.text.trim().length < 30) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l.listingReportLegalDetailsRequired)),
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
-      await widget.onSubmit(_selected.toList(), _note.text);
+      final combinedNote = () {
+        final a = _note.text.trim();
+        final b = _legalNote.text.trim();
+        if (a.isEmpty) return b;
+        if (b.isEmpty) return a;
+        return '$a\n\n$b';
+      }();
+      await widget.onSubmit(_selected.toList(), combinedNote);
       if (mounted) Navigator.of(context).pop();
       widget.onDone?.call();
     } on DuplicateOpenListingReportException {
@@ -407,12 +448,24 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                     ),
                   if (_selected.contains(ListingReportReasons.other)) ...[
                     const SizedBox(height: 6),
-                    TextField(
+                    AqarTextField(
                       controller: _note,
                       minLines: 2,
                       maxLines: 5,
                       decoration: InputDecoration(
                         labelText: _l.listingReportDetailsLabel,
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                  if (_needsLegalNote) ...[
+                    const SizedBox(height: 10),
+                    AqarTextField(
+                      controller: _legalNote,
+                      minLines: 3,
+                      maxLines: 8,
+                      decoration: InputDecoration(
+                        labelText: _l.listingReportLegalDetailsLabel,
                         border: const OutlineInputBorder(),
                       ),
                     ),

@@ -1,12 +1,14 @@
-// lib/screens/edit_property_page.dart
+﻿// lib/screens/edit_property_page.dart
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/branding/app_branding.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart' show suspendAutoLock;
@@ -22,8 +24,10 @@ import '../core/utils/app_money.dart';
 import '../services/watermark_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/deed_date_calendar_dialog.dart';
+import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/year_built_picker_field.dart';
 import '../widgets/property_type_hierarchy_picker.dart';
+import '../widgets/stable_select_chip.dart';
 
 /// مطابقة لأسماء `saudi_locations.json` (كما في إضافة إعلان).
 const List<String> _kEditQuickCityAr = ['الرياض', 'جدة', 'مكة المكرمة'];
@@ -37,12 +41,16 @@ class EditPropertyPage extends StatefulWidget {
   /// وضع المسوّق: تعديل لمطابقة بيانات الهيئة بعد التصريح (قبل النشر).
   final bool marketerRegaAlignmentMode;
 
+  /// عند `true`: يخفي سهم الرجوع الداخلي للاعتماد على شريط لوحة الداشبورد.
+  final bool embedAppBar;
+
   const EditPropertyPage({
     super.key,
     required this.property,
     required this.userId,
     required this.lang,
     this.marketerRegaAlignmentMode = false,
+    this.embedAppBar = false,
   });
 
   @override
@@ -96,6 +104,13 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
   DateTime? _deedDate;
   bool _negotiable = false;
   String _typeCode = 'villa';
+
+  // --- فوترة الإعلان (ضريبة + عمولة): نفس منطق صفحة الإضافة ---
+  bool _priceIncludesVat = true;
+  String _commissionKind = 'none';
+  final TextEditingController _commissionFixedCtrl = TextEditingController();
+  static const double _kEditVatRate = 0.05;
+  static const double _kEditCommissionRate = 0.025;
 
   int? _bedrooms;
   int? _bathrooms;
@@ -163,6 +178,13 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
 
     _currency = p.currency;
     _negotiable = p.negotiable;
+    _priceIncludesVat = p.priceIncludesVat;
+    _commissionKind = p.marketingCommissionKind;
+    if (p.marketingCommissionKind == 'fixed' &&
+        p.marketingCommissionAmount > 0) {
+      _commissionFixedCtrl.text =
+          p.marketingCommissionAmount.toStringAsFixed(2);
+    }
     final rawKey = p.listingTypeKey.trim().toLowerCase();
     _typeCode = rawKey.isNotEmpty ? rawKey : p.type.name.toLowerCase();
 
@@ -195,11 +217,29 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     _wireNumericFieldListeners();
     _price.addListener(_onPriceOrAreaChanged);
     _area.addListener(_onPriceOrAreaChanged);
+    _commissionFixedCtrl.addListener(_onPriceOrAreaChanged);
     _bootstrap();
   }
 
   void _onPriceOrAreaChanged() {
     if (mounted) setState(() {});
+  }
+
+  double _editFixedCommissionValue() {
+    return double.tryParse(_commissionFixedCtrl.text.trim().replaceAll(',', '')) ??
+        0;
+  }
+
+  ListingInvoiceModel _buildEditInvoice() {
+    return ListingInvoiceModel(
+      enteredPrice: _parseNum(_price.text),
+      priceIncludesVat: _priceIncludesVat,
+      vatRate: _kEditVatRate,
+      commissionKind: _commissionKind,
+      commissionRate: _kEditCommissionRate,
+      commissionAmount: _editFixedCommissionValue(),
+      currencyCode: _currency,
+    );
   }
 
   double? _areaInSquareMeters() {
@@ -303,6 +343,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     _area.removeListener(_onPriceOrAreaChanged);
     _price.dispose();
     _area.dispose();
+    _commissionFixedCtrl.dispose();
     _currentBid.dispose();
     _virtualTourUrl.dispose();
     _contactPhone.dispose();
@@ -430,6 +471,15 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     } else {
       merged.remove('price_per_sqm');
     }
+    // — مرآة احتياطية لإعدادات الفوترة داخل listing_guidance.
+    merged['pricing'] = {
+      'price_includes_vat': _priceIncludesVat,
+      'vat_rate': _kEditVatRate,
+      'marketing_commission_kind': _commissionKind,
+      'marketing_commission_rate': _kEditCommissionRate,
+      'marketing_commission_amount':
+          _commissionKind == 'fixed' ? _editFixedCommissionValue() : 0,
+    };
     return merged;
   }
 
@@ -1067,6 +1117,24 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
             .eq('owner_id', _uid);
       } catch (_) {}
 
+      // — حفظ اختيارات الفوترة الجديدة (ضريبة + عمولة) في أعمدة v9.
+      //   نتجاهل الخطأ بصمت لو لم يكن الترحيل مطبّقاً بعد على البيئة (يبقى السلوك القديم).
+      try {
+        await _sb
+            .from('properties')
+            .update({
+              'price_includes_vat': _priceIncludesVat,
+              'vat_rate': _kEditVatRate,
+              'marketing_commission_kind': _commissionKind,
+              'marketing_commission_rate': _kEditCommissionRate,
+              'marketing_commission_amount': _commissionKind == 'fixed'
+                  ? _editFixedCommissionValue()
+                  : 0,
+            })
+            .eq('id', widget.property.id)
+            .eq('owner_id', _uid);
+      } catch (_) {}
+
       try {
         const landExtraKeys = <String>{
           'parcel_number',
@@ -1127,7 +1195,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
         try {
           bytesToUpload = await WatermarkService.addTextWatermark(
             bytesToUpload,
-            text: '© موثوق العقاري | Motawoq Real Estate',
+            text: AppBranding.copyrightBilingual(),
           );
         } catch (_) {}
 
@@ -1287,6 +1355,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
       child: Scaffold(
         backgroundColor: cs.surface,
         appBar: AppBar(
+          automaticallyImplyLeading: !widget.embedAppBar,
           title: Text(
             widget.marketerRegaAlignmentMode
                 ? (_isAr ? 'مطابقة بيانات الهيئة' : 'REGA alignment')
@@ -1372,7 +1441,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           if (!widget.marketerRegaAlignmentMode) ...[
                             _secTitle(_isAr ? 'سبب التعديل' : 'Edit reason'),
                             const SizedBox(height: 10),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _editReason,
                               enabled: !_saving && !exhausted,
                               maxLines: 3,
@@ -1478,7 +1547,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _title,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1534,7 +1603,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             }),
                           ),
                           const SizedBox(height: 12),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _city,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1547,7 +1616,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 : null,
                           ),
                           const SizedBox(height: 12),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _region,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1555,7 +1624,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _governorate,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1563,7 +1632,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _location,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1578,7 +1647,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 ? 'القطعة والحدود'
                                 : 'Parcel & boundaries'),
                             const SizedBox(height: 8),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _parcelNumber,
                               enabled: !_saving && !exhausted,
                               decoration: InputDecoration(
@@ -1587,7 +1656,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _boundaryNorth,
                               enabled: !_saving && !exhausted,
                               decoration: InputDecoration(
@@ -1596,7 +1665,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _boundarySouth,
                               enabled: !_saving && !exhausted,
                               decoration: InputDecoration(
@@ -1605,7 +1674,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _boundaryEast,
                               enabled: !_saving && !exhausted,
                               decoration: InputDecoration(
@@ -1613,7 +1682,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _boundaryWest,
                               enabled: !_saving && !exhausted,
                               decoration: InputDecoration(
@@ -1623,7 +1692,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             const SizedBox(height: 12),
                           ],
                           if (_showBuildingOnEdit) ...[
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _buildingNumber,
                               enabled: !_saving && !exhausted,
                               decoration: InputDecoration(
@@ -1633,7 +1702,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                             const SizedBox(height: 12),
                           ],
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _addressLine,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1644,7 +1713,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           const SizedBox(height: 12),
                           _secTitle(_isAr ? 'بيانات الصك' : 'Deed'),
                           const SizedBox(height: 8),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _deedNumber,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1652,36 +1721,59 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  _deedDate == null
-                                      ? (_isAr
-                                          ? 'تاريخ الصك: غير محدد'
-                                          : 'Deed date: not set')
-                                      : (_isAr
-                                          ? 'تاريخ الصك: ${_deedDate!.year}-${_deedDate!.month.toString().padLeft(2, '0')}-${_deedDate!.day.toString().padLeft(2, '0')}'
-                                          : 'Deed date: ${_deedDate!.year}-${_deedDate!.month.toString().padLeft(2, '0')}-${_deedDate!.day.toString().padLeft(2, '0')}'),
+                          Builder(
+                            builder: (context) {
+                              final cs = Theme.of(context).colorScheme;
+                              final enabled = !_saving && !exhausted;
+                              final formatted = _deedDate == null
+                                  ? null
+                                  : '${_deedDate!.year}-${_deedDate!.month.toString().padLeft(2, '0')}-${_deedDate!.day.toString().padLeft(2, '0')}';
+                              return InkWell(
+                                onTap: enabled ? _pickDeedDate : null,
+                                borderRadius: BorderRadius.circular(12),
+                                child: InputDecorator(
+                                  decoration: InputDecoration(
+                                    labelText:
+                                        _isAr ? 'تاريخ الصك' : 'Deed date',
+                                    hintText: _isAr
+                                        ? 'اختر التاريخ'
+                                        : 'Select date',
+                                    suffixIcon: _deedDate != null && enabled
+                                        ? IconButton(
+                                            tooltip: _isAr ? 'مسح' : 'Clear',
+                                            onPressed: () => setState(
+                                                () => _deedDate = null),
+                                            icon: const Icon(Icons.clear),
+                                          )
+                                        : Icon(
+                                            Icons.calendar_today_outlined,
+                                            color: cs.onSurfaceVariant,
+                                          ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 12),
+                                    child: Text(
+                                      formatted ??
+                                          (_isAr
+                                              ? 'اختر التاريخ'
+                                              : 'Select date'),
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: formatted == null
+                                            ? cs.onSurfaceVariant
+                                            : (enabled
+                                                ? cs.onSurface
+                                                : cs.onSurfaceVariant),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                              TextButton(
-                                onPressed: (_saving || exhausted)
-                                    ? null
-                                    : _pickDeedDate,
-                                child: Text(_isAr ? 'اختيار' : 'Pick'),
-                              ),
-                              if (_deedDate != null)
-                                TextButton(
-                                  onPressed: (_saving || exhausted)
-                                      ? null
-                                      : () => setState(() => _deedDate = null),
-                                  child: Text(_isAr ? 'مسح' : 'Clear'),
-                                ),
-                            ],
+                              );
+                            },
                           ),
                           const SizedBox(height: 8),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _deedIssuer,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -1691,7 +1783,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _desc,
                             enabled: !_saving && !exhausted,
                             maxLines: 4,
@@ -1719,7 +1811,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           Row(
                             children: [
                               Expanded(
-                                child: TextFormField(
+                                child: AqarTextFormField(
                                   controller: _price,
                                   enabled: !_saving && !exhausted,
                                   keyboardType:
@@ -1768,13 +1860,44 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 12),
+                          // — أسئلة الفوترة (ضريبة + عمولة) — تظهر تحت السعر مباشرة
+                          //   كما في صفحة إضافة الإعلان.
+                          _EditVatQuestion(
+                            isAr: _isAr,
+                            saving: _saving || exhausted,
+                            value: _priceIncludesVat,
+                            onChanged: (v) =>
+                                setState(() => _priceIncludesVat = v),
+                          ),
+                          const SizedBox(height: 10),
+                          _EditCommissionQuestion(
+                            isAr: _isAr,
+                            saving: _saving || exhausted,
+                            value: _commissionKind,
+                            onChanged: (v) => setState(() {
+                              _commissionKind = v;
+                              if (v != 'fixed') _commissionFixedCtrl.clear();
+                            }),
+                            fixedAmountCtrl: _commissionFixedCtrl,
+                            currencyCode: _currency,
+                          ),
+                          const SizedBox(height: 12),
+                          if (_parseNum(_price.text) > 0)
+                            ListingPricingBreakdown(
+                              invoice: _buildEditInvoice(),
+                              isAr: _isAr,
+                              title: _isAr
+                                  ? 'معاينة الفاتورة (حسب اختيارك)'
+                                  : 'Live invoice preview',
+                            ),
                           const SizedBox(height: 10),
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
                                 flex: 2,
-                                child: TextFormField(
+                                child: AqarTextFormField(
                                   controller: _area,
                                   enabled: !_saving && !exhausted,
                                   keyboardType:
@@ -1976,13 +2099,12 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 .map((k) {
                               final label = _amenityLabel(k);
                               final sel = _amenities[k] == true;
-                              return FilterChip(
+                              return StableSelectChip(
+                                label: label,
                                 selected: sel,
-                                showCheckmark: true,
-                                label: Text(label),
-                                onSelected: (_saving || exhausted)
-                                    ? null
-                                    : (v) => setState(() => _amenities[k] = v),
+                                enabled: !_saving && !exhausted,
+                                onSelected: (v) =>
+                                    setState(() => _amenities[k] = v),
                               );
                             }).toList(),
                           ),
@@ -2001,7 +2123,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           if (_useMapCoords) ...[
                             const SizedBox(height: 8),
-                            TextFormField(
+                            AqarTextFormField(
                               enabled: !_saving && !exhausted,
                               initialValue: _lat?.toString() ?? '',
                               keyboardType:
@@ -2016,7 +2138,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                   _lat = double.tryParse(v.trim()),
                             ),
                             const SizedBox(height: 10),
-                            TextFormField(
+                            AqarTextFormField(
                               enabled: !_saving && !exhausted,
                               initialValue: _lng?.toString() ?? '',
                               keyboardType:
@@ -2048,7 +2170,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           if (_isAuction) ...[
                             const SizedBox(height: 10),
-                            TextFormField(
+                            AqarTextFormField(
                               controller: _currentBid,
                               enabled: !_saving && !exhausted,
                               keyboardType:
@@ -2068,7 +2190,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           const SizedBox(height: 16),
                           _secTitle(_isAr ? 'روابط/فيديو' : 'Links/Video'),
                           const SizedBox(height: 10),
-                          TextFormField(
+                          AqarTextFormField(
                             controller: _virtualTourUrl,
                             enabled: !_saving && !exhausted,
                             decoration: InputDecoration(
@@ -2528,4 +2650,185 @@ class _EditImageItem {
   }
 
   bool get isNew => !isExisting;
+}
+
+/// السؤال الأول في صفحة تعديل الإعلان: شامل/غير شامل للضريبة 5%.
+class _EditVatQuestion extends StatelessWidget {
+  final bool isAr;
+  final bool saving;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _EditVatQuestion({
+    required this.isAr,
+    required this.saving,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.receipt_long_outlined, size: 18, color: cs.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isAr
+                      ? 'هل الإجمالي شامل ضريبة القيمة المضافة 5%؟'
+                      : 'Does the total include 5% VAT?',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              StableSelectChip(
+                label: isAr ? 'نعم — شامل' : 'Yes — included',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == true,
+                enabled: !saving,
+                onSelected: (_) => onChanged(true),
+              ),
+              StableSelectChip(
+                label: isAr ? 'لا — يضاف 5%' : 'No — add 5%',
+                exclusive: true,
+                showLeadingCheck: false,
+                selected: value == false,
+                enabled: !saving,
+                onSelected: (_) => onChanged(false),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// السؤال الثاني في صفحة تعديل الإعلان: لا توجد عمولة / نسبة / مبلغ مقطوع.
+class _EditCommissionQuestion extends StatelessWidget {
+  final bool isAr;
+  final bool saving;
+  final String value;
+  final ValueChanged<String> onChanged;
+  final TextEditingController fixedAmountCtrl;
+  final String currencyCode;
+
+  const _EditCommissionQuestion({
+    required this.isAr,
+    required this.saving,
+    required this.value,
+    required this.onChanged,
+    required this.fixedAmountCtrl,
+    required this.currencyCode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.percent, size: 18, color: cs.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  isAr
+                      ? 'هل إجمالي السعر يحوي عمولة التسويق العقاري؟'
+                      : 'Does the total include marketing commission?',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              ChoiceChip(
+                label: Text(isAr ? 'لا توجد عمولة' : 'No commission'),
+                selected: value == 'none',
+                onSelected: saving ? null : (_) => onChanged('none'),
+              ),
+              ChoiceChip(
+                label: Text(isAr ? 'عمولة 2.5%' : '2.5% commission'),
+                selected: value == 'percent',
+                onSelected: saving ? null : (_) => onChanged('percent'),
+              ),
+              ChoiceChip(
+                label: Text(isAr ? 'مبلغ مقطوع' : 'Fixed amount'),
+                selected: value == 'fixed',
+                onSelected: saving ? null : (_) => onChanged('fixed'),
+              ),
+            ],
+          ),
+          if (value == 'fixed') ...[
+            const SizedBox(height: 8),
+            AqarTextFormField(
+              controller: fixedAmountCtrl,
+              enabled: !saving,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: latinDecimalNumberFormatters(),
+              decoration: InputDecoration(
+                labelText: isAr
+                    ? 'مبلغ العمولة المقطوع ($currencyCode)'
+                    : 'Fixed commission amount ($currencyCode)',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+              validator: (v) {
+                if (value != 'fixed') return null;
+                final s = (v ?? '').trim();
+                if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
+                final n = double.tryParse(s.replaceAll(',', ''));
+                if (n == null || n <= 0) {
+                  return isAr ? 'أدخل مبلغاً موجباً' : 'Enter a positive amount';
+                }
+                return null;
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }

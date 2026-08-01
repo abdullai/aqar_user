@@ -11,12 +11,22 @@ String _accentKeyForUser(String? userId) {
   return 'app_accent_id_$u';
 }
 
+/// هل حفظ المستخدم لوناً مخصّصاً لحسابه؟
+Future<bool> userHasCustomAccent({String? userId}) async {
+  String? uid = userId;
+  try {
+    uid ??= Supabase.instance.client.auth.currentUser?.id;
+  } catch (_) {}
+  final u = (uid ?? '').trim();
+  if (u.isEmpty) return false;
+  final p = await SharedPreferences.getInstance();
+  return p.containsKey(_accentKeyForUser(u));
+}
+
 /// لوحة محدودة (5) لألوان التمييز — نفس البذور للوضعين الفاتح والداكن عبر AppTheme.
-/// الاختيار: أول دخول (حوار لوحة التحكم) أو الإعدادات في أي وقت (`kPrefAccentId`).
 abstract final class AppAccent {
   static const int count = 5;
 
-  /// ترتيب ثابت: افتراضي ثم بدائل متناغمة مع Material 3.
   static const List<Color> seeds = <Color>[
     Color(0xFF0F766E),
     Color(0xFF0369A1),
@@ -33,19 +43,30 @@ abstract final class AppAccent {
 final ValueNotifier<Color> accentSeedNotifier =
     ValueNotifier<Color>(AppAccent.seeds[0]);
 
-/// يحمّل لون التمييز للمستخدم المسجّل الحالي إن وُجد [userId]، وإلا للجهاز الافتراضي.
-/// عند أول دخول لمستخدم جديد: إن لم يُحفظ له لون، يُنسخ من لون الجهاز مرة واحدة.
+/// يحمّل لون التمييز للمستخدم الحالي فقط.
+/// إن لم يخصص المستخدم لوناً → الافتراضي (لا وراثة من جهاز/حساب آخر).
 Future<void> loadAppAccentFromPrefs({String? userId}) async {
   final p = await SharedPreferences.getInstance();
-  final key = _accentKeyForUser(userId);
-  if (userId != null && userId.trim().isNotEmpty && !p.containsKey(key)) {
-    final dev = p.getInt(kPrefAccentId);
-    if (dev != null) {
-      await p.setInt(key, dev);
-    }
+  String? uid = userId;
+  try {
+    uid ??= Supabase.instance.client.auth.currentUser?.id;
+  } catch (_) {}
+  final u = (uid ?? '').trim();
+
+  if (u.isEmpty) {
+    // ضيف / بلا جلسة: لون الجهاز أو الافتراضي.
+    final id = (p.getInt(kPrefAccentId) ?? 0).clamp(0, AppAccent.count - 1);
+    accentSeedNotifier.value = AppAccent.seedForIndex(id);
+    return;
   }
-  final id = (p.getInt(key) ?? p.getInt(kPrefAccentId) ?? 0)
-      .clamp(0, AppAccent.count - 1);
+
+  final key = _accentKeyForUser(u);
+  if (!p.containsKey(key)) {
+    // حساب بلا تخصيص → افتراضي المنصة (لا نسخ من جهاز مشترك).
+    accentSeedNotifier.value = AppAccent.seeds[0];
+    return;
+  }
+  final id = (p.getInt(key) ?? 0).clamp(0, AppAccent.count - 1);
   accentSeedNotifier.value = AppAccent.seedForIndex(id);
 }
 
@@ -58,5 +79,25 @@ Future<void> setAppAccentIndex(int index, {String? userId}) async {
   } catch (_) {}
   final key = _accentKeyForUser(uid);
   await p.setInt(key, i);
+  // حدّث مفتاح الجهاز فقط للضيف؛ المسجّل يبقى حسابه معزولاً.
+  if ((uid ?? '').trim().isEmpty) {
+    await p.setInt(kPrefAccentId, i);
+  }
   accentSeedNotifier.value = AppAccent.seedForIndex(i);
+}
+
+/// فهرس اللون الحالي للمستخدم (أو 0 إن لم يُخصَّص).
+Future<int> currentAppAccentIndex({String? userId}) async {
+  final p = await SharedPreferences.getInstance();
+  String? uid = userId;
+  try {
+    uid ??= Supabase.instance.client.auth.currentUser?.id;
+  } catch (_) {}
+  final u = (uid ?? '').trim();
+  if (u.isEmpty) {
+    return (p.getInt(kPrefAccentId) ?? 0).clamp(0, AppAccent.count - 1);
+  }
+  final key = _accentKeyForUser(u);
+  if (!p.containsKey(key)) return 0;
+  return (p.getInt(key) ?? 0).clamp(0, AppAccent.count - 1);
 }

@@ -17,5 +17,7 @@ Future<void> resetStoredAppearanceForNextSignIn() async {
   await prefs.setString(AppConfig.prefThemeKey, 'light');
   await prefs.setDouble(AppConfig.prefTextScaleKey, 1.0);
   await prefs.setInt(kPrefAccentId, 0);
+  // لا تمسح مفاتيح accent لكل مستخدم — تبقى محفوظة لكل حساب.
+  accentSeedNotifier.value = AppAccent.seeds[0];
   await reloadAppAppearanceFromStoredPrefs?.call();
 }

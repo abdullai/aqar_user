@@ -37,6 +37,12 @@ class AppRoleHelper {
     }
   }
 
+  /// مالك فرد / مستخدم عام: لا باقات اشتراك — الطلب الفوري 30 ر.س منفصل.
+  static bool isOwnerFreeTierAccount(String? accountType) {
+    final k = fromAccountType(accountType);
+    return k == AppRoleKind.ownerIndividual || k == AppRoleKind.publicUser;
+  }
+
   static bool isMarketingRole(AppRoleKind k) {
     return k == AppRoleKind.marketer ||
         k == AppRoleKind.realEstateOffice ||
@@ -71,7 +77,8 @@ class AppRoleHelper {
     return k == AppRoleKind.marketer ||
         k == AppRoleKind.realEstateOffice ||
         k == AppRoleKind.realEstateCompany ||
-        k == AppRoleKind.realEstateInstitution;
+        k == AppRoleKind.realEstateInstitution ||
+        k == AppRoleKind.agency;
   }
 
   static bool isOwnerIndividual(String? accountType) {
@@ -92,9 +99,15 @@ class AppRoleHelper {
   /// صلاحيات عضو الفريق (JSON من [org_memberships.permissions]): إظهار زر الوسط.
   static bool orgPermissionsAllowMiddleNav(Map<String, dynamic>? permissions) {
     if (permissions == null || permissions.isEmpty) return false;
+    if (permissions['all'] == true) return true;
     if (permissions['desk'] == true) return true;
     if (permissions['middle_nav'] == true) return true;
     if (permissions['create_listing'] == true) return true;
+    if (permissions['add_properties'] == true) return true;
+    if (permissions['add_ads'] == true) return true;
+    if (permissions['add_listing_requests'] == true) return true;
+    if (permissions['edit_properties'] == true) return true;
+    if (permissions['view_market'] == true) return true;
     final listing = permissions['listing'];
     if (listing is Map && listing['create'] == true) return true;
     return false;
@@ -103,8 +116,13 @@ class AppRoleHelper {
   /// فتح لوحة «إدارتي» (مراقبة/فريق) وليس إضافة عقار مباشرة.
   static bool orgPermissionsOpenDeskShell(Map<String, dynamic>? permissions) {
     if (permissions == null || permissions.isEmpty) return false;
+    if (permissions['all'] == true) return true;
     if (permissions['desk'] == true) return true;
     if (permissions['middle_nav'] == true) return true;
+    if (permissions['manage_team'] == true) return true;
+    if (permissions['view_analytics'] == true) return true;
+    if (permissions['view_reports'] == true) return true;
+    if (permissions['access_chat'] == true) return true;
     return false;
   }
 }

@@ -60,11 +60,31 @@ class FastLoginService {
 
   static const _kPinLength = 'fast_pin_length';
 
+  /// محاولات PIN الفاشلة + قفل مؤقت.
+  static const _kPinFailCount = 'fast_pin_fail_count';
+  static const _kPinLockUntilMs = 'fast_pin_lock_until_ms';
+  static const int kPinMaxAttempts = 5;
+  static const Duration kPinLockout = Duration(minutes: 2);
+
+  /// لقطة استئناف الحساب بعد الخروج الكامل (كلمة المرور فقط — بدون أسرار القفل).
+  static const _kResumeUid = 'fast_resume_uid';
+  static const _kResumeDisplayName = 'fast_resume_display_name';
+  static const _kResumeUsername = 'fast_resume_username';
+
   /// يطابق مفاتيح `main.dart` لمسار شاشة القفل عند فتح التطبيق.
   static const kPrefBootstrapFastEnabled = 'fast_login_enabled';
   static const kPrefBootstrapPinSet = 'fast_login_pin_set';
 
   static Future<SharedPreferences> _prefs() => SharedPreferences.getInstance();
+
+  /// إخفاء رقم الهوية/الإقامة للعرض الآمن (يظهر آخر 4 أرقام فقط).
+  static String maskNationalId(String? raw) {
+    final d = normalizeDigits((raw ?? '').trim());
+    if (d.isEmpty) return '';
+    if (d.length <= 4) return '••••$d';
+    final tail = d.substring(d.length - 4);
+    return '${'•' * (d.length - 4)}$tail';
+  }
 
   /// طول رمز PIN المحفوظ (للواجهة). الافتراضي 6 لتوافق الحسابات القديمة.
   static Future<int> storedPinLength() async {
@@ -299,11 +319,63 @@ class FastLoginService {
   }
 
   static Future<bool> verifyPin(String pinRaw) async {
+    if (await isPinTemporarilyLocked()) return false;
     final pin = normalizeDigits(pinRaw);
     final p = await _prefs();
     final hash = p.getString(_kPinHash);
     if (hash == null || hash.isEmpty) return false;
-    return _hashPin(pin) == hash;
+    final ok = _hashPin(pin) == hash;
+    if (ok) {
+      await clearPinFailState();
+      return true;
+    }
+    await registerPinFailure();
+    return false;
+  }
+
+  static Future<bool> isPinTemporarilyLocked() async {
+    final p = await _prefs();
+    final until = p.getInt(_kPinLockUntilMs) ?? 0;
+    if (until <= 0) return false;
+    if (DateTime.now().millisecondsSinceEpoch >= until) {
+      await p.remove(_kPinLockUntilMs);
+      await p.setInt(_kPinFailCount, 0);
+      return false;
+    }
+    return true;
+  }
+
+  static Future<int> pinLockRemainingSeconds() async {
+    final p = await _prefs();
+    final until = p.getInt(_kPinLockUntilMs) ?? 0;
+    if (until <= 0) return 0;
+    final sec =
+        ((until - DateTime.now().millisecondsSinceEpoch) / 1000).ceil();
+    return sec.clamp(0, kPinLockout.inSeconds);
+  }
+
+  static Future<void> registerPinFailure() async {
+    final p = await _prefs();
+    final n = (p.getInt(_kPinFailCount) ?? 0) + 1;
+    await p.setInt(_kPinFailCount, n);
+    if (n >= kPinMaxAttempts) {
+      await p.setInt(
+        _kPinLockUntilMs,
+        DateTime.now().add(kPinLockout).millisecondsSinceEpoch,
+      );
+      await p.setInt(_kPinFailCount, 0);
+    }
+  }
+
+  static Future<void> clearPinFailState() async {
+    final p = await _prefs();
+    await p.remove(_kPinFailCount);
+    await p.remove(_kPinLockUntilMs);
+  }
+
+  static Future<int> pinFailCount() async {
+    final p = await _prefs();
+    return p.getInt(_kPinFailCount) ?? 0;
   }
 
   // -----------------------------
@@ -421,13 +493,16 @@ class FastLoginService {
     final p = await _prefs();
     await p.setString(_kCtxUid, uid);
 
-    if (displayName != null) {
-      final v = displayName.trim();
-      if (v.isNotEmpty) {
-        await p.setString(_kCtxDisplayName, v);
+    String? resolvedName = displayName?.trim();
+    if (resolvedName != null) {
+      if (resolvedName.isNotEmpty) {
+        await p.setString(_kCtxDisplayName, resolvedName);
       } else {
         await p.remove(_kCtxDisplayName);
+        resolvedName = null;
       }
+    } else {
+      resolvedName = p.getString(_kCtxDisplayName);
     }
 
     if (lang != null) {
@@ -439,13 +514,26 @@ class FastLoginService {
       }
     }
 
-    if (usernameNationalId != null) {
-      final v = normalizeDigits(usernameNationalId).trim();
-      if (v.isNotEmpty) {
-        await p.setString(_kCtxUsernameNationalId, v);
+    String? resolvedUser = usernameNationalId != null
+        ? normalizeDigits(usernameNationalId).trim()
+        : null;
+    if (resolvedUser != null) {
+      if (resolvedUser.isNotEmpty) {
+        await p.setString(_kCtxUsernameNationalId, resolvedUser);
       } else {
         await p.remove(_kCtxUsernameNationalId);
+        resolvedUser = null;
       }
+    } else {
+      resolvedUser = p.getString(_kCtxUsernameNationalId);
+    }
+
+    await p.setString(_kResumeUid, uid);
+    if ((resolvedName ?? '').isNotEmpty) {
+      await p.setString(_kResumeDisplayName, resolvedName!);
+    }
+    if ((resolvedUser ?? '').isNotEmpty) {
+      await p.setString(_kResumeUsername, resolvedUser!);
     }
   }
 
@@ -467,6 +555,89 @@ class FastLoginService {
   static Future<String?> getUsernameNationalId() async {
     final p = await _prefs();
     return p.getString(_kCtxUsernameNationalId);
+  }
+
+  /// هل يمكن قفل الجلسة ناعماً بعد الخمول؟ (جلسة + سياق مستخدم أو قفل)
+  static Future<bool> canSoftLockSession() async {
+    if (await hasAnyLockEnabled()) return true;
+    var u = await getUsernameNationalId();
+    if (u != null && u.trim().length >= 10) return true;
+    final resume = await getResumeAccount();
+    final ru = normalizeDigits((resume.username ?? '').trim());
+    if (ru.length >= 10) {
+      // أعد ملء السياق من لقطة الاستئناف حتى تعمل شاشة القفل بكلمة المرور.
+      final uid = resume.uid ?? '';
+      if (uid.isNotEmpty) {
+        await saveUserContext(
+          uid: uid,
+          displayName: resume.displayName,
+          usernameNationalId: ru,
+        );
+      } else {
+        final p = await _prefs();
+        await p.setString(_kCtxUsernameNationalId, ru);
+        if ((resume.displayName ?? '').trim().isNotEmpty) {
+          await p.setString(_kCtxDisplayName, resume.displayName!.trim());
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  static Future<({String? uid, String? displayName, String? username})>
+      getResumeAccount() async {
+    final p = await _prefs();
+    return (
+      uid: p.getString(_kResumeUid),
+      displayName: p.getString(_kResumeDisplayName),
+      username: p.getString(_kResumeUsername),
+    );
+  }
+
+  static Future<void> clearResumeAccount() async {
+    final p = await _prefs();
+    await p.remove(_kResumeUid);
+    await p.remove(_kResumeDisplayName);
+    await p.remove(_kResumeUsername);
+  }
+
+  /// عند الخروج الكامل: أزل أسرار القفل لكن أبقِ لقطة الاستئناف (كلمة المرور).
+  static Future<void> clearSecretsKeepResume() async {
+    final p = await _prefs();
+    final resumeUid = p.getString(_kResumeUid) ?? p.getString(_kCtxUid);
+    final resumeName =
+        p.getString(_kResumeDisplayName) ?? p.getString(_kCtxDisplayName);
+    final resumeUser =
+        p.getString(_kResumeUsername) ?? p.getString(_kCtxUsernameNationalId);
+
+    await p.remove(_kPinEnabled);
+    await p.remove(_kPinHash);
+    await p.remove(_kPinLength);
+    await p.remove(_kBioEnabled);
+    await p.remove(_kBioFaceEnabled);
+    await p.remove(_kBioFingerprintEnabled);
+    await p.remove(_kPinFailCount);
+    await p.remove(_kPinLockUntilMs);
+
+    await p.remove(_kCtxUid);
+    await p.remove(_kCtxDisplayName);
+    await p.remove(_kCtxLang);
+    await p.remove(_kCtxUsernameNationalId);
+
+    await p.setBool(kPrefBootstrapFastEnabled, false);
+    await p.setBool(kPrefBootstrapPinSet, false);
+    clearRuntimeUnlock();
+
+    if ((resumeUid ?? '').isNotEmpty) {
+      await p.setString(_kResumeUid, resumeUid!);
+    }
+    if ((resumeName ?? '').isNotEmpty) {
+      await p.setString(_kResumeDisplayName, resumeName!);
+    }
+    if ((resumeUser ?? '').isNotEmpty) {
+      await p.setString(_kResumeUsername, resumeUser!);
+    }
   }
 
   // -----------------------------
@@ -496,6 +667,8 @@ class FastLoginService {
     await p.remove(_kBioFaceEnabled);
     await p.remove(_kBioFingerprintEnabled);
     await p.remove(_kBioPrefsMigrated);
+    await p.remove(_kPinFailCount);
+    await p.remove(_kPinLockUntilMs);
 
     await p.remove(_kPromptState);
     await p.remove(_kPromptLoginCount);
@@ -505,6 +678,10 @@ class FastLoginService {
     await p.remove(_kCtxDisplayName);
     await p.remove(_kCtxLang);
     await p.remove(_kCtxUsernameNationalId);
+
+    await p.remove(_kResumeUid);
+    await p.remove(_kResumeDisplayName);
+    await p.remove(_kResumeUsername);
 
     await p.setBool(kPrefBootstrapFastEnabled, false);
     await p.setBool(kPrefBootstrapPinSet, false);

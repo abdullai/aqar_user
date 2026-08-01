@@ -28,16 +28,19 @@ class FieldGroupFrame extends StatelessWidget {
     this.subtitle,
     required this.child,
     this.padding = const EdgeInsets.all(16),
+    this.titleTextAlign,
   });
 
   final String? title;
   final String? subtitle;
   final Widget child;
   final EdgeInsetsGeometry padding;
+  final TextAlign? titleTextAlign;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final align = titleTextAlign;
 
     return DecoratedBox(
       decoration: FieldGroupTheme.boxDecoration(context),
@@ -50,6 +53,7 @@ class FieldGroupFrame extends StatelessWidget {
             if (title != null) ...[
               Text(
                 title!,
+                textAlign: align,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: cs.onSurface,
@@ -59,6 +63,7 @@ class FieldGroupFrame extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   subtitle!,
+                  textAlign: align,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: cs.onSurface.withValues(alpha: 0.72),
                         fontWeight: FontWeight.w600,

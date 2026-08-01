@@ -2,11 +2,15 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/branding/branding_logo_image.dart';
+import '../core/listing/listing_media_urls.dart';
+
 /// صورة غلاف طلب السوق أو شعار التطبيق عند غياب الصورة.
 class MarketRequestLeadThumb extends StatelessWidget {
   const MarketRequestLeadThumb({
     super.key,
     required this.storagePath,
+    this.defaultCoverUsed = false,
     this.size = 56,
     this.borderRadius = 12,
     this.width,
@@ -14,6 +18,7 @@ class MarketRequestLeadThumb extends StatelessWidget {
   });
 
   final String? storagePath;
+  final bool defaultCoverUsed;
   final double size;
   final double borderRadius;
 
@@ -21,14 +26,29 @@ class MarketRequestLeadThumb extends StatelessWidget {
   final double? width;
   final double? height;
 
-  static const String _fallbackAsset = 'assets/logo.png';
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final boxW = width ?? size;
     final boxH = height ?? size;
     final raw = (storagePath ?? '').trim();
+
+    Widget logoFallback() => ClipRRect(
+          borderRadius: BorderRadius.circular(borderRadius),
+          child: SizedBox(
+            width: boxW,
+            height: boxH,
+            child: const BrandingLogoImage(
+              fillFrame: true,
+              filterQuality: FilterQuality.high,
+              errorIcon: Icons.request_quote_outlined,
+            ),
+          ),
+        );
+
+    if (defaultCoverUsed || ListingMediaUrls.isSmartDefaultCoverPath(raw)) {
+      return logoFallback();
+    }
     final isHttp = raw.startsWith('http://') || raw.startsWith('https://');
     final url = isHttp
         ? raw
@@ -37,26 +57,6 @@ class MarketRequestLeadThumb extends StatelessWidget {
                 .from('property-images')
                 .getPublicUrl(raw)
             : '');
-
-    Widget logoFallback() => ClipRRect(
-          borderRadius: BorderRadius.circular(borderRadius),
-          child: Container(
-            width: boxW,
-            height: boxH,
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.65),
-            padding: const EdgeInsets.all(6),
-            child: Image.asset(
-              _fallbackAsset,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.high,
-              errorBuilder: (_, __, ___) => Icon(
-                Icons.request_quote_outlined,
-                color: cs.primary,
-                size: size * 0.45,
-              ),
-            ),
-          ),
-        );
 
     if (url.isEmpty) return logoFallback();
 

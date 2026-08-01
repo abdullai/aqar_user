@@ -1,4 +1,9 @@
+import 'compound_display_name.dart';
+
 /// استخراج اسم العرض وآخر دخول من صف users_profiles (لتسجيل الدخول وشاشة التحقق).
+///
+/// ترتيب «آخر دخول» يفضّل `last_verified_login_at` (يُحدَّث بعد OTP عبر `LoginSecurityDb`).
+/// انظر: `lib/core/auth/login_security_db.dart`
 ///
 /// عند غياب صف الملف أو فشل RLS يمكن قراءة الاسم من [User.userMetadata]
 /// (مثل `full_name` بعد التسجيل) وآخر دخول من [User.lastSignInAt].
@@ -9,7 +14,7 @@ class ProfileGreetingFromRow {
   static String? displayNameFromAuthMetadata(Map<String, dynamic>? meta) {
     if (meta == null || meta.isEmpty) return null;
     final s = (meta['full_name'] ?? meta['name'] ?? '').toString().trim();
-    return s.isEmpty ? null : s;
+    return s.isEmpty ? null : CompoundDisplayName.normalize(s);
   }
 
   static DateTime? lastSignInFromAuthString(String? iso) {
@@ -19,6 +24,10 @@ class ProfileGreetingFromRow {
 
   static String? displayName(Map<String, dynamic> row, {required bool isAr}) {
     String pickStr(String k) => (row[k] ?? '').toString().trim();
+
+    final alias = CompoundDisplayName.normalize(pickStr('display_name'));
+    final source = pickStr('public_name_source').toLowerCase();
+    final wantAlias = source == 'display';
 
     final arParts = [
       pickStr('first_name_ar'),
@@ -38,41 +47,54 @@ class ProfileGreetingFromRow {
     final enFull = pickStr('full_name_en');
     final anyFull = pickStr('full_name');
     final office = pickStr('office_name');
+    final accountType = pickStr('account_type').toLowerCase();
 
-    final nameFromPartsAr = arParts.join(' ');
-    final nameFromPartsEn = enParts.join(' ');
+    final nameFromPartsAr = CompoundDisplayName.normalize(arParts.join(' '));
+    final nameFromPartsEn = CompoundDisplayName.normalize(enParts.join(' '));
 
     String? pickAr() {
       if (nameFromPartsAr.isNotEmpty) return nameFromPartsAr;
-      if (arFull.isNotEmpty) return arFull;
-      if (anyFull.isNotEmpty) return anyFull;
+      if (arFull.isNotEmpty) return CompoundDisplayName.normalize(arFull);
+      if (anyFull.isNotEmpty) return CompoundDisplayName.normalize(anyFull);
       return null;
     }
 
     String? pickEn() {
       if (nameFromPartsEn.isNotEmpty) return nameFromPartsEn;
-      if (enFull.isNotEmpty) return enFull;
-      if (anyFull.isNotEmpty) return anyFull;
+      if (enFull.isNotEmpty) return CompoundDisplayName.normalize(enFull);
+      if (anyFull.isNotEmpty) return CompoundDisplayName.normalize(anyFull);
       return null;
     }
 
-    // لغة الواجهة أولاً، ثم العكس (كثيراً ما يُحفظ الاسم بجهة واحدة فقط عند التسجيل).
-    final primary = isAr ? pickAr() : pickEn();
-    final secondary = isAr ? pickEn() : pickAr();
+    String? official() {
+      // للكيانات — الاسم/الصفة المعتمدة (مكتب/مؤسسة/شركة).
+      const orgEntities = {'office', 'institution', 'company', 'agency'};
+      if (orgEntities.contains(accountType) && office.isNotEmpty) {
+        return office;
+      }
+      final primary = isAr ? pickAr() : pickEn();
+      final secondary = isAr ? pickEn() : pickAr();
+      final merged = (primary != null && primary.trim().isNotEmpty)
+          ? primary.trim()
+          : (secondary != null && secondary.trim().isNotEmpty)
+              ? secondary.trim()
+              : '';
+      if (merged.isNotEmpty) return merged;
+      if (office.isNotEmpty) return office;
+      return null;
+    }
 
-    final merged = (primary != null && primary.trim().isNotEmpty)
-        ? primary.trim()
-        : (secondary != null && secondary.trim().isNotEmpty)
-            ? secondary.trim()
-            : '';
+    if (wantAlias && alias.isNotEmpty) return alias;
 
-    if (merged.isNotEmpty) return merged;
-    if (office.isNotEmpty) return office;
+    final off = official();
+    if (off != null && off.isNotEmpty) return off;
+    if (alias.isNotEmpty) return alias;
     return null;
   }
 
   static DateTime? lastLoginAt(Map<String, dynamic> row) {
     for (final key in const [
+      'last_verified_login_at',
       'last_login_at',
       'last_seen_at',
       'last_sign_in_at',

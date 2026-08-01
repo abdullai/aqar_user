@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../navigation/post_auth_navigation.dart';
+
 class ReturnAfterAuth {
   ReturnAfterAuth._();
 
@@ -108,15 +110,15 @@ class ReturnAfterAuth {
     final tuple = await consume();
     if (tuple != null) {
       final args = decodeArgsJson(tuple.argsJson) ?? defaultArgs;
-      nav.pushNamedAndRemoveUntil(
-        tuple.route,
-        (r) => false,
+      await PostAuthNavigation.navigatorOpenRouteReplacingStack(
+        nav,
+        PostAuthNavigation.resolveDashboardRoute(tuple.route),
         arguments: args,
       );
     } else {
-      nav.pushNamedAndRemoveUntil(
-        defaultRoute,
-        (r) => false,
+      await PostAuthNavigation.navigatorOpenRouteReplacingStack(
+        nav,
+        PostAuthNavigation.resolveDashboardRoute(defaultRoute),
         arguments: defaultArgs,
       );
     }
