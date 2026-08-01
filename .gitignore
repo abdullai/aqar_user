@@ -75,3 +75,27 @@ android/app/release
 web/supabase_config.json
 firebase_private_key.txt
 *-firebase-adminsdk*.json
+
+# Generated security inventory (local only)
+tools/security_inventory/out/
+
+# =====================
+# Local junk / diagnostics (do not commit)
+# =====================
+*.hprof
+_screen_review.mp4
+_screen_review_frames/
+_vid_frames/
+_shots/
+_may_compare/
+_may_compare_agent_tmp/
+_screens_unused_backup/
+_analyze_out.txt
+_patch_*.py
+node_modules/
+fal_backend/node_modules/
+android/app/build/
+android/.gradle/
+node_modules/
+_screen_review.mp4
+android/*.hprof
