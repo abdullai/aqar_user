@@ -53,6 +53,7 @@ import '../services/account_completion_service.dart';
 
 import 'add_property_page.dart' as addp;
 import 'marketing_listing_entry_page.dart';
+import 'home_shorts_feed_page.dart';
 import 'property_details_page.dart' as details;
 import 'property_map_discovery_page.dart';
 import 'settings_page.dart';
@@ -226,6 +227,9 @@ dynamic decodeDashboardJsonString(String raw) => json.decode(raw);
 /// ترتيب ثابت للشريط السفلي (يتم تخطي عناصر حسب الصلاحية).
 enum DashboardBottomSlot {
   home,
+
+  /// شورتز بملء الشاشة (تيك توك) — ليس ضمن فلاتر الكل/طلبات/إعلانات.
+  shorts,
   myAds,
 
   /// طلباتي: إعلانات وطلبات سوق قدّمها المستخدم (بطاقات كالرئيسية).

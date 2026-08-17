@@ -13,12 +13,31 @@ class BillingTransactionRepository {
   /// يُحوّل الحالة الخام إلى تبويب العرض (success / pending / failed).
   static String normalizedStatus(Map<String, dynamic> row) {
     final raw = '${row['status'] ?? ''}'.toLowerCase().trim();
-    if (raw == 'success' || raw == 'refunded') return 'success';
-    if (raw == 'failed') return 'failed';
+    if (raw == 'success' ||
+        raw == 'refunded' ||
+        raw == 'paid' ||
+        raw == 'completed' ||
+        raw == 'succeeded' ||
+        raw == 'captured' ||
+        raw == 'ok') {
+      return 'success';
+    }
+    if (raw == 'failed' ||
+        raw == 'error' ||
+        raw == 'declined' ||
+        raw == 'canceled' ||
+        raw == 'cancelled') {
+      return 'failed';
+    }
 
     final gw = row['gateway_response'];
     if (gw is Map) {
       final m = Map<String, dynamic>.from(gw);
+      if (m['ok'] == true ||
+          '${m['status'] ?? ''}'.toLowerCase() == 'paid' ||
+          '${m['status'] ?? ''}'.toLowerCase() == 'success') {
+        return 'success';
+      }
       if (m['ok'] == false || m['status'] == 'failed') return 'failed';
       final err = '${m['error'] ?? ''}'.toLowerCase();
       if (err.contains('fail') ||
@@ -28,12 +47,13 @@ class BillingTransactionRepository {
       }
     }
 
-    if (raw == 'pending') {
+    if (raw == 'pending' || raw == 'processing' || raw == 'initiated') {
       final created = DateTime.tryParse('${row['created_at']}');
       if (created != null) {
         final age = DateTime.now().difference(created);
         if (age.inHours > 2) return 'failed';
       }
+      return 'pending';
     }
     return raw.isEmpty ? 'pending' : raw;
   }

@@ -107,6 +107,9 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   int _tabIndex = 0;
 
+  /// تمييز مؤقت لشريط التنقل أثناء شورتز/إدارتي (لا يُعاد للرئيسية بصرياً).
+  int? _bottomNavTransientIndex;
+
   /// ويب: تبويبات زِيرت + قائمة أبناء ثابتة لـ [IndexedStack].
   /// عند تبديل التبويب فقط نُعيد نفس مثيلات الـ Widget فلا تُعاد بناء الرئيسية (تجمّد).
   /// عند تغيّر بيانات الفيد نُحدّث الأبناء فتظهر البطاقات (كاش قديم كان يُبقي الرئيسية فارغة).
@@ -3885,6 +3888,50 @@ class _UserDashboardState extends State<UserDashboard>
     return false;
   }
 
+  /// شورتز بملء الشاشة — خارج فلاتر الكل/طلبات/إعلانات.
+  Future<void> _openHomeShortsFeed({required int slotsIndex}) async {
+    final listings = _nestedDashboardHomeItems.isNotEmpty
+        ? List<Property>.from(_nestedDashboardHomeItems)
+        : List<Property>.from(_all);
+    final requests = _nestedDashboardHomeRequests.isNotEmpty
+        ? List<MarketPropertyRequestRow>.from(_nestedDashboardHomeRequests)
+        : List<MarketPropertyRequestRow>.from(_marketHomeRequests);
+    final items = <HomeShortsItem>[
+      for (final p in listings) HomeShortsItem.property(p),
+      for (final r in requests) HomeShortsItem.request(r),
+    ];
+    if (!mounted) return;
+    setState(() => _bottomNavTransientIndex = slotsIndex);
+    await Navigator.of(context, rootNavigator: true).push<void>(
+      PageRouteBuilder<void>(
+        opaque: true,
+        barrierDismissible: false,
+        pageBuilder: (_, __, ___) => HomeShortsFeedPage(
+          items: items,
+          isAr: _isArabic,
+          onOpenProperty: (p) {
+            Navigator.of(context, rootNavigator: true).pop();
+            unawaited(_openDetails(p));
+          },
+          onOpenRequest: (r) {
+            Navigator.of(context, rootNavigator: true).pop();
+            unawaited(_openMarketRequestDetail(r));
+          },
+          onCompleteDeal: (item) {
+            final p = item.property;
+            if (p != null) {
+              Navigator.of(context, rootNavigator: true).pop();
+              unawaited(_addToCart(p));
+            }
+          },
+        ),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
+      ),
+    );
+    if (mounted) setState(() => _bottomNavTransientIndex = null);
+  }
+
   /// رجوع عند جذر اللوحة: تأكيد ثم خروج آمن (لا تُترك جلسة مفتوحة على شاشة الدخول).
   Future<void> _handleDashboardRootBrowserBack() async {
     if (!mounted) return;
@@ -5026,9 +5073,10 @@ class _UserDashboardState extends State<UserDashboard>
   // Bottom navigation (ديناميكي حسب account_type — عالمي، بدون تكرار مع AppBar)
   // =========================
   List<DashboardBottomSlot> _dashboardBottomSlots() {
-    // ضيف ومسجّل: نفس التبويبات السبعة دائماً — الحماية عبر شيت الدخول عند الضغط.
+    // ضيف ومسجّل: نفس التبويبات دائماً — الحماية عبر شيت الدخول عند الضغط.
     return const <DashboardBottomSlot>[
       DashboardBottomSlot.home,
+      DashboardBottomSlot.shorts,
       DashboardBottomSlot.myAds,
       DashboardBottomSlot.mySubmissions,
       DashboardBottomSlot.addListing,
@@ -5049,6 +5097,10 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   int _bottomNavSelectedIndex(List<DashboardBottomSlot> slots) {
+    final transient = _bottomNavTransientIndex;
+    if (transient != null && transient >= 0 && transient < slots.length) {
+      return transient;
+    }
     for (var i = 0; i < slots.length; i++) {
       switch (slots[i]) {
         case DashboardBottomSlot.home:
@@ -5061,13 +5113,14 @@ class _UserDashboardState extends State<UserDashboard>
           if (_tabIndex == 2) return i;
           break;
         case DashboardBottomSlot.cart:
-          if (_showBottomNavCart && _tabIndex == 3) return i;
+          // أبرز التبويب حتى لو كانت صلاحية السلة متغيّرة — يمنع الرجوع البصري للرئيسية.
+          if (_tabIndex == 3) return i;
           break;
         case DashboardBottomSlot.support:
           if (_tabIndex == 4) return i;
           break;
+        case DashboardBottomSlot.shorts:
         case DashboardBottomSlot.myDesk:
-          break;
         case DashboardBottomSlot.addListing:
           break;
       }
@@ -5090,10 +5143,36 @@ class _UserDashboardState extends State<UserDashboard>
     if (!_bottomNavSlideVisible) {
       _bottomNavSlideVisible = true;
     }
+    final slot = slots[i];
+    // ثبّت التمييز فوراً للتبويبات الحقيقية حتى لا يومض ثم يعود للرئيسية.
+    final instantTab = switch (slot) {
+      DashboardBottomSlot.home => 0,
+      DashboardBottomSlot.myAds => 1,
+      DashboardBottomSlot.mySubmissions => 2,
+      DashboardBottomSlot.cart => 3,
+      DashboardBottomSlot.support => 4,
+      _ => null,
+    };
+    if (instantTab != null && _tabIndex != instantTab) {
+      setState(() {
+        _tabIndex = instantTab;
+        _bottomNavTransientIndex = null;
+        if (kIsWeb) _webVisitedTabs.add(instantTab);
+      });
+    } else if (slot == DashboardBottomSlot.shorts ||
+        slot == DashboardBottomSlot.myDesk) {
+      setState(() => _bottomNavTransientIndex = i);
+    }
+
     // أغلق مسارات الجسم (إضافة إعلان…) مع حارس النموذج — لا popUntil أعمى يعلّق عند canPop=false.
     unawaited(() async {
       final ok = await _popBodyRoutesWithFormGuard();
-      if (!ok || !mounted) return;
+      if (!ok || !mounted) {
+        if (mounted && _bottomNavTransientIndex != null) {
+          setState(() => _bottomNavTransientIndex = null);
+        }
+        return;
+      }
       _applyDashboardBottomNavSelection(slots, i);
     }());
   }
@@ -5110,7 +5189,8 @@ class _UserDashboardState extends State<UserDashboard>
     if (_isGuest) {
       final slot = slots[i];
       if (slot != DashboardBottomSlot.home &&
-          slot != DashboardBottomSlot.support) {
+          slot != DashboardBottomSlot.support &&
+          slot != DashboardBottomSlot.shorts) {
         unawaited(() async {
           final res = await showGuestAuthRequiredSheet(
             context: context,
@@ -5134,6 +5214,7 @@ class _UserDashboardState extends State<UserDashboard>
       // ويب: حدّث المؤشر فوراً — الجسم IndexedStack لا يهدم الرئيسية.
       setState(() {
         _tabIndex = tab;
+        _bottomNavTransientIndex = null;
         if (kIsWeb) _webVisitedTabs.add(tab);
       });
     }
@@ -5141,6 +5222,9 @@ class _UserDashboardState extends State<UserDashboard>
     switch (slots[i]) {
       case DashboardBottomSlot.home:
         goTab(0);
+        break;
+      case DashboardBottomSlot.shorts:
+        unawaited(_openHomeShortsFeed(slotsIndex: i));
         break;
       case DashboardBottomSlot.myAds:
         _ensureAccountRoleLoadedForNav();
@@ -5212,6 +5296,7 @@ class _UserDashboardState extends State<UserDashboard>
       case DashboardBottomSlot.myDesk:
         _ensureAccountRoleLoadedForNav();
         if (_accountRoleLoaded && !_showBottomNavMyDeskSlot) {
+          if (mounted) setState(() => _bottomNavTransientIndex = null);
           _showNotification(
             _isArabic ? 'تنبيه' : 'Notice',
             _isArabic
@@ -5222,7 +5307,11 @@ class _UserDashboardState extends State<UserDashboard>
           return;
         }
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _openMyDeskNav();
+          if (!mounted) return;
+          unawaited(() async {
+            await _openMyDeskNav();
+            if (mounted) setState(() => _bottomNavTransientIndex = null);
+          }());
         });
         break;
       case DashboardBottomSlot.cart:
@@ -5254,6 +5343,13 @@ class _UserDashboardState extends State<UserDashboard>
             icon: wrap(const Icon(Icons.home_outlined)),
             selectedIcon: wrap(const Icon(Icons.home)),
             label: lab(l10n.navHome),
+            tooltip: noTip,
+          );
+        case DashboardBottomSlot.shorts:
+          return NavigationDestination(
+            icon: wrap(const Icon(Icons.smart_display_outlined)),
+            selectedIcon: wrap(const Icon(Icons.smart_display)),
+            label: lab(_isArabic ? 'شورتز' : 'Shorts'),
             tooltip: noTip,
           );
         case DashboardBottomSlot.myAds:
@@ -6097,12 +6193,8 @@ class _UserDashboardState extends State<UserDashboard>
                 if (isNarrow) {
                   final topActions = <Widget>[
                     if (showResultCount) resultChip,
-                    refreshBtn,
-                  ];
-                  final secondActions = <Widget>[
                     advancedSearchBtn,
-                    if (_isNearestMode) clearNearestBtn,
-                    if (_hasActiveTopFilters) clearAllBtn,
+                    refreshBtn,
                   ];
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -6112,8 +6204,13 @@ class _UserDashboardState extends State<UserDashboard>
                       feedKindTabs,
                       const SizedBox(height: 8),
                       stretchRow(topActions),
-                      const SizedBox(height: 6),
-                      stretchRow(secondActions),
+                      if (_isNearestMode || _hasActiveTopFilters) ...[
+                        const SizedBox(height: 6),
+                        stretchRow([
+                          if (_isNearestMode) clearNearestBtn,
+                          if (_hasActiveTopFilters) clearAllBtn,
+                        ]),
+                      ],
                     ],
                   );
                 }

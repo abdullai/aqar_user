@@ -47,6 +47,9 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
     _repo = BillingTransactionRepository(sb);
     _invoices = InvoiceService(repository: _repo, isAr: _isAr, supabase: sb);
     _tabs = TabController(length: 3, vsync: this);
+    _tabs.addListener(() {
+      if (mounted && !_tabs.indexIsChanging) setState(() {});
+    });
     _loadAll();
     unawaited(_invoices.loadPayerInfo());
   }

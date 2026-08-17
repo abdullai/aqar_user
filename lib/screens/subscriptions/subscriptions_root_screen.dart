@@ -242,7 +242,10 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
                 controller: _ctrl,
                 children: [
                   for (final body in _bodies)
-                    AqarPrimaryScrollScope(child: body),
+                    // سجل المدفوعات يدير Expanded/تمريره ذاتياً — لا تغليفه بـ PrimaryScroll.
+                    body is PaymentHistoryScreen
+                        ? body
+                        : AqarPrimaryScrollScope(child: body),
                 ],
               ),
             ),
@@ -262,7 +265,10 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       body: TabBarView(
         controller: _ctrl,
         children: [
-          for (final body in _bodies) AqarPrimaryScrollScope(child: body),
+          for (final body in _bodies)
+            body is PaymentHistoryScreen
+                ? body
+                : AqarPrimaryScrollScope(child: body),
         ],
       ),
     );
