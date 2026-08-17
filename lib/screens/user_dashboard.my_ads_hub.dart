@@ -9162,7 +9162,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           8,
           4,
           8,
-          12 + _marketerHubScrollBottomPadding(context),
+          4 + _marketerHubScrollBottomPadding(context),
         ),
         physics: _myAdsHubScrollPhysics,
         cacheExtent: _myAdsHubListCacheExtent,
@@ -9189,7 +9189,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         builder: (context, c) {
           final cross = _hubPropertyCrossAxisCount(c.maxWidth);
           const spacing = 14.0;
-          final bottom = 12 + _marketerHubScrollBottomPadding(context);
+          final bottom = 4 + _marketerHubScrollBottomPadding(context);
           final rowWidgets = <Widget>[];
           for (var start = 0; start < rows.length; start += cross) {
             if (rowWidgets.isNotEmpty) {
