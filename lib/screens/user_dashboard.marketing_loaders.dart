@@ -1620,8 +1620,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   }
 
   String _coverPrimaryFromPayload(Map<String, dynamic> payload) {
-    final g = payload['listing_guidance'];
-    if (g is Map) {
+    final raw = payload['listing_guidance'];
+    if (raw is Map) {
+      final g = Map<String, dynamic>.from(raw);
       final v = (g['cover_primary'] ?? 'image').toString().toLowerCase();
       return v == 'video' ? 'video' : 'image';
     }
@@ -1637,7 +1638,8 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       } catch (_) {}
     }
     if (g is Map) {
-      final v = (g['cover_primary'] ?? 'image').toString().toLowerCase();
+      final map = Map<String, dynamic>.from(g);
+      final v = (map['cover_primary'] ?? 'image').toString().toLowerCase();
       return v == 'video' ? 'video' : 'image';
     }
     return 'image';

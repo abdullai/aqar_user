@@ -74,11 +74,13 @@ abstract final class ListingMediaUrls {
 
   static bool propertyPrefersVideoCover(Property p) {
     final g = p.listingGuidance;
-    if (g is Map) {
-      final v = (g['cover_primary'] ?? '').toString().trim().toLowerCase();
-      if (v == 'video') return true;
-      if (v == 'image') return false;
+    if (g == null) {
+      return imagePathsExcludingVideo(p.images).isEmpty &&
+          (p.videoUrl ?? '').trim().isNotEmpty;
     }
+    final v = (g['cover_primary'] ?? '').toString().trim().toLowerCase();
+    if (v == 'video') return true;
+    if (v == 'image') return false;
     return imagePathsExcludingVideo(p.images).isEmpty &&
         (p.videoUrl ?? '').trim().isNotEmpty;
   }
@@ -275,8 +277,9 @@ abstract final class ListingMediaUrls {
 
   static bool payloadPrefersVideoCover(Map<String, dynamic>? payload) {
     if (payload == null) return false;
-    final g = payload['listing_guidance'];
-    if (g is Map) {
+    final raw = payload['listing_guidance'];
+    if (raw is Map) {
+      final g = Map<String, dynamic>.from(raw);
       return (g['cover_primary'] ?? '').toString().trim().toLowerCase() ==
           'video';
     }
