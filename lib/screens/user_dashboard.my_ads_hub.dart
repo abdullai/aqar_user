@@ -585,65 +585,66 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ],
         ),
         Expanded(
-          child: kIsWeb
-              ? AnimatedBuilder(
-                  animation: ctrl,
-                  builder: (context, _) {
-                    // ويب: ابنِ التبويب الظاهر فقط — بناء الـ 7 دفعة واحدة كان يجمّد المالك.
-                    return KeyedSubtree(
-                      key: ValueKey<int>(ctrl.index),
-                      child: _buildOwnerHubSelectedTab(
-                        ctrl.index,
-                        myItems: myItems,
-                        l10n: l10n,
-                        ar: ar,
+          child: ClipRect(
+            child: _myAdsHubPreferSwipeableSubTabs
+                ? TabBarView(
+                    controller: ctrl,
+                    physics: _myAdsHubTabViewPhysics,
+                    children: [
+                      _buildOwnerHubTab(
+                        propertyItems: _filterOwnerHubTab(myItems, 0),
+                        requestRows: _ownerRequestRowsWaitingNoOffers(),
+                        emptyText: l10n.myAdsEmptyWaitingMediator,
+                        ownerMarketingFeedScope: 1,
                       ),
-                    );
-                  },
-                )
-              : TabBarView(
-                  controller: ctrl,
-                  physics: _myAdsHubTabViewPhysics,
-                  children: [
-                    _buildOwnerHubTab(
-                      propertyItems: _filterOwnerHubTab(myItems, 0),
-                      requestRows: _ownerRequestRowsWaitingNoOffers(),
-                      emptyText: l10n.myAdsEmptyWaitingMediator,
-                      ownerMarketingFeedScope: 1,
-                    ),
-                    _buildOwnerHubTab(
-                      propertyItems: const <Property>[],
-                      requestRows: _ownerRequestRowsSubmittedOffersOnly(),
-                      emptyText: ar
-                          ? 'لا توجد عروض مقدَّمة بعد'
-                          : 'No submitted offers yet',
-                      ownerMarketingFeedScope: 2,
-                    ),
-                    _buildOwnerHubTab(
-                      propertyItems: _filterOwnerHubTab(myItems, 1),
-                      requestRows: _ownerRequestRowsForTab(1),
-                      emptyText: ar
-                          ? 'لا توجد طلبات بانتظار إصدار التصريح حالياً'
-                          : 'Nothing awaiting permit issuance right now',
-                    ),
-                    _buildOwnerHubTab(
-                      propertyItems: _filterOwnerHubTab(myItems, 2),
-                      requestRows: _ownerRequestRowsForTab(2),
-                      emptyText: ar
-                          ? 'لا توجد عقارات متوقفة هنا'
-                          : 'Nothing in this bucket',
-                    ),
-                    _buildOwnerHubTab(
-                      propertyItems: _filterOwnerHubTab(myItems, 3),
-                      requestRows: _ownerRequestRowsForTab(3),
-                      emptyText: ar
-                          ? 'لا توجد عقارات مفسوخة هنا'
-                          : 'Nothing cancelled here',
-                    ),
-                    _buildOwnerReservationsTab(l10n),
-                    _buildOwnerCompletedDealsTab(myItems),
-                  ],
-                ),
+                      _buildOwnerHubTab(
+                        propertyItems: const <Property>[],
+                        requestRows: _ownerRequestRowsSubmittedOffersOnly(),
+                        emptyText: ar
+                            ? 'لا توجد عروض مقدَّمة بعد'
+                            : 'No submitted offers yet',
+                        ownerMarketingFeedScope: 2,
+                      ),
+                      _buildOwnerHubTab(
+                        propertyItems: _filterOwnerHubTab(myItems, 1),
+                        requestRows: _ownerRequestRowsForTab(1),
+                        emptyText: ar
+                            ? 'لا توجد طلبات بانتظار إصدار التصريح حالياً'
+                            : 'Nothing awaiting permit issuance right now',
+                      ),
+                      _buildOwnerHubTab(
+                        propertyItems: _filterOwnerHubTab(myItems, 2),
+                        requestRows: _ownerRequestRowsForTab(2),
+                        emptyText: ar
+                            ? 'لا توجد عقارات متوقفة هنا'
+                            : 'Nothing in this bucket',
+                      ),
+                      _buildOwnerHubTab(
+                        propertyItems: _filterOwnerHubTab(myItems, 3),
+                        requestRows: _ownerRequestRowsForTab(3),
+                        emptyText: ar
+                            ? 'لا توجد عقارات مفسوخة هنا'
+                            : 'Nothing cancelled here',
+                      ),
+                      _buildOwnerReservationsTab(l10n),
+                      _buildOwnerCompletedDealsTab(myItems),
+                    ],
+                  )
+                : AnimatedBuilder(
+                    animation: ctrl,
+                    builder: (context, _) {
+                      return KeyedSubtree(
+                        key: ValueKey<int>(ctrl.index),
+                        child: _buildOwnerHubSelectedTab(
+                          ctrl.index,
+                          myItems: myItems,
+                          l10n: l10n,
+                          ar: ar,
+                        ),
+                      );
+                    },
+                  ),
+          ),
         ),
       ],
     );
@@ -4925,19 +4926,22 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ),
         ),
         Expanded(
-          child: TabBarView(
-            controller: roleCtrl,
-            // السحب الأفقي مسموح؛ المحتوى الداخلي يبقى بقوائمه الخاصة.
-            children: [
-              KeyedSubtree(
-                key: const ValueKey<String>('hub-role-marketer'),
-                child: _buildMarketerMyAds(cs, mkCtrl),
-              ),
-              KeyedSubtree(
-                key: const ValueKey<String>('hub-role-owner'),
-                child: _buildOwnerMyAds(cs, sortedMineForHub(), ownerCtrl),
-              ),
-            ],
+          child: ClipRect(
+            child: TabBarView(
+              controller: roleCtrl,
+              // كمعلن/كمسوّق: تبديل بالضغط فقط — السحب الأفقي للتبويبات الفرعية داخلياً.
+              physics: const NeverScrollableScrollPhysics(),
+              children: [
+                KeyedSubtree(
+                  key: const ValueKey<String>('hub-role-marketer'),
+                  child: _buildMarketerMyAds(cs, mkCtrl),
+                ),
+                KeyedSubtree(
+                  key: const ValueKey<String>('hub-role-owner'),
+                  child: _buildOwnerMyAds(cs, sortedMineForHub(), ownerCtrl),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -4985,65 +4989,67 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ],
         ),
         Expanded(
-          child: kIsWeb
-              ? AnimatedBuilder(
-                  animation: ctrl,
-                  builder: (context, _) {
-                    // ويب: تبويب مسوّق واحد فقط لكل إطار — يمنع تجمّد الضغط على التبويبات العلوية.
-                    return KeyedSubtree(
-                      key: ValueKey<int>(ctrl.index),
-                      child: _buildMarketerHubSelectedTab(
-                        ctrl.index,
-                        l10n: l10n,
-                        ar: ar,
+          child: ClipRect(
+            child: _myAdsHubPreferSwipeableSubTabs
+                ? TabBarView(
+                    controller: ctrl,
+                    physics: _myAdsHubTabViewPhysics,
+                    children: [
+                      _buildMarketerTabBody(
+                        rows: _filterMarketerRowsForTab(0),
+                        emptyText: l10n.marketerEmptyInvites,
+                        type: 'invite',
+                        marketerInvitesTabLayout: true,
                       ),
-                    );
-                  },
-                )
-              : TabBarView(
-                  controller: ctrl,
-                  physics: _myAdsHubTabViewPhysics,
-                  children: [
-                    _buildMarketerTabBody(
-                      rows: _filterMarketerRowsForTab(0),
-                      emptyText: l10n.marketerEmptyInvites,
-                      type: 'invite',
-                      marketerInvitesTabLayout: true,
-                    ),
-                    _buildMarketerTabBody(
-                      rows: _filterMarketerRowsForTab(1),
-                      emptyText: ar
-                          ? 'لا توجد عروض تتبّعها حالياً'
-                          : 'No offers to track',
-                      type: 'offer',
-                      marketerMyOffersTabLayout: true,
-                    ),
-                    _buildMarketerContractingTab(l10n),
-                    _buildMarketerTabBody(
-                      rows: _filterMarketerRowsForTab(3),
-                      emptyText: l10n.marketerEmptyPermits,
-                      type: 'permit',
-                    ),
-                    _buildMarketerTabBody(
-                      rows: _filterMarketerRowsForTab(4),
-                      emptyText: l10n.marketerEmptyPublished,
-                      type: 'published',
-                    ),
-                    _buildMarketerTabBody(
-                      rows: _filterMarketerRowsForTab(5),
-                      emptyText: ar
-                          ? 'لا توجد طلبات بدون إجراء 72 ساعة'
-                          : 'No 72h inactive items',
-                      type: 'inactive72h',
-                    ),
-                    _buildMarketerTabBody(
-                      rows: _filterMarketerRowsForTab(6),
-                      emptyText:
-                          ar ? 'لا توجد عقارات مفسوخة' : 'Nothing cancelled',
-                      type: 'cancelled',
-                    ),
-                  ],
-                ),
+                      _buildMarketerTabBody(
+                        rows: _filterMarketerRowsForTab(1),
+                        emptyText: ar
+                            ? 'لا توجد عروض تتبّعها حالياً'
+                            : 'No offers to track',
+                        type: 'offer',
+                        marketerMyOffersTabLayout: true,
+                      ),
+                      _buildMarketerContractingTab(l10n),
+                      _buildMarketerTabBody(
+                        rows: _filterMarketerRowsForTab(3),
+                        emptyText: l10n.marketerEmptyPermits,
+                        type: 'permit',
+                      ),
+                      _buildMarketerTabBody(
+                        rows: _filterMarketerRowsForTab(4),
+                        emptyText: l10n.marketerEmptyPublished,
+                        type: 'published',
+                      ),
+                      _buildMarketerTabBody(
+                        rows: _filterMarketerRowsForTab(5),
+                        emptyText: ar
+                            ? 'لا توجد طلبات بدون إجراء 72 ساعة'
+                            : 'No 72h inactive items',
+                        type: 'inactive72h',
+                      ),
+                      _buildMarketerTabBody(
+                        rows: _filterMarketerRowsForTab(6),
+                        emptyText:
+                            ar ? 'لا توجد عقارات مفسوخة' : 'Nothing cancelled',
+                        type: 'cancelled',
+                      ),
+                    ],
+                  )
+                : AnimatedBuilder(
+                    animation: ctrl,
+                    builder: (context, _) {
+                      // سطح مكتب عريض: تبويب واحد لكل إطار (أخف).
+                      return KeyedSubtree(
+                        key: ValueKey<int>(ctrl.index),
+                        child: _buildMarketerHubSelectedTab(
+                          ctrl.index,
+                          l10n: l10n,
+                          ar: ar,
+                        ),
+                      );
+                    },
+                  ),
+          ),
         ),
       ],
     );
@@ -5230,70 +5236,69 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     bool showMarketerScenarioGuide = false,
     bool showOwnerScenarioGuide = false,
   }) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(8, 2, 8, 6),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: cs.outlineVariant.withOpacity(0.28),
+    return Material(
+      color: cs.surface,
+      elevation: 0,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: cs.outlineVariant.withValues(alpha: 0.35),
+          ),
         ),
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-            color: cs.shadow.withOpacity(0.05),
-          ),
-        ],
-      ),
-      child: Align(
-        alignment: AlignmentDirectional.centerStart,
-        child: TabBar(
-          controller: controller,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          splashBorderRadius: BorderRadius.circular(999),
-          overlayColor: WidgetStateProperty.resolveWith(
-            (states) => _brandPrimary.withOpacity(0.06),
-          ),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-          indicatorPadding: EdgeInsets.zero,
-          indicator: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                _brandPrimary.withOpacity(0.16),
-                _brandPrimary.withOpacity(0.08),
-              ],
+        clipBehavior: Clip.hardEdge,
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TabBar(
+            controller: controller,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            splashBorderRadius: BorderRadius.circular(999),
+            overlayColor: WidgetStateProperty.resolveWith(
+              (states) => _brandPrimary.withValues(alpha: 0.06),
             ),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: _brandPrimary.withOpacity(0.22),
+            labelPadding:
+                const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+            indicatorPadding: EdgeInsets.zero,
+            indicator: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  _brandPrimary.withValues(alpha: 0.16),
+                  _brandPrimary.withValues(alpha: 0.08),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: _brandPrimary.withValues(alpha: 0.22),
+              ),
             ),
-          ),
-          labelStyle: const TextStyle(
-            fontWeight: FontWeight.w900,
-            fontSize: 12,
-          ),
-          unselectedLabelStyle: const TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
-          ),
-          labelColor: _brandPrimary,
-          unselectedLabelColor: cs.onSurfaceVariant,
-          dividerColor: Colors.transparent,
-          indicatorSize: TabBarIndicatorSize.tab,
-          tabs: tabs
-              .map(
-                (t) => Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 3,
-                    vertical: 5,
+            labelStyle: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 12,
+            ),
+            unselectedLabelStyle: const TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
+            ),
+            labelColor: _brandPrimary,
+            unselectedLabelColor: cs.onSurfaceVariant,
+            dividerColor: Colors.transparent,
+            indicatorSize: TabBarIndicatorSize.tab,
+            tabs: tabs
+                .map(
+                  (t) => Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 3,
+                      vertical: 4,
+                    ),
+                    child: t,
                   ),
-                  child: t,
-                ),
-              )
-              .toList(),
+                )
+                .toList(),
+          ),
         ),
       ),
     );
@@ -6905,9 +6910,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return const AlwaysScrollableScrollPhysics();
   }
 
+  /// الجوال / ويب اللمس: السحب يحرّك تبويبات السوق/عروضي… لا دور كمسوّق/كمعلن.
+  bool get _myAdsHubPreferSwipeableSubTabs =>
+      !kIsWeb || AqarScrollBehavior.isCompactTouchLike(context);
+
   ScrollPhysics get _myAdsHubTabViewPhysics {
     if (kIsWeb && AqarScrollBehavior.isCompactTouchLike(context)) {
-      return const BouncingScrollPhysics();
+      return const BouncingScrollPhysics(
+        parent: PageScrollPhysics(),
+      );
     }
     return const PageScrollPhysics();
   }
@@ -6917,6 +6928,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   /// يعتمد على [AqarScrollBehavior] العام — لا نلفّ بـ Scrollbar إضافي (كان يعطّل الويب).
   Widget _myAdsHubScrollWrap(Widget child) => child;
+
+  double _marketerHubScrollBottomPadding(BuildContext context) {
+    // هامش خفيف فقط فوق شريط التنقل — بدون فراغ كبير مهدر.
+    return 4;
+  }
 
   int _hubPropertyCrossAxisCount(double width) =>
       _homeListingGridCrossAxisCount(width);
@@ -6987,12 +7003,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
   }
 
-  double _marketerHubScrollBottomPadding(BuildContext context) {
-    // جسم Scaffold فوق شريط التنقل — هامش خفيف فقط حتى يظهر آخر محتوى فوق التبويبات.
-    final w = MediaQuery.sizeOf(context).width;
-    return w < 720 ? 8 : 12;
-  }
-
   String _safeNotifString(dynamic v) => (v ?? '').toString().trim();
 
   Future<void> _sendInAppNotification({
@@ -7059,15 +7069,16 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final requestId = _marketingRequestIdFromRow(r);
     if (requestId.isEmpty) return;
 
-    final ok = await _pushBody<bool>(
+    final ok = await Navigator.of(context, rootNavigator: true).push<bool>(
       MaterialPageRoute<bool>(
+        fullscreenDialog: true,
         settings:
             const RouteSettings(name: '/dashboard/marketer-request-details'),
         builder: (_) => MarketerRequestDetailsPage(
           lang: widget.lang,
           inviteId: inviteId,
           requestId: requestId,
-          embedAppBar: true,
+          embedAppBar: false,
         ),
       ),
     );
@@ -8435,8 +8446,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         : requestStatusId.trim();
     if (rid.isEmpty) return;
     if (!mounted) return;
-    await Navigator.of(context).push<void>(
+    await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
+        fullscreenDialog: true,
         builder: (_) => ListingRequestStatusPage(
           requestId: rid,
           lang: widget.isAr ? 'ar' : 'en',

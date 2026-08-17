@@ -931,8 +931,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
       ownerForDetails = vis.isNotEmpty ? vis : null;
     }
 
-    await _pushBody<void>(
+    await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
+        fullscreenDialog: true,
         builder: (_) => details.PropertyDetailsPage(
           property: p,
           isAr: widget.isAr,
@@ -940,7 +941,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           ownerUsername: ownerForDetails,
           marketingRequestId: marketingRequestId,
           marketingInviteId: marketingInviteId,
-          embedAppBar: true,
+          embedAppBar: false,
           allowMarketingOffer: allowMarketingOffer,
           marketerHubPhase: marketerHubPhase,
           isFavorite: !_isGuest && _isFav(p.id),

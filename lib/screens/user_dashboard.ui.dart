@@ -4093,6 +4093,8 @@ class _UserDashboardState extends State<UserDashboard>
       clipBehavior: Clip.none,
       children: [
         SafeArea(
+          // الشريط السفلي منفصل في Scaffold — لا تُضاعف المساحة الآمنة السفلية فوقه.
+          bottom: false,
           child: Column(
             children: [
               if (_tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2)

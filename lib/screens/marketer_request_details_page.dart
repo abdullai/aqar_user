@@ -20,6 +20,7 @@ import '../core/utils/app_money.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../theme.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_marketing_tracking_sheet.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
@@ -863,7 +864,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
             ? null
             : AppBar(
                 automaticallyImplyLeading: false,
-                leading: BackButton(
+                leading: AppPageCloseButton(
+                  isArabic: _isAr,
                   onPressed: () => Navigator.of(context).maybePop(),
                 ),
                 title: Text(_t('تفاصيل طلب التسويق', 'Marketing Request Details')),
