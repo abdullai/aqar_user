@@ -12,44 +12,68 @@ BEGIN;
 
 -- -----------------------------------------------------------------------------
 -- 1) Rebuild master_dashboard without auth.users.
---    Email comes from users_profiles.contact_email (not auth.users.email).
+--    Email: users_profiles.contact_email or .email if present; else NULL.
+--    Never select auth.users.email (that was the Data API leak).
 -- -----------------------------------------------------------------------------
 DROP VIEW IF EXISTS public.master_dashboard;
 
-CREATE VIEW public.master_dashboard
-WITH (security_invoker = true) AS
-SELECT
-  up.full_name_ar AS name_ar,
-  up.full_name_en AS name_en,
-  up.contact_email::character varying AS email,
-  up.office_name,
-  up.verification_status,
-  up.is_licensed_marketer,
-  up.unified_national_number AS unified_number_700,
-  up.license_no AS fal_license_number,
-  (
-    SELECT count(*)::bigint
-    FROM public.properties p
-    WHERE p.owner_id = up.user_id
-  ) AS properties_count,
-  (
-    SELECT count(*)::bigint
-    FROM public.listing_offers lo
-    WHERE lo.marketer_id = up.user_id
-  ) AS offers_count,
-  vh.expiry_date,
-  CASE
-    WHEN vh.expiry_date IS NULL THEN 'N/A'::text
-    ELSE ((vh.expiry_date::date - CURRENT_DATE)::text) || ' days'::text
-  END AS days_left
-FROM public.users_profiles up
-LEFT JOIN (
-  SELECT DISTINCT ON (verification_history.user_id)
-    verification_history.user_id,
-    verification_history.expiry_date
-  FROM public.verification_history
-  ORDER BY verification_history.user_id, verification_history.verified_at DESC
-) vh ON up.user_id = vh.user_id;
+DO $$
+DECLARE
+  email_expr text := 'NULL::character varying';
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'users_profiles'
+      AND column_name = 'contact_email'
+  ) THEN
+    email_expr := 'up.contact_email::character varying';
+  ELSIF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'users_profiles'
+      AND column_name = 'email'
+  ) THEN
+    email_expr := 'up.email::character varying';
+  END IF;
+
+  EXECUTE format($v$
+    CREATE VIEW public.master_dashboard
+    WITH (security_invoker = true) AS
+    SELECT
+      up.full_name_ar AS name_ar,
+      up.full_name_en AS name_en,
+      %s AS email,
+      up.office_name,
+      up.verification_status,
+      up.is_licensed_marketer,
+      up.unified_national_number AS unified_number_700,
+      up.license_no AS fal_license_number,
+      (
+        SELECT count(*)::bigint
+        FROM public.properties p
+        WHERE p.owner_id = up.user_id
+      ) AS properties_count,
+      (
+        SELECT count(*)::bigint
+        FROM public.listing_offers lo
+        WHERE lo.marketer_id = up.user_id
+      ) AS offers_count,
+      vh.expiry_date,
+      CASE
+        WHEN vh.expiry_date IS NULL THEN 'N/A'::text
+        ELSE ((vh.expiry_date::date - CURRENT_DATE)::text) || ' days'::text
+      END AS days_left
+    FROM public.users_profiles up
+    LEFT JOIN (
+      SELECT DISTINCT ON (verification_history.user_id)
+        verification_history.user_id,
+        verification_history.expiry_date
+      FROM public.verification_history
+      ORDER BY verification_history.user_id, verification_history.verified_at DESC
+    ) vh ON up.user_id = vh.user_id
+  $v$, email_expr);
+END $$;
 
 COMMENT ON VIEW public.master_dashboard IS
   'Admin-only profile overview. Not in the Data API. Does not read auth.users.';
