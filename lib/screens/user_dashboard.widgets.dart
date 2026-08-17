@@ -4296,12 +4296,7 @@ class _PropertyImage extends StatelessWidget {
       );
     }
 
-    if (urls.isEmpty) return placeholder();
-
-    final cleanUrls =
-        urls.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-
-    if (cleanUrls.isEmpty) return placeholder();
+    if (urls.isEmpty || cleanUrls.isEmpty) return placeholder();
 
     final normalized = cleanUrls
         .map(_normalizeImagePublicUrl)

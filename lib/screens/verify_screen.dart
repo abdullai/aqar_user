@@ -1788,6 +1788,7 @@ class _VerifyScreenState extends State<VerifyScreen>
 
       final display = ProfileGreetingFromRow.displayName(row, isAr: _isAr);
       final last = ProfileGreetingFromRow.lastLoginAt(row);
+      final av = (row['avatar_url'] ?? '').toString().trim();
 
       setState(() {
         if (display != null && display.trim().isNotEmpty) {
@@ -1797,7 +1798,6 @@ class _VerifyScreenState extends State<VerifyScreen>
         if (last != null) {
           _lastLogin = _latestOf(_lastLogin, last);
         }
-        final av = (row['avatar_url'] ?? '').toString().trim();
         if (av.isNotEmpty) _avatarUrl = av;
       });
       if (display != null && display.trim().isNotEmpty) {
