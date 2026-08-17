@@ -598,7 +598,7 @@ abstract final class PropertyListingDisplay {
     return '$core in $place'.trim();
   }
 
-  /// عنوان بطاقة إعلان: يفضّل تركيباً مرتّباً إن وُجد النوع/الغرض/المدينة.
+  /// عنوان بطاقة إعلان: يفضّل العنوان المخزَّن إن كان واضحاً، وإلا تركيباً مرتّباً.
   static String displayListingTitle(Property p, bool isAr) {
     final type = typeLabelForProperty(p, isAr);
     final purpose = purposeBitShort(p, isAr);
@@ -614,21 +614,88 @@ abstract final class PropertyListingDisplay {
           : null,
       isAr: isAr,
     );
-    final raw = p.title.trim();
+    final raw = sanitizeListingTitle(p.title.trim(), typeLabel: type, isAr: isAr);
     if (raw.isEmpty) return composed;
     if (type.isEmpty) return normalizePlacePrepositions(raw, isAr: isAr);
     // عنوان خام يخلط المدينة بين النوع والغرض → استبدل بالتركيب الأنيق.
     if (_titleLooksScrambled(raw, type: type, city: city, isAr: isAr)) {
-      return composed.isNotEmpty ? composed : normalizePlacePrepositions(raw, isAr: isAr);
+      return composed.isNotEmpty
+          ? composed
+          : normalizePlacePrepositions(raw, isAr: isAr);
+    }
+    // إن تعارض النوع المخزَّن مع كلمات العنوان (فيلا…أرض) أبقِ العنوان المنقّى.
+    if (_titleConflictsWithType(raw, type, isAr: isAr) && raw.isNotEmpty) {
+      return normalizePlacePrepositions(raw, isAr: isAr);
     }
     return normalizePlacePrepositions(raw, isAr: isAr);
+  }
+
+  /// ينظّف لاحقات النوع المكررة مثل «فيلا للبيع - ارض».
+  static String sanitizeListingTitle(
+    String raw, {
+    required String typeLabel,
+    required bool isAr,
+  }) {
+    var t = raw.trim();
+    if (t.isEmpty) return t;
+    t = t.replaceAll(RegExp(r'\s*[-–—·|]\s*'), ' - ');
+    final type = typeLabel.trim();
+    if (type.isNotEmpty) {
+      final esc = RegExp.escape(type);
+      t = t.replaceFirst(RegExp('\\s*-\\s*$esc\\s*\$', caseSensitive: false), '');
+      t = t.replaceFirst(RegExp('^$esc\\s*-\\s*', caseSensitive: false), '');
+    }
+    // أزل لاحقة نوع شائعة لا تطابق بقية العنوان (أو مرادف مثل فله↔فيلا).
+    for (final bad in isAr
+        ? const ['ارض', 'أرض', 'فله', 'فيلا', 'شقة', 'أرض فضاء', 'دور', 'عمارة']
+        : const ['land', 'villa', 'apartment', 'floor', 'building']) {
+      final low = t.toLowerCase();
+      final suffix = ' - $bad';
+      if (low.endsWith(suffix.toLowerCase())) {
+        final head = t.substring(0, t.length - suffix.length).trim();
+        if (head.isEmpty) continue;
+        final headLow = head.toLowerCase();
+        final synonymHit = isAr &&
+            ((bad == 'فله' && headLow.contains('فيلا')) ||
+                (bad == 'فيلا' && headLow.contains('فله')) ||
+                (bad == 'ارض' && headLow.contains('أرض')) ||
+                (bad == 'أرض' && headLow.contains('ارض')));
+        if (!headLow.contains(bad.toLowerCase()) || synonymHit) {
+          t = head;
+        }
+      }
+    }
+    return t.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+  }
+
+  static bool _titleConflictsWithType(
+    String raw,
+    String typeLabel, {
+    required bool isAr,
+  }) {
+    final t = raw.toLowerCase();
+    final type = typeLabel.trim().toLowerCase();
+    if (t.isEmpty || type.isEmpty) return false;
+    if (isAr) {
+      final saysVilla = t.contains('فيلا') || t.contains('فله');
+      final saysLand = t.contains('أرض') || t.contains('ارض');
+      final typeIsLand = type.contains('أرض') || type.contains('ارض') || type == 'land';
+      final typeIsVilla = type.contains('فيلا') || type.contains('فله') || type == 'villa';
+      if (saysVilla && typeIsLand) return true;
+      if (saysLand && typeIsVilla) return true;
+    }
+    return false;
   }
 
   static String displayRequestTitle(
     MarketPropertyRequestRow r,
     bool isAr,
   ) {
-    final type = PropertyTypeCatalog.label(r.propertyType, isAr);
+    final typeCode = PropertyTypeCatalog.normalize(r.propertyType);
+    final type = PropertyTypeCatalog.label(
+      typeCode == 'فله' || typeCode == 'فله' ? 'villa' : r.propertyType,
+      isAr,
+    );
     final purpose = r.purpose == 'rent'
         ? (isAr ? 'للإيجار' : 'for rent')
         : (isAr ? 'للشراء' : 'to buy');
@@ -640,6 +707,16 @@ abstract final class PropertyListingDisplay {
         district = t;
         break;
       }
+    }
+    final raw = sanitizeListingTitle(
+      r.title.trim(),
+      typeLabel: type,
+      isAr: isAr,
+    );
+    if (raw.isNotEmpty &&
+        (raw.contains(purpose) || raw.length >= 8) &&
+        !_titleConflictsWithType(raw, type, isAr: isAr)) {
+      return normalizePlacePrepositions(raw, isAr: isAr);
     }
     return composeListingHeadline(
       typeLabel: type,

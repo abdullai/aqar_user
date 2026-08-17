@@ -944,9 +944,20 @@ extension _UserDashboardStateActions on _UserDashboardState {
           allowMarketingOffer: allowMarketingOffer,
           marketerHubPhase: marketerHubPhase,
           isFavorite: !_isGuest && _isFav(p.id),
+          // اسم المعلن للمُسوّق فقط بعد اختياره (موافقة المالك) وقبل النشر.
           showOwnerLegalNameToViewer: _isMarketerRole &&
               !_isGuest &&
-              p.effectiveWorkflowStage != ListingWorkflowStage.published,
+              (p.selectedMarketerId ?? '').trim() == _uid &&
+              p.effectiveWorkflowStage != ListingWorkflowStage.published &&
+              const {
+                ListingWorkflowStage.marketerSelected,
+                ListingWorkflowStage.contractPending,
+                ListingWorkflowStage.contractSent,
+                ListingWorkflowStage.contractReturned,
+                ListingWorkflowStage.contractSigned,
+                ListingWorkflowStage.permitPending,
+                ListingWorkflowStage.permitIssued,
+              }.contains(p.effectiveWorkflowStage),
           canManageProperty: !_isGuest && !_isMarketerRole && p.ownerId == _uid,
           homeFeedShowsHiddenOnly: _tabIndex == 0 && _homeShowHiddenOnly,
           onVisitorListingPreferenceChanged: _isGuest

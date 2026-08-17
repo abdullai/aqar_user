@@ -1711,6 +1711,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   }
 
   String? _previewImagePathFromMap(Map<String, dynamic> e) {
+    if (ListingMediaUrls.rowLooksLikeVideo(e)) return null;
     for (final k in const [
       'path',
       'file_name',
@@ -1719,7 +1720,11 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       'storage_path',
     ]) {
       final s = e[k]?.toString().trim();
-      if (s != null && s.isNotEmpty) return s;
+      if (s != null &&
+          s.isNotEmpty &&
+          !ListingMediaUrls.looksLikeVideoPath(s)) {
+        return s;
+      }
     }
     return null;
   }

@@ -1277,7 +1277,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     Map<String, dynamic> row,
   ) {
     final payload = _mergedJsonPayloadForRow(row);
-    final payloadPaths = _payloadImagePaths(payload);
+    final payloadPaths = ListingMediaUrls.imagePathsExcludingVideo(
+      _payloadImagePaths(payload),
+    );
     if (row['default_cover_used'] == true && payloadPaths.isEmpty) {
       return const [];
     }
@@ -1294,10 +1296,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       row['preview_image_urls'],
       fromPayloadUrls,
     );
-    final direct = mergedDyn
-        .map((e) => e.toString().trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final direct = ListingMediaUrls.imagePathsExcludingVideo(
+      mergedDyn.map((e) => e.toString().trim()).where((e) => e.isNotEmpty),
+    );
     List<String> toPublic(Iterable<String> raw) {
       return raw
           .map((u) {
@@ -1842,9 +1843,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
     }
     final id = (merged['request_id'] ?? merged['id'] ?? '').toString().trim();
-    final urls = linkedProperty != null
+    final urlsFromProp = linkedProperty != null
         ? PropertyListingDisplay.propertyCardImagePaths(linkedProperty)
-        : _effectiveImageUrlsForOwnerRequestRow(merged);
+        : const <String>[];
+    final urlsFromRow = _effectiveImageUrlsForOwnerRequestRow(merged);
+    final urls = ListingMediaUrls.mergePathLists([urlsFromProp, urlsFromRow]);
     final previewViews = (merged['preview_views'] as num?)?.toInt() ??
         (linkedProperty != null ? linkedProperty.views : null);
     final mergedReq = _mergedJsonPayloadForRow(merged);
@@ -1860,12 +1863,27 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       final c = (lgReq['cover_primary'] ?? 'image').toString().toLowerCase();
       coverVid = c == 'video';
     }
+    // إن وُجدت صور حقيقية لا تُقدَّم فيديو الغلاف تلقائياً (إلا بطلب صريح).
+    if (urls.isNotEmpty && !coverVid) {
+      coverVid = false;
+    }
     final purposeLabel =
         PropertyListingDisplay.purposeLabelForRequestRow(merged, widget.isAr);
-    final requestTitle =
-        (merged['request_title'] ?? merged['title'] ?? '').toString().trim();
-    final propTitle = (linkedProperty?.title ?? '').trim();
-    // الموضوع أولاً (مثلاً «فيلا للبيع في جازان») — الغرض «للبيع» شارة وليس عنواناً.
+    final requestTitle = PropertyListingDisplay.sanitizeListingTitle(
+      (merged['request_title'] ?? merged['title'] ?? '').toString().trim(),
+      typeLabel: PropertyListingDisplay.typeLabelForRequestRow(
+        merged,
+        widget.isAr,
+      ),
+      isAr: widget.isAr,
+    );
+    final propTitle = linkedProperty != null
+        ? PropertyListingDisplay.displayListingTitle(
+            linkedProperty,
+            widget.isAr,
+          )
+        : '';
+    // الموضوع أولاً — من بيانات العقار نفسه عند الربط، بدون لاحقات نوع متعارضة.
     final title = propTitle.isNotEmpty
         ? propTitle
         : (requestTitle.isNotEmpty
@@ -2449,7 +2467,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
     void open() {
       if (id.isNotEmpty) {
-        unawaited(_openDetails(cardProperty, marketingRequestId: id));
+        unawaited(
+          _openOwnerListingRequestFromRow(row, requestStatusId: id),
+        );
       } else {
         unawaited(_openDetails(cardProperty));
       }
@@ -2724,11 +2744,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
     void open() {
       if (id.isEmpty) return;
-      final linked = _linkedPropertyForOwnerRequestCard(row);
-      if (linked != null) {
-        unawaited(_openDetails(linked, marketingRequestId: id));
-        return;
-      }
       unawaited(_openOwnerListingRequestFromRow(row, requestStatusId: id));
     }
 
@@ -5644,9 +5659,19 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   String _mkRowTitle(Map<String, dynamic> r) {
-    final requestTitle = (r['request_title'] ?? '').toString().trim();
-    final previewTitle = (r['preview_title'] ?? '').toString().trim();
-    final title = (r['title'] ?? '').toString().trim();
+    final typeLabel =
+        PropertyListingDisplay.typeLabelForRequestRow(r, widget.isAr);
+    String clean(String raw) => PropertyListingDisplay.sanitizeListingTitle(
+          raw,
+          typeLabel: typeLabel,
+          isAr: widget.isAr,
+        );
+
+    final requestTitle =
+        clean((r['request_title'] ?? '').toString().trim());
+    final previewTitle =
+        clean((r['preview_title'] ?? '').toString().trim());
+    final title = clean((r['title'] ?? '').toString().trim());
     final city = (r['request_city'] ?? r['preview_city'] ?? r['city'] ?? '')
         .toString()
         .trim();
@@ -6969,7 +6994,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   double _marketerHubScrollBottomPadding(BuildContext context) {
-    return MediaQuery.viewPaddingOf(context).bottom + 76;
+    // جسم Scaffold فوق شريط التنقل — لا تُضاعف safe-area وإلا تظهر طبقة فارغة تغطي النص.
+    final w = MediaQuery.sizeOf(context).width;
+    return w < 720 ? 12 : 16;
   }
 
   String _safeNotifString(dynamic v) => (v ?? '').toString().trim();
@@ -8404,7 +8431,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
   }
 
-  /// فتح تفاصيل العقار المرتبط بطلب التسويق إن وُجد؛ وإلا [ListingRequestStatusPage].
+  /// من بطاقات تسويق المالك في «صفحتي»: مسار الحالة/التعاقد — وليس تفاصيل عقار عامة.
   Future<void> _openOwnerListingRequestFromRow(
     Map<String, dynamic> row, {
     required String requestStatusId,
@@ -8413,87 +8440,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         ? _marketingRequestIdFromRow(row)
         : requestStatusId.trim();
     if (rid.isEmpty) return;
-
-    final localLinked = _linkedPropertyForOwnerRequestCard(row);
-    if (localLinked != null) {
-      await _openDetails(
-        localLinked,
-        marketingRequestId: rid,
-        allowMarketingOffer: false,
-      );
-      return;
-    }
-
-    final previewPid = (row['preview_property_id'] ??
-            row['property_id'] ??
-            row['linked_property_id'] ??
-            '')
-        .toString()
-        .trim();
-    if (previewPid.isNotEmpty) {
-      Property? p = _propertyFromLocalCaches(previewPid);
-      p ??= await _fetchPropertyById(previewPid);
-      if (!mounted) return;
-      if (p != null) {
-        _applyUpdatedPropertyToCollections(p);
-        await _openDetails(
-          p,
-          marketingRequestId: rid,
-          allowMarketingOffer: false,
-        );
-        return;
-      }
-    }
-
-    try {
-      final lr = await _sb
-          .from('listing_requests')
-          .select('preview_property_id, listing_request_public_code')
-          .eq('id', rid)
-          .maybeSingle();
-      if (!mounted) return;
-      final pid = (lr?['preview_property_id'] ?? '').toString().trim();
-      if (pid.isNotEmpty) {
-        final p = await _fetchPropertyById(pid);
-        if (!mounted) return;
-        if (p != null) {
-          _applyUpdatedPropertyToCollections(p);
-          await _openDetails(
-            p,
-            marketingRequestId: rid,
-            allowMarketingOffer: false,
-          );
-          return;
-        }
-      }
-      final pubCode =
-          (lr?['listing_request_public_code'] ?? '').toString().trim();
-      if (pubCode.isNotEmpty && _uid.isNotEmpty) {
-        final byCode = await _sb
-            .from('properties')
-            .select(SupabaseSchemaSelects.propertiesListing)
-            .eq('owner_id', _uid)
-            .eq('listing_public_code', pubCode)
-            .order('updated_at', ascending: false)
-            .limit(1)
-            .maybeSingle();
-        if (!mounted) return;
-        if (byCode != null) {
-          final p = Property.fromJson(Map<String, dynamic>.from(byCode));
-          _applyUpdatedPropertyToCollections(p);
-          await _openDetails(
-            p,
-            marketingRequestId: rid,
-            allowMarketingOffer: false,
-          );
-          return;
-        }
-      }
-    } catch (_) {}
-
     if (!mounted) return;
-    // لا يوجد عقار منشور بعد — نفتح «حالة طلب التسويق» (تعاقد/تصريح/عروض)
-    // بدل تنبيه «لا يوجد إعلان مرتبط» الذي كان يظهر لكل التبويبات.
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ListingRequestStatusPage(
@@ -9943,7 +9890,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       previewImageUrls,
       type: type,
       views: previewViews,
-      videoStoragePath: previewVideoUrl.isEmpty ? null : previewVideoUrl,
+      videoStoragePath: (previewVideoUrl.isNotEmpty &&
+              (previewImageUrls.isEmpty || coverPrefersVideo))
+          ? previewVideoUrl
+          : null,
       coverPrefersVideo: coverPrefersVideo,
       showTrackingMark: trackingTap != null,
       onImageTrackingTap: trackingTap,
@@ -10407,9 +10357,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                                 previewImageUrls,
                                 type: type,
                                 views: previewViews,
-                                videoStoragePath: previewVideoUrl.isEmpty
-                                    ? null
-                                    : previewVideoUrl,
+                                videoStoragePath: (previewVideoUrl.isNotEmpty &&
+                                        (previewImageUrls.isEmpty ||
+                                            coverPrefersVideo))
+                                    ? previewVideoUrl
+                                    : null,
                                 coverPrefersVideo: coverPrefersVideo,
                               ),
                             ),

@@ -707,15 +707,26 @@ class Property {
     final out = <String>[];
 
     void pushFromImageMap(Map<String, dynamic> row) {
+      final mt = (row['media_type'] ?? '').toString().trim().toLowerCase();
+      if (mt.contains('video')) return;
       final path = row['path']?.toString().trim();
       final fileName = row['file_name']?.toString().trim();
       final url = row['url']?.toString().trim();
+      bool looksVideo(String? s) {
+        final v = (s ?? '').toLowerCase();
+        return v.endsWith('.mp4') ||
+            v.endsWith('.mov') ||
+            v.endsWith('.webm') ||
+            v.endsWith('.m4v') ||
+            v.endsWith('.avi') ||
+            v.endsWith('.mkv');
+      }
       if (path != null && path.isNotEmpty) {
-        out.add(path);
+        if (!looksVideo(path)) out.add(path);
       } else if (fileName != null && fileName.isNotEmpty) {
-        out.add(fileName);
+        if (!looksVideo(fileName)) out.add(fileName);
       } else if (url != null && url.isNotEmpty) {
-        out.add(url);
+        if (!looksVideo(url)) out.add(url);
       }
     }
 
@@ -755,6 +766,40 @@ class Property {
     }
 
     return out;
+  }
+
+  static String? _firstVideoFromPropertyImages(dynamic propertyImages) {
+    bool looksVideo(String? s) {
+      final v = (s ?? '').toLowerCase();
+      return v.endsWith('.mp4') ||
+          v.endsWith('.mov') ||
+          v.endsWith('.webm') ||
+          v.endsWith('.m4v') ||
+          v.endsWith('.avi') ||
+          v.endsWith('.mkv');
+    }
+
+    String? found;
+    void check(Map<String, dynamic> row) {
+      final mt = (row['media_type'] ?? '').toString().trim().toLowerCase();
+      final path = (row['path'] ?? row['file_name'] ?? row['url'] ?? '')
+          .toString()
+          .trim();
+      if (path.isEmpty) return;
+      if (mt.contains('video') || looksVideo(path)) {
+        found ??= path;
+      }
+    }
+
+    if (propertyImages is Map) {
+      check(Map<String, dynamic>.from(propertyImages));
+    } else if (propertyImages is List) {
+      for (final e in propertyImages) {
+        if (e is Map) check(Map<String, dynamic>.from(e));
+        if (found != null) break;
+      }
+    }
+    return found;
   }
 
   factory Property.fromJson(Map<String, dynamic> json) {
@@ -826,7 +871,8 @@ class Property {
       floor: _toInt(json['floor']),
       totalFloors: _toInt(json['total_floors']),
       amenities: _toBoolMap(json['amenities']),
-      videoUrl: _trimOrNull(json['video_url']),
+      videoUrl: _trimOrNull(json['video_url']) ??
+          _firstVideoFromPropertyImages(json['property_images']),
       virtualTourUrl: _trimOrNull(json['virtual_tour_url']),
       contactPhone: _trimOrNull(json['contact_phone']),
       availabilityDate: _tryParseDt(json['availability_date']),
@@ -975,7 +1021,8 @@ class Property {
       floor: _toInt(map['floor']),
       totalFloors: _toInt(map['total_floors']),
       amenities: _toBoolMap(map['amenities']),
-      videoUrl: _trimOrNull(map['video_url']),
+      videoUrl: _trimOrNull(map['video_url']) ??
+          _firstVideoFromPropertyImages(map['property_images']),
       virtualTourUrl: _trimOrNull(map['virtual_tour_url']),
       contactPhone: _trimOrNull(map['contact_phone']),
       availabilityDate: _tryParseDt(map['availability_date']),

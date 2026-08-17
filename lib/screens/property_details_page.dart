@@ -193,17 +193,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return (_resolvedListingRequestId ?? '').trim();
   }
 
-  bool get _resolvedMarketerSidecar =>
-      !_isGuest &&
-      !_isListingOwner &&
-      widget.currentUserId.trim().isNotEmpty &&
-      widget.currentUserId != _property.ownerId;
-
-  bool get _allowMarketingOfferEffective =>
-      widget.allowMarketingOffer ||
-      (_resolvedMarketerSidecar &&
-          (_resolvedListingRequestId ?? '').trim().isNotEmpty &&
-          !_isPublishedLikeListing);
+  /// لا تُفعَّل من مجرّد وجود طلب مربوط — وإلا يظهر «عرض تسويقي» من السوق قبل الدعوة/الموافقة.
+  bool get _allowMarketingOfferEffective => widget.allowMarketingOffer;
 
   bool get _canUseMarketingOfferAction =>
       _allowMarketingOfferEffective &&
@@ -402,12 +393,22 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
           widget.currentUserId ==
               (_property.publishedByMarketerId ?? '').trim());
 
-  /// قبل النشر: مسوّق مرتبط أو لديه عرض/دعوة يفتح محادثة مع المالك.
-  bool get _canOpenListingOwnerChat =>
-      !_isGuest &&
-      !_isPublishedLikeListing &&
-      widget.currentUserId.trim() != _property.ownerId &&
-      (_isPartyMarketerOnListing || widget.allowMarketingOffer);
+  /// مراسلة المالك: بعد قبول العرض وفي مراحل التعاقد/التصاريح فقط — ليست من السوق العقاري.
+  bool get _canOpenListingOwnerChat {
+    if (_isGuest || _isPublishedLikeListing) return false;
+    if (widget.currentUserId.trim() == _property.ownerId) return false;
+    if (!_isSelectedMarketerForListing) return false;
+    final s = _property.effectiveWorkflowStage;
+    return const {
+      ListingWorkflowStage.marketerSelected,
+      ListingWorkflowStage.contractPending,
+      ListingWorkflowStage.contractSent,
+      ListingWorkflowStage.contractReturned,
+      ListingWorkflowStage.contractSigned,
+      ListingWorkflowStage.permitPending,
+      ListingWorkflowStage.permitIssued,
+    }.contains(s);
+  }
 
   /// ⋮ للزائر: ليس مالكاً ولا مسوّقاً مرتبطاً بالإعلان ولا موظف منصّة.
   bool get _showVisitorListingPublicMenu {
@@ -955,17 +956,74 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   List<String> get _galleryUrls {
-    if (_property.defaultCoverUsed) return const [];
     final out = <String>[];
-
-    for (final raw in _property.images) {
+    for (final raw in ListingMediaUrls.propertyCardImagePaths(_property)) {
       final normalized = _normalizeImageUrl(raw);
       if (normalized.isNotEmpty) {
         out.add(normalized);
       }
     }
-
     return out;
+  }
+
+  String _localizedListingStatusLine() {
+    final st = (_property.status ?? '').trim().toLowerCase();
+    final wf = (_property.workflowStage ?? '').trim().toLowerCase();
+    String mapOne(String s) {
+      if (!widget.isAr) {
+        switch (s) {
+          case 'draft':
+            return 'Draft';
+          case 'waiting_marketers':
+            return 'Waiting for marketers';
+          case 'published':
+            return 'Published';
+          case 'active':
+          case 'live':
+            return 'Live';
+          case 'reserved':
+            return 'Reserved';
+          default:
+            return s.replaceAll('_', ' ');
+        }
+      }
+      switch (s) {
+        case 'draft':
+          return 'مسودة';
+        case 'waiting_marketers':
+          return 'بانتظار المسوّقين';
+        case 'offers_received':
+          return 'وصلت عروض';
+        case 'marketer_selected':
+          return 'تم اختيار مسوّق';
+        case 'contract_pending':
+        case 'contract_sent':
+          return 'بانتظار العقد';
+        case 'contract_signed':
+          return 'تم التوقيع';
+        case 'permit_pending':
+          return 'بانتظار التصريح';
+        case 'permit_issued':
+          return 'صدر التصريح';
+        case 'published':
+          return 'منشور';
+        case 'active':
+        case 'live':
+          return 'ظاهر';
+        case 'reserved':
+          return 'محجوز';
+        case 'sold':
+        case 'completed':
+          return 'مكتمل';
+        default:
+          return s.replaceAll('_', ' ');
+      }
+    }
+
+    // المرحلة التشغيلية أوضح من حالة الصف العامة (draft).
+    if (wf.isNotEmpty) return mapOne(wf);
+    if (st.isNotEmpty) return mapOne(st);
+    return '';
   }
 
   bool get _coverPrimaryPrefersVideo {
@@ -2979,13 +3037,19 @@ $licLine
     final total = (videoLead ? 1 : 0) + imgs.length;
 
     if (total == 0) {
-      return ColoredBox(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-        child: AspectRatio(
-          aspectRatio: 16 / 9,
-          child: const BrandingLogoImage(
-            fillFrame: true,
-            errorIcon: Icons.image_not_supported_outlined,
+      return Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 360),
+          child: ColoredBox(
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+            child: const AspectRatio(
+              aspectRatio: 16 / 9,
+              child: BrandingLogoImage(
+                fit: BoxFit.contain,
+                errorIcon: Icons.image_not_supported_outlined,
+              ),
+            ),
           ),
         ),
       );
@@ -2997,16 +3061,22 @@ $licLine
       final wmTrace = idShort.length <= 8
           ? idShort
           : idShort.substring(idShort.length - 8);
-      return ListingMediaGallery(
-        imageUrls: imgs,
-        isAr: widget.isAr,
-        aspectRatio: 16 / 9,
-        maxHeight: 480,
-        borderRadius: 0,
-        initialIndex: 0,
-        watermark: ListingWatermarkOverlay(
-          traceId: wmTrace,
-          isAr: widget.isAr,
+      return Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 420),
+          child: ListingMediaGallery(
+            imageUrls: imgs,
+            isAr: widget.isAr,
+            aspectRatio: 16 / 9,
+            maxHeight: 420,
+            borderRadius: 0,
+            initialIndex: 0,
+            watermark: ListingWatermarkOverlay(
+              traceId: wmTrace,
+              isAr: widget.isAr,
+            ),
+          ),
         ),
       );
     }
@@ -3033,123 +3103,130 @@ $licLine
       );
     }
 
-    final frame = ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 480),
-      child: AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            PageView.builder(
-              controller: _page,
-              itemCount: total,
-              onPageChanged: (i) => setState(() => _imgIndex = i),
-              itemBuilder: (_, i) {
-                if (videoLead && i == 0) {
-                  final raw = _property.videoUrl!.trim();
-                  final url = _resolveVideoPlayableUrl(raw);
-                  return ClipRect(
-                    child: InlinePropertyVideoPlayer(
-                      videoUrl: url,
-                      isAr: widget.isAr,
-                    ),
-                  );
-                }
-                final imgIndex = videoLead ? i - 1 : i;
-                final imageUrl = imgs[imgIndex];
-                return GestureDetector(
-                  onTap: () {
-                    // فتح معرض الصور فقط (تخطي شريحة الفيديو).
-                    showDialog<void>(
-                      context: context,
-                      barrierColor: Colors.black.withValues(alpha: 0.92),
-                      builder: (_) => ListingImageLightbox(
-                        urls: imgs,
-                        initialIndex: imgIndex.clamp(0, imgs.length - 1),
-                        isAr: widget.isAr,
+    final frame = Align(
+      alignment: Alignment.center,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 920, maxHeight: 420),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 420),
+          child: AspectRatio(
+            aspectRatio: 16 / 9,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                PageView.builder(
+                  controller: _page,
+                  itemCount: total,
+                  onPageChanged: (i) => setState(() => _imgIndex = i),
+                  itemBuilder: (_, i) {
+                    if (videoLead && i == 0) {
+                      final raw = _property.videoUrl!.trim();
+                      final url = _resolveVideoPlayableUrl(raw);
+                      return ClipRect(
+                        child: InlinePropertyVideoPlayer(
+                          videoUrl: url,
+                          isAr: widget.isAr,
+                        ),
+                      );
+                    }
+                    final imgIndex = videoLead ? i - 1 : i;
+                    final imageUrl = imgs[imgIndex];
+                    return GestureDetector(
+                      onTap: () {
+                        // فتح معرض الصور فقط (تخطي شريحة الفيديو).
+                        showDialog<void>(
+                          context: context,
+                          barrierColor: Colors.black.withValues(alpha: 0.92),
+                          builder: (_) => ListingImageLightbox(
+                            urls: imgs,
+                            initialIndex: imgIndex.clamp(0, imgs.length - 1),
+                            isAr: widget.isAr,
+                          ),
+                        );
+                      },
+                      child: CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.cover,
+                        memCacheWidth: kIsWeb ? 900 : 1400,
+                        memCacheHeight: kIsWeb ? 650 : 1000,
+                        placeholder: (_, __) => const Center(
+                          child: AppLogoLoading(compact: true, size: 40),
+                        ),
+                        errorWidget: (_, __, error) {
+                          debugPrint(
+                            'PropertyDetails image load error: $error | url=$imageUrl',
+                          );
+                          return ColoredBox(
+                            color: cs.surfaceContainerHighest
+                                .withValues(alpha: 0.6),
+                            child: const Center(
+                              child: BrandingLogoImage(
+                                fit: BoxFit.contain,
+                                errorIcon: Icons.broken_image_outlined,
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     );
                   },
-                  child: CachedNetworkImage(
-                    imageUrl: imageUrl,
-                    fit: BoxFit.cover,
-                    memCacheWidth: kIsWeb ? 900 : 1400,
-                    memCacheHeight: kIsWeb ? 650 : 1000,
-                    placeholder: (_, __) => const Center(
-                      child: AppLogoLoading(compact: true, size: 40),
-                    ),
-                    errorWidget: (_, __, error) {
-                      debugPrint(
-                        'PropertyDetails image load error: $error | url=$imageUrl',
-                      );
-                      return ColoredBox(
-                        color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
-                        child: const Center(
-                          child: BrandingLogoImage(
-                            fit: BoxFit.contain,
-                            errorIcon: Icons.broken_image_outlined,
+                ),
+                ListingWatermarkOverlay(traceId: wmTrace, isAr: widget.isAr),
+                PositionedDirectional(
+                  top: 10,
+                  start: 10,
+                  child: _Pill(
+                    text: '${safeIndex + 1} / $total',
+                    icon: safeIndex == 0
+                        ? Icons.videocam_outlined
+                        : Icons.photo_library_outlined,
+                  ),
+                ),
+                if (total > 1) ...[
+                  Positioned(
+                    left: 6,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: Material(
+                        color: Colors.black54,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => go(-1),
+                          child: const Padding(
+                            padding: EdgeInsets.all(6),
+                            child: Icon(Icons.chevron_left_rounded,
+                                color: Colors.white, size: 26),
                           ),
                         ),
-                      );
-                    },
-                  ),
-                );
-              },
-            ),
-            ListingWatermarkOverlay(traceId: wmTrace, isAr: widget.isAr),
-            PositionedDirectional(
-              top: 10,
-              start: 10,
-              child: _Pill(
-                text: '${safeIndex + 1} / $total',
-                icon: safeIndex == 0
-                    ? Icons.videocam_outlined
-                    : Icons.photo_library_outlined,
-              ),
-            ),
-            if (total > 1) ...[
-              Positioned(
-                left: 6,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: Material(
-                    color: Colors.black54,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () => go(-1),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6),
-                        child: Icon(Icons.chevron_left_rounded,
-                            color: Colors.white, size: 26),
                       ),
                     ),
                   ),
-                ),
-              ),
-              Positioned(
-                right: 6,
-                top: 0,
-                bottom: 0,
-                child: Center(
-                  child: Material(
-                    color: Colors.black54,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      customBorder: const CircleBorder(),
-                      onTap: () => go(1),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6),
-                        child: Icon(Icons.chevron_right_rounded,
-                            color: Colors.white, size: 26),
+                  Positioned(
+                    right: 6,
+                    top: 0,
+                    bottom: 0,
+                    child: Center(
+                      child: Material(
+                        color: Colors.black54,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => go(1),
+                          child: const Padding(
+                            padding: EdgeInsets.all(6),
+                            child: Icon(Icons.chevron_right_rounded,
+                                color: Colors.white, size: 26),
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            ],
-          ],
+                ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -3635,7 +3712,9 @@ $licLine
     final publishedLike = _isPublishedLikeListing;
     final showQuadToMarketerPrePublish =
         widget.showOwnerLegalNameToViewer && !publishedLike;
-    final showAdvertiserByLine = !showOwnerIdentity && ownerNameRaw.isNotEmpty;
+    // لا تُعرض هوية المعلن من السوق قبل الموافقة؛ بعد النشر تظهر العلامة التجارية/المسوّق.
+    final showAdvertiserByLine =
+        !showOwnerIdentity && ownerNameRaw.isNotEmpty && publishedLike;
     final marketerBrandUrl =
         (_property.marketerBrandImagePublicUrl ?? '').trim();
 
@@ -4301,57 +4380,6 @@ $licLine
                           ],
                         ),
                       ),
-                      if ((_property.listingPublicCode ?? '')
-                          .trim()
-                          .isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        _Card(
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.tag_outlined,
-                                size: 20,
-                                color: cs.primary,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: SelectableText(
-                                  widget.isAr
-                                      ? 'رقم الإعلان: ${DisplayIds.tenDigit(_property.listingPublicCode)}'
-                                      : 'Listing no.: ${DisplayIds.tenDigit(_property.listingPublicCode)}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    color: cs.onSurface,
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: widget.isAr
-                                    ? 'نسخ رقم الإعلان'
-                                    : 'Copy listing ID',
-                                onPressed: () async {
-                                  final code = DisplayIds.tenDigit(
-                                    _property.listingPublicCode,
-                                  );
-                                  await Clipboard.setData(
-                                      ClipboardData(text: code));
-                                  if (!context.mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        widget.isAr
-                                            ? 'تم نسخ رقم الإعلان'
-                                            : 'Listing ID copied',
-                                      ),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.copy_rounded),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
                       if (_hasMarketingLicenseInfo) ...[
                         const SizedBox(height: 12),
                         _Card(
@@ -4828,8 +4856,8 @@ $licLine
                                     icon: const Icon(Icons.edit_note_outlined),
                                     label: Text(
                                       widget.isAr
-                                          ? 'إتمام الصفقة'
-                                          : 'Complete deal',
+                                          ? 'إرسال عرض تسويقي'
+                                          : 'Submit marketing offer',
                                     ),
                                   ),
                                 if (_offerSentThisRound &&
@@ -5115,14 +5143,8 @@ $licLine
                                 title: widget.isAr
                                     ? 'حالة الإعلان'
                                     : 'Listing status',
-                                value: [
-                                  (_property.status ?? '').trim(),
-                                  (_property.workflowStage ?? '').trim(),
-                                ].where((e) => e.isNotEmpty).join(' / '),
-                                copyValue: [
-                                  (_property.status ?? '').trim(),
-                                  (_property.workflowStage ?? '').trim(),
-                                ].where((e) => e.isNotEmpty).join(' / '),
+                                value: _localizedListingStatusLine(),
+                                copyValue: _localizedListingStatusLine(),
                                 copiedMessage: widget.isAr
                                     ? 'تم النسخ'
                                     : 'Copied',

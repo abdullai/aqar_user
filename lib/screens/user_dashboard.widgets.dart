@@ -2972,6 +2972,8 @@ class _RealEstateCard extends StatelessWidget {
           urls: PropertyListingDisplay.propertyCardImagePaths(property),
           fit: BoxFit.cover,
           videoPathOrUrl: property.videoUrl,
+          preferVideoCover:
+              ListingMediaUrls.propertyPrefersVideoCover(property),
           isAr: isAr,
           allowInlineVideo: !kIsWeb,
           listingIdForWatermark: property.id,
@@ -4170,6 +4172,9 @@ class _PropertyImage extends StatelessWidget {
   /// عند true مع عدة صور: نعرض الأولى فقط (بدون PageView/نقاط).
   final bool preferStaticPrimaryImage;
 
+  /// عند true مع فيديو: الغلاف فيديو حتى لو وُجدت صور.
+  final bool preferVideoCover;
+
   const _PropertyImage({
     required this.urls,
     this.fit = BoxFit.cover,
@@ -4179,6 +4184,7 @@ class _PropertyImage extends StatelessWidget {
     this.listingIdForWatermark,
     this.showListingWatermark = true,
     this.preferStaticPrimaryImage = false,
+    this.preferVideoCover = false,
   });
 
   static const String _imagesBucket = 'property-images';
@@ -4236,7 +4242,10 @@ class _PropertyImage extends StatelessWidget {
         );
 
     final vid = (videoPathOrUrl ?? '').trim();
-    final wantVideoCover = vid.isNotEmpty;
+    final cleanUrls =
+        urls.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    final wantVideoCover =
+        vid.isNotEmpty && (cleanUrls.isEmpty || preferVideoCover);
 
     if (wantVideoCover && !allowInlineVideo) {
       final playable = _normalizeVideoPlayableUrl(vid);

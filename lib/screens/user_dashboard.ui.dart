@@ -2623,7 +2623,7 @@ class _UserDashboardState extends State<UserDashboard>
     WebBootstrapDiag.start('my_ads.lazy');
     try {
       _ensureSubTabControllers();
-      if (mounted) setState(() {});
+      // لا setState فوري هنا — يمنع وميض/إعادة بناء قبل وصول الدلاء.
       WebBootstrapDiag.log(
         'my_ads.lazy',
         'instant paint n=${_mine.length} hub=${_usesMarketerMyPageHub ? "marketer" : "owner"}',
@@ -2654,27 +2654,37 @@ class _UserDashboardState extends State<UserDashboard>
       await Future.wait([roleFut, mineFut]);
       if (!mounted) return;
       _ensureSubTabControllers();
-      if (mounted) setState(() {});
       WebBootstrapDiag.log(
         'my_ads.lazy',
         'mine ready n=${_mine.length} hub=${_usesMarketerMyPageHub ? "marketer" : "owner"}',
       );
 
       final usedMarketer = _usesMarketerMyPageHub;
+      final hasHubCache = usedMarketer
+          ? (_hasMarketingData || _hasOwnerRequestsData)
+          : _hasOwnerRequestsData;
+      // إن وُجد كاش للدلاء ولا طلب force: أعِد الرسم مرة واحدة بعد mine فقط عند الحاجة.
+      if (force || !hasHubCache) {
+        // انتظر الدلاء ثم setState مرة واحدة — يقلل الوميض المزدوج.
+      } else if (mounted) {
+        setState(() {});
+      }
+
       final bucketsFut = usedMarketer
           ? Future.wait([
               _loadMarketerBuckets(force: force),
               _loadOwnerRequestsBuckets(force: force),
             ])
           : _loadOwnerRequestsBuckets(force: force);
-      unawaited(bucketsFut.then((_) {
+      try {
+        await bucketsFut;
         if (!mounted) return;
         _ensureSubTabControllers();
         if (_usesMarketerMyPageHub != usedMarketer) {
           if (_usesMarketerMyPageHub) {
-            unawaited(_loadMarketerBuckets(force: false));
+            await _loadMarketerBuckets(force: false);
           } else {
-            unawaited(_loadOwnerRequestsBuckets(force: false));
+            await _loadOwnerRequestsBuckets(force: false);
           }
         }
         if (!kIsWeb) {
@@ -2685,12 +2695,16 @@ class _UserDashboardState extends State<UserDashboard>
           'my_ads.lazy',
           'hub=${_usesMarketerMyPageHub ? "marketer" : "owner"} buckets=done',
         );
-      }).catchError((Object e) {
+      } catch (e) {
         WebBootstrapDiag.warn('my_ads.lazy', 'buckets $e');
-      }));
+        if (mounted) setState(() {});
+      }
     } catch (e) {
       WebBootstrapDiag.warn('my_ads.lazy.bg', '$e');
-      _myAdsHubDataLoadStarted = false;
+      // أبقِ العلم true إن وُجد كاش حتى لا تُعاد الحلقة عند كل دخول لصفحتي.
+      if (!_hasMarketingData && !_hasOwnerRequestsData && _mine.isEmpty) {
+        _myAdsHubDataLoadStarted = false;
+      }
     }
   }
 
@@ -4819,24 +4833,29 @@ class _UserDashboardState extends State<UserDashboard>
                           );
                         }),
                       ),
-                      child: NavigationBar(
-                        height: hideBottomLabels ? 64 : 80,
-                        labelBehavior: hideBottomLabels
-                            ? NavigationDestinationLabelBehavior.alwaysHide
-                            : NavigationDestinationLabelBehavior.alwaysShow,
-                        selectedIndex: navIndex,
-                        indicatorColor:
-                            _brandPrimary.withValues(alpha: _op(28)),
-                        onDestinationSelected: (i) {
-                          AppHaptics.selection();
-                          _onDashboardBottomNavSelected(bottomSlots, i);
-                        },
-                        destinations: _dashboardBottomDestinations(
-                          l10n,
-                          bottomSlots,
-                          compact: compactBottomNav,
+                      child: SafeArea(
+                        top: false,
+                        // ويب ويندوز: تجنّب شريط فراغ تحت الرموز يضيّق مساحة المحتوى.
+                        bottom: !kIsWeb,
+                        child: NavigationBar(
+                          height: hideBottomLabels ? 64 : 72,
+                          labelBehavior: hideBottomLabels
+                              ? NavigationDestinationLabelBehavior.alwaysHide
+                              : NavigationDestinationLabelBehavior.alwaysShow,
                           selectedIndex: navIndex,
-                          hideLabels: hideBottomLabels,
+                          indicatorColor:
+                              _brandPrimary.withValues(alpha: _op(28)),
+                          onDestinationSelected: (i) {
+                            AppHaptics.selection();
+                            _onDashboardBottomNavSelected(bottomSlots, i);
+                          },
+                          destinations: _dashboardBottomDestinations(
+                            l10n,
+                            bottomSlots,
+                            compact: compactBottomNav,
+                            selectedIndex: navIndex,
+                            hideLabels: hideBottomLabels,
+                          ),
                         ),
                       ),
                     );
