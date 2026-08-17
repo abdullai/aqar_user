@@ -7,11 +7,16 @@
 -- Clears / reduces:
 --   0011 function_search_path_mutable
 --   0025 public_bucket_allows_listing (property-images / property-videos)
---   0028 anon_security_definer_function_executable  (keep login + guest helpers)
+--   0028 anon_security_definer_function_executable  (keep login + guest + RLS)
 --   0029 authenticated_security_definer_function_executable
---         only for server-only RPCs (dev_/debug_/cron_/one-shot). App RPCs and
---         trigger functions stay executable by authenticated — revoking those
---         would break Flutter and row triggers.
+--         only for server-only RPCs (dev_/debug_/cron_/one-shot/_helpers).
+--         App RPCs and trigger functions stay executable by authenticated —
+--         revoking those would break Flutter and row triggers.
+--
+-- Advisor will NOT reach zero WARN. Remaining 0028 rows are login/signup/guest
+-- RPCs plus RLS helpers (is_admin, property_id_public_home_feed_visible).
+-- Remaining 0029 rows are every signed-in Flutter RPC and DML trigger.
+-- Ignore those rows. Do not REVOKE them to "clear" the linter.
 --
 -- Does NOT change (Dashboard, not SQL):
 --   auth_leaked_password_protection
@@ -117,6 +122,7 @@ BEGIN
         p.proname LIKE 'cron\_%' ESCAPE '\'
         OR p.proname LIKE 'dev\_%' ESCAPE '\'
         OR p.proname LIKE 'debug\_%' ESCAPE '\'
+        OR p.proname = 'request_otp_dev'
         OR p.proname IN (
           'apply_listing_media_link_round3',
           'apply_listing_media_link_round4',
@@ -134,6 +140,21 @@ BEGIN
           'run_document_expiry_checks',
           'check_expired_licenses',
           'login_with_national_id'
+        )
+        OR (
+          p.proname LIKE '\_%' ESCAPE '\'
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_trigger t
+            WHERE t.tgfoid = p.oid AND NOT t.tgisinternal
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_policies pol
+            WHERE pol.schemaname IN ('public', 'storage')
+              AND (
+                coalesce(pol.qual, '') ~ ('\m' || p.proname || '\M')
+                OR coalesce(pol.with_check, '') ~ ('\m' || p.proname || '\M')
+              )
+          )
         )
       )
   LOOP
@@ -161,6 +182,7 @@ BEGIN
         p.proname LIKE 'cron\_%' ESCAPE '\'
         OR p.proname LIKE 'dev\_%' ESCAPE '\'
         OR p.proname LIKE 'debug\_%' ESCAPE '\'
+        OR p.proname = 'request_otp_dev'
         OR p.proname IN (
           'apply_listing_media_link_round3',
           'apply_listing_media_link_round4',
@@ -178,6 +200,21 @@ BEGIN
           'run_document_expiry_checks',
           'check_expired_licenses',
           'login_with_national_id'
+        )
+        OR (
+          p.proname LIKE '\_%' ESCAPE '\'
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_trigger t
+            WHERE t.tgfoid = p.oid AND NOT t.tgisinternal
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM pg_policies pol
+            WHERE pol.schemaname IN ('public', 'storage')
+              AND (
+                coalesce(pol.qual, '') ~ ('\m' || p.proname || '\M')
+                OR coalesce(pol.with_check, '') ~ ('\m' || p.proname || '\M')
+              )
+          )
         )
       )
   LOOP
@@ -208,7 +245,6 @@ BEGIN
         'record_failed_password_login',
         'request_inapp_otp',
         'verify_inapp_otp',
-        'ensure_otp_username_for_me',
         'signup_email_taken',
         'signup_fal_license_taken',
         'signup_phone_taken',
@@ -314,7 +350,6 @@ WHERE nsp.nspname = 'public'
     'record_failed_password_login',
     'request_inapp_otp',
     'verify_inapp_otp',
-    'ensure_otp_username_for_me',
     'signup_email_taken',
     'signup_fal_license_taken',
     'signup_phone_taken',
@@ -351,6 +386,8 @@ WHERE nsp.nspname = 'public'
     p.proname LIKE 'cron\_%' ESCAPE '\'
     OR p.proname LIKE 'dev\_%' ESCAPE '\'
     OR p.proname LIKE 'debug\_%' ESCAPE '\'
+    OR p.proname = 'request_otp_dev'
+    OR p.proname LIKE '\_%' ESCAPE '\'
     OR p.proname IN (
       'apply_listing_media_link_round3',
       'apply_listing_media_link_round4',
