@@ -675,8 +675,24 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     return MarketerOwnerChatIntroAr.build(
       isAr: _isAr,
       ownerDisplayName: _ownerDisplayName(),
-      listingNoTenDigit: MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(r),
+      listingNoTenDigit: MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow({
+        ...r,
+        if (p != null) ...{
+          'preview_property_id': p['id'],
+          'preview_listing_public_code':
+              p['listing_public_code'] ?? p['public_code'],
+          'listing_public_code': p['listing_public_code'] ?? p['public_code'],
+        },
+      }),
       locationLine: loc,
+      subject: MarketerOwnerChatIntroAr.inferSubject({
+        ...r,
+        if (p != null) ...{
+          'preview_property_id': p['id'],
+          'preview_listing_public_code': p['listing_public_code'],
+          'listing_public_code': p['listing_public_code'],
+        },
+      }),
     );
   }
 
@@ -717,7 +733,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
       await ChatNavigation.push(
         context,
         isAr: _isAr,
-        embedInParentDashboardShell: widget.embedAppBar,
         propertyId: pid,
         title: _t('محادثة مع المالك', 'Chat with owner'),
         initialDraftMessage: draft,
@@ -731,7 +746,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
       await ChatNavigation.push(
         context,
         isAr: _isAr,
-        embedInParentDashboardShell: widget.embedAppBar,
         counterpartyId: oid,
         kind: ConversationKind.direct,
         title: _t('محادثة مع المالك', 'Chat with owner'),

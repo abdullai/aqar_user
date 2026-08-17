@@ -689,19 +689,16 @@ class _UserDashboardState extends State<UserDashboard>
       _chatTitle = title;
       _bottomNavSlideVisible = true;
     });
-    // داخل جسم اللوحة — يبقى الشريط السفلي (مثل الاشتراكات/المدفوعات).
     unawaited(
-      _pushBody<void>(
-        ChatNavigation.materialRoute(
-          isAr: _isArabic,
-          embedInParentDashboardShell: true,
-          propertyId: propertyId,
-          reservationId: reservationId,
-          title: title,
-          marketRequestId: marketRequestId,
-          kind: kind,
-          counterpartyId: counterpartyId,
-        ),
+      ChatNavigation.push(
+        context,
+        isAr: _isArabic,
+        propertyId: propertyId,
+        reservationId: reservationId,
+        title: title,
+        marketRequestId: marketRequestId,
+        kind: kind,
+        counterpartyId: counterpartyId,
       ),
     );
   }

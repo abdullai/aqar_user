@@ -1,24 +1,121 @@
 import '../utils/dashboard_greeting.dart';
 import '../utils/display_ids.dart';
 
-/// نص تمهيدي لمراسلة المالك (داخل التطبيق أو واتساب) — يُعبَّأ في حقل الدردشة.
+/// موضوع النص الافتتاحي — صياغة ذكية حسب نوع المراسلة.
+enum MarketerOwnerChatIntroSubject {
+  /// إعلان عقاري منشور / معاينة.
+  listing,
+
+  /// طلب تسويق / طلب سوق.
+  request,
+
+  /// صفقة نشطة بين طرفين على طلب أو إعلان.
+  deal,
+}
+
+/// نص تمهيدي لمراسلة المالك (داخل التطبيق أو واتساب).
+///
+/// يظهر الاسم مرة واحدة (بدون تكرار «شريكنا العقاري»)، ورقم العرض إن وُجد.
 abstract final class MarketerOwnerChatIntroAr {
-  static String tenDigitListingCodeFromRow(Map<String, dynamic> row) {
-    var rawCode =
-        (row['listing_request_public_code'] ?? '').toString().trim();
-    if (rawCode.length != 10 ||
-        !RegExp(r'^[0-9]{10}$').hasMatch(rawCode)) {
-      rawCode = (row['preview_listing_public_code'] ??
-              row['listing_public_code'] ??
-              '')
-          .toString()
-          .trim();
+  static final RegExp _tenDigitRe = RegExp(r'^[0-9]{10}$');
+
+  static bool _isGenericPartnerLabel(String raw, {required bool isAr}) {
+    final t = raw.trim();
+    if (t.isEmpty) return true;
+    final lower = t.toLowerCase();
+    if (isAr) {
+      return t == 'شريكنا العقاري' ||
+          t == 'الشريك العقاري' ||
+          t == 'المالك' ||
+          t == 'مسوّق' ||
+          t == 'مسوق';
     }
-    if (rawCode.length == 10 &&
-        RegExp(r'^[0-9]{10}$').hasMatch(rawCode)) {
-      return DisplayIds.tenDigit(rawCode);
+    return lower == 'property owner' ||
+        lower == 'real estate partner' ||
+        lower == 'our partner' ||
+        lower == 'owner' ||
+        lower == 'partner';
+  }
+
+  /// يستخرج رقم العرض العام (10 خانات) من صف طلب/إعلان بأي مفتاح شائع.
+  static String tenDigitListingCodeFromRow(Map<String, dynamic> row) {
+    const keys = <String>[
+      'listing_request_public_code',
+      'preview_listing_public_code',
+      'listing_public_code',
+      'public_listing_code',
+      'property_public_code',
+      'preview_public_code',
+      'request_public_code',
+      'public_code',
+      'listing_code',
+      'display_code',
+      'listing_no',
+      'ad_number',
+    ];
+    for (final k in keys) {
+      final raw = (row[k] ?? '').toString().trim();
+      if (raw.isEmpty) continue;
+      final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+      if (digits.length >= 10) {
+        return DisplayIds.tenDigit(digits);
+      }
+      if (_tenDigitRe.hasMatch(raw)) {
+        return DisplayIds.tenDigit(raw);
+      }
+    }
+
+    // احتياط: أي قيمة رقمية ظاهرة في الصف (بدون توليد هاش عشوائي من UUID).
+    for (final k in const [
+      'listing_request_number',
+      'request_number',
+      'ad_no',
+      'property_number',
+    ]) {
+      final raw = (row[k] ?? '').toString().trim();
+      final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+      if (digits.length >= 6) {
+        return digits.length >= 10
+            ? DisplayIds.tenDigit(digits)
+            : digits;
+      }
     }
     return '';
+  }
+
+  /// يخمن الموضوع من مفاتيح الصف إن لم يُمرَّر صراحة.
+  static MarketerOwnerChatIntroSubject inferSubject(Map<String, dynamic> row) {
+    final kind = (row['conversation_kind'] ??
+            row['deal_kind'] ??
+            row['subject'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (kind.contains('deal') || kind.contains('صفق')) {
+      return MarketerOwnerChatIntroSubject.deal;
+    }
+    if (kind.contains('request') || kind.contains('طلب')) {
+      return MarketerOwnerChatIntroSubject.request;
+    }
+    final hasListing = (row['preview_property_id'] ??
+            row['property_id'] ??
+            row['listing_id'] ??
+            '')
+        .toString()
+        .trim()
+        .isNotEmpty;
+    final hasRequest = (row['request_id'] ??
+            row['listing_request_id'] ??
+            row['market_request_id'] ??
+            '')
+        .toString()
+        .trim()
+        .isNotEmpty;
+    if (hasListing && !hasRequest) return MarketerOwnerChatIntroSubject.listing;
+    if (hasRequest && !hasListing) return MarketerOwnerChatIntroSubject.request;
+    if (hasListing && hasRequest) return MarketerOwnerChatIntroSubject.deal;
+    return MarketerOwnerChatIntroSubject.listing;
   }
 
   static String build({
@@ -26,22 +123,64 @@ abstract final class MarketerOwnerChatIntroAr {
     required String ownerDisplayName,
     required String listingNoTenDigit,
     required String locationLine,
+    MarketerOwnerChatIntroSubject subject = MarketerOwnerChatIntroSubject.listing,
   }) {
     final salute = DashboardGreeting.salutationOnly(isAr: isAr);
-    final nm = ownerDisplayName.trim().isEmpty
-        ? (isAr ? 'شريكنا العقاري' : 'property owner')
-        : ownerDisplayName.trim();
+    final brand = DashboardGreeting.partnerBrand(isAr: isAr);
+    final rawName = ownerDisplayName.trim();
+    // اسم حقيقي مرة واحدة — وإلا العلامة التجارية مرة واحدة فقط (بدون تكرار).
+    final address = _isGenericPartnerLabel(rawName, isAr: isAr)
+        ? brand
+        : rawName;
+
     final loc = locationLine.trim().isEmpty
-        ? (isAr ? 'الموقع المذكور في الإعلان' : 'the location listed')
+        ? (isAr ? 'الموقع المذكور' : 'the listed location')
         : locationLine.trim();
-    final no = listingNoTenDigit.trim().isEmpty ? '—' : listingNoTenDigit.trim();
-    if (isAr) {
-      return 'السلام عليكم ورحمة الله وبركاته، $salute شريكنا العقاري $nm، '
-          'بخصوص إعلانكم العقاري رقم $no في $loc، لدي الرغبة بالتواصل معكم، '
-          'هل وقتكم يسمح بذلك؟ أنتظر إجابتك عندما تكون الفرصة مناسبة لك.';
+
+    var no = listingNoTenDigit.trim();
+    if (no.isEmpty) {
+      no = isAr ? 'قيد التعيين' : 'pending';
     }
-    return 'Hello, $salute. Dear $nm, regarding your property listing no. $no '
-        'in $loc — I would like to connect with you. Please let me know when '
-        'a good time works for you. Thank you.';
+
+    if (isAr) {
+      final about = switch (subject) {
+        MarketerOwnerChatIntroSubject.listing =>
+          'بخصوص إعلانكم العقاري رقم $no في $loc',
+        MarketerOwnerChatIntroSubject.request =>
+          'بخصوص طلبكم العقاري رقم $no في $loc',
+        MarketerOwnerChatIntroSubject.deal =>
+          'بخصوص صفقتكم على الطلب/الإعلان العقاري رقم $no في $loc',
+      };
+      return 'السلام عليكم ورحمة الله وبركاته، $salute $address، $about، '
+          'هذه بداية محادثة الصفقة بيننا داخل المنصة. '
+          'يسعدني التنسيق معكم خطوة بخطوة.';
+    }
+
+    final aboutEn = switch (subject) {
+      MarketerOwnerChatIntroSubject.listing =>
+        'regarding your property listing no. $no in $loc',
+      MarketerOwnerChatIntroSubject.request =>
+        'regarding your property request no. $no in $loc',
+      MarketerOwnerChatIntroSubject.deal =>
+        'regarding your deal on listing/request no. $no in $loc',
+    };
+    return 'Peace be upon you, $salute $address — $aboutEn. '
+        'This is the start of our in-app deal chat. '
+        'I look forward to coordinating with you step by step.';
+  }
+
+  /// هل يبدو النص رسالة افتتاحية للمنصة؟
+  static bool looksLikeOpeningIntro(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return false;
+    if (t.contains('السلام عليكم ورحمة الله وبركاته')) return true;
+    if (t.contains('هذه بداية محادثة الصفقة')) return true;
+    if (t.contains('لدي الرغبة بالتواصل معكم')) return true;
+    if (t.toLowerCase().contains('peace be upon you')) return true;
+    if (t.toLowerCase().contains('start of our in-app deal chat')) return true;
+    if (t.toLowerCase().contains('regarding your property listing')) {
+      return true;
+    }
+    return false;
   }
 }

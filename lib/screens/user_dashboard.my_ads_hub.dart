@@ -2977,13 +2977,14 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   Future<void> _openOwnerContractChat(String contractId) async {
     if (contractId.isEmpty) return;
-    await _pushBody<void>(
+    await Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
+        fullscreenDialog: true,
         settings: const RouteSettings(name: AppRoutes.listingContractChat),
         builder: (_) => ListingContractChatPage(
           contractId: contractId,
           lang: widget.lang,
-          embedAppBar: true,
+          embedAppBar: false,
         ),
       ),
     );
@@ -3140,6 +3141,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       ownerDisplayName: _marketingOwnerName(r),
       listingNoTenDigit: MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(r),
       locationLine: _marketingLocationText(r),
+      subject: MarketerOwnerChatIntroAr.inferSubject(r),
     );
   }
 
@@ -3402,14 +3404,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         .trim();
     final pid = (r['preview_property_id'] ?? '').toString().trim();
     if (pid.isNotEmpty) {
-      await _pushBody<void>(
-        ChatNavigation.materialRoute(
-          isAr: widget.isAr,
-          embedInParentDashboardShell: true,
-          propertyId: pid,
-          counterpartyId: mid.isNotEmpty && mid != _uid ? mid : null,
-          title: widget.isAr ? 'محادثة مع المسوّق' : 'Chat with marketer',
-        ),
+      await ChatNavigation.push(
+        context,
+        isAr: widget.isAr,
+        propertyId: pid,
+        counterpartyId: mid.isNotEmpty && mid != _uid ? mid : null,
+        title: widget.isAr ? 'محادثة مع المسوّق' : 'Chat with marketer',
       );
       return;
     }
@@ -3441,14 +3441,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final rid = _marketingRequestIdFromRow(r);
     final pid = (r['preview_property_id'] ?? '').toString().trim();
     if (pid.isNotEmpty) {
-      await _pushBody<void>(
-        ChatNavigation.materialRoute(
-          isAr: widget.isAr,
-          embedInParentDashboardShell: true,
-          propertyId: pid,
-          title: widget.isAr ? 'محادثة مع المالك' : 'Chat with owner',
-          initialDraftMessage: draft,
-        ),
+      await ChatNavigation.push(
+        context,
+        isAr: widget.isAr,
+        propertyId: pid,
+        title: widget.isAr ? 'محادثة مع المالك' : 'Chat with owner',
+        initialDraftMessage: draft,
       );
       return;
     }
@@ -3456,28 +3454,24 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         (r['request_owner_id'] ?? r['owner_id'] ?? '').toString().trim();
     if (oid.isNotEmpty && oid != _uid) {
       if (rid.isNotEmpty) {
-        await _pushBody<void>(
-          ChatNavigation.materialRoute(
-            isAr: widget.isAr,
-            embedInParentDashboardShell: true,
-            kind: ConversationKind.marketRequest,
-            marketRequestId: rid,
-            counterpartyId: oid,
-            title: widget.isAr ? 'محادثة مع المالك' : 'Chat with owner',
-            initialDraftMessage: draft,
-          ),
-        );
-        return;
-      }
-      await _pushBody<void>(
-        ChatNavigation.materialRoute(
+        await ChatNavigation.push(
+          context,
           isAr: widget.isAr,
-          embedInParentDashboardShell: true,
-          kind: ConversationKind.direct,
+          kind: ConversationKind.marketRequest,
+          marketRequestId: rid,
           counterpartyId: oid,
           title: widget.isAr ? 'محادثة مع المالك' : 'Chat with owner',
           initialDraftMessage: draft,
-        ),
+        );
+        return;
+      }
+      await ChatNavigation.push(
+        context,
+        isAr: widget.isAr,
+        kind: ConversationKind.direct,
+        counterpartyId: oid,
+        title: widget.isAr ? 'محادثة مع المالك' : 'Chat with owner',
+        initialDraftMessage: draft,
       );
       return;
     }

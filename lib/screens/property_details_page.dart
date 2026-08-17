@@ -777,13 +777,15 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return;
     }
     if (!mounted) return;
-    Navigator.of(context).push<void>(
+    Navigator.of(context, rootNavigator: true).push<void>(
       MaterialPageRoute<void>(
+        fullscreenDialog: true,
         builder: (_) => ListingContractChatPage(
           contractId: cid,
           lang: _marketingLang,
           strictReadOnly: true,
           lockAfterOwnerSigns: true,
+          embedAppBar: false,
         ),
       ),
     );
@@ -1306,13 +1308,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
       if (!mounted) return;
 
-      await Navigator.push<void>(
+      await ChatNavigation.push(
         context,
-        ChatNavigation.materialRoute(
-          isAr: widget.isAr,
-          conversationId: conversationId,
-          propertyId: _property.id,
-        ),
+        isAr: widget.isAr,
+        conversationId: conversationId,
+        propertyId: _property.id,
       );
     } catch (_) {
       if (!mounted) return;
@@ -1357,13 +1357,11 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
       if (!mounted) return;
 
-      await Navigator.push<void>(
+      await ChatNavigation.push(
         context,
-        ChatNavigation.materialRoute(
-          isAr: widget.isAr,
-          conversationId: conversationId,
-          propertyId: _property.id,
-        ),
+        isAr: widget.isAr,
+        conversationId: conversationId,
+        propertyId: _property.id,
       );
     } catch (_) {
       if (!mounted) return;

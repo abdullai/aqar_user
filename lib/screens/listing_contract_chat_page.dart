@@ -12,6 +12,7 @@ import '../core/notifications/hub_workflow_sound.dart';
 import '../services/contract_pdf_service.dart';
 import '../services/marketing_flow_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 
 // نفس ألوان واتساب المستخدمة في [ChatPage] للاتساق
 const Color _kWaChatBg = Color(0xFFECE5DD);
@@ -32,6 +33,8 @@ bool listingContractOptimisticMatchesServer(
   Map<String, dynamic> server,
 ) {
   final oid = (optimistic['id'] ?? '').toString();
+  final sid = (server['id'] ?? '').toString();
+  if (oid.isNotEmpty && sid.isNotEmpty && oid == sid) return true;
   if (!oid.startsWith('__opt__')) return false;
   if ((optimistic['sender_id'] ?? '').toString() !=
       (server['sender_id'] ?? '').toString()) {
@@ -324,7 +327,6 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
 
     setState(() {
       _optimisticContractMsgs.insert(0, optRow);
-      _sending = true;
     });
     _ctrl.clear();
 
@@ -337,13 +339,14 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
       );
       if (!mounted) return;
       if (row != null) {
+        final real = Map<String, dynamic>.from(row);
+        real['_opt_ms'] = optMs;
         setState(() {
-          _optimisticContractMsgs.removeWhere(
-            (m) =>
-                (m['id'] ?? '').toString() == optId ||
-                listingContractOptimisticMatchesServer(
-                    m, Map<String, dynamic>.from(row)),
-          );
+          final ix =
+              _optimisticContractMsgs.indexWhere((m) => m['id'] == optId);
+          if (ix != -1) {
+            _optimisticContractMsgs[ix] = real;
+          }
         });
       } else {
         setState(() {
@@ -364,8 +367,6 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
           SnackBar(content: Text(e.toString())),
         );
       }
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -471,9 +472,15 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
         : null;
 
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: widget.embedAppBar
           ? null
           : AppBar(
+              automaticallyImplyLeading: false,
+              leading: AppPageCloseButton(
+                isArabic: _isAr,
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
               title: Text(_isAr ? 'محادثة العقد' : 'Contract chat'),
               actions: appBarActions,
             ),
@@ -658,93 +665,99 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
                     ),
             ),
           ),
-          SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: _inputLocked
-                  ? Material(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest
-                          .withValues(alpha: 0.65),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              Icons.lock_outline_rounded,
-                              size: 22,
-                              color: Theme.of(context).colorScheme.primary,
+          Builder(
+            builder: (context) {
+              final kb = MediaQuery.viewInsetsOf(context).bottom;
+              return SafeArea(
+                top: false,
+                bottom: kb <= 0,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(12, 0, 12, 12 + kb),
+                  child: _inputLocked
+                      ? Material(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest
+                              .withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                widget.strictReadOnly
-                                    ? (_isAr
-                                        ? 'عرض قراءة فقط — لا يمكن إرسال رسائل أو مرفقات من هنا.'
-                                        : 'Read-only preview — sending is disabled.')
-                                    : (_isAr
-                                        ? 'بعد توقيع المالك أصبحت محادثة العقد للقراءة فقط للحفاظ على السجل القانوني.'
-                                        : 'After the owner signed, contract chat is read-only to preserve the legal record.'),
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      height: 1.35,
-                                    ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.lock_outline_rounded,
+                                  size: 22,
+                                  color:
+                                      Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    widget.strictReadOnly
+                                        ? (_isAr
+                                            ? 'عرض قراءة فقط — لا يمكن إرسال رسائل أو مرفقات من هنا.'
+                                            : 'Read-only preview — sending is disabled.')
+                                        : (_isAr
+                                            ? 'بعد توقيع المالك أصبحت محادثة العقد للقراءة فقط للحفاظ على السجل القانوني.'
+                                            : 'After the owner signed, contract chat is read-only to preserve the legal record.'),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.35,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            AqarTextField(
+                              controller: _ctrl,
+                              minLines: 1,
+                              maxLines: 4,
+                              decoration: InputDecoration(
+                                hintText: _isAr
+                                    ? 'اكتب رسالتك…'
+                                    : 'Type a message…',
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        AqarTextField(
-                          controller: _ctrl,
-                          minLines: 1,
-                          maxLines: 4,
-                          decoration: InputDecoration(
-                            hintText:
-                                _isAr ? 'اكتب رسالتك…' : 'Type a message…',
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            FilledButton(
-                              onPressed:
-                                  _sending ? null : () => _send('chat'),
-                              child: Text(_isAr ? 'إرسال' : 'Send'),
-                            ),
-                            OutlinedButton(
-                              onPressed: _sending
-                                  ? null
-                                  : () => _send('request_change'),
-                              child: Text(
-                                  _isAr ? 'طلب تعديل' : 'Request change'),
-                            ),
-                            OutlinedButton(
-                              onPressed: _sending
-                                  ? null
-                                  : () => _send('request_cancel'),
-                              child: Text(
-                                  _isAr ? 'طلب إلغاء' : 'Request cancel'),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                FilledButton(
+                                  onPressed: () => _send('chat'),
+                                  child: Text(_isAr ? 'إرسال' : 'Send'),
+                                ),
+                                OutlinedButton(
+                                  onPressed: () => _send('request_change'),
+                                  child: Text(_isAr
+                                      ? 'طلب تعديل'
+                                      : 'Request change'),
+                                ),
+                                OutlinedButton(
+                                  onPressed: () => _send('request_cancel'),
+                                  child: Text(_isAr
+                                      ? 'طلب إلغاء'
+                                      : 'Request cancel'),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
-                    ),
-            ),
+                ),
+              );
+            },
           ),
         ],
       ),

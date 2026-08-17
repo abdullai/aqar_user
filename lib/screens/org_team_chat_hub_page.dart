@@ -71,13 +71,12 @@ class _OrgTeamChatHubPageState extends State<OrgTeamChatHubPage> {
 
   Future<void> _openChat(String otherId, String title) async {
     if (!mounted) return;
-    await Navigator.of(context).push<void>(
-      ChatNavigation.materialRoute(
-        isAr: _isAr,
-        kind: ConversationKind.direct,
-        counterpartyId: otherId,
-        title: title,
-      ),
+    await ChatNavigation.push(
+      context,
+      isAr: _isAr,
+      kind: ConversationKind.direct,
+      counterpartyId: otherId,
+      title: title,
     );
   }
 
@@ -154,11 +153,10 @@ class _OrgTeamChatHubPageState extends State<OrgTeamChatHubPage> {
                   );
                   return;
                 }
-                await Navigator.of(context).push<void>(
-                  ChatNavigation.materialRoute(
-                    isAr: _isAr,
-                    conversationId: cid,
-                  ),
+                await ChatNavigation.push(
+                  context,
+                  isAr: _isAr,
+                  conversationId: cid,
                 );
               },
             ),

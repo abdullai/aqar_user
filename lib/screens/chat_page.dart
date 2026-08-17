@@ -13,11 +13,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/marketing/marketer_owner_chat_intro_ar.dart';
 import '../core/notifications/chat_message_sound.dart';
 import '../core/notifications/in_app_notifications.dart';
 import '../core/session/app_session.dart';
+import '../core/utils/display_ids.dart';
 import '../core/workflow/listing_workflow.dart';
 import '../l10n/app_localizations.dart';
+import '../navigation/chat_navigation.dart';
 import '../services/chat_inbox_service.dart';
 import '../services/communication_hub_service.dart';
 import '../services/chat_peer_service.dart';
@@ -75,6 +78,9 @@ bool chatOptimisticRowMatchesServer(
   Map<String, dynamic> server,
 ) {
   final oid = (optimistic['id'] ?? '').toString().trim();
+  final sid = (server['id'] ?? '').toString().trim();
+  // بعد تأكيد الإدراج نستبدل id التفاؤلي بالـ id الحقيقي ونُبقي الصف حتى يصل البث.
+  if (oid.isNotEmpty && sid.isNotEmpty && oid == sid) return true;
   if (!oid.startsWith('__opt__')) return false;
   final optPost = (optimistic['org_channel_post_id'] ?? '').toString().trim();
   final srvPost = (server['org_channel_post_id'] ?? '').toString().trim();
@@ -741,17 +747,121 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             _presenceStarted = true;
             _schedulePresenceLoop();
           }
-          final draft = widget.initialDraftMessage?.trim();
-          final cid = (_activeConversationId ?? '').trim();
-          if (draft != null &&
-              draft.isNotEmpty &&
-              cid.isNotEmpty &&
-              _tc.text.trim().isEmpty) {
-            setState(() => _tc.text = draft);
-          }
+          unawaited(_maybeSendOpeningIntroOnce());
         });
       }
     }
+  }
+
+  /// يُرسل النص الافتتاحي مرة واحدة فقط لنفس المحادثة، مع إثراء الاسم والرقم.
+  Future<void> _maybeSendOpeningIntroOnce() async {
+    final cid = (_activeConversationId ?? '').trim();
+    if (cid.isEmpty || !mounted) return;
+
+    var draft = (widget.initialDraftMessage ?? '').trim();
+    if (draft.isEmpty) return;
+
+    try {
+      final existing = await _sb
+          .from('messages')
+          .select('id, sender_id, content')
+          .eq('conversation_id', cid)
+          .order('created_at', ascending: true)
+          .limit(40);
+      final rows = (existing is List) ? existing : const <dynamic>[];
+      for (final e in rows) {
+        if (e is! Map) continue;
+        final content = (e['content'] ?? '').toString();
+        if (MarketerOwnerChatIntroAr.looksLikeOpeningIntro(content)) {
+          return;
+        }
+      }
+      // إن وُجدت محادثة سابقة بلا افتتاحية قديمة — لا نفرض إرسال تلقائي.
+      if (rows.isNotEmpty) return;
+    } catch (_) {
+      // عند فشل الفحص: لا تُرسل تلقائياً لتجنّب التكرار.
+      return;
+    }
+
+    final peerId = (_activeCounterpartyId ?? '').trim();
+    if (peerId.isNotEmpty && (_peerDisplayName ?? '').trim().isEmpty) {
+      await _loadPeerProfile(peerId);
+    }
+
+    draft = await _enrichOpeningDraft(draft);
+    if (!mounted || draft.trim().isEmpty) return;
+    if (_tc.text.trim().isEmpty) {
+      _tc.text = draft;
+    }
+    await _sendChatPayload(content: draft, clearInput: true);
+  }
+
+  Future<String> _enrichOpeningDraft(String draft) async {
+    var out = draft.trim();
+    if (out.isEmpty) return out;
+
+    final peer = (_peerDisplayName ?? '').trim();
+    if (peer.isNotEmpty) {
+      out = out.replaceAll(
+        'شريكنا العقاري شريكنا العقاري',
+        peer,
+      );
+      // إن بقي الاسم العام فقط والنظير معروف: أدرج الاسم بعد التحية.
+      if (!out.contains(peer) &&
+          (out.contains('شريكنا العقاري،') ||
+              out.contains('شريكنا العقاري '))) {
+        out = out.replaceFirst('شريكنا العقاري', peer);
+      }
+    }
+
+    if (out.contains('رقم —') ||
+        out.contains('رقم قيد التعيين') ||
+        out.contains('no. —') ||
+        out.contains('no. pending')) {
+      final code = await _resolveListingPublicCode();
+      if (code.isNotEmpty) {
+        out = out
+            .replaceAll('رقم —', 'رقم $code')
+            .replaceAll('رقم قيد التعيين', 'رقم $code')
+            .replaceAll('no. —', 'no. $code')
+            .replaceAll('no. pending', 'no. $code');
+      }
+    }
+    return out;
+  }
+
+  Future<String> _resolveListingPublicCode() async {
+    final pid = (widget.propertyId ?? '').trim();
+    if (pid.isEmpty) return '';
+    try {
+      final row = await _sb
+          .from('properties')
+          .select(
+            'listing_public_code, public_code, listing_code, ad_number',
+          )
+          .eq('id', pid)
+          .maybeSingle();
+      if (row == null) return '';
+      final code = MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(
+        Map<String, dynamic>.from(row),
+      );
+      if (code.isNotEmpty) return code;
+      for (final k in const [
+        'listing_public_code',
+        'public_code',
+        'listing_code',
+        'ad_number',
+      ]) {
+        final raw = (row[k] ?? '').toString().trim();
+        final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+        if (digits.length >= 6) {
+          return digits.length >= 10
+              ? DisplayIds.tenDigit(digits)
+              : digits;
+        }
+      }
+    } catch (_) {}
+    return '';
   }
 
   // =========================
@@ -1072,6 +1182,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ? row.otherFullName!.trim()
             : _defaultTitleFor(kind);
 
+    // داخل مركز التواصل / اللوحة: افتح طبقة ملء الشاشة فوق كل شيء (مثل واتساب).
+    if (widget.embedInParentDashboardShell) {
+      await ChatNavigation.push(
+        context,
+        isAr: widget.isAr,
+        conversationId: row.conversationId,
+        counterpartyId: otherId.isNotEmpty ? otherId : null,
+        title: t,
+        kind: kind,
+      );
+      if (mounted) setState(() => _listReloadTick++);
+      return;
+    }
+
     final displayName = (row.otherFullName ?? '').trim().isNotEmpty
         ? row.otherFullName!.trim()
         : t;
@@ -1161,7 +1285,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     bool clearInput = false,
   }) async {
     final cid = (_activeConversationId ?? '').trim();
-    if (cid.isEmpty || _sending) return;
+    if (cid.isEmpty) return;
 
     final trimmed = content.trim();
     if (trimmed.isEmpty &&
@@ -1206,7 +1330,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
       setState(() {
         _optimisticMessages.insert(0, optimisticRow);
-        _sending = true;
         if (clearInput) _tc.clear();
       });
 
@@ -1258,12 +1381,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 .maybeSingle();
             if (myRow != null && mounted) {
               final real = Map<String, dynamic>.from(myRow);
+              real['_opt_ms'] = optMs;
               setState(() {
-                _optimisticMessages.removeWhere(
-                  (m) =>
-                      (m['id'] ?? '').toString() == optId ||
-                      chatOptimisticRowMatchesServer(m, real),
-                );
+                final ix =
+                    _optimisticMessages.indexWhere((m) => m['id'] == optId);
+                if (ix != -1) {
+                  _optimisticMessages[ix] = real;
+                }
               });
             }
           } catch (_) {}
@@ -1289,8 +1413,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           });
           _showSnack(widget.isAr ? 'فشل الإرسال: $e' : 'Send failed: $e');
         }
-      } finally {
-        if (mounted) setState(() => _sending = false);
       }
       return;
     }
@@ -1339,7 +1461,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     setState(() {
       _optimisticMessages.insert(0, optimisticRow);
-      _sending = true;
       if (clearInput) _tc.clear();
     });
 
@@ -1386,12 +1507,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
 
       if (mounted) {
+        // أبقِ الرسالة ظاهرة فوراً: استبدل الصف التفاؤلي بالصف الحقيقي حتى يصل البث.
+        final real = Map<String, dynamic>.from(inserted);
+        real['_opt_ms'] = optMs;
         setState(() {
-          _optimisticMessages.removeWhere(
-            (m) =>
-                (m['id'] ?? '').toString() == optId ||
-                chatOptimisticRowMatchesServer(m, inserted!),
-          );
+          final ix = _optimisticMessages.indexWhere((m) => m['id'] == optId);
+          if (ix != -1) {
+            _optimisticMessages[ix] = real;
+          }
         });
       }
 
@@ -1440,8 +1563,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
         _showSnack(widget.isAr ? 'فشل الإرسال: $e' : 'Send failed: $e');
       }
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
   }
 
@@ -1679,6 +1800,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (widget.embedInParentDashboardShell) return null;
     final inThread = (_activeConversationId ?? '').isNotEmpty;
     return AppBar(
+      automaticallyImplyLeading: false,
       title: inThread
           ? _ChatAppBarLead(
               name: _threadBarTitle(),
@@ -1706,12 +1828,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               },
             )
           : Text(_appTitle()),
-      leading: inThread
-          ? AppPageCloseButton(
-              isArabic: widget.isAr,
-              onPressed: _backToList,
-            )
-          : null,
+      leading: AppPageCloseButton(
+        isArabic: widget.isAr,
+        tooltip: widget.isAr ? 'إغلاق' : 'Close',
+        onPressed: () {
+          // محادثة فُتحت من قائمة داخل نفس المسار → رجوع للقائمة.
+          if (inThread && !_openedDirectlyFromExternal) {
+            _backToList();
+            return;
+          }
+          Navigator.of(context).maybePop();
+        },
+      ),
     );
   }
 
@@ -1883,6 +2011,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return Directionality(
       textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         appBar: _buildOuterAppBar(),
         body: wrappedBody,
       ),
@@ -3827,108 +3956,119 @@ class _ChatThreadState extends State<_ChatThread> {
             ),
           ),
         ),
-        SafeArea(
-          top: false,
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-            decoration: BoxDecoration(
-              color: cs.surface,
-              border: Border(
-                  top: BorderSide(
-                      color: cs.outlineVariant.withValues(alpha: 0.6))),
-            ),
-            child: Row(
-              children: [
-                if (widget.attachmentsEnabled)
-                  PopupMenuButton<String>(
-                    tooltip: widget.isAr ? 'إرفاق' : 'Attach',
-                    icon: Icon(
-                      Icons.add_circle_outline_rounded,
-                      color: cs.primary,
-                      size: 28,
+        Builder(
+          builder: (context) {
+            final kb = MediaQuery.viewInsetsOf(context).bottom;
+            return SafeArea(
+              top: false,
+              bottom: kb <= 0,
+              child: Padding(
+                padding: EdgeInsets.only(bottom: kb),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  decoration: BoxDecoration(
+                    color: cs.surface,
+                    border: Border(
+                      top: BorderSide(
+                        color: cs.outlineVariant.withValues(alpha: 0.6),
+                      ),
                     ),
-                    onSelected: (v) {
-                      unawaited(widget.onAttachmentSelected(v));
-                    },
-                    itemBuilder: (ctx) => [
-                      PopupMenuItem(
-                        value: 'media',
-                        child: ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.perm_media_outlined),
-                          title: Text(widget.isAr ? 'وسائط' : 'Media'),
+                  ),
+                  child: Row(
+                    children: [
+                      if (widget.attachmentsEnabled)
+                        PopupMenuButton<String>(
+                          tooltip: widget.isAr ? 'إرفاق' : 'Attach',
+                          icon: Icon(
+                            Icons.add_circle_outline_rounded,
+                            color: cs.primary,
+                            size: 28,
+                          ),
+                          onSelected: (v) {
+                            unawaited(widget.onAttachmentSelected(v));
+                          },
+                          itemBuilder: (ctx) => [
+                            PopupMenuItem(
+                              value: 'media',
+                              child: ListTile(
+                                dense: true,
+                                leading: const Icon(Icons.perm_media_outlined),
+                                title: Text(widget.isAr ? 'وسائط' : 'Media'),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'loc',
+                              child: ListTile(
+                                dense: true,
+                                leading:
+                                    const Icon(Icons.location_on_outlined),
+                                title: Text(widget.isAr ? 'موقع' : 'Location'),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'contact',
+                              child: ListTile(
+                                dense: true,
+                                leading:
+                                    const Icon(Icons.contact_phone_outlined),
+                                title: Text(
+                                    widget.isAr ? 'جهة اتصال' : 'Contact'),
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        Tooltip(
+                          message: widget.isAr
+                              ? 'قناة الفريق — نص فقط'
+                              : 'Team channel — text only',
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: Icon(
+                              Icons.campaign_outlined,
+                              color: cs.outline,
+                              size: 26,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: AqarTextField(
+                          controller: widget.controller,
+                          minLines: 1,
+                          maxLines: 4,
+                          decoration: InputDecoration(
+                            hintText: widget.composerHint ??
+                                (widget.isAr
+                                    ? 'اكتب رسالة…'
+                                    : 'Type a message…'),
+                            filled: true,
+                            fillColor: cs.surfaceContainerHighest
+                                .withValues(alpha: 0.6),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                              borderSide: BorderSide.none,
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => widget.onSend(),
                         ),
                       ),
-                      PopupMenuItem(
-                        value: 'loc',
-                        child: ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.location_on_outlined),
-                          title: Text(widget.isAr ? 'موقع' : 'Location'),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'contact',
-                        child: ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.contact_phone_outlined),
-                          title: Text(widget.isAr ? 'جهة اتصال' : 'Contact'),
-                        ),
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        onPressed: !hasInternet ? null : widget.onSend,
+                        icon: const Icon(Icons.send_rounded),
                       ),
                     ],
-                  )
-                else
-                  Tooltip(
-                    message: widget.isAr
-                        ? 'قناة الفريق — نص فقط'
-                        : 'Team channel — text only',
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Icon(
-                        Icons.campaign_outlined,
-                        color: cs.outline,
-                        size: 26,
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: AqarTextField(
-                    controller: widget.controller,
-                    minLines: 1,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: widget.composerHint ??
-                          (widget.isAr ? 'اكتب رسالة…' : 'Type a message…'),
-                      filled: true,
-                      fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.6),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 10),
-                    ),
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => widget.onSend(),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  onPressed: (widget.sending || !hasInternet)
-                      ? null
-                      : widget.onSend,
-                  icon: widget.sending
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: AppLogoLoading(compact: true, size: 20),
-                        )
-                      : const Icon(Icons.send),
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         ),
       ],
     );

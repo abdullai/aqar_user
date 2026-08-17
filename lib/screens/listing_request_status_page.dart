@@ -1222,11 +1222,13 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
                 if (st != 'signed' && (isOwner || isMarketer))
                   OutlinedButton.icon(
                     onPressed: () {
-                      Navigator.of(context).push<void>(
+                      Navigator.of(context, rootNavigator: true).push<void>(
                         MaterialPageRoute<void>(
+                          fullscreenDialog: true,
                           builder: (_) => ListingContractChatPage(
                             contractId: contractId,
                             lang: widget.lang,
+                            embedAppBar: false,
                           ),
                         ),
                       );

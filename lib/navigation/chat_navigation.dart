@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../screens/chat_page.dart';
 
-/// فتح المحادثة كطبقة منبثقة فوق الشاشة الحالية (لا يستبدل المسار بالكامل).
+/// فتح أي محادثة كطبقة ملء الشاشة فوق كل الواجهة (مثل واتساب) مع زر إغلاق.
 abstract final class ChatOverlayNavigation {
   static Future<void> openContextualModal(
     BuildContext context, {
@@ -17,35 +17,23 @@ abstract final class ChatOverlayNavigation {
     String? marketRequestId,
     String? initialDraftMessage,
   }) {
-    final h = MediaQuery.sizeOf(context).height;
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        return SizedBox(
-          height: h * 0.78,
-          child: ChatPage(
-            isAr: isAr,
-            embedInParentDashboardShell: false,
-            conversationId: conversationId,
-            propertyId: propertyId,
-            reservationId: reservationId,
-            counterpartyId: counterpartyId,
-            title: title,
-            kind: kind,
-            supportUserId: supportUserId,
-            marketRequestId: marketRequestId,
-            initialDraftMessage: initialDraftMessage,
-          ),
-        );
-      },
+    return ChatNavigation.push(
+      context,
+      isAr: isAr,
+      conversationId: conversationId,
+      propertyId: propertyId,
+      reservationId: reservationId,
+      counterpartyId: counterpartyId,
+      title: title,
+      kind: kind,
+      supportUserId: supportUserId,
+      marketRequestId: marketRequestId,
+      initialDraftMessage: initialDraftMessage,
     );
   }
 }
 
-/// مدخل واحد لفتح [ChatPage] مع `RouteSettings` موحّدة للتتبّع والدفع العميق.
+/// مدخل واحد لفتح [ChatPage] فوق الجذر — ملء الشاشة دائماً.
 abstract final class ChatNavigation {
   static const String routeName = '/app_chat';
 
@@ -63,6 +51,7 @@ abstract final class ChatNavigation {
     String? initialDraftMessage,
   }) {
     return MaterialPageRoute<void>(
+      fullscreenDialog: true,
       settings: RouteSettings(
         name: routeName,
         arguments: <String, dynamic>{
@@ -80,7 +69,8 @@ abstract final class ChatNavigation {
       ),
       builder: (_) => ChatPage(
         isAr: isAr,
-        embedInParentDashboardShell: embedInParentDashboardShell,
+        // الطبقة الجذرية لا تُضمَّن داخل هيكل اللوحة — شريط دردشة كامل + X.
+        embedInParentDashboardShell: false,
         conversationId: conversationId,
         propertyId: propertyId,
         reservationId: reservationId,
@@ -94,7 +84,7 @@ abstract final class ChatNavigation {
     );
   }
 
-  /// بديل مباشر لـ [Navigator.push] عند الحاجة لنتيجة المسار.
+  /// يفتح فوق [rootNavigator] ليغطي الشريط السفلي والتبويبات والهب بالكامل.
   static Future<void> push(
     BuildContext context, {
     required bool isAr,
@@ -109,10 +99,10 @@ abstract final class ChatNavigation {
     String? marketRequestId,
     String? initialDraftMessage,
   }) {
-    return Navigator.of(context).push(
+    return Navigator.of(context, rootNavigator: true).push<void>(
       materialRoute(
         isAr: isAr,
-        embedInParentDashboardShell: embedInParentDashboardShell,
+        embedInParentDashboardShell: false,
         conversationId: conversationId,
         propertyId: propertyId,
         reservationId: reservationId,

@@ -324,12 +324,11 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       );
       if (!mounted) return;
       Navigator.of(context).pop();
-      await Navigator.of(context).push<void>(
-        ChatNavigation.materialRoute(
-          isAr: widget.isAr,
-          conversationId: cid,
-          marketRequestId: widget.row.id,
-        ),
+      await ChatNavigation.push(
+        context,
+        isAr: widget.isAr,
+        conversationId: cid,
+        marketRequestId: widget.row.id,
       );
     } catch (e) {
       if (!mounted) return;
