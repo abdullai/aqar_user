@@ -211,8 +211,8 @@ class Property {
 
   /// غلاف القائمة/التفاصيل يفضّل الفيديو (من [listingGuidance.cover_primary]).
   bool get coverPrimaryPrefersVideo {
-    final g = listingGuidance;
-    final v = (g?['cover_primary'] ?? 'image').toString().trim().toLowerCase();
+    final v =
+        (listingGuidance?['cover_primary'] ?? 'image').toString().trim().toLowerCase();
     return v == 'video';
   }
 

@@ -73,12 +73,11 @@ abstract final class ListingMediaUrls {
       isSmartDefaultCoverPath(r.coverImageStoragePath);
 
   static bool propertyPrefersVideoCover(Property p) {
-    final g = p.listingGuidance;
-    if (g == null) {
-      return imagePathsExcludingVideo(p.images).isEmpty &&
-          (p.videoUrl ?? '').trim().isNotEmpty;
-    }
-    final v = (g['cover_primary'] ?? '').toString().trim().toLowerCase();
+    // استخدم ?. دائماً — dart2js (Dart 3.12) يرفض [] على Map<String, dynamic>?.
+    final v = (p.listingGuidance?['cover_primary'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
     if (v == 'video') return true;
     if (v == 'image') return false;
     return imagePathsExcludingVideo(p.images).isEmpty &&
