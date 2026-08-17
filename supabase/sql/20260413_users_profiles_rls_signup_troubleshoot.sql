@@ -1,0 +1,25 @@
+-- =============================================================================
+-- استكشاف: infinite recursion (42P17) عند «إنشاء الحساب» / تحديث users_profiles
+--
+-- ملف 20260412 يعالج حلقة شائعة مع in_app_notifications.
+-- إن ظهر الخطأ أثناء INSERT أو UPDATE على users_profiles نفسه:
+--
+-- 1) Triggers على users_profiles قد تنفّذ SELECT يعيد تقييم RLS → حلقة.
+--    جرّب تعطيل المؤقت أو جعل الدالة TRIGGER تعمل SECURITY DEFINER مع
+--    search_path آمن وتجنب SELECT على users_profiles داخل نفس السياسة.
+--
+-- 2) سياسة INSERT/UPDATE/WITH CHECK على users_profiles تحتوي
+--    EXISTS (SELECT … FROM users_profiles …) → استبدلها بدالة
+--    SECURITY DEFINER (مثل app_rls_my_profile_org_id) تقرأ صفاً واحداً
+--    دون إعادة تقييم سياسات الجدول نفسه في الحلقة.
+--
+-- 3) التأكد أن upsert_my_profile / إنشاء الملف يعملان كـ SECURITY DEFINER
+--    ويكتبان الصف بصلاحية تتجاوز RLS عند الحاجة (نمط Supabase الشائع).
+--
+-- عرض السياسات:
+--   SELECT pol.polname, pg_get_expr(pol.polqual, pol.polrelid),
+--          pg_get_expr(pol.polwithcheck, pol.polrelid)
+--   FROM pg_policy pol
+--   JOIN pg_class c ON c.oid = pol.polrelid
+--   WHERE c.relname = 'users_profiles' AND c.relnamespace = 'public'::regnamespace;
+-- =============================================================================

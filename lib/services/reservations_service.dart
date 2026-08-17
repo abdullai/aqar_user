@@ -53,6 +53,17 @@ class ReservationsService {
   static bool _isPostgresUniqueViolation(PostgrestException e) =>
       e.code == '23505';
 
+  /// طرف محادثة العقار للمستخدمين: المسوّق المنشّر/المختار فقط (لا رقم المالك).
+  static String? marketerCounterpartyIdForPropertyChat(
+    Map<String, dynamic> prop,
+  ) {
+    final pub = _s(prop['published_by_marketer_id']);
+    if (pub.isNotEmpty) return pub;
+    final sel = _s(prop['selected_marketer_id']);
+    if (sel.isNotEmpty) return sel;
+    return null;
+  }
+
   // ===========================================================================
   // 1) إنشاء الحجز + (اختياري) إنشاء/ربط محادثة العقار
   // ===========================================================================
@@ -69,27 +80,20 @@ class ReservationsService {
     String? conversationTitle,
   }) async {
     try {
-      final expiresAt = DateTime.now().add(const Duration(hours: 72));
+      // Use RPC to keep properties.workflow_stage + reservation_expires_at in sync.
+      final res = await _sb.rpc(
+        'reserve_property',
+        params: {
+          'p_property_id': propertyId,
+          'p_base_price': basePrice,
+        },
+      );
 
-      // ✅ مهم: جدول reservations عندك اسمه id وليس reservation_id
-      // ✅ مهم: أعمدة الرسوم NOT NULL عندك، لازم نرسلها (Trigger يعمل Guard وقد يعيد حسابها)
-      final inserted = await _sb
-          .from('reservations')
-          .insert({
-            'user_id': userId,
-            'property_id': propertyId,
-            'status': 'pending',
-            'expires_at': expiresAt.toUtc().toIso8601String(),
-            'base_price': basePrice,
-            // قيم مبدئية لتفادي 400 بسبب NOT NULL (الـ Trigger يمكنه إعادة ضبطها)
-            'platform_fee_amount': 0,
-            'extra_fee_amount': 0,
-            'total_amount': 0,
-          })
-          .select('id')
-          .single();
-
-      final reservationId = _s(inserted['id']);
+      final reservationId = res is String
+          ? res
+          : (res is Map
+              ? _s(res.values.isNotEmpty ? res.values.first : null)
+              : _s(res));
 
       if (createConversation && reservationId.isNotEmpty) {
         // best-effort: لا نكسر الحجز لو فشلت الدردشة
@@ -104,7 +108,16 @@ class ReservationsService {
 
       return true;
     } on PostgrestException catch (e) {
-      if (_isPostgresUniqueViolation(e)) return false;
+      final msg = e.message.toLowerCase();
+      if (msg.contains('property_already_reserved') ||
+          msg.contains('user_already_has_active_reservation') ||
+          msg.contains('property_not_published') ||
+          msg.contains('cannot_reserve_own_listing') ||
+          msg.contains('cannot_reserve_publisher_listing') ||
+          msg.contains('not_allowed_reserve') ||
+          _isPostgresUniqueViolation(e)) {
+        return false;
+      }
       rethrow;
     } catch (_) {
       return false;
@@ -113,11 +126,13 @@ class ReservationsService {
 
   /// ✅ إلغاء الحجز (للمستخدم)
   static Future<void> cancelReservation(String reservationId) async {
-    // ✅ جدول reservations عندك: المفتاح id
-    await _sb.from('reservations').update({'status': 'cancelled'}).eq(
-          'id',
-          reservationId,
-        );
+    await _sb.rpc(
+      'release_or_expire_reservation',
+      params: {
+        'p_reservation_id': reservationId,
+        'p_set_status': 'cancelled',
+      },
+    );
   }
 
   // ===========================================================================
@@ -128,7 +143,7 @@ class ReservationsService {
   ///
   /// التوافق مع ChatPage:
   /// - user_id = المستخدم الحالي
-  /// - counterparty_id = owner_id
+  /// - counterparty_id = المسوّق (published_by_marketer_id أو selected_marketer_id) — لا المالك
   /// - نفس المحادثة تعاد دائماً (بدون تكرار)
   static Future<String> getOrCreatePropertyConversation({
     required String propertyId,
@@ -140,31 +155,36 @@ class ReservationsService {
       throw Exception('Auth required');
     }
 
-    // 1) جلب مالك العقار + عنوان افتراضي
+    // 1) جلب العقار + عنوان افتراضي + المسوّق المسؤول عن التواصل
     final prop = await _sb
         .from('properties')
-        .select('owner_id, title')
+        .select(
+          'owner_id, title, published_by_marketer_id, selected_marketer_id',
+        )
         .eq('id', propertyId)
         .single();
 
-    final ownerId = _s(prop['owner_id']);
     final propTitle = _s(prop['title']);
+    final marketerId =
+        marketerCounterpartyIdForPropertyChat(Map<String, dynamic>.from(prop));
 
-    if (ownerId.isEmpty) {
-      throw Exception('Property owner not found');
+    if (marketerId == null || marketerId.isEmpty) {
+      throw Exception(
+        'No marketer assigned to this listing. Chat is only with the licensed marketer.',
+      );
     }
-    if (ownerId == uid) {
+    if (marketerId == uid) {
       throw Exception('Cannot chat with yourself');
     }
 
-    // 2) البحث عن محادثة موجودة
+    // 2) البحث عن محادثة موجودة (مع المسوّق فقط)
     final existing = await _sb
         .from('conversations')
         .select('id, reservation_id')
         .eq('kind', 'property')
         .eq('property_id', propertyId)
         .or(
-          'and(user_id.eq.$uid,counterparty_id.eq.$ownerId),and(user_id.eq.$ownerId,counterparty_id.eq.$uid)',
+          'and(user_id.eq.$uid,counterparty_id.eq.$marketerId),and(user_id.eq.$marketerId,counterparty_id.eq.$uid)',
         )
         .order('created_at', ascending: false)
         .limit(1)
@@ -200,9 +220,73 @@ class ReservationsService {
           'property_id': propertyId,
           'reservation_id': wantedRes.isEmpty ? null : wantedRes,
           'user_id': uid,
-          'counterparty_id': ownerId,
+          'counterparty_id': marketerId,
           'title': (title ?? propTitle).trim().isEmpty
               ? 'Property chat'
+              : (title ?? propTitle).trim(),
+        })
+        .select('id')
+        .single();
+
+    return _s(inserted['id']);
+  }
+
+  /// محادثة المسوّق (أو من له صلة بالطلب) مع **مالك** الإعلان قبل النشر.
+  /// `kind=property` و`counterparty_id = owner_id` — منفصلة عن محادثة المسوّق للمشترين.
+  static Future<String> getOrCreatePropertyOwnerConversation({
+    required String propertyId,
+    String? title,
+  }) async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) {
+      throw Exception('Auth required');
+    }
+
+    final prop = await _sb
+        .from('properties')
+        .select('owner_id, title')
+        .eq('id', propertyId)
+        .single();
+
+    final ownerId = _s(prop['owner_id']);
+    if (ownerId.isEmpty) {
+      throw Exception('Owner not found');
+    }
+    if (ownerId == uid) {
+      throw Exception('Owner uses marketer chat channel');
+    }
+
+    final propTitle = _s(prop['title']);
+
+    final existing = await _sb
+        .from('conversations')
+        .select('id, reservation_id')
+        .eq('kind', 'property')
+        .eq('property_id', propertyId)
+        .or(
+          'and(user_id.eq.$uid,counterparty_id.eq.$ownerId),and(user_id.eq.$ownerId,counterparty_id.eq.$uid)',
+        )
+        .order('created_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+
+    if (existing != null) {
+      final cid = _s(existing['id']);
+      if (cid.isEmpty) {
+        throw Exception('Invalid conversation row');
+      }
+      return cid;
+    }
+
+    final inserted = await _sb
+        .from('conversations')
+        .insert({
+          'kind': 'property',
+          'property_id': propertyId,
+          'user_id': uid,
+          'counterparty_id': ownerId,
+          'title': (title ?? propTitle).trim().isEmpty
+              ? 'Listing owner chat'
               : (title ?? propTitle).trim(),
         })
         .select('id')
@@ -214,6 +298,28 @@ class ReservationsService {
   // ===========================================================================
   // 3) السلة (حجوزاتي) + conversationId لكل عنصر
   // ===========================================================================
+
+  /// هل لدى المستخدم حجزاً نشطاً (صفقة) على هذا الإعلان؟
+  static Future<bool> userHasActiveReservationForProperty({
+    required String userId,
+    required String propertyId,
+  }) async {
+    final uid = userId.trim();
+    final pid = propertyId.trim();
+    if (uid.isEmpty || pid.isEmpty) return false;
+    try {
+      final res = await _sb
+          .from('reservations')
+          .select('id')
+          .eq('user_id', uid)
+          .eq('property_id', pid)
+          .inFilter('status', ['pending', 'paid'])
+          .limit(1);
+      return (res as List).isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// ✅ سلة المستخدم
   static Future<List<ReservationItem>> loadMyCart(String userId) async {
@@ -420,5 +526,45 @@ class ReservationsService {
     }
 
     return out;
+  }
+
+  // ===========================================================================
+  // 6) محادثات طلب السوق (صاحب الطلب ↔ مهتم)
+  // ===========================================================================
+
+  static Future<String> getOrCreateMarketRequestConversation({
+    required String marketRequestId,
+    String? counterpartyId,
+  }) async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) {
+      throw Exception('Auth required');
+    }
+
+    final rid = marketRequestId.trim();
+    if (rid.isEmpty) {
+      throw Exception('Invalid request');
+    }
+
+    final params = <String, dynamic>{
+      'p_request_id': rid,
+    };
+    final cp = (counterpartyId ?? '').trim();
+    if (cp.isNotEmpty) {
+      params['p_counterparty'] = cp;
+    }
+
+    final res = await _sb.rpc(
+      'ensure_market_request_conversation',
+      params: params,
+    );
+
+    final cid = res is String
+        ? res
+        : _s(res);
+    if (cid.isEmpty) {
+      throw Exception('Could not open conversation');
+    }
+    return cid;
   }
 }

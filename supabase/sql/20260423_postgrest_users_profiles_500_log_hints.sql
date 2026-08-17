@@ -1,0 +1,32 @@
+-- =============================================================================
+-- تشخيص 500 على GET /rest/v1/users_profiles (PostgREST) — أين تجد السبب الحقيقي
+-- =============================================================================
+--
+-- لا يمكن لأي أداة خارج لوحة Supabase قراءة سجلات مشروعك. افتح:
+--   Dashboard → Logs → Postgres (أو API) → صفِّ بالوقت ولون الخطأ.
+--
+-- ابحث عن السطر الذي يلي طلب PostgREST مباشرة؛ غالباً يحتوي على:
+--   ERROR:  ... (SQLSTATE مثل 42P17، 42501، 23502، …)
+--
+-- أمثلة:
+--   42P17  → infinite recursion في RLS (نفّذ 20260422_users_profiles_rls_consolidated_fix.sql)
+--   42501  → صلاحية / GRANT / سياسة تمنع SELECT
+--   42703  → عمود مفقود في الاستعلام
+--   P0001  → RAISE من دالة/مشغّل
+--
+-- استعلامات مفيدة (SQL Editor — بدون JWT المستخدم):
+--
+-- أ) سياسات الجدول الحالية
+-- SELECT polname, cmd, roles::text,
+--        pg_get_expr(polqual, polrelid) AS using_expr
+-- FROM pg_policy pol
+-- JOIN pg_class c ON c.oid = pol.polrelid
+-- JOIN pg_namespace n ON n.oid = c.relnamespace
+-- WHERE n.nspname = 'public' AND c.relname = 'users_profiles'
+-- ORDER BY polname;
+--
+-- ب) هل الجدول VIEW أم BASE TABLE؟
+-- SELECT table_type FROM information_schema.tables
+-- WHERE table_schema = 'public' AND table_name = 'users_profiles';
+--
+-- =============================================================================

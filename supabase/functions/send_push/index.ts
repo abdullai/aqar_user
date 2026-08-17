@@ -12,8 +12,20 @@ type TriggerBody = {
     sender_id?: string;
     receiver_id?: string;
     content?: string;
-    kind?: string; // support | reservation | property
+    kind?: string;
+    user_id?: string;
+    property_id?: string;
+    id?: string;
+    status?: string;
+    username?: string;
+    title?: string;
+    body?: string;
+    type?: string;
+    data?: Record<string, unknown>;
   };
+  type?: string;
+  table?: string;
+  schema?: string;
 };
 
 type ManualBody = {
@@ -41,6 +53,36 @@ function base64url(input: string) {
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/g, "");
+}
+
+function asStringData(data: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v === undefined || v === null) continue;
+    out[k] = String(v);
+  }
+  return out;
+}
+
+/** `in_app_notifications.data` قد يكون jsonb أو نص JSON من بعض قنوات الـ webhook */
+function inAppNotificationDataObject(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const v = record["data"];
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
+  }
+  if (typeof v === "string" && v.trim()) {
+    try {
+      const d = JSON.parse(v);
+      if (d && typeof d === "object" && !Array.isArray(d)) {
+        return d as Record<string, unknown>;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return {};
 }
 
 // =====================
@@ -77,7 +119,6 @@ async function signJwt(privateKeyPem: string, header: any, payload: any) {
   return `${toSign}.${sigB64}`;
 }
 
-// ✅ UPDATED: uses FIREBASE_PRIVATE_KEY_B64 (stable, no multiline issues)
 async function getAccessToken() {
   const projectId = Deno.env.get("FIREBASE_PROJECT_ID") ?? "";
   const clientEmail = Deno.env.get("FIREBASE_CLIENT_EMAIL") ?? "";
@@ -89,7 +130,6 @@ async function getAccessToken() {
     );
   }
 
-  // Build PEM from Base64
   const privateKeyPem =
     "-----BEGIN PRIVATE KEY-----\n" +
     privateKeyB64.replace(/(.{64})/g, "$1\n") +
@@ -150,6 +190,8 @@ async function sendToToken(
       ? "chat_support"
       : kind === "reservation"
       ? "chat_reservation"
+      : kind === "workflow"
+      ? "workflow_channel"
       : "chat_property";
 
   const msg = {
@@ -182,7 +224,6 @@ async function sendToToken(
     body: JSON.stringify(msg),
   });
 
-  // ✅ Read text then try parse JSON
   const text = await r.text().catch(() => "");
   let j: any = {};
   try {
@@ -194,9 +235,6 @@ async function sendToToken(
   return { ok: r.ok, status: r.status, body: j };
 }
 
-// =====================
-// ✅ Supabase Admin (important)
-// =====================
 function getSupabaseAdmin() {
   const url = Deno.env.get("SUPABASE_URL") ?? Deno.env.get("SB_URL") ?? "";
 
@@ -213,6 +251,103 @@ function getSupabaseAdmin() {
 
   return createClient(url, serviceKey, {
     auth: { persistSession: false },
+  });
+}
+
+async function deliverTokens(
+  accessToken: string,
+  tokens: string[],
+  title: string,
+  body: string,
+  data: Record<string, string>,
+) {
+  const results: any[] = [];
+  for (const t of tokens) {
+    results.push(await sendToToken(accessToken, t, title, body, data));
+  }
+  return results;
+}
+
+async function tokensForUser(userId: string): Promise<string[]> {
+  const sb = getSupabaseAdmin();
+  const { data: rows, error } = await sb
+    .from("user_push_tokens")
+    .select("fcm_token")
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`user_push_tokens read error: ${error.message}`);
+  }
+
+  return (rows ?? [])
+    .map((r: any) => (r?.fcm_token ?? "").toString().trim())
+    .filter((t) => t.length > 0);
+}
+
+// =====================
+// Reservation (webhook: INSERT reservations)
+// =====================
+async function handleReservationInsert(rec: any) {
+  const propertyId = (rec?.property_id ?? "").toString().trim();
+  const reserverId = (rec?.user_id ?? "").toString().trim();
+  const reservationId = (rec?.id ?? "").toString().trim();
+
+  if (!propertyId) {
+    return json({ ok: true, sent: 0, reason: "no property_id" });
+  }
+
+  const sb = getSupabaseAdmin();
+  const { data: prop, error } = await sb
+    .from("properties")
+    .select("owner_id, published_by_marketer_id, title")
+    .eq("id", propertyId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`properties read: ${error.message}`);
+  }
+  if (!prop) {
+    return json({ ok: true, sent: 0, reason: "property_not_found" });
+  }
+
+  const ownerId = (prop.owner_id ?? "").toString().trim();
+  const marketerId = (prop.published_by_marketer_id ?? "").toString().trim();
+
+  const targets = new Set<string>();
+  if (ownerId) targets.add(ownerId);
+  if (marketerId) targets.add(marketerId);
+  if (reserverId) targets.delete(reserverId);
+
+  const accessToken = await getAccessToken();
+  const title = "حجز جديد";
+  const shortTitle = (prop.title ?? "").toString().trim();
+  const body = shortTitle
+    ? `تم حجز إعلان: ${shortTitle.length > 80 ? shortTitle.slice(0, 80) + "…" : shortTitle}`
+    : "تم حجز أحد إعلاناتك. اضغط للعرض.";
+
+  let total = 0;
+  const allResults: any[] = [];
+
+  for (const uid of targets) {
+    const tokens = await tokensForUser(uid);
+    if (!tokens.length) continue;
+    const data = asStringData({
+      kind: "reservation",
+      property_id: propertyId,
+      reservation_id: reservationId,
+      title_ar: title,
+      body_ar: body,
+    });
+    const results = await deliverTokens(accessToken, tokens, title, body, data);
+    allResults.push(...results);
+    total += results.length;
+  }
+
+  return json({
+    ok: true,
+    mode: "reservation_insert",
+    sent: total,
+    results: allResults,
   });
 }
 
@@ -238,9 +373,17 @@ serve(async (req) => {
   try {
     const raw = await req.json().catch(() => ({}));
 
-    // -------- Trigger payload --------
+    // -------- Supabase Database Webhook (INSERT reservations) --------
+    const whType = (raw as TriggerBody).type;
+    const whTable = (raw as TriggerBody).table;
+    if (whType === "INSERT" && whTable === "reservations") {
+      const rec = (raw as TriggerBody).record;
+      if (rec) return await handleReservationInsert(rec);
+    }
+
+    // -------- Chat message trigger (legacy body) --------
     const trigger = raw as TriggerBody;
-    const rec = trigger?.record;
+    let rec = trigger?.record;
 
     if (rec?.receiver_id && rec?.content) {
       const receiverId = rec.receiver_id.trim();
@@ -257,20 +400,7 @@ serve(async (req) => {
         return json({ ok: true, sent: 0, reason: "self message ignored" });
       }
 
-      const sb = getSupabaseAdmin();
-
-      const { data: rows, error } = await sb
-        .from("user_push_tokens")
-        .select("fcm_token")
-        .eq("user_id", receiverId);
-
-      if (error) {
-        throw new Error(`user_push_tokens read error: ${error.message}`);
-      }
-
-      const tokens = (rows ?? [])
-        .map((r: any) => (r?.fcm_token ?? "").toString().trim())
-        .filter((t) => t.length > 0);
+      const tokens = await tokensForUser(receiverId);
 
       if (!tokens.length) {
         return json({ ok: true, sent: 0, reason: "no tokens" });
@@ -281,19 +411,159 @@ serve(async (req) => {
       const title = kind === "support" ? "رسالة من الدعم" : "رسالة جديدة";
       const body = content.length > 140 ? content.slice(0, 140) + "…" : content;
 
-      const data = {
+      const data = asStringData({
         kind,
         conversation_id: conversationId,
         sender_id: senderId,
         receiver_id: receiverId,
-      };
+        title_ar: title,
+        body_ar: body,
+      });
 
-      const results: any[] = [];
-      for (const t of tokens) {
-        results.push(await sendToToken(accessToken, t, title, body, data));
-      }
+      const results = await deliverTokens(
+        accessToken,
+        tokens,
+        title,
+        body,
+        data,
+      );
 
       return json({ ok: true, mode: "trigger", sent: results.length, results });
+    }
+
+    // -------- Webhook: INSERT messages --------
+    if (whType === "INSERT" && whTable === "messages" && (raw as any).record) {
+      const mrec = (raw as any).record;
+      const receiverId = (mrec.receiver_id ?? "").toString().trim();
+      const senderId = (mrec.sender_id ?? "").toString().trim();
+      const conversationId = (mrec.conversation_id ?? "").toString().trim();
+      const content = (mrec.content ?? "").toString().trim();
+      const kind = (mrec.kind ?? "property").toString().trim();
+
+      if (!receiverId || !content) {
+        return json({ ok: true, sent: 0, reason: "missing receiver/content" });
+      }
+      if (senderId && senderId === receiverId) {
+        return json({ ok: true, sent: 0, reason: "self message ignored" });
+      }
+
+      const tokens = await tokensForUser(receiverId);
+      if (!tokens.length) {
+        return json({ ok: true, sent: 0, reason: "no tokens" });
+      }
+
+      const accessToken = await getAccessToken();
+      const title = kind === "support" ? "رسالة من الدعم" : "رسالة جديدة";
+      const body = content.length > 140 ? content.slice(0, 140) + "…" : content;
+      const data = asStringData({
+        kind: kind || "property",
+        conversation_id: conversationId,
+        sender_id: senderId,
+        receiver_id: receiverId,
+        title_ar: title,
+        body_ar: body,
+      });
+      const results = await deliverTokens(
+        accessToken,
+        tokens,
+        title,
+        body,
+        data,
+      );
+      return json({
+        ok: true,
+        mode: "messages_webhook",
+        sent: results.length,
+        results,
+      });
+    }
+
+    // -------- Webhook: INSERT in_app_notifications (workflow / عروض / عقود / …) --------
+    if (
+      whType === "INSERT" &&
+      whTable === "in_app_notifications" &&
+      (raw as TriggerBody).record
+    ) {
+      const nrec = (raw as TriggerBody).record!;
+      const username = (nrec.username ?? "").toString().trim();
+      const title = (nrec.title ?? "موثوق العقاري").toString().trim() ||
+        "موثوق العقاري";
+      const body = (nrec.body ?? "").toString().trim() || "تنبيه جديد";
+      const ntype = (nrec.type ?? "").toString().toLowerCase();
+
+      if (
+        ntype.includes("otp") ||
+        ntype.includes("pin") ||
+        ntype.includes("verify") ||
+        ntype.includes("2fa") ||
+        ntype.includes("mfa")
+      ) {
+        return json({ ok: true, sent: 0, reason: "security_notification_skipped" });
+      }
+
+      if (!username) {
+        return json({ ok: true, sent: 0, reason: "no_username" });
+      }
+
+      const sb = getSupabaseAdmin();
+      const { data: prof, error: pe } = await sb
+        .from("users_profiles")
+        .select("user_id")
+        .eq("username", username)
+        .maybeSingle();
+
+      if (pe) {
+        throw new Error(`users_profiles read: ${pe.message}`);
+      }
+      const targetUid = (prof?.user_id ?? "").toString().trim();
+      if (!targetUid) {
+        return json({ ok: true, sent: 0, reason: "profile_not_found" });
+      }
+
+      const tokens = await tokensForUser(targetUid);
+      if (!tokens.length) {
+        return json({ ok: true, sent: 0, reason: "no_tokens" });
+      }
+
+      const accessToken = await getAccessToken();
+      const extra = inAppNotificationDataObject(nrec as unknown as Record<string, unknown>);
+      const entityType = String(extra["entity_type"] ?? "").trim();
+      const entityId = String(extra["entity_id"] ?? "").trim();
+      const propertyFromData = String(extra["property_id"] ?? "").trim();
+      const requestFromData = String(extra["request_id"] ?? "").trim();
+      const propertyIdForPush = propertyFromData ||
+        (entityType.toLowerCase() === "property" ? entityId : "");
+      const requestIdForPush = requestFromData ||
+        (entityType.toLowerCase() === "listing_request" ? entityId : "");
+
+      const data = asStringData({
+        kind: "workflow",
+        notification_id: (nrec.id ?? "").toString(),
+        title_ar: title,
+        body_ar: body,
+        type: ntype,
+        entity_type: entityType,
+        entity_id: entityId,
+        property_id: propertyIdForPush,
+        request_id: requestIdForPush,
+        deep_route: String(extra["deep_route"] ?? "").trim(),
+        main_tab: String(extra["main_tab"] ?? "").trim(),
+        offer_id: String(extra["offer_id"] ?? "").trim(),
+        status: String(extra["status"] ?? "").trim(),
+      });
+      const results = await deliverTokens(
+        accessToken,
+        tokens,
+        title,
+        body,
+        data,
+      );
+      return json({
+        ok: true,
+        mode: "in_app_notifications_webhook",
+        sent: results.length,
+        results,
+      });
     }
 
     // -------- Manual payload --------
@@ -316,7 +586,7 @@ serve(async (req) => {
           t,
           manual.title ?? "New message",
           manual.body ?? "",
-          manual.data,
+          manual.data ? asStringData(manual.data as any) : {},
         ),
       );
     }

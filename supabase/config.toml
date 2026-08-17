@@ -391,3 +391,16 @@ entrypoint = "./functions/send_push/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/send_push/*.html" ]
+
+[functions.nafath_session]
+enabled = true
+# This function is the public entry point before a Supabase user session exists.
+# Keep provider secrets server-side and validate inputs inside the function.
+verify_jwt = false
+entrypoint = "./functions/nafath_session/index.ts"
+
+# Called by Moyasar servers (no Supabase JWT). Lock down via MOYASAR_WEBHOOK_SECRET.
+[functions.moyasar-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/moyasar-webhook/index.ts"

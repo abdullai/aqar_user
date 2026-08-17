@@ -1,0 +1,19 @@
+# IntelliSense فقط — لا يؤثر على بناء Flutter.
+# على هذا الجهاز لا يوجد مسار MSVC لـ <string>، فـ clangd يظهر أخطاء وهمية.
+# عطّل clangd من .vscode/settings.json (clangd.enable=false) أو ثبّت Visual Studio C++.
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -DUNICODE
+    - -D_UNICODE
+    - -DWIN32
+    - -D_WINDOWS
+    - -DNDEBUG
+    - --target=x86_64-pc-windows-msvc
+    - -ID:/Flutter/flutter/bin/cache/artifacts/engine/windows-x64/cpp_client_wrapper/include
+    - -ID:/Flutter/flutter/bin/cache/artifacts/engine/windows-x64
+    - -I.
+    - -Irunner
+Diagnostics:
+  Suppress: '*'
+  UnusedIncludes: None

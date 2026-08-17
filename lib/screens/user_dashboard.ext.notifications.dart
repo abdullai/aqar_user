@@ -1,5 +1,3 @@
 part of 'user_dashboard.dart';
 
-extension _UserDashboardState_notifications on _UserDashboardState {
-  // انقل الدوال المناسبة إلى هنا (قص/لصق من user_dashboard.ui.dart).
-}
+// Notification UI helpers live in `user_dashboard.ui.dart` (single source of truth).

@@ -1,1 +1,177 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"aqaruser-73df0","appId":"1:396763698740:android:9ef992bd3c1595e2b61c61","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"aqaruser-73df0","configurations":{"android":"1:396763698740:android:9ef992bd3c1595e2b61c61","ios":"1:396763698740:ios:ed8dc56f130fb87cb61c61","macos":"1:396763698740:ios:ed8dc56f130fb87cb61c61","web":"1:396763698740:web:0394828ec9dfa6d8b61c61","windows":"1:396763698740:web:190582ab60ff0342b61c61"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "aqaruser-73df0",
+          "appId": "1:396763698740:android:9ef992bd3c1595e2b61c61",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "aqaruser-73df0",
+          "configurations": {
+            "android": "1:396763698740:android:9ef992bd3c1595e2b61c61",
+            "ios": "1:396763698740:ios:ed8dc56f130fb87cb61c61",
+            "macos": "1:396763698740:ios:ed8dc56f130fb87cb61c61",
+            "web": "1:396763698740:web:0394828ec9dfa6d8b61c61",
+            "windows": "1:396763698740:web:190582ab60ff0342b61c61"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "site": "eaqar-mawthuq",
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/moyasar-3ds-return",
+        "destination": "/moyasar-3ds-return.html"
+      },
+      {
+        "source": "/.well-known/apple-developer-merchantid-domain-association",
+        "destination": "/well-known/apple-developer-merchantid-domain-association"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/assets/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          },
+          {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
+          }
+        ]
+      },
+      {
+        "source": "/assets/FontManifest.json",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json; charset=utf-8"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "/assets/fonts/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          },
+          {
+            "key": "Access-Control-Allow-Origin",
+            "value": "*"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(js|wasm)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/flutter_bootstrap.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/main.dart.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          },
+          {
+            "key": "Accept-Ranges",
+            "value": "bytes"
+          }
+        ]
+      },
+      {
+        "source": "**/flutter_service_worker.js",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, no-store, must-revalidate"
+          }
+        ]
+      },
+      {
+        "source": "/index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0"
+          }
+        ]
+      },
+      {
+        "source": "/supabase_config.json",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json; charset=utf-8"
+          }
+        ]
+      },
+      {
+        "source": "/well-known/apple-developer-merchantid-domain-association",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "text/plain; charset=utf-8"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "/firebase-messaging-sw.js",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/javascript; charset=utf-8"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "no-cache, max-age=0"
+          }
+        ]
+      }
+    ]
+  }
+}

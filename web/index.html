@@ -1,38 +1,149 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
-
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
-
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
-
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
-  -->
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
-  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <!-- Supabase on web: add web/supabase_config.json (see web/supabase_config.json.example) before deploy, or pass --dart-define=SUPABASE_ANON_KEY=... in your build. -->
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="description" content="Motawoq Real Estate — trusted real estate app">
 
-  <!-- iOS meta tags & icons -->
+  <!-- Mobile support -->
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="aqar_user">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <!-- viewport-fit + interactive-widget=resizes-visual:
+       يمرّر ارتفاع لوحة المفاتيح إلى Flutter عبر MediaQuery.viewInsets
+       (resizes-content كان يُصغّر النافذة ويترك inset=0 فيغطّي الحقل). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover, interactive-widget=resizes-visual">
+
+  <!-- Icons -->
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
 
   <title>aqar_user</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- خطوط Flutter تُحمَّل عبر FontManifest — preload المبكر يسبب تحذيرات Console -->
+  <link rel="preconnect" href="https://czfvqhepsqkgsrfnknwm.supabase.co" crossorigin>
+  <link rel="dns-prefetch" href="https://czfvqhepsqkgsrfnknwm.supabase.co">
+  <link rel="preload" href="assets/FontManifest.json" as="fetch" crossorigin="anonymous">
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background-color: #F3F6F8;
+      background-image: radial-gradient(ellipse at 50% 35%, #E6F4F1 0%, #F3F6F8 55%, #EEF2F5 100%);
+      touch-action: manipulation;
+      min-height: 100%;
+      min-height: 100dvh;
+    }
+
+    input, textarea, select {
+      font-size: 16px;
+    }
+
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 50% 35%, #E6F4F1 0%, #F3F6F8 55%, #EEF2F5 100%);
+    }
+
+    #splash img {
+      width: min(72vw, 280px);
+      height: auto;
+      max-height: 42vh;
+      object-fit: contain;
+    }
+  </style>
+
+  <script>
+    function removeSplashFromWeb() {
+      document.getElementById("splash")?.remove();
+      if (document.body) document.body.style.background = "transparent";
+    }
+
+    function pickBootSplashSrc() {
+      var narrow = window.matchMedia("(max-width: 700px)").matches;
+      var shortSide = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+      var phoneLike = shortSide > 0 && shortSide < 600;
+      var ua = (navigator.userAgent || "").toLowerCase();
+      // هاتف فقط (ليس آيباد) أو شاشة ضيّقة → تطبيق؛ آيباد/ويندوز عريض → مؤسسة
+      var phoneUa = /mobi|android|iphone|ipod/.test(ua) && !/ipad/.test(ua);
+      return (phoneLike || narrow || phoneUa)
+        ? "assets/assets/splashscreen.png"
+        : "assets/assets/logo.png";
+    }
+  </script>
+
+  <!--
+    Maps JavaScript API: load before Flutter so google_maps_flutter_web can initialize.
+    In Google Cloud Console: enable "Maps JavaScript API" + Places (if used), link billing,
+    and add HTTP referrer restrictions for your hosts (e.g. https://*.web.app/* ,
+    https://*.firebaseapp.com/* , localhost for dev).
+  -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB1GB51H6O-8O5wab9WnEDSj5aY_qQL4Vs&libraries=places&loading=async"></script>
 </head>
+
 <body>
+  <div id="splash" aria-hidden="true">
+    <img id="boot-splash-img" alt="" src="assets/assets/logo.png">
+  </div>
+  <script>
+    (function () {
+      var img = document.getElementById("boot-splash-img");
+      if (img) img.src = pickBootSplashSrc();
+    })();
+  </script>
+
+  <!--
+    Service Worker: المشروع يضمّ `web/flutter_bootstrap.js` يستدعي `_flutter.loader.load({})` بدون
+    service worker — يتفادى "prepareServiceWorker took more than 4000ms" وأخطاء Cache.put/206.
+    للبناء: ما زال `flutter build web --pwa-strategy=none` مفيداً (مضمّن في firebase.json predeploy).
+    بعد نشر قديم: DevTools → Application → Unregister service workers → Hard reload.
+  -->
+  <script>
+    /* إلغاء تسجيل Service Workers القديمة يقلّل أخطاء Cache.put + 206 بعد تغيير نسخة Flutter. */
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        for (var i = 0; i < regs.length; i++) regs[i].unregister();
+      });
+    }
+  </script>
+  <script>
+    /* إزالة طبقات semantics العالقة — Flutter web #175119
+       كان التوقف بعد 20 ثانية يترك التجمّد دائماً إن ظهرت الطبقة لاحقاً. */
+    window.aqarUnblockPointer = function aqarUnblockPointer() {
+      var removed = 0;
+      try {
+        document.querySelectorAll('flt-semantics-placeholder').forEach(function (el) {
+          var r = el.getBoundingClientRect();
+          if (r.width >= window.innerWidth * 0.85 && r.height >= window.innerHeight * 0.85) {
+            el.style.pointerEvents = 'none';
+            removed++;
+          }
+        });
+      } catch (e) {}
+      return removed;
+    };
+    (function () {
+      var ticks = 0;
+      setInterval(function () {
+        ticks++;
+        // أول 30 ثانية: كل ثانية؛ بعدها نتخطى معظم النبضات (كل 5 ثوانٍ).
+        if (ticks > 30 && (ticks % 5) !== 0) return;
+        try { window.aqarUnblockPointer(); } catch (e) {}
+      }, 1000);
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

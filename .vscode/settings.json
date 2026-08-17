@@ -1,0 +1,23 @@
+{
+  "deno.enable": false,
+  "deno.enablePaths": ["supabase/functions"],
+  "typescript.tsserver.experimental.enableProjectDiagnostics": true,
+  "mssql.intelliSense.enable": false,
+  "files.associations": {
+    "supabase/functions/**/*.ts": "typescript",
+    "**/supabase/**/*.sql": "postgres"
+  },
+  "C_Cpp.errorSquiggles": "disabled",
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "C_Cpp.files.exclude": {
+    "**/windows/**": true,
+    "**/linux/**": true,
+    "**/macos/**": true
+  },
+  "files.exclude": {},
+  "clangd.enable": false,
+  "clangd.arguments": [
+    "--compile-commands-dir=${workspaceFolder}/windows"
+  ],
+  "clangd.fallbackFlags": []
+}

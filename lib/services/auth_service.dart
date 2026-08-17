@@ -1,4 +1,6 @@
 // lib/services/auth_service.dart
+import 'dart:async';
+
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
@@ -6,6 +8,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
 import 'package:aqar_user/models.dart';
+import 'package:aqar_user/core/auth/login_security_db.dart';
+import 'package:aqar_user/core/input/input_normalizers.dart';
+import 'package:aqar_user/core/security/install_device_identity.dart';
 
 class LoginResult {
   final bool ok;
@@ -29,50 +34,69 @@ class AuthService {
    * ============================================================ */
 
   /// تحويل الأرقام العربية/الفارسية إلى 0-9
-  static String normalizeNumbers(String input) {
-    const a = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
-    const e = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
-    var out = input;
-    for (int i = 0; i < 10; i++) {
-      out = out.replaceAll(a[i], i.toString());
-      out = out.replaceAll(e[i], i.toString());
-    }
-    return out;
+  static String normalizeNumbers(String input) => normalizeAsciiDigits(input);
+
+  static bool _isValidLoginKey(String v) {
+    final s = digitsOnly(normalizeAsciiDigits(v.trim()));
+    return isTenDigitLoginKey(s);
   }
 
-  static bool _isValidUsername(String v) {
-    final s = normalizeNumbers(v.trim());
-    return RegExp(r'^\d{10}$').hasMatch(s);
+  /// مفتاح موحّد لاستدعاءات الأمان/OTP (يطابق users_profiles.username عند الحاجة).
+  static Future<String> securityUsernameForDeviceFlow(String rawInput) async {
+    final u = digitsOnly(normalizeAsciiDigits(rawInput.trim()));
+    if (!isTenDigitLoginKey(u)) return u;
+    try {
+      final res = await _sb.rpc(
+        'get_security_username_for_login',
+        params: {'p_digits': u},
+      );
+      final s = res?.toString().trim() ?? '';
+      if (isTenDigitLoginKey(s)) return s;
+    } catch (_) {}
+    return u;
   }
 
   /// ✅ يعمل على Web بدون dart:io
-  static Future<String> _deviceFingerprint() async {
-    final info = DeviceInfoPlugin();
+  /// بصمة الجهاز لاستدعاءات الأمان / تسجيل الجهاز (نفس المنطق الداخلي).
+  static Future<String> deviceFingerprint() async {
+    return _deviceFingerprint();
+  }
 
+  static Future<String> _deviceFingerprint() async {
+    // مصدر واحد مستقر لكل الحسابات على نفس التثبيت/المتصفح.
+    // سابقاً كان User-Agent يتغيّر فيُحسب الجهاز الواحد أجهزة متعددة بالخطأ.
+    return InstallDeviceIdentity.key();
+  }
+
+  /// تسمية منصة/طراز للعرض وتخزينها مع الجهاز الموثوق.
+  static Future<String> devicePlatformModelLabel() async {
+    final info = DeviceInfoPlugin();
     try {
       if (kIsWeb) {
         final w = await info.webBrowserInfo;
-        final vendor = (w.vendor ?? 'unknown').toString();
-        final userAgent = (w.userAgent ?? 'unknown').toString();
-        return 'web:$vendor:$userAgent';
+        return 'web:${w.browserName.name}';
       }
-
       switch (defaultTargetPlatform) {
         case TargetPlatform.android:
           final a = await info.androidInfo;
-          return 'android:${a.id}:${a.model}:${a.brand}';
+          return 'android:${a.brand} ${a.model}';
         case TargetPlatform.iOS:
           final i = await info.iosInfo;
-          return 'ios:${i.identifierForVendor}:${i.model}';
+          return 'ios:${i.model}';
         case TargetPlatform.windows:
           final w = await info.windowsInfo;
-          return 'win:${w.deviceId}:${w.computerName}';
+          return 'windows:${w.computerName}';
+        case TargetPlatform.macOS:
+          final m = await info.macOsInfo;
+          return 'macos:${m.model}';
+        case TargetPlatform.linux:
+          final l = await info.linuxInfo;
+          return 'linux:${l.name}';
         default:
           break;
       }
     } catch (_) {}
-
-    return 'unknown-device';
+    return defaultTargetPlatform.name;
   }
 
   static Future<void> _logSecurity({
@@ -81,9 +105,21 @@ class AuthService {
     required bool success,
     String? details,
   }) async {
-    // ✅ لا ترسل null لأي باراميتر
     final u = username.trim().isEmpty ? 'guest' : username.trim();
     final d = (details ?? '').toString();
+
+    // قبل تسجيل الدخول لا توجد جلسة — RPC المحمي يُرجع 401 ويُشوّش Network.
+    if (_sb.auth.currentSession == null) {
+      if (action == 'login_password_failed' && isTenDigitLoginKey(u)) {
+        unawaited(
+          LoginSecurityDb.recordFailedPasswordLogin(
+            _sb,
+            tenDigitUsername: u,
+          ),
+        );
+      }
+      return;
+    }
 
     try {
       await _sb.rpc(
@@ -95,9 +131,7 @@ class AuthService {
           'p_details': d,
         },
       );
-    } catch (_) {
-      // تجاهل الأخطاء حتى لا تعلق الواجهات
-    }
+    } catch (_) {}
   }
 
   /* ============================================================
@@ -106,8 +140,17 @@ class AuthService {
 
   /// RPC: get_status_by_username
   static Future<String?> getAccountStatus(String username) async {
-    final u = normalizeNumbers(username).trim();
-    if (!_isValidUsername(u)) return null;
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
+    if (!_isValidLoginKey(u)) return null;
+
+    try {
+      final res = await _sb.rpc(
+        'get_login_account_status',
+        params: {'p_digits': u},
+      );
+      final s = res?.toString().trim();
+      if (s != null && s.isNotEmpty && s != 'null') return s;
+    } catch (_) {}
 
     try {
       final res = await _sb.rpc(
@@ -132,14 +175,21 @@ class AuthService {
    * ============================================================ */
 
   static Future<String?> getEmailByUsername(String username) async {
-    final u = normalizeNumbers(username).trim();
-    if (!_isValidUsername(u)) return null;
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
+    if (!_isValidLoginKey(u)) return null;
 
     try {
-      final res = await _sb.rpc(
-        'get_email_by_national_id',
-        params: {'p_national_id': u},
-      );
+      final res = await _sb
+          .rpc('get_login_email', params: {'p_digits': u})
+          .timeout(const Duration(seconds: 8));
+      final email = res?.toString().trim();
+      if (email != null && email.isNotEmpty && email != 'null') return email;
+    } catch (_) {}
+
+    try {
+      final res = await _sb
+          .rpc('get_email_by_national_id', params: {'p_national_id': u})
+          .timeout(const Duration(seconds: 8));
       final email = res?.toString().trim();
       if (email == null || email.isEmpty || email == 'null') return null;
       return email;
@@ -153,31 +203,76 @@ class AuthService {
    * ============================================================ */
 
   /// ✅ RPC: request_inapp_otp(p_username)
-  static Future<bool> requestOtp(String username) async {
-    final u = normalizeNumbers(username).trim();
-    if (!_isValidUsername(u)) return false;
+  /// تحقق من رمز OTP داخل التطبيق (نفس منطق [VerifyScreen]).
+  static Future<bool> verifyInAppOtp({
+    required String usernameDigits,
+    required String code,
+  }) async {
+    final u = digitsOnly(normalizeAsciiDigits(usernameDigits.trim()));
+    if (!_isValidLoginKey(u)) return false;
+    final canonical = await securityUsernameForDeviceFlow(u);
+    final digits = code.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return false;
+    try {
+      final v = await _sb.rpc(
+        'verify_inapp_otp',
+        params: {'p_username': canonical, 'p_code': digits},
+      );
+      return (v is bool) ? v : (v?.toString() == 'true');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns `null` if the OTP RPC succeeded; otherwise a machine-readable hint
+  /// (`timeout`, `invalid_username`, or the raw exception message).
+  static Future<String?> requestOtpWithMessage(String username) async {
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
+    if (!_isValidLoginKey(u)) return 'invalid_username';
+
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null || uid.isEmpty) {
+      return 'not_authenticated';
+    }
+
+    final canonical = await securityUsernameForDeviceFlow(u);
 
     try {
       await _sb.rpc(
         'request_inapp_otp',
-        params: {'p_username': u},
+        params: {'p_username': canonical},
       );
       await _logSecurity(
-        username: u,
+        username: canonical,
         action: 'otp_requested',
         success: true,
         details: '',
       );
-      return true;
+      return null;
     } catch (e) {
+      final raw = e.toString();
       await _logSecurity(
-        username: u,
+        username: canonical,
         action: 'otp_requested',
         success: false,
-        details: e.toString(),
+        details: raw,
       );
-      return false;
+      // PostgREST 400 من RAISE EXCEPTION — أعِد رمزاً واضحاً للواجهة.
+      final lower = raw.toLowerCase();
+      if (lower.contains('not_authenticated')) return 'not_authenticated';
+      if (lower.contains('username_not_current_user')) {
+        return 'username_not_current_user';
+      }
+      if (lower.contains('rate') || lower.contains('too many')) {
+        return 'rate_limited';
+      }
+      return raw;
     }
+  }
+
+  static Future<bool> requestOtp(String username) async {
+    final err = await requestOtpWithMessage(username);
+    return err == null;
   }
 
   /* ============================================================
@@ -185,16 +280,17 @@ class AuthService {
    * ============================================================ */
 
   static Future<bool> isDeviceKnown(String username) async {
-    final u = normalizeNumbers(username).trim();
-    if (!_isValidUsername(u)) return false;
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
+    if (!_isValidLoginKey(u)) return false;
 
+    final canonical = await securityUsernameForDeviceFlow(u);
     final deviceId = await _deviceFingerprint();
 
     try {
       final res = await _sb.rpc(
         'is_device_known',
         params: {
-          'p_username': u,
+          'p_username': canonical,
           'p_device_id': deviceId,
         },
       );
@@ -205,28 +301,29 @@ class AuthService {
   }
 
   static Future<void> registerDevice(String username) async {
-    final u = normalizeNumbers(username).trim();
-    if (!_isValidUsername(u)) return;
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
+    if (!_isValidLoginKey(u)) return;
 
+    final canonical = await securityUsernameForDeviceFlow(u);
     final deviceId = await _deviceFingerprint();
 
     try {
       await _sb.rpc(
         'register_device',
         params: {
-          'p_username': u,
+          'p_username': canonical,
           'p_device_id': deviceId,
         },
       );
       await _logSecurity(
-        username: u,
+        username: canonical,
         action: 'device_registered',
         success: true,
         details: '',
       );
     } catch (e) {
       await _logSecurity(
-        username: u,
+        username: canonical,
         action: 'device_registered',
         success: false,
         details: e.toString(),
@@ -244,15 +341,15 @@ class AuthService {
     String lang = 'ar',
   }) async {
     final isAr = lang != 'en';
-    final u = normalizeNumbers(username).trim();
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
 
-    if (!_isValidUsername(u)) {
+    if (!_isValidLoginKey(u)) {
       return LoginResult(
         ok: false,
         locked: false,
         message: isAr
-            ? 'رقم الهوية يجب أن يكون 10 أرقام'
-            : 'Username must be 10 digits',
+            ? 'أدخل 10 أرقام: هوية/إقامة، رخصة فال، أو الرقم الوطني الموحّد (700…)'
+            : 'Enter 10 digits: ID/Iqama, FAL license, or unified national no. (700…)',
       );
     }
 
@@ -318,13 +415,15 @@ class AuthService {
     String? redirectTo,
   }) async {
     final isAr = lang != 'en';
-    final u = normalizeNumbers(username).trim();
+    final u = digitsOnly(normalizeAsciiDigits(username.trim()));
 
-    if (!_isValidUsername(u)) {
+    if (!_isValidLoginKey(u)) {
       return LoginResult(
         ok: false,
         locked: false,
-        message: isAr ? 'رقم الهوية غير صحيح' : 'Invalid username',
+        message: isAr
+            ? 'المعرّف غير صالح (10 أرقام)'
+            : 'Invalid identifier (10 digits)',
       );
     }
 

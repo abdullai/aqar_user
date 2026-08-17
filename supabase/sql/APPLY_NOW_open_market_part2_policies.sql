@@ -1,0 +1,65 @@
+-- =============================================================================
+-- APPLY NOW جزء 2/3 — سياسات listing_requests + معاينة العقار/الصور
+-- نفّذ بعد نجاح الجزء 1
+-- =============================================================================
+
+DROP POLICY IF EXISTS "marketer_select_linked_listing_requests" ON public.listing_requests;
+CREATE POLICY "marketer_select_linked_listing_requests"
+  ON public.listing_requests FOR SELECT TO authenticated
+  USING (public.marketer_can_read_listing_request(id));
+
+CREATE OR REPLACE FUNCTION public.marketer_can_read_property_for_marketing(p_property_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+SET row_security = off
+AS $fn$
+  SELECT p_property_id IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM public.listing_requests lr
+    WHERE (
+        lr.preview_property_id = p_property_id
+        OR EXISTS (
+          SELECT 1 FROM public.properties p
+          WHERE p.id = p_property_id
+            AND p.request_id IS NOT NULL
+            AND p.request_id = lr.id
+        )
+      )
+      AND (
+        EXISTS (
+          SELECT 1 FROM public.listing_request_invites inv
+          WHERE inv.request_id = lr.id AND inv.marketer_id = auth.uid()
+        )
+        OR EXISTS (
+          SELECT 1 FROM public.listing_offers o
+          WHERE o.request_id = lr.id AND o.marketer_id = auth.uid()
+        )
+        OR (
+          public.auth_is_marketing_account()
+          AND lr.owner_id IS DISTINCT FROM auth.uid()
+          AND lr.selected_marketer_id IS NULL
+          AND lower(trim(coalesce(lr.workflow_stage, ''))) = 'waiting_marketers'
+        )
+      )
+  );
+$fn$;
+
+REVOKE ALL ON FUNCTION public.marketer_can_read_property_for_marketing(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.marketer_can_read_property_for_marketing(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.marketer_can_read_property_for_marketing(uuid) TO service_role;
+
+DROP POLICY IF EXISTS "marketer_select_linked_preview_properties" ON public.properties;
+DROP POLICY IF EXISTS "marketer_select_linked_preview_properties_v2" ON public.properties;
+CREATE POLICY "marketer_select_linked_preview_properties_v2"
+  ON public.properties FOR SELECT TO authenticated
+  USING (public.marketer_can_read_property_for_marketing(id));
+
+DROP POLICY IF EXISTS "marketer_select_linked_property_images" ON public.property_images;
+DROP POLICY IF EXISTS "marketer_select_linked_property_images_v2" ON public.property_images;
+CREATE POLICY "marketer_select_linked_property_images_v2"
+  ON public.property_images FOR SELECT TO authenticated
+  USING (public.marketer_can_read_property_for_marketing(property_images.property_id));

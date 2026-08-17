@@ -1,5 +1,7 @@
 // lib/models/ad_item.dart
 
+import 'property.dart';
+
 /// نموذج إعلان/عقار موحّد لاستخدامه في القائمة (Dashboard) وفي التفاصيل.
 ///
 /// ✅ متوافق مع نسختك الحالية (Backward compatible):
@@ -71,6 +73,9 @@ class AdItem {
   /// - إن كانت فارغة يستخدم imageUrl/assetImage
   List<String> images;
 
+  /// رابط فيديو الغلاف/العقار (مثل `properties.video_url`)
+  String? videoUrl;
+
   /// مصدر حالة العقار (اختياري): internal | external | mixed
   String statusSource;
 
@@ -102,6 +107,7 @@ class AdItem {
     this.isVerified = false,
     this.verifiedAt,
     List<String>? images,
+    this.videoUrl,
     this.statusSource = 'internal',
     this.statusNote,
   }) : images = images ?? const [];
@@ -121,11 +127,19 @@ class AdItem {
   /// - else imageUrl
   /// - else assetImage (تتعامل معها الواجهة)
   String? bestCoverUrl() {
-    if (images.isNotEmpty)
+    if (images.isNotEmpty) {
       return images.first.trim().isEmpty ? null : images.first.trim();
+    }
     final u = imageUrl?.trim();
     if (u != null && u.isNotEmpty) return u;
     return null; // إذا null فالواجهة تستخدم assetImage
+  }
+
+  /// رابط فيديو للبطاقة إن وُجد (لا يستبدل صورة الغلاف إلا إذا رغبت الواجهة بذلك)
+  String? bestVideoUrl() {
+    final v = videoUrl?.trim();
+    if (v != null && v.isNotEmpty) return v;
+    return null;
   }
 
   /// مساعد: هل يمكن حجز العقار؟
@@ -160,6 +174,7 @@ class AdItem {
         'isVerified': isVerified,
         'verifiedAt': verifiedAt?.toIso8601String(),
         'images': images,
+        'videoUrl': videoUrl,
         'statusSource': statusSource,
         'statusNote': statusNote,
       };
@@ -234,9 +249,66 @@ class AdItem {
       isVerified: (j['isVerified'] ?? j['is_verified'] ?? false) as bool,
       verifiedAt: toDateTimeOrNull(j['verifiedAt'] ?? j['verified_at']),
       images: toStringList(j['images']),
+      videoUrl: trimOrNull(j['videoUrl'] ?? j['video_url']),
       statusSource:
           (j['statusSource'] ?? j['status_source'] ?? 'internal').toString(),
       statusNote: trimOrNull(j['statusNote'] ?? j['status_note']),
+    );
+  }
+
+  /// جسر عرض من [Property] لشاشات تفضّل [AdItem].
+  factory AdItem.fromProperty(Property p) {
+    final city = p.city.trim();
+    final district = (p.location ?? '').trim();
+    final bits = <String>[
+      if (p.area > 0) '${p.area.toStringAsFixed(0)} m²',
+      if (city.isNotEmpty) city,
+    ];
+    final sub = bits.join(' · ');
+    final priceVal = p.isAuction ? (p.currentBid ?? p.price) : p.price;
+    var st = 'unknown';
+    if (p.isDeletedLike) {
+      st = 'sold';
+    } else if (p.normalizedStatus == 'reserved' ||
+        (p.reservationStatus ?? '').toLowerCase().contains('pending')) {
+      st = 'reserved';
+    } else if (p.isActive) {
+      st = 'available';
+    }
+    String? httpCover;
+    for (final u in p.images) {
+      final t = u.trim();
+      if (t.startsWith('http://') || t.startsWith('https://')) {
+        httpCover = t;
+        break;
+      }
+    }
+    return AdItem(
+      id: p.id,
+      titleAr: p.title,
+      titleEn: p.title,
+      subtitleAr: sub,
+      subtitleEn: sub,
+      assetImage: '',
+      imageUrl: httpCover,
+      linkUrl: null,
+      enabled: true,
+      propertyId: p.id,
+      cityAr: city.isNotEmpty ? city : null,
+      cityEn: city.isNotEmpty ? city : null,
+      districtAr: district.isNotEmpty ? district : null,
+      districtEn: district.isNotEmpty ? district : null,
+      areaSqm: p.area > 0 ? p.area : null,
+      price: priceVal,
+      currency: p.currency.trim().isEmpty ? 'SAR' : p.currency.trim(),
+      status: st,
+      licenseNumber: null,
+      isVerified: false,
+      verifiedAt: null,
+      images: List<String>.from(p.images),
+      videoUrl: (p.videoUrl ?? '').trim().isEmpty ? null : p.videoUrl!.trim(),
+      statusSource: 'internal',
+      statusNote: null,
     );
   }
 }

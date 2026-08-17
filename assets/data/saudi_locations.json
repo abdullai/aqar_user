@@ -1,0 +1,192 @@
+[
+{
+"city_ar": "تبوك",
+"city_en": "Tabuk",
+"region_ar": "منطقة تبوك",
+"region_en": "Tabuk",
+"governorate_ar": "تبوك",
+"governorate_en": "Tabuk",
+"lat": 28.41463997,
+"lng": 36.53387003
+},
+{
+"city_ar": "الرياض",
+"city_en": "Riyadh",
+"region_ar": "منطقة الرياض",
+"region_en": "Riyadh",
+"governorate_ar": "الرياض",
+"governorate_en": "Riyadh",
+"lat": 24.69999996,
+"lng": 46.73333003
+},
+{
+"city_ar": "الطائف",
+"city_en": "At Taif",
+"region_ar": "منطقة مكة المكرمة",
+"region_en": "Makkah",
+"governorate_ar": "الطائف",
+"governorate_en": "At Taif",
+"lat": 21.26848005,
+"lng": 40.41667003
+},
+{
+"city_ar": "حائل",
+"city_en": "Hail",
+"region_ar": "منطقة حائل",
+"region_en": "Hail",
+"governorate_ar": "حائل",
+"governorate_en": "Hail",
+"lat": 27.53054999,
+"lng": 41.69733002
+},
+{
+"city_ar": "بريدة",
+"city_en": "Buraidah",
+"region_ar": "منطقة القصيم",
+"region_en": "Qassim",
+"governorate_ar": "بريدة",
+"governorate_en": "Buraidah",
+"lat": 26.33033999,
+"lng": 43.97435997
+},
+{
+"city_ar": "الدمام",
+"city_en": "Dammam",
+"region_ar": "المنطقة الشرقية",
+"region_en": "Eastern Province",
+"governorate_ar": "الدمام",
+"governorate_en": "Dammam",
+"lat": 26.44199002,
+"lng": 50.10919981
+},
+{
+"city_ar": "جازان",
+"city_en": "Jazan",
+"region_ar": "منطقة جازان",
+"region_en": "Jazan",
+"governorate_ar": "جازان",
+"governorate_en": "Jazan",
+"lat": 16.89671995,
+"lng": 42.55360001
+},
+{
+"city_ar": "جدة",
+"city_en": "Jeddah",
+"region_ar": "منطقة مكة المكرمة",
+"region_en": "Makkah",
+"governorate_ar": "جدة",
+"governorate_en": "Jeddah",
+"lat": 21.48817996,
+"lng": 39.18094995
+},
+{
+"city_ar": "الخبر",
+"city_en": "Al Khobar",
+"region_ar": "المنطقة الشرقية",
+"region_en": "Eastern Province",
+"governorate_ar": "الخبر",
+"governorate_en": "Al Khobar",
+"lat": 26.31090997,
+"lng": 50.21074975
+},
+{
+"city_ar": "خميس مشيط",
+"city_en": "Khamis Mushayt",
+"region_ar": "منطقة عسير",
+"region_en": "Asir",
+"governorate_ar": "خميس مشيط",
+"governorate_en": "Khamis Mushayt",
+"lat": 18.30613002,
+"lng": 42.72976998
+},
+{
+"city_ar": "القطيف",
+"city_en": "Al Qatif",
+"region_ar": "المنطقة الشرقية",
+"region_en": "Eastern Province",
+"governorate_ar": "القطيف",
+"governorate_en": "Al Qatif",
+"lat": 26.56387002,
+"lng": 50.00120987
+},
+{
+"city_ar": "الجبيل",
+"city_en": "Al Jubail",
+"region_ar": "المنطقة الشرقية",
+"region_en": "Eastern Province",
+"governorate_ar": "الجبيل",
+"governorate_en": "Al Jubail",
+"lat": 26.99921004,
+"lng": 49.67046985
+},
+{
+"city_ar": "ينبع",
+"city_en": "Yanbu",
+"region_ar": "منطقة المدينة المنورة",
+"region_en": "Madinah",
+"governorate_ar": "ينبع",
+"governorate_en": "Yanbu",
+"lat": 24.09391997,
+"lng": 38.06336005
+},
+{
+"city_ar": "الباحة",
+"city_en": "Bahah",
+"region_ar": "منطقة الباحة",
+"region_en": "Bahah",
+"governorate_ar": "الباحة",
+"governorate_en": "Bahah",
+"lat": 20.00695006,
+"lng": 41.46314
+},
+{
+"city_ar": "عرعر",
+"city_en": "Arar",
+"region_ar": "منطقة الحدود الشمالية",
+"region_en": "Northern Borders",
+"governorate_ar": "عرعر",
+"governorate_en": "Arar",
+"lat": 30.97214998,
+"lng": 41.01332997
+},
+{
+"city_ar": "سكاكا",
+"city_en": "Sakaka",
+"region_ar": "منطقة الجوف",
+"region_en": "Jawf",
+"governorate_ar": "سكاكا",
+"governorate_en": "Sakaka",
+"lat": 29.9728,
+"lng": 40.21416997
+},
+{
+"city_ar": "الباحة",
+"city_en": "Al Baha",
+"region_ar": "منطقة حائل",
+"region_en": "Hail",
+"governorate_ar": "الباحة",
+"governorate_en": "Al Baha",
+"lat": 26.05922314,
+"lng": 40.53401944
+},
+{
+"city_ar": "نجران",
+"city_en": "Najran",
+"region_ar": "منطقة نجران",
+"region_en": "Najran",
+"governorate_ar": "نجران",
+"governorate_en": "Najran",
+"lat": 17.5408618,
+"lng": 44.2663834
+},
+{
+"city_ar": "الاحساء",
+"city_en": "Al Ahsa",
+"region_ar": "المنطقة الشرقية",
+"region_en": "Eastern Province",
+"governorate_ar": "الاحساء",
+"governorate_en": "Al Ahsa",
+"lat": 25.39574461,
+"lng": 49.6162808
+}
+]

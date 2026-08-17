@@ -1,5 +1,6 @@
 package com.example.aqar_user
 
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 
-class MainActivity : FlutterActivity()
+/// [FlutterFragmentActivity] مطلوب لـ local_auth / BiometricPrompt على أندرويد.
+class MainActivity : FlutterFragmentActivity()

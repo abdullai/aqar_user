@@ -1,0 +1,8 @@
+{
+  "_comment": "انسخ إلى web/supabase_config.json قبل flutter build web. لا تضع المفتاح السري sk_ هنا.",
+  "SUPABASE_URL": "https://YOUR_PROJECT.supabase.co",
+  "SUPABASE_ANON_KEY": "YOUR_ANON_OR_PUBLISHABLE_KEY",
+  "MOYASAR_PUBLISHABLE_KEY": "pk_test_...",
+  "MOYASAR_CALLBACK_URL": "https://YOUR_HOST.web.app/moyasar-3ds-return",
+  "MOYASAR_APPLE_PAY_MERCHANT_ID": ""
+}

@@ -1,0 +1,4 @@
+id,user_id,event_type,metadata_json,created_at_utc,mock
+a1000000-0000-4000-8000-000000000001,00000000-0000-4000-8000-0000000000a1,terms.accepted,"{""version"":""2026-04-05-SA"",""lang"":""ar""}",2026-05-01T12:00:00Z,yes
+a1000000-0000-4000-8000-000000000002,00000000-0000-4000-8000-0000000000a1,consent.preferences_updated,"{""analytics_cookies"":false,""marketing_cookies"":false}",2026-05-01T12:05:00Z,yes
+a1000000-0000-4000-8000-000000000003,00000000-0000-4000-8000-0000000000a2,support.ticket_opened,"{""channel"":""in_app""}",2026-05-02T09:00:00Z,yes

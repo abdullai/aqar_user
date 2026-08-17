@@ -32,7 +32,7 @@ class AdsService {
           .select(
             'id,title,image_url,link_url,show_on_web,show_on_app,is_active,deleted_at,'
             'title_ar,title_en,subtitle_ar,subtitle_en,created_at,'
-            'edit_count,max_edits,created_by',
+            'edit_count,max_edits,created_by,video_url',
           )
           .eq('is_active', true)
           // ✅ FIX: postgrest 2.6.0: لا eq(null) ولا is_()
@@ -57,6 +57,8 @@ class AdsService {
         // الصور في DB هنا URL (image_url)
         final imageUrl = (m['image_url'] ?? '').toString();
         final linkUrl = (m['link_url'] ?? '').toString();
+        final videoUrl = (m['video_url'] ?? '').toString().trim();
+        final videoUrlOrNull = videoUrl.isEmpty ? null : videoUrl;
 
         list.add(
           AdItem(
@@ -68,6 +70,7 @@ class AdsService {
             // لو عندك URL من DB نخزنه هنا
             imageUrl: imageUrl.isEmpty ? null : imageUrl,
             linkUrl: linkUrl.isEmpty ? null : linkUrl,
+            videoUrl: videoUrlOrNull,
             // لو ما فيه URL نترك assetImage فاضي (يمكن واجهتك تتعامل مع هذا)
             assetImage: '',
             enabled: true,
@@ -253,37 +256,45 @@ class AdsService {
   static List<AdItem> demoAds() {
     return [
       AdItem(
-        id: 'ad-1',
-        titleAr: 'إعلان تجريبي 1',
-        titleEn: 'Demo Ad 1',
-        subtitleAr: 'هذا نص تجريبي للإعلان',
-        subtitleEn: 'This is a demo ad text',
-        assetImage: 'assets/logo.png',
+        id: 'mawthuq-demo-license',
+        titleAr: 'رخصة فال ورصد رسمي',
+        titleEn: 'FAL licence & registry alignment',
+        subtitleAr:
+            'عروض مرتبطة ببيانات مرخّصة تساعدك على اتخاذ قرار أوضح بثقة أكبر.',
+        subtitleEn:
+            'Listings tied to licensed data so you can decide with clearer confidence.',
+        assetImage: '',
+        imageUrl: null,
+        linkUrl: null,
+        enabled: true,
+        isVerified: true,
+      ),
+      AdItem(
+        id: 'mawthuq-demo-inbox',
+        titleAr: 'تواصل داخل المنصة',
+        titleEn: 'In-app conversations',
+        subtitleAr:
+            'دردش مع الوسيط أو الفريق دون تشتيت—كل السياق بقرب عقارك المختار.',
+        subtitleEn:
+            'Chat with brokers or your team in one place—context stays next to each listing.',
+        assetImage: '',
         imageUrl: null,
         linkUrl: null,
         enabled: true,
       ),
       AdItem(
-        id: 'ad-2',
-        titleAr: 'إعلان تجريبي 2',
-        titleEn: 'Demo Ad 2',
-        subtitleAr: 'إعلان خاص بالتطبيق',
-        subtitleEn: 'App internal announcement',
-        assetImage: 'assets/splashscreen.png',
+        id: 'mawthuq-demo-explore',
+        titleAr: 'تصفّح العروض الموثقة',
+        titleEn: 'Browse verified listings',
+        subtitleAr:
+            'تجربة عرض نظيفة تشبه التطبيق: بطاقات واضحة وشارات توضح حالة العرض.',
+        subtitleEn:
+            'A clean, app-like grid with cards and clear status cues at a glance.',
+        assetImage: '',
         imageUrl: null,
         linkUrl: null,
         enabled: true,
-      ),
-      AdItem(
-        id: 'ad-3',
-        titleAr: 'إعلان تجريبي 3',
-        titleEn: 'Demo Ad 3',
-        subtitleAr: 'قريبًا ميزات جديدة',
-        subtitleEn: 'New features soon',
-        assetImage: 'assets/logo.png',
-        imageUrl: null,
-        linkUrl: null,
-        enabled: false,
+        isVerified: true,
       ),
     ];
   }
