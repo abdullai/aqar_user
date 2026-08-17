@@ -4725,7 +4725,53 @@ class _UserDashboardState extends State<UserDashboard>
     final navIndex = _bottomNavSelectedIndex(bottomSlots);
     final useSideNav = AppLayout.useDashboardSideNavigation(context);
     final bodyNavCanPop = _dashboardCanGoBack();
-    final wideDashboard = MediaQuery.sizeOf(context).width >= 580;
+
+    Widget buildBottomNavBar(BoxConstraints constraints) {
+      final w = constraints.maxWidth;
+      final hideBottomLabels = w < 720;
+      final compactBottomNav = hideBottomLabels || w < 680;
+      final bar = NavigationBarTheme(
+        data: NavigationBarThemeData(
+          labelTextStyle: WidgetStateProperty.resolveWith((states) {
+            return TextStyle(
+              fontSize: hideBottomLabels ? 0.01 : 11,
+              height: 1.05,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0,
+            );
+          }),
+        ),
+        child: MediaQuery.removePadding(
+          context: context,
+          removeBottom: true,
+          child: NavigationBar(
+            height: hideBottomLabels ? 56 : 68,
+            labelBehavior: hideBottomLabels
+                ? NavigationDestinationLabelBehavior.alwaysHide
+                : NavigationDestinationLabelBehavior.alwaysShow,
+            selectedIndex: navIndex,
+            indicatorColor: _brandPrimary.withValues(alpha: _op(28)),
+            onDestinationSelected: (i) {
+              AppHaptics.selection();
+              _onDashboardBottomNavSelected(bottomSlots, i);
+            },
+            destinations: _dashboardBottomDestinations(
+              l10n,
+              bottomSlots,
+              compact: compactBottomNav,
+              selectedIndex: navIndex,
+              hideLabels: hideBottomLabels,
+            ),
+          ),
+        ),
+      );
+      // ويب: ثابت بلا انزلاق — يمنع رفع الشاشة/الفراغ عند التحديث.
+      if (kIsWeb) return bar;
+      return SafeArea(
+        top: false,
+        child: bar,
+      );
+    }
 
     final dashboardScaffold = Scaffold(
       resizeToAvoidBottomInset: true,
@@ -4734,10 +4780,11 @@ class _UserDashboardState extends State<UserDashboard>
         elevation: 0,
         toolbarHeight: _isGuest ? 68 : 96,
         automaticallyImplyLeading: false,
-        leading: bodyNavCanPop && wideDashboard
-            ? IconButton(
-                tooltip: _isArabic ? 'رجوع' : 'Back',
-                icon: const Icon(Icons.arrow_back_rounded),
+        // X مقابل قائمة ⋮ — يظهر على الجوال والشاشات الكبيرة عند وجود صفحة للرجوع إليها.
+        leading: bodyNavCanPop
+            ? AppPageCloseButton(
+                isArabic: _isArabic,
+                tooltip: _isArabic ? 'إغلاق / رجوع' : 'Close / Back',
                 onPressed: _popDashboardBodyRoute,
               )
             : null,
@@ -4807,62 +4854,24 @@ class _UserDashboardState extends State<UserDashboard>
           : null,
       bottomNavigationBar: useSideNav
           ? null
-          : ClipRect(
-              child: AnimatedSlide(
-                duration: AppMotionPolicy.barSlide,
-                curve: AppMotionPolicy.curve,
-                offset: _bottomNavSlideVisible
-                    ? Offset.zero
-                    : const Offset(0, 1.15),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    // جوال وويب الجوال: إخفاء النص تحت الرمز — يكفي الاسم أعلى الشاشة.
-                    // ويب ويندوز / شاشات كبيرة: الاسم تحت الرمز بدون تلميح.
-                    final w = constraints.maxWidth;
-                    final hideBottomLabels = w < 720;
-                    final compactBottomNav = hideBottomLabels || w < 680;
-                    return NavigationBarTheme(
-                      data: NavigationBarThemeData(
-                        labelTextStyle:
-                            WidgetStateProperty.resolveWith((states) {
-                          return TextStyle(
-                            fontSize: hideBottomLabels ? 0.01 : 11,
-                            height: 1.05,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0,
-                          );
-                        }),
-                      ),
-                      child: SafeArea(
-                        top: false,
-                        // ويب ويندوز: تجنّب شريط فراغ تحت الرموز يضيّق مساحة المحتوى.
-                        bottom: !kIsWeb,
-                        child: NavigationBar(
-                          height: hideBottomLabels ? 64 : 72,
-                          labelBehavior: hideBottomLabels
-                              ? NavigationDestinationLabelBehavior.alwaysHide
-                              : NavigationDestinationLabelBehavior.alwaysShow,
-                          selectedIndex: navIndex,
-                          indicatorColor:
-                              _brandPrimary.withValues(alpha: _op(28)),
-                          onDestinationSelected: (i) {
-                            AppHaptics.selection();
-                            _onDashboardBottomNavSelected(bottomSlots, i);
-                          },
-                          destinations: _dashboardBottomDestinations(
-                            l10n,
-                            bottomSlots,
-                            compact: compactBottomNav,
-                            selectedIndex: navIndex,
-                            hideLabels: hideBottomLabels,
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
+          : (kIsWeb
+              ? LayoutBuilder(
+                  builder: (context, constraints) =>
+                      buildBottomNavBar(constraints),
+                )
+              : ClipRect(
+                  child: AnimatedSlide(
+                    duration: AppMotionPolicy.barSlide,
+                    curve: AppMotionPolicy.curve,
+                    offset: _bottomNavSlideVisible
+                        ? Offset.zero
+                        : const Offset(0, 1.15),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) =>
+                          buildBottomNavBar(constraints),
+                    ),
+                  ),
+                )),
     );
 
     final mainChrome = useSideNav
@@ -5439,7 +5448,7 @@ class _UserDashboardState extends State<UserDashboard>
       );
     }
 
-    final salute = DashboardGreeting.salutationOnly(isAr: _isArabic);
+    final salute = DashboardGreeting.partnerSalutationLine(isAr: _isArabic);
     final raw = _resolvedGreetingDisplayName();
     final narrowToolbar = width < 480;
     final mediumToolbar = width < 720;
@@ -5472,11 +5481,16 @@ class _UserDashboardState extends State<UserDashboard>
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              salute,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: subStyle,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment:
+                  _isArabic ? Alignment.centerRight : Alignment.centerLeft,
+              child: Text(
+                salute,
+                maxLines: 1,
+                softWrap: false,
+                style: subStyle,
+              ),
             ),
             const SizedBox(height: 2),
             FittedBox(

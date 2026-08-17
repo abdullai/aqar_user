@@ -59,6 +59,7 @@ import 'browse_organizations_screen.dart';
 import '../services/fast_login_service.dart';
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/app_confirm_dialog.dart';
 import '../models/saudi_location.dart';
 import '../services/saudi_locations_service.dart';
@@ -4543,15 +4544,17 @@ class _SettingsPageState extends State<SettingsPage> {
                             ],
                           ),
                           leading: inHubDetail
-                              ? IconButton(
-                                  icon: const Icon(Icons.arrow_back_rounded),
-                                  tooltip:
-                                      _isAr ? 'رجوع للقائمة' : 'Back to list',
+                              ? AppPageCloseButton(
+                                  isArabic: _isAr,
+                                  tooltip: _isAr
+                                      ? 'إغلاق / رجوع للقائمة'
+                                      : 'Close / Back to list',
                                   onPressed: () =>
                                       setState(() => _mobileDetail = null),
                                 )
                               : (canNavPop
-                                  ? BackButton(
+                                  ? AppPageCloseButton(
+                                      isArabic: _isAr,
                                       onPressed: () =>
                                           Navigator.of(context).maybePop(),
                                     )

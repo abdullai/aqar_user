@@ -6994,9 +6994,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   double _marketerHubScrollBottomPadding(BuildContext context) {
-    // جسم Scaffold فوق شريط التنقل — لا تُضاعف safe-area وإلا تظهر طبقة فارغة تغطي النص.
+    // جسم Scaffold فوق شريط التنقل — هامش خفيف فقط حتى يظهر آخر محتوى فوق التبويبات.
     final w = MediaQuery.sizeOf(context).width;
-    return w < 720 ? 12 : 16;
+    return w < 720 ? 8 : 12;
   }
 
   String _safeNotifString(dynamic v) => (v ?? '').toString().trim();
@@ -10448,9 +10448,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                                   previewImageUrls,
                                   type: type,
                                   views: previewViews,
-                                  videoStoragePath: previewVideoUrl.isEmpty
-                                      ? null
-                                      : previewVideoUrl,
+                                  videoStoragePath: (previewVideoUrl
+                                              .isNotEmpty &&
+                                          (previewImageUrls.isEmpty ||
+                                              coverPrefersVideo))
+                                      ? previewVideoUrl
+                                      : null,
                                   coverPrefersVideo: coverPrefersVideo,
                                 ),
                               ),

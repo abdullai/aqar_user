@@ -36,6 +36,7 @@ import '../core/theme/app_appearance_bridge.dart';
 import '../core/session/return_after_auth.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/compound_display_name.dart';
+import '../core/utils/dashboard_greeting.dart';
 import '../services/connectivity_guard.dart';
 import '../services/session_manager.dart';
 import '../services/fast_login_service.dart';
@@ -1704,11 +1705,13 @@ class _LoginScreenState extends State<LoginScreen>
                     );
                   }
 
-                  final tightWeb = kIsWeb && w < 560;
-                  final padH = tightWeb ? 8.0 : 18.0;
-                  final padV = tightWeb ? 6.0 : 18.0;
-                  final cardMax =
-                      tightWeb ? (w - padH * 2).clamp(260.0, 900.0) : 600.0;
+                  // هاتف / ويب جوال: البطاقة بعرض الشاشة تقريباً؛ سطح المكتب يبقى ممركزاً.
+                  final phoneLike = w < 720;
+                  final padH = phoneLike ? (w < 360 ? 4.0 : 8.0) : 18.0;
+                  final padV = phoneLike ? 6.0 : 18.0;
+                  final cardMax = phoneLike
+                      ? (w - padH * 2).clamp(280.0, w)
+                      : 600.0;
                   final kb = MediaQuery.viewInsetsOf(context).bottom;
 
                   return ScrollConfiguration(
@@ -1721,7 +1724,7 @@ class _LoginScreenState extends State<LoginScreen>
                         padH,
                         padV,
                         padH,
-                        padV + kb + 24,
+                        padV + kb + 16,
                       ),
                       child: Align(
                         alignment: Alignment.topCenter,
@@ -1729,7 +1732,7 @@ class _LoginScreenState extends State<LoginScreen>
                           constraints: BoxConstraints(maxWidth: cardMax),
                           child: _loginCard(
                             maxWidth: cardMax,
-                            borderRadius: 18,
+                            borderRadius: phoneLike ? 14 : 18,
                             t: t,
                             // التمرير الخارجي يرفع الحقول فوق لوحة المفاتيح.
                             allowVerticalScroll: false,
@@ -2526,46 +2529,15 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildForgotRememberRow({required AppLocalizations t}) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: _busy
-                  ? null
-                  : () async {
-                      final okNet = await _ensureInternetOrAlert();
-                      if (!mounted) return;
-                      ConnectivityGuard.showOfflineSnackIfNeeded(
-                          context, okNet);
-                      if (!okNet) return;
-                      Navigator.pushNamed(context, '/resetPassword');
-                    },
-              child: Text(
-                t.forgotUsernameOrPassword,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.start,
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: _font(context, 13.5, 12),
-                  color: _bankColor,
-                ),
-              ),
-            ),
-          ),
-        ),
-        Row(
+    return LayoutBuilder(
+      builder: (context, c) {
+        final narrow = c.maxWidth < 340;
+        final remember = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Checkbox(
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               value: rememberMe,
               onChanged: _busy
                   ? null
@@ -2609,24 +2581,86 @@ class _LoginScreenState extends State<LoginScreen>
                       });
                     },
             ),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: _isSmallUi(context) ? 140 : 160,
+            Text(
+              t.rememberMe,
+              style: TextStyle(
+                color: _textPrimary,
+                fontSize: _font(context, 13, 12),
+                fontWeight: FontWeight.w900,
               ),
-              child: Text(
-                t.rememberMe,
-                style: TextStyle(
-                  color: _textPrimary,
-                  fontSize: _font(context, 13, 12),
-                  fontWeight: FontWeight.w900,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        );
+
+        final forgot = TextButton(
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            visualDensity: VisualDensity.compact,
+          ),
+          onPressed: _busy
+              ? null
+              : () async {
+                  final okNet = await _ensureInternetOrAlert();
+                  if (!mounted) return;
+                  ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
+                  if (!okNet) return;
+                  Navigator.pushNamed(context, '/resetPassword');
+                },
+          child: Text(
+            t.forgotUsernameOrPassword,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.visible,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: _font(context, 13.5, 11.5),
+              color: _bankColor,
+              height: 1.15,
+            ),
+          ),
+        );
+
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              remember,
+              const SizedBox(height: 4),
+              Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: forgot,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            remember,
+            const SizedBox(width: 8),
+            Expanded(
+              child: Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: forgot,
+                ),
               ),
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -2695,7 +2729,7 @@ class _LoginScreenState extends State<LoginScreen>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Material(
-            color: cs.primaryContainer.withValues(alpha: 0.45),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(14),
             child: InkWell(
               borderRadius: BorderRadius.circular(14),
@@ -2711,31 +2745,34 @@ class _LoginScreenState extends State<LoginScreen>
                       });
                     },
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
                 child: Row(
                   children: [
-                    Icon(Icons.person_rounded, color: cs.primary),
-                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            _isAr ? 'مرحباً بعودتك' : 'Welcome back',
+                            DashboardGreeting.partnerSalutationLine(
+                              isAr: _isAr,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 11.5,
+                              fontSize: 12,
                               fontWeight: FontWeight.w800,
                               color: cs.onSurfaceVariant,
                             ),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
                           Text(
                             _rememberDisplayName!,
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 15.5,
+                              fontSize: 16,
+                              height: 1.2,
                             ),
                           ),
                         ],

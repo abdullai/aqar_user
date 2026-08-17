@@ -15,16 +15,16 @@ abstract final class DashboardGreeting {
       return isAr ? 'الرئيسية' : 'Home';
     }
 
-    final salute = salutationOnly(isAr: isAr);
-
-    // بدون «شريكنا العقاري» في شريط العنوان — الاسم يظهر في السطر التالي في الواجهة.
-    return '$salute، $name';
+    // سطر واحد احتياطي: تحية + شريكنا + الاسم.
+    return '${partnerSalutationLine(isAr: isAr)} — $name';
   }
 
   /// توقيت السعودية (UTC+3 بلا DST) — التحية لا تعتمد على ساعة الجهاز.
-  static DateTime _nowSaudiArabia() {
+  static DateTime nowSaudiArabia() {
     return DateTime.now().toUtc().add(const Duration(hours: 3));
   }
+
+  static DateTime _nowSaudiArabia() => nowSaudiArabia();
 
   /// تحية حسب وقت المملكة: صباح الخير (5–12) أو مساء الخير (باقي اليوم).
   static String salutationOnly({required bool isAr}) {
@@ -33,6 +33,14 @@ abstract final class DashboardGreeting {
       return isAr ? 'صباح الخير' : 'Good morning';
     }
     return isAr ? 'مساء الخير' : 'Good evening';
+  }
+
+  static String partnerBrand({required bool isAr}) =>
+      isAr ? 'شريكنا العقاري' : 'Real estate partner';
+
+  /// سطر التحية العلوي: «صباح الخير شريكنا العقاري».
+  static String partnerSalutationLine({required bool isAr}) {
+    return '${salutationOnly(isAr: isAr)} ${partnerBrand(isAr: isAr)}';
   }
 
   static String firstChunk(String fullName) {

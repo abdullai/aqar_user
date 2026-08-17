@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../l10n/app_localizations.dart';
 import '../services/communication_hub_service.dart';
 import '../services/marketing_flow_service.dart';
+import '../widgets/app_page_close_button.dart';
 import 'chat_page.dart';
 import 'in_app_notifications_page.dart';
 
@@ -254,10 +255,10 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          leading: Navigator.canPop(context)
-              ? IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded),
-                  tooltip: widget.isAr ? 'رجوع' : 'Back',
+          leading: (!widget.hideLeadingBecauseShellHasBack &&
+                  Navigator.canPop(context))
+              ? AppPageCloseButton(
+                  isArabic: widget.isAr,
                   onPressed: () => Navigator.maybePop(context),
                 )
               : null,

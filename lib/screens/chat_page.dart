@@ -25,6 +25,7 @@ import '../services/chat_presence_service.dart';
 import '../services/org_team_service.dart';
 import '../services/reservations_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/chat_peer_profile_sheet.dart';
 import '../widgets/inbox_bulk_toolbar.dart';
 import '../widgets/swipe_actions_tile.dart';
@@ -1706,8 +1707,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             )
           : Text(_appTitle()),
       leading: inThread
-          ? IconButton(
-              icon: const Icon(Icons.arrow_back),
+          ? AppPageCloseButton(
+              isArabic: widget.isAr,
               onPressed: _backToList,
             )
           : null,
@@ -1786,9 +1787,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           child: Row(
             children: [
               if (showInternalBack)
-                IconButton(
+                AppPageCloseButton(
+                  isArabic: widget.isAr,
                   tooltip: widget.isAr ? 'قائمة المحادثات' : 'Chat list',
-                  icon: const Icon(Icons.arrow_back_rounded),
                   onPressed: _backToList,
                 )
               else

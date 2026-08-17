@@ -42,6 +42,7 @@ import '../core/input/input_normalizers.dart';
 import '../core/auth/login_security_db.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/compound_display_name.dart';
+import '../core/utils/dashboard_greeting.dart';
 import '../core/haptics/app_haptics.dart';
 
 import 'package:sms_autofill/sms_autofill.dart';
@@ -49,6 +50,7 @@ import 'package:sms_autofill/sms_autofill.dart';
 import '../core/notifications/app_sound_coordinator.dart';
 
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/field_group_frame.dart';
 import '../theme.dart' show AqarAuthScrollBehavior;
 
@@ -672,22 +674,19 @@ class _VerifyScreenState extends State<VerifyScreen>
     );
   }
 
-  String _greeting() {
-    final h = DateTime.now().hour;
-    final morning = h < 12;
-    if (_isAr) return morning ? 'صباح الخير' : 'مساء الخير';
-    return morning ? 'Good morning' : 'Good evening';
-  }
+  String _greeting() => DashboardGreeting.salutationOnly(isAr: _isAr);
 
   String _two(int n) => n.toString().padLeft(2, '0');
 
+  DateTime get _nowSaudi => DashboardGreeting.nowSaudiArabia();
+
   String _formatDateDDMMYYYY(DateTime d) {
-    final v = d.toLocal();
+    final v = d;
     return '${_two(v.day)}/${_two(v.month)}/${v.year}';
   }
 
   String _formatTime12(DateTime d) {
-    final v = d.toLocal();
+    final v = d;
     int h = v.hour;
     final m = _two(v.minute);
     final isPm = h >= 12;
@@ -698,7 +697,7 @@ class _VerifyScreenState extends State<VerifyScreen>
   }
 
   String _weekdayName(DateTime d) {
-    final wd = d.toLocal().weekday;
+    final wd = d.weekday;
     if (_isAr) {
       const ar = [
         'الاثنين',
@@ -725,14 +724,16 @@ class _VerifyScreenState extends State<VerifyScreen>
   }
 
   String _todayLine() {
-    final now = DateTime.now();
+    final now = _nowSaudi;
     return '${_weekdayName(now)} ${_formatDateDDMMYYYY(now)} • ${_formatTime12(now)}';
   }
 
   String _lastLoginLine() {
     final v = _lastLogin;
     if (v == null) return _isAr ? 'غير متوفر' : 'N/A';
-    return '${_formatDateDDMMYYYY(v)} • ${_formatTime12(v)}';
+    // اعرض آخر دخول بتوقيت المملكة للاتساق مع التحية.
+    final saudi = v.toUtc().add(const Duration(hours: 3));
+    return '${_formatDateDDMMYYYY(saudi)} • ${_formatTime12(saudi)}';
   }
 
   /// لا نعرض أرقام الهوية / المعرف العام / أي «اسم» مكوّن من أرقام فقط كتحية بشرية.
@@ -2100,22 +2101,56 @@ class _VerifyScreenState extends State<VerifyScreen>
     required double fontSize,
   }) {
     final hasName = name.trim().isNotEmpty;
-    final text = hasName ? '$greeting : ${name.trim()}' : greeting;
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: AlignmentDirectional.centerStart,
-      child: Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.visible,
-        softWrap: false,
-        style: TextStyle(
-          fontSize: fontSize,
-          fontWeight: FontWeight.w900,
-          color: color,
-          height: 1.1,
+    final brand = DashboardGreeting.partnerBrand(isAr: _isAr);
+    final top = '$greeting $brand';
+    if (!hasName) {
+      return FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: AlignmentDirectional.centerStart,
+        child: Text(
+          top,
+          maxLines: 1,
+          softWrap: false,
+          style: TextStyle(
+            fontSize: fontSize,
+            fontWeight: FontWeight.w900,
+            color: color,
+            height: 1.15,
+          ),
         ),
-      ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: Text(
+            top,
+            maxLines: 1,
+            softWrap: false,
+            style: TextStyle(
+              fontSize: fontSize * 0.82,
+              fontWeight: FontWeight.w800,
+              color: color.withValues(alpha: 0.85),
+              height: 1.15,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          name.trim(),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: fontSize,
+            fontWeight: FontWeight.w900,
+            color: color,
+            height: 1.2,
+          ),
+        ),
+      ],
     );
   }
 
@@ -2161,163 +2196,100 @@ class _VerifyScreenState extends State<VerifyScreen>
                     LayoutBuilder(
                       builder: (context, c) {
                         final w = c.maxWidth;
-                        // جوالات / شاشات ضيقة: الدرع أو الصورة أعلى التحية.
+                        // جوالات / شاشات ضيقة: عرض شبه كامل بدون دائرة هوية.
                         final isSmall = w < 520;
                         final isTiny = w < 360;
+                        final phoneLike = w < 720;
+                        final cardMax = phoneLike
+                            ? (w - (isTiny ? 8.0 : 12.0) * 2).clamp(280.0, w)
+                            : 560.0;
 
-                        Widget verifyAvatar({required double size}) {
-                          final av = (_avatarUrl ?? '').trim();
-                          return AnimatedBuilder(
-                            animation: _pulseAnimation,
-                            builder: (context, child) {
-                              return Transform.scale(
-                                scale: 1.0 + (_pulseAnimation.value * 0.1),
-                                child: Container(
-                                  width: size,
-                                  height: size,
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withValues(alpha: 0.12),
-                                    shape: BoxShape.circle,
-                                    image: av.isEmpty
-                                        ? null
-                                        : DecorationImage(
-                                            image: NetworkImage(av),
-                                            fit: BoxFit.cover,
-                                          ),
-                                  ),
-                                  child: av.isNotEmpty
-                                      ? null
-                                      : Icon(
-                                          Icons.verified_user_rounded,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                          size: size * 0.48,
-                                        ),
-                                ),
-                              );
-                            },
-                          );
-                        }
-
-                        return Center(
+                        return Align(
+                          alignment: Alignment.topCenter,
                           child: SingleChildScrollView(
-                            padding: EdgeInsets.all(isTiny ? 12 : 16),
+                            padding: EdgeInsets.fromLTRB(
+                              phoneLike ? (isTiny ? 6 : 10) : 16,
+                              phoneLike ? 8 : 16,
+                              phoneLike ? (isTiny ? 6 : 10) : 16,
+                              16 + MediaQuery.viewInsetsOf(context).bottom,
+                            ),
                             child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 560),
+                              constraints: BoxConstraints(maxWidth: cardMax),
                               child: Card(
                                 color: card,
-                                elevation: 10,
+                                elevation: phoneLike ? 4 : 10,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
+                                  borderRadius: BorderRadius.circular(
+                                    phoneLike ? 16 : 24,
+                                  ),
                                 ),
                                 child: Padding(
-                                  padding: EdgeInsets.all(isSmall ? 16 : 22),
+                                  padding: EdgeInsets.all(isSmall ? 14 : 22),
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Row(
-                                        children: [
-                                          if (!_isAr)
-                                            IconButton(
-                                              onPressed: () => _goToLogin(
-                                                signOut: true,
-                                                clearOtp: true,
-                                              ),
-                                              icon:
-                                                  const Icon(Icons.arrow_back),
-                                              tooltip: 'Back',
-                                            ),
-                                          const Spacer(),
-                                          if (_isAr)
-                                            IconButton(
-                                              onPressed: () => _goToLogin(
-                                                signOut: true,
-                                                clearOtp: true,
-                                              ),
-                                              icon:
-                                                  const Icon(Icons.arrow_back),
-                                              tooltip: 'رجوع',
-                                            ),
-                                        ],
-                                      ),
-                                      if (isSmall) ...[
-                                        Center(
-                                          child: verifyAvatar(
-                                            size: isTiny ? 56.0 : 68.0,
+                                      Align(
+                                        alignment: AlignmentDirectional.centerEnd,
+                                        child: AppPageCloseButton(
+                                          isArabic: _isAr,
+                                          onPressed: () => _goToLogin(
+                                            signOut: true,
+                                            clearOtp: true,
                                           ),
                                         ),
-                                        const SizedBox(height: 14),
-                                      ],
-                                      Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          if (!isSmall) ...[
-                                            verifyAvatar(size: 44),
-                                            const SizedBox(width: 12),
-                                          ],
-                                          Expanded(
-                                            child: Container(
-                                              width: double.infinity,
-                                              padding: EdgeInsets.symmetric(
-                                                horizontal: isTiny ? 10 : 12,
-                                                vertical: isTiny ? 8 : 10,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: isDark
-                                                    ? Colors.white
-                                                        .withValues(alpha: 0.04)
-                                                    : Colors.black
-                                                        .withValues(alpha: 0.03),
-                                                borderRadius:
-                                                    BorderRadius.circular(14),
-                                                border: Border.all(
-                                                  color: isDark
-                                                      ? Colors.white
-                                                          .withValues(
-                                                              alpha: 0.14)
-                                                      : Colors.black
-                                                          .withValues(
-                                                              alpha: 0.10),
-                                                ),
-                                              ),
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  _singleLineGreeting(
-                                                    greeting: _greeting(),
-                                                    name: displayName,
-                                                    color: titleColor,
-                                                    fontSize: nameSize,
-                                                  ),
-                                                  const SizedBox(height: 8),
-                                                  _infoRow(
-                                                    icon: Icons
-                                                        .calendar_today_rounded,
-                                                    text: _todayLine(),
-                                                    color: subColor,
-                                                    fontSize: bodySize,
-                                                  ),
-                                                  const SizedBox(height: 6),
-                                                  _infoRow(
-                                                    icon: Icons.login_rounded,
-                                                    text: (_isAr
-                                                            ? 'آخر تسجيل دخول: '
-                                                            : 'Last login: ') +
-                                                        _lastLoginLine(),
-                                                    color: subColor,
-                                                    fontSize: bodySize,
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
+                                      ),
+                                      Container(
+                                        width: double.infinity,
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: isTiny ? 10 : 12,
+                                          vertical: isTiny ? 8 : 10,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: isDark
+                                              ? Colors.white
+                                                  .withValues(alpha: 0.04)
+                                              : Colors.black
+                                                  .withValues(alpha: 0.03),
+                                          borderRadius:
+                                              BorderRadius.circular(14),
+                                          border: Border.all(
+                                            color: isDark
+                                                ? Colors.white
+                                                    .withValues(alpha: 0.14)
+                                                : Colors.black
+                                                    .withValues(alpha: 0.10),
                                           ),
-                                        ],
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            _singleLineGreeting(
+                                              greeting: _greeting(),
+                                              name: displayName,
+                                              color: titleColor,
+                                              fontSize: nameSize,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            _infoRow(
+                                              icon: Icons
+                                                  .calendar_today_rounded,
+                                              text: _todayLine(),
+                                              color: subColor,
+                                              fontSize: bodySize,
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _infoRow(
+                                              icon: Icons.login_rounded,
+                                              text: (_isAr
+                                                      ? 'آخر تسجيل دخول: '
+                                                      : 'Last login: ') +
+                                                  _lastLoginLine(),
+                                              color: subColor,
+                                              fontSize: bodySize,
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                       const SizedBox(height: 16),
                                       Text(
@@ -2362,11 +2334,10 @@ class _VerifyScreenState extends State<VerifyScreen>
                                             _restApiFailureHint!,
                                             style: TextStyle(
                                               fontWeight: FontWeight.w700,
-                                              fontSize: bodySize - 1,
-                                              height: 1.35,
                                               color: Theme.of(context)
                                                   .colorScheme
                                                   .onErrorContainer,
+                                              fontSize: bodySize,
                                             ),
                                           ),
                                         ),

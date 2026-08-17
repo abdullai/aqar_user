@@ -42,6 +42,7 @@ import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/listing_public_actions_menu.dart';
 import '../widgets/listing_report_sheet.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/marketing_offer_submit_sheet.dart';
 import '../widgets/marketer_policy_notice_card.dart';
 import '../widgets/inline_property_video.dart';
@@ -3723,10 +3724,20 @@ $licLine
       child: Scaffold(
         backgroundColor: cs.surface,
         appBar: AppBar(
-          // عند الفتح داخل لوحة الداشبورد: الشريط العلوي يعرض سهم الرجوع
-          // الموحَّد، فنخفي السهم الداخلي. عند الفتح من رابط مباشر فإن
-          // [canPop] أصلاً false فلا فرق.
-          automaticallyImplyLeading: !widget.embedAppBar,
+          // عند الفتح داخل لوحة الداشبورد: الشريط العلوي يعرض X للإغلاق
+          // الموحَّد، فنخفي السهم الداخلي. عند الفتح من رابط مباشر يظهر X للرجوع.
+          automaticallyImplyLeading: false,
+          leading: widget.embedAppBar
+              ? null
+              : AppPageCloseButton(
+                  isArabic: widget.isAr,
+                  onPressed: () {
+                    final nav = Navigator.of(context);
+                    if (nav.canPop()) {
+                      nav.pop();
+                    }
+                  },
+                ),
           title: Text(
             widget.isAr ? 'تفاصيل العقار' : 'Property details',
           ),
