@@ -183,4 +183,83 @@ abstract final class MarketerOwnerChatIntroAr {
     }
     return false;
   }
+
+  /// رسالة قديمة بعيوب معروفة (تكرار العلامة أو رقم فارغ).
+  static bool needsLegacyRepair(String raw) {
+    if (!looksLikeOpeningIntro(raw)) return false;
+    final t = raw;
+    if (t.contains('شريكنا العقاري شريكنا العقاري')) return true;
+    if (t.contains('رقم —') || t.contains('رقم -') || t.contains('رقم–')) {
+      return true;
+    }
+    if (t.contains('no. —') || t.contains('no. -')) return true;
+    if (t.contains('رقم قيد التعيين') || t.contains('no. pending')) {
+      return true;
+    }
+    return false;
+  }
+
+  /// إصلاح عرض/محتوى رسالة افتتاحية قديمة دون تغيير بقية النص.
+  static String repairLegacyIntro(
+    String raw, {
+    required String partnerName,
+    required String listingCode,
+    required bool isAr,
+  }) {
+    var out = raw.trim();
+    if (out.isEmpty) return out;
+
+    final brand = DashboardGreeting.partnerBrand(isAr: isAr);
+    final name = partnerName.trim();
+    final address = name.isEmpty || _isGenericPartnerLabel(name, isAr: isAr)
+        ? brand
+        : name;
+
+    out = out.replaceAll('شريكنا العقاري شريكنا العقاري', address);
+    // إن بقي الاسم العام مكرراً بصيغة أخرى.
+    out = out.replaceAll('$brand $brand', address);
+
+    final code = listingCode.trim();
+    if (code.isNotEmpty) {
+      out = out
+          .replaceAll('رقم —', 'رقم $code')
+          .replaceAll('رقم -', 'رقم $code')
+          .replaceAll('رقم–', 'رقم $code')
+          .replaceAll('رقم قيد التعيين', 'رقم $code')
+          .replaceAll('no. —', 'no. $code')
+          .replaceAll('no. -', 'no. $code')
+          .replaceAll('no. pending', 'no. $code');
+    }
+
+    // إن وُجد الاسم الحقيقي ولم يظهر بعد التحية: أدرجه بدل العلامة مرة واحدة.
+    if (name.isNotEmpty &&
+        !_isGenericPartnerLabel(name, isAr: isAr) &&
+        !out.contains(name) &&
+        out.contains(brand)) {
+      out = out.replaceFirst(brand, name);
+    }
+
+    return out;
+  }
+
+  /// تنظيف فوري للعرض حتى قبل تحديث الصف في الخادم.
+  static String displaySanitize(
+    String raw, {
+    String? partnerName,
+    String? listingCode,
+    required bool isAr,
+  }) {
+    if (!looksLikeOpeningIntro(raw)) return raw;
+    if (!needsLegacyRepair(raw) &&
+        (partnerName == null || partnerName.trim().isEmpty) &&
+        (listingCode == null || listingCode.trim().isEmpty)) {
+      return raw;
+    }
+    return repairLegacyIntro(
+      raw,
+      partnerName: partnerName ?? '',
+      listingCode: listingCode ?? '',
+      isAr: isAr,
+    );
+  }
 }

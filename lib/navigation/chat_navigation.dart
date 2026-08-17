@@ -50,7 +50,21 @@ abstract final class ChatNavigation {
     String? marketRequestId,
     String? initialDraftMessage,
   }) {
-    return MaterialPageRoute<void>(
+    final page = ChatPage(
+      isAr: isAr,
+      embedInParentDashboardShell: false,
+      conversationId: conversationId,
+      propertyId: propertyId,
+      reservationId: reservationId,
+      counterpartyId: counterpartyId,
+      title: title,
+      kind: kind,
+      supportUserId: supportUserId,
+      marketRequestId: marketRequestId,
+      initialDraftMessage: initialDraftMessage,
+    );
+    return PageRouteBuilder<void>(
+      opaque: true,
       fullscreenDialog: true,
       settings: RouteSettings(
         name: routeName,
@@ -67,20 +81,23 @@ abstract final class ChatNavigation {
             'market_request_id': marketRequestId,
         },
       ),
-      builder: (_) => ChatPage(
-        isAr: isAr,
-        // الطبقة الجذرية لا تُضمَّن داخل هيكل اللوحة — شريط دردشة كامل + X.
-        embedInParentDashboardShell: false,
-        conversationId: conversationId,
-        propertyId: propertyId,
-        reservationId: reservationId,
-        counterpartyId: counterpartyId,
-        title: title,
-        kind: kind,
-        supportUserId: supportUserId,
-        marketRequestId: marketRequestId,
-        initialDraftMessage: initialDraftMessage,
-      ),
+      transitionDuration: const Duration(milliseconds: 280),
+      reverseTransitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 1),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
     );
   }
 

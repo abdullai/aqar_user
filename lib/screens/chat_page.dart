@@ -324,6 +324,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// مالك المنشأة — صلاحيات حذف منشورات قناة الفريق.
   bool _isOrgOwner = false;
 
+  /// رقم الإعلان/الطلب المستخرج من سياق المحادثة (للنص الافتتاحي والعرض).
+  String? _resolvedListingCode;
+
+  /// property_id من صف المحادثة إن وُجد.
+  String? _conversationPropertyId;
+
+  bool _legacyIntroRepairStarted = false;
+
   @override
   void initState() {
     super.initState();
@@ -490,7 +498,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           action: () async {
             return await _sb
                 .from('conversations')
-                .select('id, kind, title, user_id, counterparty_id, org_id')
+                .select(
+                  'id, kind, title, user_id, counterparty_id, org_id, '
+                  'property_id, reservation_id, market_request_id, '
+                  'listing_request_id',
+                )
                 .eq('id', directCid)
                 .maybeSingle();
           },
@@ -551,6 +563,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _activeKind = _parseKind(conv['kind']);
           _activeTitle = (conv['title'] as String?)?.trim();
           _activeCounterpartyId = otherPartyId;
+          _conversationPropertyId = (conv['property_id'] ??
+                  widget.propertyId ??
+                  '')
+              .toString()
+              .trim();
+          if ((_conversationPropertyId ?? '').isEmpty) {
+            _conversationPropertyId = null;
+          }
           _booting = false;
         });
 
@@ -558,6 +578,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _schedulePeerSeenPolling(otherPartyId);
         // ✅ مثل واتساب: عند فتح المحادثة نعلّم الرسائل كمقروءة
         unawaited(_markReadSafe());
+        unawaited(_resolveListingCodeForActiveConversation(conv));
         return;
       }
 
@@ -748,9 +769,145 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             _schedulePresenceLoop();
           }
           unawaited(_maybeSendOpeningIntroOnce());
+          unawaited(_repairLegacyOpeningMessageIfNeeded());
         });
       }
     }
+  }
+
+  Future<void> _resolveListingCodeForActiveConversation(
+    Map<String, dynamic> conv,
+  ) async {
+    final fromRow = MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(conv);
+    if (fromRow.isNotEmpty) {
+      if (mounted) setState(() => _resolvedListingCode = fromRow);
+      return;
+    }
+    final pid = (conv['property_id'] ??
+            _conversationPropertyId ??
+            widget.propertyId ??
+            '')
+        .toString()
+        .trim();
+    if (pid.isNotEmpty) {
+      final code = await _resolveListingPublicCodeForProperty(pid);
+      if (code.isNotEmpty && mounted) {
+        setState(() {
+          _resolvedListingCode = code;
+          _conversationPropertyId = pid;
+        });
+        return;
+      }
+    }
+    final mrid = (conv['market_request_id'] ??
+            conv['listing_request_id'] ??
+            widget.marketRequestId ??
+            '')
+        .toString()
+        .trim();
+    if (mrid.isEmpty) return;
+    try {
+      final row = await _sb
+          .from('market_property_requests')
+          .select(
+            'listing_request_public_code, public_code, request_public_code, '
+            'listing_public_code',
+          )
+          .eq('id', mrid)
+          .maybeSingle();
+      if (row == null) return;
+      final code = MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(
+        Map<String, dynamic>.from(row),
+      );
+      if (code.isNotEmpty && mounted) {
+        setState(() => _resolvedListingCode = code);
+      }
+    } catch (_) {}
+  }
+
+  Future<String> _resolveListingPublicCodeForProperty(String propertyId) async {
+    final pid = propertyId.trim();
+    if (pid.isEmpty) return '';
+    try {
+      final row = await _sb
+          .from('properties')
+          .select(
+            'listing_public_code, public_code, listing_code, ad_number, '
+            'listing_request_public_code',
+          )
+          .eq('id', pid)
+          .maybeSingle();
+      if (row == null) return '';
+      final code = MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(
+        Map<String, dynamic>.from(row),
+      );
+      if (code.isNotEmpty) return code;
+      for (final k in const [
+        'listing_public_code',
+        'public_code',
+        'listing_code',
+        'ad_number',
+        'listing_request_public_code',
+      ]) {
+        final raw = (row[k] ?? '').toString().trim();
+        final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
+        if (digits.length >= 6) {
+          return digits.length >= 10
+              ? DisplayIds.tenDigit(digits)
+              : digits;
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  /// يصلح رسالة افتتاحية قديمة (تكرار العلامة / رقم —) في قاعدة البيانات مرة واحدة.
+  Future<void> _repairLegacyOpeningMessageIfNeeded() async {
+    if (_legacyIntroRepairStarted) return;
+    _legacyIntroRepairStarted = true;
+    final cid = (_activeConversationId ?? '').trim();
+    if (cid.isEmpty || _uid.isEmpty || !mounted) return;
+
+    try {
+      final peerId = (_activeCounterpartyId ?? '').trim();
+      if (peerId.isNotEmpty && (_peerDisplayName ?? '').trim().isEmpty) {
+        await _loadPeerProfile(peerId);
+      }
+      if ((_resolvedListingCode ?? '').isEmpty) {
+        final pid = (_conversationPropertyId ?? widget.propertyId ?? '').trim();
+        if (pid.isNotEmpty) {
+          final code = await _resolveListingPublicCodeForProperty(pid);
+          if (code.isNotEmpty && mounted) {
+            setState(() => _resolvedListingCode = code);
+          }
+        }
+      }
+
+      final existing = await _sb
+          .from('messages')
+          .select('id, sender_id, content')
+          .eq('conversation_id', cid)
+          .eq('sender_id', _uid)
+          .order('created_at', ascending: true)
+          .limit(8);
+      final rows = (existing is List) ? existing : const <dynamic>[];
+      for (final e in rows) {
+        if (e is! Map) continue;
+        final content = (e['content'] ?? '').toString();
+        if (!MarketerOwnerChatIntroAr.needsLegacyRepair(content)) continue;
+        final mid = (e['id'] ?? '').toString().trim();
+        if (mid.isEmpty) continue;
+        final fixed = MarketerOwnerChatIntroAr.repairLegacyIntro(
+          content,
+          partnerName: (_peerDisplayName ?? '').trim(),
+          listingCode: (_resolvedListingCode ?? '').trim(),
+          isAr: widget.isAr,
+        );
+        if (fixed.trim().isEmpty || fixed == content) continue;
+        await _sb.from('messages').update({'content': fixed}).eq('id', mid);
+        break;
+      }
+    } catch (_) {}
   }
 
   /// يُرسل النص الافتتاحي مرة واحدة فقط لنفس المحادثة، مع إثراء الاسم والرقم.
@@ -818,7 +975,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         out.contains('رقم قيد التعيين') ||
         out.contains('no. —') ||
         out.contains('no. pending')) {
-      final code = await _resolveListingPublicCode();
+      var code = (_resolvedListingCode ?? '').trim();
+      if (code.isEmpty) {
+        code = await _resolveListingPublicCode();
+      }
       if (code.isNotEmpty) {
         out = out
             .replaceAll('رقم —', 'رقم $code')
@@ -831,37 +991,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<String> _resolveListingPublicCode() async {
-    final pid = (widget.propertyId ?? '').trim();
+    final cached = (_resolvedListingCode ?? '').trim();
+    if (cached.isNotEmpty) return cached;
+    final pid =
+        (_conversationPropertyId ?? widget.propertyId ?? '').trim();
     if (pid.isEmpty) return '';
-    try {
-      final row = await _sb
-          .from('properties')
-          .select(
-            'listing_public_code, public_code, listing_code, ad_number',
-          )
-          .eq('id', pid)
-          .maybeSingle();
-      if (row == null) return '';
-      final code = MarketerOwnerChatIntroAr.tenDigitListingCodeFromRow(
-        Map<String, dynamic>.from(row),
-      );
-      if (code.isNotEmpty) return code;
-      for (final k in const [
-        'listing_public_code',
-        'public_code',
-        'listing_code',
-        'ad_number',
-      ]) {
-        final raw = (row[k] ?? '').toString().trim();
-        final digits = raw.replaceAll(RegExp(r'[^\d]'), '');
-        if (digits.length >= 6) {
-          return digits.length >= 10
-              ? DisplayIds.tenDigit(digits)
-              : digits;
-        }
-      }
-    } catch (_) {}
-    return '';
+    final code = await _resolveListingPublicCodeForProperty(pid);
+    if (code.isNotEmpty && mounted) {
+      setState(() => _resolvedListingCode = code);
+    }
+    return code;
   }
 
   // =========================
@@ -1182,43 +1321,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ? row.otherFullName!.trim()
             : _defaultTitleFor(kind);
 
-    // داخل مركز التواصل / اللوحة: افتح طبقة ملء الشاشة فوق كل شيء (مثل واتساب).
-    if (widget.embedInParentDashboardShell) {
-      await ChatNavigation.push(
-        context,
-        isAr: widget.isAr,
-        conversationId: row.conversationId,
-        counterpartyId: otherId.isNotEmpty ? otherId : null,
-        title: t,
-        kind: kind,
-      );
-      if (mounted) setState(() => _listReloadTick++);
-      return;
-    }
-
-    final displayName = (row.otherFullName ?? '').trim().isNotEmpty
-        ? row.otherFullName!.trim()
-        : t;
-
-    setState(() {
-      _optimisticMessages.clear();
-      _activeConversationId = row.conversationId;
-      _activeKind = kind;
-      _activeConversationKindRaw = row.kind;
-      _activeOrgId = row.orgId;
-      _activeTitle = t;
-      _activeCounterpartyId = otherId.isNotEmpty ? otherId : null;
-      _peerDisplayName = displayName;
-      _peerAvatarUrl = row.otherAvatarUrl;
-      _tc.clear();
-    });
-
-    if (otherId.isNotEmpty) {
-      unawaited(_loadPeerProfile(otherId));
-      _schedulePeerSeenPolling(otherId);
-    }
-    unawaited(_resolveOrgOwnerFlag(row.orgId));
-    unawaited(_markReadSafe());
+    // دائماً طبقة ملء الشاشة فوق الجذر (مثل واتساب) — لا تُفتح داخل الهب/القائمة.
+    await ChatNavigation.push(
+      context,
+      isAr: widget.isAr,
+      conversationId: row.conversationId,
+      counterpartyId: otherId.isNotEmpty ? otherId : null,
+      title: t,
+      kind: kind,
+    );
+    if (mounted) setState(() => _listReloadTick++);
   }
 
   Future<void> _resolveOrgOwnerFlag(String? orgId) async {
@@ -1859,7 +1971,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   _boot();
                 },
               )
-            : (_activeConversationId ?? '').isEmpty
+            : (_activeConversationId ?? '').isEmpty ||
+                    widget.embedInParentDashboardShell
                 ? _ConversationsListRpc(
                     key: ValueKey(_listReloadTick),
                     isAr: widget.isAr,
@@ -1897,66 +2010,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     controller: _tc,
                     sending: _sending,
                     optimisticMessages: _optimisticMessages,
+                    introPartnerName: _peerDisplayName,
+                    introListingCode: _resolvedListingCode,
                   );
   }
 
   Widget? _buildEmbeddedThreadChrome() {
-    if (!widget.embedInParentDashboardShell) return null;
-    if ((_activeConversationId ?? '').isEmpty) return null;
-    // عند الفتح المباشر: سهم الرجوع الموحّد في شريط اللوحة الخارجي فقط.
-    final showInternalBack = !_openedDirectlyFromExternal;
-    return Material(
-      elevation: 1,
-      color: Theme.of(context).colorScheme.surface,
-      child: SafeArea(
-        bottom: false,
-        child: SizedBox(
-          height: kToolbarHeight,
-          child: Row(
-            children: [
-              if (showInternalBack)
-                AppPageCloseButton(
-                  isArabic: widget.isAr,
-                  tooltip: widget.isAr ? 'قائمة المحادثات' : 'Chat list',
-                  onPressed: _backToList,
-                )
-              else
-                const SizedBox(width: 8),
-              Expanded(
-                child: Align(
-                  alignment: AlignmentDirectional.centerStart,
-                  child: _ChatAppBarLead(
-                    name: _threadBarTitle(),
-                    subtitle: _threadBarSubtitle(),
-                    avatarUrl: _peerAvatarUrl,
-                    isAr: widget.isAr,
-                    currentUserId: _uid,
-                    peerPresenceUserId: () {
-                      final raw =
-                          (_activeConversationKindRaw ?? '').toLowerCase().trim();
-                      if (raw == 'org_team_channel') return null;
-                      final p = (_activeCounterpartyId ?? '').trim();
-                      if (p.isEmpty || _uid.isEmpty || p == _uid) return null;
-                      return p;
-                    }(),
-                    onTap: () {
-                      final id = (_activeCounterpartyId ?? '').trim();
-                      if (id.isEmpty) return;
-                      showChatPeerProfileSheet(
-                        context: context,
-                        isAr: widget.isAr,
-                        userId: id,
-                        supabase: _sb,
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+    // المحادثات تُفتح دائماً كطبقة ملء الشاشة — لا شريط فرعي داخل الهب.
+    return null;
   }
 
   @override
@@ -1988,23 +2049,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
     }
 
-    final bodyCore = _buildChatMainContent();
-    final embeddedChrome = _buildEmbeddedThreadChrome();
-    final wrappedBody = embeddedChrome == null
-        ? bodyCore
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              embeddedChrome,
-              Expanded(child: bodyCore),
-            ],
-          );
-
-    if (widget.embedInParentDashboardShell &&
-        (_activeConversationId ?? '').isEmpty) {
+    // داخل الهب: قائمة فقط دائماً (المحادثة تُفتح فوق الجذر).
+    if (widget.embedInParentDashboardShell) {
       return Directionality(
         textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
-        child: wrappedBody,
+        child: _buildChatMainContent(),
       );
     }
 
@@ -2013,7 +2062,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       child: Scaffold(
         resizeToAvoidBottomInset: true,
         appBar: _buildOuterAppBar(),
-        body: wrappedBody,
+        body: _buildChatMainContent(),
       ),
     );
   }
@@ -3123,6 +3172,8 @@ class _ChatThread extends StatefulWidget {
   final bool sending;
   final List<Map<String, dynamic>> optimisticMessages;
   final bool isOrgOwner;
+  final String? introPartnerName;
+  final String? introListingCode;
 
   const _ChatThread({
     required this.isAr,
@@ -3138,6 +3189,8 @@ class _ChatThread extends StatefulWidget {
     required this.sending,
     required this.optimisticMessages,
     this.isOrgOwner = false,
+    this.introPartnerName,
+    this.introListingCode,
   });
 
   @override
@@ -3668,16 +3721,21 @@ class _ChatThreadState extends State<_ChatThread> {
               : 'Login to use chat'));
     }
 
-    return Column(
-      children: [
-        Expanded(
-          child: ColoredBox(
-            color: _kWaChatBg,
-            child: StreamBuilder<List<Map<String, dynamic>>>(
-              key: ValueKey<String>(
-                  '${widget.conversationId.trim()}:${identityHashCode(widget.sb)}'),
-              stream: _messagesStream,
-              builder: (context, snap) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final kb = MediaQuery.viewInsetsOf(context).bottom;
+        return Padding(
+          padding: EdgeInsets.only(bottom: kb > 0 ? kb : 0),
+          child: Column(
+            children: [
+              Expanded(
+                child: ColoredBox(
+                  color: _kWaChatBg,
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
+                    key: ValueKey<String>(
+                        '${widget.conversationId.trim()}:${identityHashCode(widget.sb)}'),
+                    stream: _messagesStream,
+                    builder: (context, snap) {
                 final waiting = snap.connectionState == ConnectionState.waiting;
                 final hasEmitted = snap.hasData;
                 final rows = snap.data ?? const <Map<String, dynamic>>[];
@@ -3731,7 +3789,12 @@ class _ChatThreadState extends State<_ChatThread> {
                     final cs = Theme.of(context).colorScheme;
                     final m = visible[i];
                     final sender = (m['sender_id'] ?? '').toString();
-                    final text = (m['content'] ?? '').toString();
+                    final text = MarketerOwnerChatIntroAr.displaySanitize(
+                      (m['content'] ?? '').toString(),
+                      partnerName: widget.introPartnerName,
+                      listingCode: widget.introListingCode,
+                      isAr: widget.isAr,
+                    );
                     final attachUrl =
                         (m['attachment_url'] ?? '').toString().trim();
                     final attachType = (m['attachment_type'] ?? '')
@@ -3956,121 +4019,111 @@ class _ChatThreadState extends State<_ChatThread> {
             ),
           ),
         ),
-        Builder(
-          builder: (context) {
-            final kb = MediaQuery.viewInsetsOf(context).bottom;
-            return SafeArea(
-              top: false,
-              bottom: kb <= 0,
-              child: Padding(
-                padding: EdgeInsets.only(bottom: kb),
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                  decoration: BoxDecoration(
-                    color: cs.surface,
-                    border: Border(
-                      top: BorderSide(
-                        color: cs.outlineVariant.withValues(alpha: 0.6),
+        SafeArea(
+          top: false,
+          bottom: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+            decoration: BoxDecoration(
+              color: cs.surface,
+              border: Border(
+                top: BorderSide(
+                  color: cs.outlineVariant.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                if (widget.attachmentsEnabled)
+                  PopupMenuButton<String>(
+                    tooltip: widget.isAr ? 'إرفاق' : 'Attach',
+                    icon: Icon(
+                      Icons.add_circle_outline_rounded,
+                      color: cs.primary,
+                      size: 28,
+                    ),
+                    onSelected: (v) {
+                      unawaited(widget.onAttachmentSelected(v));
+                    },
+                    itemBuilder: (ctx) => [
+                      PopupMenuItem(
+                        value: 'media',
+                        child: ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.perm_media_outlined),
+                          title: Text(widget.isAr ? 'وسائط' : 'Media'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'loc',
+                        child: ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.location_on_outlined),
+                          title: Text(widget.isAr ? 'موقع' : 'Location'),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'contact',
+                        child: ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.contact_phone_outlined),
+                          title: Text(widget.isAr ? 'جهة اتصال' : 'Contact'),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  Tooltip(
+                    message: widget.isAr
+                        ? 'قناة الفريق — نص فقط'
+                        : 'Team channel — text only',
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Icon(
+                        Icons.campaign_outlined,
+                        color: cs.outline,
+                        size: 26,
                       ),
                     ),
                   ),
-                  child: Row(
-                    children: [
-                      if (widget.attachmentsEnabled)
-                        PopupMenuButton<String>(
-                          tooltip: widget.isAr ? 'إرفاق' : 'Attach',
-                          icon: Icon(
-                            Icons.add_circle_outline_rounded,
-                            color: cs.primary,
-                            size: 28,
-                          ),
-                          onSelected: (v) {
-                            unawaited(widget.onAttachmentSelected(v));
-                          },
-                          itemBuilder: (ctx) => [
-                            PopupMenuItem(
-                              value: 'media',
-                              child: ListTile(
-                                dense: true,
-                                leading: const Icon(Icons.perm_media_outlined),
-                                title: Text(widget.isAr ? 'وسائط' : 'Media'),
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'loc',
-                              child: ListTile(
-                                dense: true,
-                                leading:
-                                    const Icon(Icons.location_on_outlined),
-                                title: Text(widget.isAr ? 'موقع' : 'Location'),
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'contact',
-                              child: ListTile(
-                                dense: true,
-                                leading:
-                                    const Icon(Icons.contact_phone_outlined),
-                                title: Text(
-                                    widget.isAr ? 'جهة اتصال' : 'Contact'),
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        Tooltip(
-                          message: widget.isAr
-                              ? 'قناة الفريق — نص فقط'
-                              : 'Team channel — text only',
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Icon(
-                              Icons.campaign_outlined,
-                              color: cs.outline,
-                              size: 26,
-                            ),
-                          ),
-                        ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: AqarTextField(
-                          controller: widget.controller,
-                          minLines: 1,
-                          maxLines: 4,
-                          decoration: InputDecoration(
-                            hintText: widget.composerHint ??
-                                (widget.isAr
-                                    ? 'اكتب رسالة…'
-                                    : 'Type a message…'),
-                            filled: true,
-                            fillColor: cs.surfaceContainerHighest
-                                .withValues(alpha: 0.6),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide.none,
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                          ),
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => widget.onSend(),
-                        ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: AqarTextField(
+                    controller: widget.controller,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: widget.composerHint ??
+                          (widget.isAr ? 'اكتب رسالة…' : 'Type a message…'),
+                      filled: true,
+                      fillColor:
+                          cs.surfaceContainerHighest.withValues(alpha: 0.6),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
                       ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        onPressed: !hasInternet ? null : widget.onSend,
-                        icon: const Icon(Icons.send_rounded),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
                       ),
-                    ],
+                    ),
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => widget.onSend(),
                   ),
                 ),
-              ),
-            );
-          },
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: !hasInternet ? null : widget.onSend,
+                  icon: const Icon(Icons.send_rounded),
+                ),
+              ],
+            ),
+          ),
         ),
-      ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
