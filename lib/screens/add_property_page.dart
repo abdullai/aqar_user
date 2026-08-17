@@ -30,6 +30,7 @@ import '../core/forms/active_form_guard.dart';
 import '../core/forms/publish_content_fingerprint_store.dart';
 import '../core/session/app_session.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/form_exit_confirm_dialog.dart';
 import '../widgets/terms_acceptance_checkbox.dart';
 import 'platform_policies_screen.dart';
@@ -4545,8 +4546,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         child: Scaffold(
           backgroundColor: cs.surface,
           appBar: AppBar(
-            automaticallyImplyLeading:
-                !widget.embedAppBar && !_publishLock && !_saving,
+            automaticallyImplyLeading: false,
+            leading: (!widget.embedAppBar && !_publishLock && !_saving)
+                ? AppPageCloseButton(
+                    isArabic: _isAr,
+                    onPressed: () {
+                      if (Navigator.canPop(context)) Navigator.pop(context);
+                    },
+                  )
+                : null,
             title: Text(_isAr ? 'إضافة إعلان' : 'Add Listing'),
           actions: [
             IconButton(

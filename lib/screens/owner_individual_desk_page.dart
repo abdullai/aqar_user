@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../main.dart' show langNotifier;
 import 'market_insights_page.dart';
 import 'subscriptions/subscriptions_root_screen.dart';
@@ -142,7 +143,15 @@ class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          automaticallyImplyLeading: !widget.suppressImpliedLeading,
+          automaticallyImplyLeading: false,
+          leading: !widget.suppressImpliedLeading
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
+                )
+              : null,
           title: Text(title),
           bottom: tabBar,
         ),

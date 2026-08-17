@@ -9,6 +9,7 @@ import '../core/utils/users_profiles_safe_select.dart';
 import '../services/fal_license_service.dart';
 import '../widgets/aqar_text_field.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import 'add_property_page.dart';
 import 'subscriptions/subscriptions_root_screen.dart';
 
@@ -296,7 +297,15 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
         children: [
           Scaffold(
             appBar: AppBar(
-              automaticallyImplyLeading: !widget.embedAppBar,
+              automaticallyImplyLeading: false,
+              leading: !widget.embedAppBar
+                  ? AppPageCloseButton(
+                      isArabic: _isAr,
+                      onPressed: () {
+                        if (Navigator.canPop(context)) Navigator.pop(context);
+                      },
+                    )
+                  : null,
               title: Text(_isAr ? 'إعلان عقاري' : 'Property listing'),
             ),
             body: SafeArea(

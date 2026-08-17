@@ -20,6 +20,7 @@ import '../core/utils/app_money.dart';
 import '../core/workflow/listing_workflow_stage.dart';
 import '../models/market_property_request_row.dart';
 import '../models/property.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/instant_market_request_badge.dart';
 
 /// طابع خريطة هادئ يُبرز الدبابيس دون ازدحام POI.
@@ -703,7 +704,15 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          automaticallyImplyLeading: !widget.embedAppBar,
+          automaticallyImplyLeading: false,
+          leading: !widget.embedAppBar
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
+                )
+              : null,
           title: Text(
             widget.contextTitle == null || widget.contextTitle!.trim().isEmpty
                 ? (_isAr ? 'خريطة العقارات' : 'Property map')

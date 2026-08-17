@@ -13,6 +13,7 @@ import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier;
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import 'org_join_requests_desk_page.dart';
 import 'org_monitor_dashboard_page.dart';
 import 'org_team_chat_hub_page.dart';
@@ -378,7 +379,15 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
         textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
         child: Scaffold(
           appBar: AppBar(
-            automaticallyImplyLeading: !widget.suppressImpliedLeading,
+            automaticallyImplyLeading: false,
+            leading: !widget.suppressImpliedLeading
+                ? AppPageCloseButton(
+                    isArabic: _isAr,
+                    onPressed: () {
+                      if (Navigator.canPop(context)) Navigator.pop(context);
+                    },
+                  )
+                : null,
             title: Text(_isAr ? 'إدارتي' : 'My desk'),
           ),
           body: const Center(child: AppLogoLoading()),
@@ -390,7 +399,15 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
         textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
         child: Scaffold(
           appBar: AppBar(
-            automaticallyImplyLeading: !widget.suppressImpliedLeading,
+            automaticallyImplyLeading: false,
+            leading: !widget.suppressImpliedLeading
+                ? AppPageCloseButton(
+                    isArabic: _isAr,
+                    onPressed: () {
+                      if (Navigator.canPop(context)) Navigator.pop(context);
+                    },
+                  )
+                : null,
             title: Text(_isAr ? 'إدارتي' : 'My desk'),
           ),
           body: Center(
@@ -407,7 +424,15 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          automaticallyImplyLeading: !widget.suppressImpliedLeading,
+          automaticallyImplyLeading: false,
+          leading: !widget.suppressImpliedLeading
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
+                )
+              : null,
           toolbarHeight: 72,
           title: LayoutBuilder(
             builder: (ctx, c) {

@@ -10,6 +10,7 @@ import '../l10n/app_localizations.dart';
 import '../services/org_team_service.dart';
 import '../services/permission_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import 'assign_permissions_screen.dart';
 import 'manage_members_screen.dart';
 import 'org_join_requests_desk_page.dart';
@@ -303,7 +304,17 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
         appBar: widget.embedAppBar
             ? null
             : AppBar(
-                automaticallyImplyLeading: !widget.suppressImpliedLeading,
+                automaticallyImplyLeading: false,
+                leading: !widget.suppressImpliedLeading
+                    ? AppPageCloseButton(
+                        isArabic: widget.lang.toLowerCase() != 'en',
+                        onPressed: () {
+                          if (Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          }
+                        },
+                      )
+                    : null,
                 title: Text(l10n.orgTeamDeskTitle),
               ),
         body: const Center(child: AppLogoLoading()),
@@ -336,7 +347,15 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
 
     return Scaffold(
       appBar: AppBar(
-        automaticallyImplyLeading: !widget.suppressImpliedLeading,
+        automaticallyImplyLeading: false,
+        leading: !widget.suppressImpliedLeading
+            ? AppPageCloseButton(
+                isArabic: widget.lang.toLowerCase() != 'en',
+                onPressed: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                },
+              )
+            : null,
         title: Text(l10n.orgTeamDeskTitle),
         actions: [
           if (_showInviteInAppBar)

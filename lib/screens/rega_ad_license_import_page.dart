@@ -5,6 +5,7 @@ import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 
 /// استيراد بيانات **ترخيص الإعلان العقاري** من صفحة تفاصيل الإعلان في بوابة الهيئة
 /// (`/public/OfficesBroker/ElanDetails/{uuid}`) عبر WebView + تحليل النص / `__NEXT_DATA__`.
@@ -513,7 +514,15 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
       textDirection: widget.isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          automaticallyImplyLeading: !widget.embedAppBar,
+          automaticallyImplyLeading: false,
+          leading: !widget.embedAppBar
+              ? AppPageCloseButton(
+                  isArabic: widget.isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
+                )
+              : null,
           title: Text(
             _t('ربط التصريح مع الهيئة', 'Link permit with REGA'),
           ),

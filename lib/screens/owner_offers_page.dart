@@ -20,6 +20,7 @@ import '../core/notifications/hub_workflow_sound.dart';
 import '../services/chat_peer_service.dart';
 import '../services/marketing_flow_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
 import '../widgets/user_presence_strip.dart';
@@ -930,14 +931,15 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          leading: widget.embeddedInSheet
-              ? IconButton(
-                  tooltip: _isAr ? 'إغلاق' : 'Close',
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  icon: const Icon(Icons.close),
+          automaticallyImplyLeading: false,
+          leading: (widget.embeddedInSheet || Navigator.canPop(context))
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
                 )
               : null,
-          automaticallyImplyLeading: !widget.embeddedInSheet,
           title: Text(ListingWorkflowCopy.ownerOffersTitle(_isAr)),
           actions: [
             if (Navigator.of(context).canPop())

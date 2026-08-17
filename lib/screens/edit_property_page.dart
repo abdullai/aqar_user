@@ -23,6 +23,7 @@ import '../core/listing/property_type_custom_registry.dart';
 import '../core/utils/app_money.dart';
 import '../services/watermark_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/deed_date_calendar_dialog.dart';
 import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/year_built_picker_field.dart';
@@ -1355,7 +1356,15 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
       child: Scaffold(
         backgroundColor: cs.surface,
         appBar: AppBar(
-          automaticallyImplyLeading: !widget.embedAppBar,
+          automaticallyImplyLeading: false,
+          leading: !widget.embedAppBar
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
+                )
+              : null,
           title: Text(
             widget.marketerRegaAlignmentMode
                 ? (_isAr ? 'مطابقة بيانات الهيئة' : 'REGA alignment')

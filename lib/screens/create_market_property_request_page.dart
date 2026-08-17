@@ -46,6 +46,7 @@ import '../widgets/adaptive_post_publish_dialog.dart';
 import '../widgets/terms_acceptance_checkbox.dart';
 import 'platform_policies_screen.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/budget_text_field.dart';
 import '../widgets/searchable_select_field.dart';
 import '../widgets/stable_select_chip.dart';
@@ -2477,7 +2478,15 @@ class _CreateMarketPropertyRequestPageState
       },
       child: Scaffold(
         appBar: AppBar(
-        automaticallyImplyLeading: !widget.embedAppBar,
+        automaticallyImplyLeading: false,
+        leading: !widget.embedAppBar
+            ? AppPageCloseButton(
+                isArabic: _isAr,
+                onPressed: () {
+                  if (Navigator.canPop(context)) Navigator.pop(context);
+                },
+              )
+            : null,
         title: Text(
           _isEditing
               ? (_isAr ? 'تعديل الطلب العقاري' : 'Edit property request')

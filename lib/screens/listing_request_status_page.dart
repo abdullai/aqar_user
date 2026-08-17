@@ -25,6 +25,7 @@ import '../core/notifications/hub_workflow_sound.dart';
 import '../core/haptics/app_haptics.dart';
 import 'listing_contract_chat_page.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/app_confirm_dialog.dart';
 import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
@@ -257,6 +258,15 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       textDirection: _isAr ? ui.TextDirection.rtl : ui.TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: Navigator.canPop(context)
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                  onPressed: () {
+                    if (Navigator.canPop(context)) Navigator.pop(context);
+                  },
+                )
+              : null,
           title: Text(_isAr ? 'حالة طلب التسويق' : 'Request Status'),
         ),
         body: SafeArea(
