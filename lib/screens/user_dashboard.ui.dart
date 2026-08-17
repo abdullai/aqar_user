@@ -3912,7 +3912,7 @@ class _UserDashboardState extends State<UserDashboard>
           },
           onOpenRequest: (r) {
             Navigator.of(context, rootNavigator: true).pop();
-            unawaited(_openMarketRequestDetail(r));
+            _openMarketRequestDetail(r);
           },
           onCompleteDeal: (item) {
             final p = item.property;
