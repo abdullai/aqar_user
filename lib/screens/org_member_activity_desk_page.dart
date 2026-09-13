@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import '../core/utils/date_helper.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
@@ -164,7 +164,6 @@ class _OrgMemberActivityDeskPageState extends State<OrgMemberActivityDeskPage> {
         ),
       );
     }
-    final loc = _isAr ? 'ar' : 'en';
     return RefreshIndicator(
       onRefresh: _load,
       child: Scrollbar(
@@ -186,7 +185,7 @@ class _OrgMemberActivityDeskPageState extends State<OrgMemberActivityDeskPage> {
             final atDt = DateTime.tryParse(atRaw);
             final at = atDt == null
                 ? atRaw
-                : DateFormat.yMMMd(loc).add_jm().format(atDt.toLocal());
+                : DateHelper.fmtCivilDateTime(atDt.toLocal(), isAr: _isAr);
             final entity = _entityLabel(et);
             return ListTile(
               leading: Icon(Icons.history, color: cs.primary),

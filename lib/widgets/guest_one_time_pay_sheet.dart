@@ -1,14 +1,15 @@
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 
 import '../core/payment/payment_platform_detector.dart';
+import '../core/utils/app_money.dart';
 import '../services/guest_unlock_service.dart';
 import '../services/payment_gateway_mock.dart';
 import '../services/payment_service.dart';
 
-/// دفع لمرة واحدة للضيف (تجريبي محلي حتى تفعيل ميسّر) —
-/// يضبط [GuestUnlockService] عند النجاح.
+/// دفع لمرة واحدة للضيف — يضبط [GuestUnlockService] عند النجاح.
 Future<bool> showGuestOneTimePaySheet({
   required BuildContext context,
   required bool isAr,
@@ -30,7 +31,7 @@ Future<bool> showGuestOneTimePaySheet({
     return false;
   }
 
-  final ok = await showModalBottomSheet<bool>(
+  final ok = await showAppModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -67,7 +68,7 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
     if (PaymentService.useMoyasarLiveFlow) {
       return PaymentPlatformDetector.supportsApplePay();
     }
-    // تجريبي: أظهر Apple Pay على iOS/Safari فقط.
+    // أظهر Apple Pay على iOS/Safari فقط.
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) return true;
     return kIsWeb && PaymentPlatformDetector.browser == BrowserType.safari;
   }
@@ -136,11 +137,16 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final amount = widget.amountSar.toStringAsFixed(0);
+    final amountText = AppMoney.formatWithCurrencyCode(
+      widget.amountSar,
+      isAr: widget.isAr,
+      maxFractionDigits:
+          widget.amountSar == widget.amountSar.roundToDouble() ? 0 : 2,
+    );
     final title = widget.isAr ? 'دفع لمرة واحدة' : 'One-time payment';
     final sub = widget.isAr
-        ? 'المبلغ $amount ر.س — تجربة محلية على هذا الجهاز حتى تفعيل بوابة الدفع المعتمدة في المملكة.'
-        : 'SAR $amount — local trial on this device until the licensed Saudi payment gateway is activated.';
+        ? 'المبلغ $amountText — تجربة محلية على هذا الجهاز حتى تفعيل بوابة الدفع المعتمدة في المملكة.'
+        : '$amountText — local trial on this device until the licensed Saudi payment gateway is activated.';
 
     return SafeArea(
       child: Padding(

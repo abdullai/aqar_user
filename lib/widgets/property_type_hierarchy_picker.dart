@@ -3,6 +3,7 @@ import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../core/listing/property_type_catalog.dart';
 import '../core/listing/property_type_custom_registry.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 
 /// اختيار نوع العقار: مجموعة + فرعي + بحث + إضافة نوع مخصص (بدون تكرار بعد التطبيع).
 class PropertyTypeHierarchyPicker extends StatefulWidget {
@@ -147,7 +148,9 @@ class _PropertyTypeHierarchyPickerState
           : items.first['code']!;
     }
 
-    return Column(
+    return AppKeyboardReveal(
+      below: 220,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         AqarTextField(
@@ -282,6 +285,7 @@ class _PropertyTypeHierarchyPickerState
           ),
         ),
       ],
+      ),
     );
   }
 }

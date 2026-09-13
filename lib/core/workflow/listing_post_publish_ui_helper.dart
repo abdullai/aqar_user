@@ -1,4 +1,5 @@
 import '../../models/property.dart';
+import 'listing_permissions_helper.dart';
 import 'listing_workflow_stage.dart';
 import 'listing_workflow_ui_context.dart';
 
@@ -77,9 +78,8 @@ class ListingPostPublishUiHelper {
   }) {
     final ctx = ListingWorkflowUiContext.fromProperty(property);
 
-    final isPublished = property.effectiveWorkflowStage ==
-            ListingWorkflowStage.published ||
-        property.effectiveWorkflowStage == ListingWorkflowStage.reserved;
+    final isPublished =
+        ListingPermissionsHelper.shouldShowInPublicHome(property);
 
     final showInMarketerAdmin =
         currentMarketerId != null &&

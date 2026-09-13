@@ -1,6 +1,7 @@
 import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
@@ -104,7 +105,7 @@ class _AssignPermissionsScreenState extends State<AssignPermissionsScreen> {
   }
 
   void _showHelp(String body) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         content: Text(body, textAlign: TextAlign.start),

@@ -106,3 +106,10 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# نفس ملف الويب (محلي / gitignored): بجانب التنفيذي حتى تعمل نسخة ويندوز بدون dart-define.
+set(_AQAR_SUPABASE_CFG "${CMAKE_CURRENT_SOURCE_DIR}/../web/supabase_config.json")
+if(EXISTS "${_AQAR_SUPABASE_CFG}")
+  install(FILES "${_AQAR_SUPABASE_CFG}" DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    COMPONENT Runtime)
+endif()

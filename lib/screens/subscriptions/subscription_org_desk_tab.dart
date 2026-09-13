@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../widgets/org_fal_and_seats_panel.dart';
 import 'subscriptions_root_screen.dart';
-import 'subscription_details_screen.dart';
 
-/// تبويب «إدارة الاشتراك» داخل لوحة المنشأة.
+/// تبويب «إدارة الاشتراك» داخل لوحة المنشأة — بلا تكرار مع إعدادات المنشأة.
 class SubscriptionOrgDeskTab extends StatelessWidget {
   const SubscriptionOrgDeskTab({
     super.key,
@@ -27,19 +27,40 @@ class SubscriptionOrgDeskTab extends StatelessWidget {
       children: [
         Text(
           t.subscriptionsOrgManageTab,
-          style: Theme.of(context).textTheme.titleLarge,
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
         ),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 220,
-          child: SubscriptionDetailsScreen(
-            lang: lang,
-            accountType: accountType,
-            organizationId: organizationId,
-          ),
+        const SizedBox(height: 6),
+        Text(
+          _isAr
+              ? 'تجديد فال، المقاعد، الباقات والفواتير — كلها هنا. إعدادات الاسم والعنوان في تبويب إعدادات المنشأة.'
+              : 'FAL renewal, seats, plans and invoices live here. Name and address stay in organization settings.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
         ),
-        const SizedBox(height: 12),
-        FilledButton(
+        const SizedBox(height: 16),
+        OrgFalAndSeatsPanel(
+          accountType: accountType,
+          organizationId: organizationId,
+          lang: lang,
+          onOpenPlans: () {
+            Navigator.push<void>(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => SubscriptionsRootScreen(
+                  lang: lang,
+                  accountType: accountType,
+                  organizationId: organizationId,
+                  initialIndex: 0,
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 20),
+        FilledButton.icon(
           onPressed: () {
             Navigator.push<void>(
               context,
@@ -48,19 +69,12 @@ class SubscriptionOrgDeskTab extends StatelessWidget {
                   lang: lang,
                   accountType: accountType,
                   organizationId: organizationId,
-                  embedAppBar: true,
                 ),
               ),
             );
           },
-          child: Text(t.subscriptionsTitle),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _isAr
-              ? 'افتح مركز الاشتراكات الكامل لإدارة البطاقات والفواتير والترقية.'
-              : 'Open the full subscriptions hub to manage cards, invoices, and upgrades.',
-          style: Theme.of(context).textTheme.bodySmall,
+          icon: const Icon(Icons.open_in_new_rounded),
+          label: Text(t.subscriptionsTitle),
         ),
       ],
     );

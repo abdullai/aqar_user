@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../payment/payment_security.dart';
 import '../session/app_session.dart';
 import '../session/web_auth_tab_guard.dart';
-import 'auth_signed_out_navigation_guard.dart';
+import '../auth/inactivity_auth_landing.dart';
+import '../auth/auth_signed_out_navigation_guard.dart';
+import '../../services/invoice_service.dart';
 import '../../services/in_app_notification_hub.dart';
 import '../../services/marketing_buckets_cache.dart';
 import '../../services/marketing_workflow_hub.dart';
@@ -19,6 +22,7 @@ import '../auth/auth_local_sign_out.dart';
 import '../auth/web_auth_exit_history.dart';
 import '../platform/web_browser_lifecycle.dart';
 import '../navigation/root_overlay_guard.dart';
+import '../navigation/web_in_app_nav.dart';
 import '../../services/user_session_coordination_service.dart';
 
 /// خروج موحّد من الحساب — على الويب يُنقَل إلى `/login` فوراً ثم يُكمَل signOut في الخلفية
@@ -35,6 +39,7 @@ abstract final class SafeSignOutService {
     if (_inFlight) return;
     _inFlight = true;
     AuthSignedOutNavigationGuard.enter();
+    WebInAppNav.beginAuthSeal();
 
     final uid = (uidForCleanup?.trim().isNotEmpty ?? false)
         ? uidForCleanup!.trim()
@@ -53,6 +58,8 @@ abstract final class SafeSignOutService {
     SubscriptionService.invalidateSubscriptionCache();
     InAppNotificationHub.clearQueueAndToast();
     MarketingBucketsCache.instance.clearAll();
+    unawaited(PaymentSecurity.purgeLocalPaymentCache(uid: uid));
+    InvoiceService.forgetPayerCache();
     try {
       MarketingWorkflowHub.hubHighlightRequestId.value = null;
     } catch (_) {}
@@ -103,10 +110,21 @@ abstract final class SafeSignOutService {
       if (!context.mounted) return;
       if (kIsWeb) suppressWebBeforeUnloadBriefly();
       RootOverlayGuard.dismissAll(UserSessionCoordinationService.navigatorKey);
+      final dest = (logoutReason == 'inactivity_logout' ||
+              logoutReason == 'connectivity_lost' ||
+              logoutReason == 'sensitive_nav_exit' ||
+              logoutReason == 'session_superseded')
+          ? InactivityAuthLanding.preferredRoute
+          : '/login';
+      if (logoutReason == 'inactivity_logout' ||
+          logoutReason == 'connectivity_lost' ||
+          logoutReason == 'session_superseded') {
+        InactivityAuthLanding.begin(route: dest);
+      }
       final nav = useRootNavigator
           ? Navigator.of(context, rootNavigator: true)
           : Navigator.of(context);
-      nav.pushNamedAndRemoveUntil('/login', (route) => false);
+      nav.pushNamedAndRemoveUntil(dest, (route) => false);
       if (kIsWeb) {
         try {
           WebAuthExitHistory.replaceLoginUrl();
@@ -124,6 +142,7 @@ abstract final class SafeSignOutService {
         navigate();
       }
     } finally {
+      WebInAppNav.endAuthSeal();
       _inFlight = false;
       AuthSignedOutNavigationGuard.scheduleLeave();
     }
@@ -149,6 +168,7 @@ abstract final class SafeSignOutService {
     if (_inFlight) return;
     _inFlight = true;
     AuthSignedOutNavigationGuard.enter();
+    WebInAppNav.beginAuthSeal();
     final uid = uidForCleanup ?? Supabase.instance.client.auth.currentUser?.id;
 
     try {
@@ -157,6 +177,11 @@ abstract final class SafeSignOutService {
         '/login',
         (route) => false,
       );
+      if (kIsWeb) {
+        try {
+          WebAuthExitHistory.replaceLoginUrl();
+        } catch (_) {}
+      }
       final sb = Supabase.instance.client;
       if (sb.auth.currentSession != null) {
         unawaited(
@@ -183,6 +208,7 @@ abstract final class SafeSignOutService {
         );
       }
     } finally {
+      WebInAppNav.endAuthSeal();
       _inFlight = false;
       AuthSignedOutNavigationGuard.scheduleLeave();
     }

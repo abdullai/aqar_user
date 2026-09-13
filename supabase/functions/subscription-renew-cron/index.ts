@@ -45,6 +45,63 @@ function merchantContact(): string {
     "Abdullah Issa Ahmed Abuhia";
 }
 
+async function notifyAutoRenewFailed(
+  svc: ReturnType<typeof createClient>,
+  userId: string,
+  subscriptionId: string,
+  billingId: string | null,
+  reason: string,
+): Promise<void> {
+  await svc.rpc("notify_subscription_auto_renew_failed", {
+    p_user_id: userId,
+    p_subscription_id: subscriptionId,
+    p_billing_transaction_id: billingId,
+    p_reason: reason,
+  }).catch(() => null);
+}
+
+async function lastUsedSavedCard(
+  svc: ReturnType<typeof createClient>,
+  userId: string,
+): Promise<{ id: string; card_token: string } | null> {
+  const { data: lastBill } = await svc
+    .from("billing_transactions")
+    .select("card_id")
+    .eq("user_id", userId)
+    .eq("status", "success")
+    .not("card_id", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastId = String((lastBill as Record<string, unknown> | null)?.card_id ?? "")
+    .trim();
+  if (lastId) {
+    const { data: named } = await svc
+      .from("saved_cards")
+      .select("id,card_token")
+      .eq("id", lastId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    const token = String((named as Record<string, unknown> | null)?.card_token ?? "")
+      .trim();
+    if (named && token) {
+      return { id: String((named as Record<string, unknown>).id), card_token: token };
+    }
+  }
+  const { data: cards } = await svc
+    .from("saved_cards")
+    .select("id,card_token")
+    .eq("user_id", userId)
+    .order("is_default", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const row = (cards ?? [])[0] as Record<string, unknown> | undefined;
+  const token = String(row?.card_token ?? "").trim();
+  const id = String(row?.id ?? "").trim();
+  if (!id || !token) return null;
+  return { id, card_token: token };
+}
+
 async function hasRecentPendingBilling(
   svc: ReturnType<typeof createClient>,
   subscriptionId: string,
@@ -89,6 +146,7 @@ serve(async (req) => {
   }
 
   const svc = createClient(supabaseUrl, serviceKey);
+  await svc.rpc("subscription_expire_due");
   const now = new Date();
   const soon = new Date(now.getTime() + 36 * 3600 * 1000).toISOString();
   const past = new Date(now.getTime() - 14 * 24 * 3600 * 1000).toISOString();
@@ -135,37 +193,37 @@ serve(async (req) => {
       continue;
     }
 
-    const { data: cards, error: cErr } = await svc
-      .from("saved_cards")
-      .select("id,card_token")
-      .eq("user_id", userId)
-      .order("is_default", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (cErr || !cards?.length) {
+    const card = await lastUsedSavedCard(svc, userId);
+    if (!card) {
       await svc.from("user_subscriptions").update({
         auto_renew_last_failure_at: new Date().toISOString(),
         auto_renew_last_failure_reason: "no_saved_card",
       }).eq("id", subId);
+      await notifyAutoRenewFailed(svc, userId, subId, null, "no_saved_card");
       results.push({ subscription_id: subId, error: "no_saved_card" });
       continue;
     }
 
-    const cardId = String(cards[0].id ?? "").trim();
-    const token = String(cards[0].card_token ?? "").trim();
-    if (!token) {
-      results.push({ subscription_id: subId, error: "empty_token" });
-      continue;
-    }
+    const cardId = card.id;
+    const token = card.card_token;
 
-    const monthly = typeof plan.price_monthly === "number"
-      ? plan.price_monthly
-      : Number.parseFloat(String(plan.price_monthly ?? "0"));
-    const yearly = typeof plan.price_yearly === "number"
-      ? plan.price_yearly
-      : Number.parseFloat(String(plan.price_yearly ?? "0"));
-    const amountSar = period === "yearly" ? yearly : monthly;
+    let amountSar = period === "yearly"
+      ? (typeof plan.price_yearly === "number"
+        ? plan.price_yearly
+        : Number.parseFloat(String(plan.price_yearly ?? "0")))
+      : (typeof plan.price_monthly === "number"
+        ? plan.price_monthly
+        : Number.parseFloat(String(plan.price_monthly ?? "0")));
+    const { data: quote } = await svc.rpc("compute_canonical_charge", {
+      p_plan_id: planId,
+      p_period: period,
+      p_with_auto_pay: true,
+    });
+    const q = quote as Record<string, unknown> | null;
+    if (q && q.ok === true) {
+      const billed = Number(q.final_amount ?? q.price_after_auto_pay ?? 0);
+      if (Number.isFinite(billed) && billed > 0) amountSar = billed;
+    }
     if (!Number.isFinite(amountSar) || amountSar <= 0) {
       results.push({ subscription_id: subId, error: "bad_plan_price" });
       continue;
@@ -179,11 +237,15 @@ serve(async (req) => {
       status: "pending",
       payment_method: "card_auto_renew",
       card_id: cardId,
+      purpose: "auto_renew",
+      plan_id: planId,
+      billing_period: period,
       title_ar: "تجديد اشتراك تلقائي",
       title_en: "Subscription auto-renewal",
       gateway_response: {
         pending_gateway: "moyasar",
         cron: "subscription-renew-cron",
+        purpose: "auto_renew",
       },
     }).select("id").single();
 
@@ -237,6 +299,13 @@ serve(async (req) => {
           auto_renew_last_failure_at: new Date().toISOString(),
           auto_renew_last_failure_reason: `moyasar_http_${payRes.status}`,
         }).eq("id", subId);
+        await notifyAutoRenewFailed(
+          svc,
+          userId,
+          subId,
+          billingId,
+          "insufficient_funds",
+        );
         results.push({ subscription_id: subId, billing_id: billingId, error: "moyasar_http", status: payRes.status });
         continue;
       }
@@ -250,6 +319,7 @@ serve(async (req) => {
         auto_renew_last_failure_at: new Date().toISOString(),
         auto_renew_last_failure_reason: "moyasar_network",
       }).eq("id", subId);
+      await notifyAutoRenewFailed(svc, userId, subId, billingId, "network");
       results.push({ subscription_id: subId, billing_id: billingId, error: "network" });
       continue;
     }
@@ -258,14 +328,13 @@ serve(async (req) => {
     const payId = payJson?.id != null ? String(payJson.id).trim() : "";
 
     if (st === "paid" || st === "captured") {
-      await svc.from("billing_transactions").update({
-        status: "success",
-        gateway_transaction_id: payId,
-        gateway_response: payJson,
-        completed_at: new Date().toISOString(),
-      }).eq("id", billingId).eq("status", "pending");
-      const { error: rpcErr } = await svc.rpc("subscription_apply_auto_renew_extension", {
-        p_subscription_id: subId,
+      await svc.rpc("mark_billing_gateway_outcome", {
+        p_billing_transaction_id: billingId,
+        p_status: "success",
+        p_gateway_transaction_id: payId,
+        p_gateway_response: payJson,
+      });
+      const { error: rpcErr } = await svc.rpc("fulfill_paid_billing", {
         p_billing_transaction_id: billingId,
       });
       if (rpcErr) {
@@ -289,6 +358,7 @@ serve(async (req) => {
         auto_renew_last_failure_at: new Date().toISOString(),
         auto_renew_last_failure_reason: st,
       }).eq("id", subId);
+      await notifyAutoRenewFailed(svc, userId, subId, billingId, "insufficient_funds");
       results.push({ subscription_id: subId, billing_id: billingId, moyasar_status: st });
     } else {
       // initiated / pending 3DS — leave billing pending; webhook finalizes

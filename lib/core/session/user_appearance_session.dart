@@ -4,92 +4,146 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
 
-/// ثيم ولغة الواجهة: **جهاز** (ضيف / بدون جلسة) + **حساب** (مسجّل) مع خيار مزامنة اللغة والثيم.
+/// لغة ومظهر محليان على الجهاز — بلا شبكة.
 ///
-/// التطبيق الموحّد: تغيير اللغة/الثيم عبر `setAppLang` و `setAppTheme` في `main.dart`؛
-/// لون التمييز عبر `loadAppAccentFromPrefs` و `setAppAccentIndex`؛ بعد تبديل جلسة أو ضيف
-/// استدعِ `applyNotifiersToMatchStoredSession` أو `syncSessionAppearanceNotifiers` من الجسر.
+/// - **شاشة الدخول** (لا جلسة): مفاتيح `login_chrome_*`.
+/// - **حساب مسجّل**: `app_theme_$uid` / `app_lang_$uid` — لا تُمسَح عند الخروج.
+/// - تغيير الثيم/اللغة من شاشة الدخول يُعلَّم `dirty` ويُنسَخ إلى الحساب عند الدخول.
 abstract final class UserAppearanceSession {
-  static const String _kSyncLangWithAccount = 'sync_lang_with_account_v1';
-  static const String _kSyncThemeWithAccount = 'sync_theme_with_account_v1';
+  static const String loginThemeKey = 'login_chrome_theme_v1';
+  static const String loginLangKey = 'login_chrome_lang_v1';
+  static const String loginChromeDirtyKey = 'login_chrome_dirty_v1';
 
-  static String _themeKeyFor(String? uid) =>
-      (uid != null && uid.isNotEmpty) ? 'app_theme_$uid' : AppConfig.prefThemeKey;
+  static String themeKeyFor(String uid) => 'app_theme_$uid';
+  static String langKeyFor(String uid) => 'app_lang_$uid';
 
-  static String _langKeyFor(String? uid) =>
-      (uid != null && uid.isNotEmpty) ? 'app_lang_$uid' : AppConfig.prefLangKey;
-
-  static Future<bool> readSyncLangWithAccount() async {
-    final p = await SharedPreferences.getInstance();
-    return p.getBool(_kSyncLangWithAccount) ?? true;
+  static String? _uidOrNull() {
+    try {
+      return Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
   }
 
-  static Future<void> writeSyncLangWithAccount(bool value) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setBool(_kSyncLangWithAccount, value);
+  static ThemeMode parseMode(String? raw) {
+    switch ((raw ?? '').trim().toLowerCase()) {
+      case 'dark':
+        return ThemeMode.dark;
+      case 'light':
+        return ThemeMode.light;
+      case 'system':
+        return ThemeMode.system;
+      default:
+        return ThemeMode.system;
+    }
   }
 
-  static Future<bool> readSyncThemeWithAccount() async {
-    final p = await SharedPreferences.getInstance();
-    return p.getBool(_kSyncThemeWithAccount) ?? true;
+  static String persistToken(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.dark:
+        return 'dark';
+      case ThemeMode.light:
+        return 'light';
+      case ThemeMode.system:
+        return 'system';
+    }
   }
 
-  static Future<void> writeSyncThemeWithAccount(bool value) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setBool(_kSyncThemeWithAccount, value);
+  /// المظهر الظاهر فعلياً: عند [ThemeMode.system] يتبع سطوع/وضع الجهاز فوراً.
+  static bool resolvesLight(
+    ThemeMode mode, [
+    Brightness? platformBrightness,
+  ]) {
+    final platform = platformBrightness ??
+        WidgetsBinding.instance.platformDispatcher.platformBrightness;
+    switch (mode) {
+      case ThemeMode.light:
+        return true;
+      case ThemeMode.dark:
+        return false;
+      case ThemeMode.system:
+        return platform == Brightness.light;
+    }
   }
 
-  /// يطبّق القيم المحفوظة على المنوّعات حسب وجود جلسة وخيار المزامنة.
+  static ThemeMode _modeOf(String? raw) => parseMode(raw);
+
+  static String _langOf(String? raw) =>
+      (raw ?? '').trim() == 'en' ? 'en' : 'ar';
+
+  /// يطبّق القيم المحفوظة: حساب إن وُجدت جلسة، وإلا شاشة الدخول.
   static Future<void> applyNotifiersToMatchStoredSession({
     required ValueNotifier<String> langNotifier,
     required ValueNotifier<ThemeMode> themeModeNotifier,
   }) async {
-    final uid = Supabase.instance.client.auth.currentUser?.id;
+    final uid = _uidOrNull();
     final p = await SharedPreferences.getInstance();
 
-    final syncTheme = await readSyncThemeWithAccount();
-    final themeStr = () {
-      if (uid != null && uid.isNotEmpty && syncTheme) {
-        return p.getString(_themeKeyFor(uid)) ??
-            p.getString(AppConfig.prefThemeKey) ??
-            'light';
-      }
-      return p.getString(AppConfig.prefThemeKey) ?? 'light';
-    }();
-
-    final syncLang = await readSyncLangWithAccount();
-    final langStr = (uid != null && uid.isNotEmpty && syncLang)
-        ? (p.getString(_langKeyFor(uid)) ??
-            p.getString(AppConfig.prefLangKey) ??
-            'ar')
-        : (p.getString(AppConfig.prefLangKey) ?? 'ar');
-
-    themeModeNotifier.value =
-        themeStr == 'dark' ? ThemeMode.dark : ThemeMode.light;
-    langNotifier.value = langStr == 'en' ? 'en' : 'ar';
-  }
-
-  /// حفظ الثيم: الجهاز دائماً؛ وللمسجّل مفتاح الحساب إن كانت مزامنة الثيم مفعّلة.
-  static Future<void> persistThemeChoice(String lightOrDark) async {
-    final uid = Supabase.instance.client.auth.currentUser?.id;
-    final p = await SharedPreferences.getInstance();
-    await p.setString(AppConfig.prefThemeKey, lightOrDark);
-    if (uid != null &&
-        uid.isNotEmpty &&
-        await readSyncThemeWithAccount()) {
-      await p.setString(_themeKeyFor(uid), lightOrDark);
+    if (uid != null && uid.isNotEmpty) {
+      final themeStr = p.getString(themeKeyFor(uid)) ??
+          p.getString(loginThemeKey) ??
+          p.getString(AppConfig.prefThemeKey) ??
+          'system';
+      final langStr = p.getString(langKeyFor(uid)) ??
+          p.getString(loginLangKey) ??
+          p.getString(AppConfig.prefLangKey) ??
+          'ar';
+      themeModeNotifier.value = _modeOf(themeStr);
+      langNotifier.value = _langOf(langStr);
+      return;
     }
+
+    final themeStr = p.getString(loginThemeKey) ??
+        p.getString(AppConfig.prefThemeKey) ??
+        'system';
+    final langStr = p.getString(loginLangKey) ??
+        p.getString(AppConfig.prefLangKey) ??
+        'ar';
+    themeModeNotifier.value = _modeOf(themeStr);
+    langNotifier.value = _langOf(langStr);
   }
 
-  /// حفظ اللغة: الجهاز دائماً؛ وللمسجّل مفتاح الحساب إن كانت المزامنة مفعّلة.
+  /// حفظ الثيم: للحساب إن وُجدت جلسة، وإلا لشاشة الدخول (+ علامة نسخ عند الدخول).
+  static Future<void> persistThemeChoice(String lightOrDarkOrSystem) async {
+    final v = persistToken(parseMode(lightOrDarkOrSystem));
+    final uid = _uidOrNull();
+    final p = await SharedPreferences.getInstance();
+    if (uid != null && uid.isNotEmpty) {
+      await p.setString(themeKeyFor(uid), v);
+      return;
+    }
+    await p.setString(loginThemeKey, v);
+    await p.setString(AppConfig.prefThemeKey, v);
+    await p.setBool(loginChromeDirtyKey, true);
+  }
+
   static Future<void> persistLangChoice(String arOrEn) async {
-    final uid = Supabase.instance.client.auth.currentUser?.id;
+    final v = arOrEn == 'en' ? 'en' : 'ar';
+    final uid = _uidOrNull();
     final p = await SharedPreferences.getInstance();
-    await p.setString(AppConfig.prefLangKey, arOrEn);
-    if (uid != null &&
-        uid.isNotEmpty &&
-        await readSyncLangWithAccount()) {
-      await p.setString(_langKeyFor(uid), arOrEn);
+    if (uid != null && uid.isNotEmpty) {
+      await p.setString(langKeyFor(uid), v);
+      return;
     }
+    await p.setString(loginLangKey, v);
+    await p.setString(AppConfig.prefLangKey, v);
+    await p.setBool(loginChromeDirtyKey, true);
+  }
+
+  /// إن غيّر الثيم/اللغة من شاشة الدخول ثم دخل: تُنسَخ إلى حسابه دون مسح لون التمييز.
+  static Future<void> absorbLoginChromeIntoUser(String uid) async {
+    final u = uid.trim();
+    if (u.isEmpty) return;
+    final p = await SharedPreferences.getInstance();
+    if (p.getBool(loginChromeDirtyKey) != true) return;
+    final t = p.getString(loginThemeKey);
+    final l = p.getString(loginLangKey);
+    if (t == 'dark' || t == 'light' || t == 'system') {
+      await p.setString(themeKeyFor(u), t!);
+    }
+    if (l == 'en' || l == 'ar') {
+      await p.setString(langKeyFor(u), l!);
+    }
+    await p.setBool(loginChromeDirtyKey, false);
   }
 }

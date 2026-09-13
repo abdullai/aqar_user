@@ -1,4 +1,6 @@
-﻿part of 'user_dashboard.dart';
+﻿// ignore_for_file: unused_element, unused_element_parameter
+
+part of 'user_dashboard.dart';
 
 extension _UserDashboardStateActions on _UserDashboardState {
   // =========================
@@ -8,13 +10,14 @@ extension _UserDashboardStateActions on _UserDashboardState {
   /// يفتح فوق جذر اللوحة فقط (يُبقي AppBar + الشريط السفلي ظاهرين).
   /// ويب وجوال: نفس [Navigator] الداخلي — لا rootNavigator (كان يخفي التبويبات).
   Future<T?> _pushBody<T extends Object?>(Route<T> route) async {
+    return _keepCurrentTab(() async {
     if (mounted && !_bottomNavSlideVisible) {
-      setState(() => _bottomNavSlideVisible = true);
+      _ss(() => _bottomNavSlideVisible = true);
     }
     final nestedTitle = _nestedTitleForRouteSettings(route.settings);
     _nestedTitleStack.add(nestedTitle);
     if (mounted) {
-      setState(() => _nestedShellTitle = nestedTitle);
+      _ss(() => _nestedShellTitle = nestedTitle);
     }
     final nav = _dashboardBodyNavKey.currentState;
     if (nav == null) {
@@ -24,7 +27,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       } finally {
         if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
         if (mounted) {
-          setState(() {
+          _ss(() {
             _nestedShellTitle =
                 _nestedTitleStack.isEmpty ? null : _nestedTitleStack.last;
           });
@@ -37,19 +40,51 @@ extension _UserDashboardStateActions on _UserDashboardState {
     } finally {
       if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
       if (mounted) {
-        setState(() {
+        _ss(() {
           _nestedShellTitle =
               _nestedTitleStack.isEmpty ? null : _nestedTitleStack.last;
         });
         unawaited(_maybeConsumeDashboardTourReplayFromPrefs());
       }
     }
+    });
   }
 
-  /// نماذج زر + — دائماً داخل جسم اللوحة (مثل مايو) حتى تبقى التبويبات ظاهرة.
-  /// لا تستخدم rootNavigator: كان يغطي الشريط السفلي ويفشل أحياناً بعد إغلاق الورقة.
-  Future<T?> _pushPlusForm<T extends Object?>(Route<T> route) async {
-    return _pushBody<T>(route);
+  /// نماذج زر + — داخل جسم اللوحة فوراً بلا انتقال متحرك.
+  Future<T?> _pushPlusForm<T extends Object?>(WidgetBuilder builder) {
+    return _pushBody<T>(
+      PlusComposerPageRoute<T>(builder: builder),
+    );
+  }
+
+  void _rememberPlusOriginTab() {
+    _tabBeforePlusComposer = _tabIndex;
+  }
+
+  Future<void> _afterPlusComposerClosed(Object? res) async {
+    if (!mounted) return;
+    final published = res == true ||
+        res == 'home' ||
+        (res is PostPublishNavResult && res.revealOnHome);
+    if (res == 'another') {
+      await _reloadAll();
+      return;
+    }
+    if (published) {
+      await _reloadAll();
+      if (mounted) _ss(() => _tabIndex = 0);
+      return;
+    }
+    if (res is PostPublishNavResult &&
+        res.kind == PostPublishKind.marketingDesk) {
+      await _reloadAll();
+      if (mounted) _ss(() => _tabIndex = 1);
+      return;
+    }
+    final origin = _tabBeforePlusComposer;
+    if (origin != null && mounted && _tabIndex != origin) {
+      _ss(() => _tabIndex = origin);
+    }
   }
 
   /// بعد إغلاق إدارتي: حدّث الشارات فقط — لا [_reloadAll] الثقيل.
@@ -187,89 +222,22 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  /// تبويب «إدارتي»: لوحة المنشأة/المسوّق/المعلن الفردي (منفصلة عن زر +).
+  /// تبويب «إدارتي»: لوحة المنشأة/المسوّق/المعلن الفردي داخل الشريط السفلي.
   Future<void> _openMyDeskNav() async {
     if (_isGuest) {
       _showLoginDialog();
       return;
     }
 
-    // افتح إدارتي فوراً — حمّل الدور/التسخين في الخلفية دون انتظار.
     if (!_accountRoleLoaded || !_orgNavResolved) {
       unawaited(_loadAccountRole());
     }
     unawaited(_prefetchMyDeskWarm());
-
-    const deskShellBack = true;
-
-    // مسوّق/مكتب/مؤسسة/شركة/وكالة: لوحة إدارتي الكاملة (أعضاء، فريق، اشتراك، دردشة، …).
-    if (AppRoleHelper.isMarketingRole(
-            AppRoleHelper.fromAccountType(_accountType)) ||
-        AppRoleHelper.isOrgEntity(_accountType)) {
-      await _pushBody<void>(
-        MaterialPageRoute<void>(
-          settings: const RouteSettings(name: '/desk/organization'),
-          builder: (_) => MyOrganizationScreen(
-            lang: widget.lang,
-            suppressImpliedLeading: deskShellBack,
-            embedAppBar: true,
-          ),
-        ),
-      );
-      if (!mounted) return;
-      await _lightRefreshAfterDesk();
-      return;
-    }
-
-    if (AppRoleHelper.isOwnerIndividual(_accountType)) {
-      await _pushBody<void>(
-        MaterialPageRoute<void>(
-          settings: const RouteSettings(name: '/desk/owner'),
-          builder: (_) => OwnerIndividualDeskPage(
-            lang: widget.lang,
-            userId: _uid,
-            accountType: _accountType,
-            suppressImpliedLeading: deskShellBack,
-            embedAppBar: true,
-          ),
-        ),
-      );
-      if (!mounted) return;
-      await _lightRefreshAfterDesk();
-      return;
-    }
-
-    if (_orgNavIsOwner ||
-        AppRoleHelper.orgPermissionsOpenDeskShell(_orgMembershipPermissions)) {
-      final ctx = await OrgTeamService(_sb).myOrgContext();
-      final oid = ctx?['org_id']?.toString();
-      if (oid != null && oid.isNotEmpty) {
-        await _pushBody<void>(
-          MaterialPageRoute<void>(
-            settings: const RouteSettings(name: '/desk/organization'),
-            builder: (_) => MyOrganizationScreen(
-              lang: widget.lang,
-              suppressImpliedLeading: deskShellBack,
-              embedAppBar: true,
-            ),
-          ),
-        );
-        if (!mounted) return;
-        await _lightRefreshAfterDesk();
-        return;
-      }
-    }
-
-    if (mounted) {
-      _showNotification(
-        widget.isAr ? 'تعذر فتح إدارتي' : 'Could not open desk',
-        widget.isAr
-            ? 'تحقق من ربط حسابك بالمؤسسة ثم أعد المحاولة.'
-            : 'Check your organization link and try again.',
-        isError: true,
-      );
-      _ss(() => _tabIndex = 1);
-    }
+    _ss(() {
+      _tabIndex = 5;
+      _bottomNavTransientIndex = null;
+      if (kIsWeb) _webVisitedTabs.add(5);
+    });
   }
 
   /// مسوّق / عضو فريق بصلاحية إضافة: بوابة ترخيص الإعلان + فال ثم [AddPropertyPage].
@@ -283,18 +251,18 @@ extension _UserDashboardStateActions on _UserDashboardState {
     return false;
   }
 
-  void _openMarketRequestDetail(
+  Future<void> _openMarketRequestDetail(
     MarketPropertyRequestRow row, {
     bool autoOpenSubmitOffer = false,
-  }) {
+    bool useRootNavigator = false,
+  }) async {
     AppHaptics.light();
-    unawaited(() async {
-      String? oid;
-      if (_isMarketingAccountType) {
-        oid = await _marketingSubscriptionOrganizationId();
-      }
-      if (!mounted) return;
-      await showMarketRequestHomeSheet(
+    String? oid;
+    if (_isMarketingAccountType) {
+      oid = await _marketingSubscriptionOrganizationId();
+    }
+    if (!mounted) return;
+    await showMarketRequestHomeSheet(
         context: context,
         row: row,
         isAr: widget.isAr,
@@ -316,7 +284,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
         accountType: _accountType,
         organizationId: oid,
       );
-    }());
   }
 
   /// Paywall → اشتراكات ومدفوعات. يُرجع true إذا عاد المستخدم بصلاحية تقديم عرض.
@@ -461,7 +428,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
         .where(propertyEligibleForPublicMap)
         .toList(growable: false);
     var requests = _marketHomeRequests
-        .where((r) => _hasValidMapCoordinates(r.latitude, r.longitude))
         .where(marketRequestEligibleForPublicMap)
         .toList(growable: false);
 
@@ -514,6 +480,61 @@ extension _UserDashboardStateActions on _UserDashboardState {
     );
   }
 
+  /// صف طلب من عروض صفقاتي عندما تمنع RLS القراءة المباشرة.
+  MarketPropertyRequestRow? _marketRequestRowFromMyDealOffer(String requestId) {
+    final rid = requestId.trim();
+    if (rid.isEmpty) return null;
+    for (final e in _myMarketSubmissions) {
+      if (e.id == rid) return e;
+    }
+    Map<String, dynamic>? hit;
+    for (final o in [
+      ..._myPendingMarketOffersForCart,
+      ..._myArchivedMarketOffersForCart,
+      ..._incomingMarketOffersOnMine,
+    ]) {
+      if ((o['market_request_id'] ?? '').toString().trim() == rid) {
+        hit = o;
+        break;
+      }
+    }
+    if (hit == null) return null;
+    final nested = hit['_request_row'] ?? hit['market_property_requests'];
+    if (nested is Map) {
+      try {
+        return MarketPropertyRequestRow.fromMap(
+          Map<String, dynamic>.from(nested),
+        );
+      } catch (_) {}
+    }
+    final title = (hit['_request_title'] ?? '').toString().trim();
+    return MarketPropertyRequestRow(
+      id: rid,
+      title: title.isNotEmpty
+          ? title
+          : (widget.isAr ? 'طلب عقاري' : 'Property request'),
+      description: null,
+      purpose: 'purchase',
+      propertyType: '',
+      city: '',
+      districts: const [],
+      budgetMin: null,
+      budgetMax: _toDouble0(hit['price_offer']) == 0
+          ? null
+          : _toDouble0(hit['price_offer']),
+      areaMinM2: null,
+      createdAt: _tryParseDt(hit['created_at']),
+      updatedAt: null,
+      requesterId: '',
+      showRequesterName: false,
+      requesterPublicName: null,
+      status: (hit['_request_status'] ?? '').toString(),
+      selectedOfferId: (hit['_selected_offer_id'] ?? '').toString().trim().isEmpty
+          ? null
+          : (hit['_selected_offer_id'] ?? '').toString().trim(),
+    );
+  }
+
   /// يفتح تفاصيل طلب السوق من الرئيسية أو من السلة حتى إن لم يعد الطلب في خليط الرئيسية.
   Future<void> _openMarketRequestDetailById(
     String requestId, {
@@ -532,6 +553,14 @@ extension _UserDashboardStateActions on _UserDashboardState {
           .marketPropertyRequestSnapshotById(rid);
       if (!mounted) return;
       if (map == null) {
+        final local = _marketRequestRowFromMyDealOffer(rid);
+        if (local != null) {
+          _openMarketRequestDetail(
+            local,
+            autoOpenSubmitOffer: autoOpenSubmitOffer,
+          );
+          return;
+        }
         _toast(
           widget.isAr
               ? 'تعذّر تحميل تفاصيل الطلب. تحقق من الاتصال أو الصلاحيات.'
@@ -558,26 +587,22 @@ extension _UserDashboardStateActions on _UserDashboardState {
       _showLoginDialog();
       return;
     }
-    final res = await _pushBody<Object?>(
-      MaterialPageRoute<Object?>(
-        fullscreenDialog: true,
-        settings: const RouteSettings(name: '/dashboard/market-request-new'),
-        builder: (_) => CreateMarketPropertyRequestPage(
-          userId: _uid,
-          lang: widget.lang,
-          embedAppBar: true,
-        ),
+    _rememberPlusOriginTab();
+    final res = await _pushPlusForm<Object?>(
+      (_) => CreateMarketPropertyRequestPage(
+        userId: _uid,
+        lang: widget.lang,
+        embedAppBar: true,
       ),
     );
     if (!mounted) return;
-    if (res == 'home' || res == true) {
-      await _reloadAll();
-      if (mounted) _ss(() => _tabIndex = 0);
-    } else if (res == 'another') {
-      await _reloadAll();
+    if (res == 'another') {
+      await _afterPlusComposerClosed(res);
       if (!mounted) return;
       unawaited(_openCreateMarketRequestOnly());
+      return;
     }
+    await _afterPlusComposerClosed(res);
   }
 
   Future<void> _editMarketRequest(MarketPropertyRequestRow request) async {
@@ -649,9 +674,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  Future<void> _guestOpenCenterPlusFlow() async {
+  Future<String?> _showPlusComposerChoices({required bool guest}) {
     final cs = Theme.of(context).colorScheme;
-    final choice = await showModalBottomSheet<String>(
+    final t = AppLocalizations.of(context)!;
+    final showListing = guest || _canPlusSheetAddProperty;
+    final showRequest = guest || _canPlusSheetAddRequest;
+    return showAppModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -659,52 +687,122 @@ extension _UserDashboardStateActions on _UserDashboardState {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (showListing)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: cs.primaryContainer,
+                    child: Icon(
+                      Icons.domain_add_rounded,
+                      color: cs.onPrimaryContainer,
+                    ),
+                  ),
+                  title: Text(
+                    t.navAdd,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    widget.isAr
+                        ? 'نشر عقار للبيع أو الإيجار.'
+                        : 'Publish a property for sale or rent.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'listing'),
+                ),
+              if (showRequest)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: cs.secondaryContainer,
+                    child: Icon(
+                      Icons.travel_explore_rounded,
+                      color: cs.onSecondaryContainer,
+                    ),
+                  ),
+                  title: Text(
+                    widget.isAr ? 'طلب عقاري' : 'Property request',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    widget.isAr
+                        ? 'أبحث عن عقار للشراء أو الإيجار.'
+                        : 'Looking to buy or rent.',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'request'),
+                ),
               ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: cs.primaryContainer,
+                  backgroundColor: cs.tertiaryContainer,
                   child: Icon(
-                    Icons.domain_add_rounded,
-                    color: cs.onPrimaryContainer,
+                    Icons.photo_camera_outlined,
+                    color: cs.onTertiaryContainer,
                   ),
                 ),
                 title: Text(
-                  widget.isAr ? 'إعلان عقاري' : 'Property listing',
+                  t.photographerJoinCta,
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 subtitle: Text(
-                  widget.isAr
-                      ? 'نشر عقار للبيع أو الإيجار.'
-                      : 'Publish a property for sale or rent.',
+                  t.photographerReviewSla,
                   style: const TextStyle(fontSize: 12),
                 ),
-                onTap: () => Navigator.pop(ctx, 'listing'),
+                onTap: () => Navigator.pop(ctx, 'photographer'),
               ),
               ListTile(
                 leading: CircleAvatar(
-                  backgroundColor: cs.secondaryContainer,
+                  backgroundColor: cs.surfaceContainerHighest,
                   child: Icon(
-                    Icons.travel_explore_rounded,
-                    color: cs.onSecondaryContainer,
+                    Icons.apartment_outlined,
+                    color: cs.onSurfaceVariant,
                   ),
                 ),
                 title: Text(
-                  widget.isAr ? 'طلب عقاري' : 'Property request',
+                  t.developerComingSoonTitle,
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
                 subtitle: Text(
-                  widget.isAr
-                      ? 'أبحث عن عقار للشراء أو الإيجار.'
-                      : 'Looking to buy or rent.',
+                  t.developerComingSoonBody,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 12),
                 ),
-                onTap: () => Navigator.pop(ctx, 'request'),
+                onTap: () => Navigator.pop(ctx, 'developer'),
               ),
             ],
           ),
         );
       },
     );
+  }
+
+  Future<void> _openPlusPhotographer() async {
+    PhotographerProfile? p;
+    try {
+      p = await PhotographerService(_sb).myProfile();
+    } catch (_) {}
+    if (!mounted) return;
+    await _pushPlusForm<void>(
+      (_) => p != null && p.isVerified
+          ? PhotographerHubPage(lang: widget.lang, embedAppBar: true)
+          : PhotographerJoinPage(lang: widget.lang, embedAppBar: true),
+    );
+  }
+
+  Future<void> _guestOpenCenterPlusFlow() async {
+    final choice = await _showPlusComposerChoices(guest: true);
     if (!mounted || choice == null) return;
+    if (choice == 'photographer' || choice == 'developer') {
+      final res = await showGuestAuthRequiredSheet(
+        context: context,
+        isAr: widget.isAr,
+      );
+      if (!mounted || res == null) return;
+      if (res == GuestAuthRequiredResult.login) {
+        _navigateToLogin();
+      } else {
+        await Navigator.of(context, rootNavigator: true).pushNamed('/register');
+      }
+      return;
+    }
     final forListing = choice == 'listing';
     final gate = await showGuestCreateContentGateSheet(
       context: context,
@@ -732,133 +830,57 @@ extension _UserDashboardStateActions on _UserDashboardState {
   }
 
   Future<void> _runAddPropertyListingFlow() async {
+    _rememberPlusOriginTab();
     if (_needsRegaGateBeforeAddProperty()) {
-      final res = await _pushPlusForm<bool>(
-        MaterialPageRoute<bool>(
-          fullscreenDialog: true,
-          builder: (_) => MarketingListingEntryPage(
-            userId: _uid,
-            lang: widget.lang,
-            accountType: _accountType,
-            embedAppBar: true,
-          ),
+      final res = await _pushPlusForm<Object?>(
+        (_) => MarketingListingEntryPage(
+          userId: _uid,
+          lang: widget.lang,
+          accountType: _accountType,
+          embedAppBar: true,
         ),
       );
 
       if (!mounted) return;
-
-      if (res == true) {
-        await _reloadAll();
-        if (mounted) _ss(() => _tabIndex = 0);
-      }
+      await _afterPlusComposerClosed(res);
       return;
     }
 
-    final res = await _pushPlusForm<bool>(
-      MaterialPageRoute<bool>(
-        fullscreenDialog: true,
-        builder: (_) => addp.AddPropertyPage(
-          userId: _uid,
-          lang: widget.lang,
-          embedAppBar: true,
-        ),
+    final res = await _pushPlusForm<Object?>(
+      (_) => addp.AddPropertyPage(
+        userId: _uid,
+        lang: widget.lang,
+        embedAppBar: true,
       ),
     );
 
     if (!mounted) return;
-
-    if (res == true) {
-      await _reloadAll();
-      if (mounted) _ss(() => _tabIndex = 0);
-    }
+    await _afterPlusComposerClosed(res);
   }
 
-  /// زر + العائم: إعلان عقاري أو طلب عقاري (بدون دمج الشاشتين).
+  /// زر +: إعلان، طلب، مصور عقاري، ومطور (قريباً).
   Future<void> _openCenterPlus() async {
+    _rememberPlusOriginTab();
     if (_isGuest) {
       await _guestOpenCenterPlusFlow();
       return;
     }
 
-    if (_accountRoleLoaded &&
-        _orgNavResolved &&
-        !_canPlusSheetAddProperty &&
-        !_canPlusSheetAddRequest) {
-      _showNotification(
-        widget.isAr ? 'تنبيه' : 'Notice',
-        widget.isAr
-            ? 'لا تملك صلاحية إضافة عقار أو طلب عقاري. راجع مدير المنشأة.'
-            : 'You do not have permission to add a listing or request. Ask your organization owner.',
-        isError: false,
-      );
-      return;
-    }
-
-    final cs = Theme.of(context).colorScheme;
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_canPlusSheetAddProperty)
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: cs.primaryContainer,
-                    child: Icon(
-                      Icons.domain_add_rounded,
-                      color: cs.onPrimaryContainer,
-                    ),
-                  ),
-                  title: Text(
-                    widget.isAr ? 'إعلان عقاري' : 'Property listing',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(
-                    widget.isAr
-                        ? 'نشر عقار للبيع أو الإيجار (مالك أو مسوّق معتمد وفق صلاحياتك).'
-                        : 'Publish a property for sale or rent (owner or permitted marketer).',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  onTap: () => Navigator.pop(ctx, 'listing'),
-                ),
-              if (_canPlusSheetAddRequest)
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: cs.secondaryContainer,
-                    child: Icon(
-                      Icons.travel_explore_rounded,
-                      color: cs.onSecondaryContainer,
-                    ),
-                  ),
-                  title: Text(
-                    widget.isAr ? 'طلب عقاري' : 'Property request',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(
-                    widget.isAr
-                        ? 'أبحث عن عقار للشراء أو الإيجار — يظهر طلبك في الرئيسية للمهتمين.'
-                        : 'Looking to buy or rent — your request appears on the home feed.',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  onTap: () => Navigator.pop(ctx, 'request'),
-                ),
-            ],
-          ),
-        );
-      },
-    );
+    final choice = await _showPlusComposerChoices(guest: false);
 
     if (!mounted || choice == null) return;
 
-    // بعد إغلاق الورقة: إطاران قصيران حتى لا يُبتلع مسار النموذج مع إغلاق الـ modal.
+    _rememberPlusOriginTab();
     final selected = choice;
-    await Future<void>.delayed(Duration.zero);
-    if (!mounted) return;
-    await Future<void>.delayed(const Duration(milliseconds: 16));
-    if (!mounted) return;
+
+    if (selected == 'photographer') {
+      await _openPlusPhotographer();
+      return;
+    }
+    if (selected == 'developer') {
+      await showDeveloperComingSoonDialog(context: context);
+      return;
+    }
 
     if (selected == 'request') {
       if (_isMarketingAccountType &&
@@ -868,24 +890,20 @@ extension _UserDashboardStateActions on _UserDashboardState {
         return;
       }
       final res = await _pushPlusForm<Object?>(
-        MaterialPageRoute<Object?>(
-          fullscreenDialog: true,
-          builder: (_) => CreateMarketPropertyRequestPage(
-            userId: _uid,
-            lang: widget.lang,
-            embedAppBar: true,
-          ),
+        (_) => CreateMarketPropertyRequestPage(
+          userId: _uid,
+          lang: widget.lang,
+          embedAppBar: true,
         ),
       );
       if (!mounted) return;
-      if (res == 'home' || res == true) {
-        await _reloadAll();
-        if (mounted) _ss(() => _tabIndex = 0);
-      } else if (res == 'another') {
-        await _reloadAll();
+      if (res == 'another') {
+        await _afterPlusComposerClosed(res);
         if (!mounted) return;
         unawaited(_openCreateMarketRequestOnly());
+        return;
       }
+      await _afterPlusComposerClosed(res);
       return;
     }
 
@@ -931,9 +949,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
       ownerForDetails = vis.isNotEmpty ? vis : null;
     }
 
-    await Navigator.of(context, rootNavigator: true).push<void>(
+    await _pushRootOverlay<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
+        settings: const RouteSettings(name: '/listing/details'),
         builder: (_) => details.PropertyDetailsPage(
           property: p,
           isAr: widget.isAr,
@@ -1253,7 +1272,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
   Future<String?> _askDeleteReason() async {
     final controller = TextEditingController();
 
-    final result = await showDialog<String>(
+    final result = await showAppDialog<String>(
       context: context,
       builder: (context) {
         bool submitting = false;
@@ -1468,7 +1487,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  Future<void> _addToCart(Property p) async {
+  Future<void> _addToCart(Property p, {bool preserveTab = false}) async {
     if (_isGuest) {
       _showLoginDialog();
       return;
@@ -1533,6 +1552,16 @@ extension _UserDashboardStateActions on _UserDashboardState {
         property: p,
         message: offerDraft.message,
       );
+      if (offerDraft.message.trim().isNotEmpty) {
+        try {
+          await _sb
+              .from('reservations')
+              .update({'applicant_note': offerDraft.message.trim()})
+              .eq('user_id', _uid)
+              .eq('property_id', p.id)
+              .inFilter('status', ['pending', 'paid', 'accepted']);
+        } catch (_) {}
+      }
 
       _propertyCache.clear();
       _profileCache.clear();
@@ -1553,15 +1582,22 @@ extension _UserDashboardStateActions on _UserDashboardState {
       );
 
       _ss(() {
-        if (_showBottomNavCart) _tabIndex = 3;
+        if (!preserveTab && _showBottomNavCart) {
+          _tabIndex = 3;
+          _cartPaneIndex = 1;
+        }
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
+      final mapped = RpcUserMessage.of(e, isAr: widget.isAr);
+      final generic = e.toString() == mapped;
       _showNotification(
         widget.isAr ? 'لا يمكن حجز هذا العقار' : 'Cannot reserve this property',
-        widget.isAr
-            ? 'هذا العقار غير متاح للحجز الآن'
-            : 'This property is not available for reservation now',
+        generic
+            ? (widget.isAr
+                ? 'هذا العقار غير متاح للحجز الآن'
+                : 'This property is not available for reservation now')
+            : mapped,
         isError: true,
       );
     }
@@ -1702,13 +1738,16 @@ extension _UserDashboardStateActions on _UserDashboardState {
       );
 
       _ss(() {
-        if (_showBottomNavCart) _tabIndex = 3;
+        if (_showBottomNavCart) {
+          _tabIndex = 3;
+          _cartPaneIndex = 1;
+        }
       });
     } catch (e) {
       if (!mounted) return;
       _showNotification(
         widget.isAr ? 'تعذر إتمام الصفقة' : 'Could not complete deal',
-        e.toString(),
+        RpcUserMessage.of(e, isAr: widget.isAr),
         isError: true,
       );
     }
@@ -1727,12 +1766,14 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
 
     try {
-      final ok = await showDialog<bool>(
+      final ok = await showAppDialog<bool>(
         context: context,
+        useRootNavigator: true,
         builder: (dCtx) {
           return AlertDialog(
             title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
             content: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1766,7 +1807,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
                     inputFormatters: latinDecimalNumberFormatters(),
                     decoration: InputDecoration(
                       labelText: widget.isAr
-                          ? 'سعر مقترح (${AppMoney.saudiRiyalSignUnicode})'
+                          ? 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})'
                           : 'Suggested price (SAR)',
                     ),
                   ),
@@ -1813,12 +1854,14 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
 
     try {
-      final ok = await showDialog<bool>(
+      final ok = await showAppDialog<bool>(
         context: context,
+        useRootNavigator: true,
         builder: (dCtx) {
           return AlertDialog(
             title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
             content: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1837,7 +1880,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
                   if (p.isAuction) ...[
                     Text(
                       widget.isAr
-                          ? 'آخر مزايدة (${AppMoney.saudiRiyalSignUnicode})'
+                          ? 'آخر مزايدة (${AppMoney.sarUiSuffix(isAr: true)})'
                           : 'Latest bid (SAR)',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
                             fontWeight: FontWeight.w800,
@@ -1952,65 +1995,95 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  Future<void> _completeSaleFromCart(String propertyId) async {
-    if (propertyId.trim().isEmpty) return;
-    final ok = await showAppConfirmDialog(
-      context: context,
-      title: widget.isAr ? 'إتمام الشراء' : 'Complete purchase',
-      message: widget.isAr
-          ? 'سيتم اعتماد الشراء وتسجيل الإعلان كمباع وإزالته من الرئيسية و«صفقاتي». لاحقاً يمكن ربط هذه الخطوة بالإدارة وتوليد عقد إتمام ودفع (Apple Pay / مدى / بطاقات بنكية / فيزا). حالياً يتم الإتمام كتسجيل شراء داخلي فقط. هل تؤكد؟'
-          : 'This confirms the purchase, marks the listing as sold, and removes it from the home feed and My deals. Later this can link to admin review, a sale-completion contract, and payments (Apple Pay, Mada, bank cards, Visa). For now it only records the purchase in the app. Confirm?',
-      confirmLabel: widget.isAr ? 'إتمام الشراء' : 'Complete purchase',
-      cancelLabel: widget.isAr ? 'إلغاء' : 'Cancel',
-      isDanger: true,
-    );
-    if (!ok || !mounted) return;
+  Future<void> _acceptIncomingMarketOffer(String offerId) async {
+    final oid = offerId.trim();
+    if (oid.isEmpty) return;
     try {
-      await MarketingFlowService(_sb).completePropertySale(propertyId);
-      _propertyCache.clear();
+      await MarketRequestOffersService(_sb).respondOffer(
+        offerId: oid,
+        accept: true,
+      );
+      if (!mounted) return;
       await Future.wait([
-        _loadCart(force: true),
-        _loadHome(force: true),
-        _loadMineAndOffers(force: true),
+        _loadMyMarketSubmissions(force: true, silent: true),
+        _loadIncomingMarketOffersOnMine(),
+        _loadMyMarketRequestOfferTracking(),
       ]);
       if (!mounted) return;
-      _ensureSubTabControllers();
-      final cleared = await _popBodyRoutesWithFormGuard();
-      if (!cleared || !mounted) return;
-      _ss(() => _tabIndex = 1);
-      if (!_isMarketerRole && _ownerTabsCtrl != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final c = _ownerTabsCtrl;
-          if (c != null && c.length > 7) {
-            c.animateTo(7);
-          }
-          _showNotification(
-            widget.isAr ? 'تم إتمام الشراء' : 'Purchase completed',
-            widget.isAr
-                ? 'سُجّل الإعلان كمباع ولم يعد يظهر للجمهور. تجد السجل في «صفحتي» → صفقات مكتملة.'
-                : 'The listing is marked sold and hidden from the public feed. Find it under My page → Completed deals.',
-          );
-        });
-      } else {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          _showNotification(
-            widget.isAr ? 'تم إتمام الشراء' : 'Purchase completed',
-            widget.isAr
-                ? 'سُجّل الإعلان كمباع ولم يعد يظهر للجمهور.'
-                : 'The listing is marked sold and hidden from the public feed.',
-          );
-        });
-      }
+      _ss(() => _cartPaneIndex = 0);
     } catch (e) {
       if (!mounted) return;
       _showNotification(
-        widget.isAr ? 'تعذر الإتمام' : 'Could not complete',
-        e.toString(),
+        widget.isAr ? 'تعذّر قبول العرض' : 'Could not accept offer',
+        RpcUserMessage.of(e, isAr: widget.isAr),
         isError: true,
       );
     }
+  }
+
+  Future<void> _completeIncomingMarketOffer(Map<String, dynamic> o) async {
+    final rid = (o['market_request_id'] ?? '').toString().trim();
+    if (rid.isEmpty) return;
+    String title = (o['_request_title'] ?? '').toString().trim();
+    if (title.isEmpty) {
+      for (final r in _myMarketSubmissions) {
+        if (r.id == rid) {
+          title = r.title;
+          break;
+        }
+      }
+    }
+    final deal = OpenAcceptedDeal(
+      kind: 'market_request',
+      id: (o['id'] ?? rid).toString(),
+      title: title,
+      role: 'owner',
+      requestId: rid,
+      offerId: (o['id'] ?? '').toString(),
+    );
+    final note = await showDealCompletionNoteSheet(context: context);
+    if (note == null || note.trim().isEmpty || !mounted) return;
+    await _submitDealCompletion(deal: deal, note: note.trim());
+  }
+
+  Future<void> _completeListingSaleFromOwner(String propertyId) =>
+      _completeSaleFromCart(propertyId);
+
+  Future<void> _acceptListingReservationFromOwner(Map r) async {
+    final id = (r['id'] ?? '').toString().trim();
+    if (id.isEmpty) return;
+    try {
+      await ReservationsService.acceptListingReservation(id);
+      if (!mounted) return;
+      await Future.wait([
+        _loadCart(force: true),
+        _loadMineAndOffers(force: true),
+      ]);
+    } catch (e) {
+      if (!mounted) return;
+      _showNotification(
+        widget.isAr ? 'تعذّر قبول الحجز' : 'Could not accept reservation',
+        RpcUserMessage.of(e, isAr: widget.isAr),
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> _completeSaleFromCart(String propertyId) async {
+    if (propertyId.trim().isEmpty) return;
+    final p = _cartPropertyById[propertyId] ??
+        _myPropertyById[propertyId] ??
+        _propertyCache[propertyId];
+    final deal = OpenAcceptedDeal(
+      kind: 'listing',
+      id: propertyId,
+      title: p?.title ?? '',
+      role: (p?.ownerId == _uid) ? 'owner' : 'partner',
+      propertyId: propertyId,
+    );
+    final note = await showDealCompletionNoteSheet(context: context);
+    if (note == null || note.trim().isEmpty || !mounted) return;
+    await _submitDealCompletion(deal: deal, note: note.trim());
   }
 
   Future<void> _relistCompletedPropertyFromCart(Property property) async {
@@ -2178,7 +2251,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final rid = requestId.trim();
     if (rid.isEmpty) return;
     final ar = widget.isAr;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: Text(ar ? 'حذف العرض وإرجاع الطلب للرئيسية' : 'Delete & restore'),
@@ -2306,40 +2379,30 @@ extension _UserDashboardStateActions on _UserDashboardState {
       if (!mounted) return;
       if (rega == null || rega.isEmpty) return;
 
-      final res = await _pushBody<bool>(
-        MaterialPageRoute<bool>(
-          fullscreenDialog: true,
-          builder: (_) => addp.AddPropertyPage(
-            userId: _uid,
-            lang: widget.lang,
-            initialRegaPayload: rega,
-            embedAppBar: true,
-          ),
+      _rememberPlusOriginTab();
+      final res = await _pushPlusForm<Object?>(
+        (_) => addp.AddPropertyPage(
+          userId: _uid,
+          lang: widget.lang,
+          initialRegaPayload: rega,
+          embedAppBar: true,
         ),
       );
       if (!mounted) return;
-      if (res == true) {
-        await _reloadAll();
-        if (mounted) _ss(() => _tabIndex = 0);
-      }
+      await _afterPlusComposerClosed(res);
       return;
     }
 
-    final res = await _pushBody<bool>(
-      MaterialPageRoute<bool>(
-        fullscreenDialog: true,
-        builder: (_) => addp.AddPropertyPage(
-          userId: _uid,
-          lang: widget.lang,
-          embedAppBar: true,
-        ),
+    _rememberPlusOriginTab();
+    final res = await _pushPlusForm<Object?>(
+      (_) => addp.AddPropertyPage(
+        userId: _uid,
+        lang: widget.lang,
+        embedAppBar: true,
       ),
     );
     if (!mounted) return;
-    if (res == true) {
-      await _reloadAll();
-      if (mounted) _ss(() => _tabIndex = 0);
-    }
+    await _afterPlusComposerClosed(res);
   }
 
   Future<void> _onHomeHideProperty(Property p) async {
@@ -2572,7 +2635,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       return _subscriptionGate.allows(action);
     }
 
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         icon: const Icon(Icons.lock_outline),
@@ -2642,14 +2705,11 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
       final isAr = widget.isAr;
       final endLocal = end.toLocal();
-      final formatted = DateFormat(
-        'EEEE d MMM yyyy — HH:mm',
-        isAr ? 'ar' : 'en',
-      ).format(endLocal);
+      final formatted = DateHelper.fmtCivilDateTime(endLocal, isAr: isAr);
       final days = diff.inDays;
       final hours = diff.inHours - days * 24;
 
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(

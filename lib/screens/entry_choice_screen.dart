@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 // lib/screens/entry_choice_screen.dart
 import 'dart:async' show unawaited;
 
@@ -22,6 +24,7 @@ import '../services/fast_login_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_about_credits.dart';
 import '../widgets/session_identity_panel.dart';
+import '../shared/core/app_flags.dart';
 
 class EntryChoiceScreen extends StatefulWidget {
   const EntryChoiceScreen({super.key});
@@ -85,6 +88,11 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (kIsOpsDesktopSurface) {
+        Navigator.of(context).pushReplacementNamed('/login');
+        return;
+      }
       unawaited(_loadPackageVersionLine());
       _loadProfileIfSignedIn();
     });
@@ -273,18 +281,21 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
-    final tr = _t(langNotifier.value);
+    return ValueListenableBuilder<String>(
+      valueListenable: langNotifier,
+      builder: (context, _, __) {
+        final theme = Theme.of(context);
+        final cs = theme.colorScheme;
+        final isDark = theme.brightness == Brightness.dark;
+        final tr = _t(langNotifier.value);
 
-    final bgTop = isDark ? const Color(0xFF071015) : const Color(0xFFF2FBF8);
-    final bgBottom = isDark ? const Color(0xFF05070C) : const Color(0xFFF7F7F7);
+        final bgTop = isDark ? const Color(0xFF071015) : const Color(0xFFF2FBF8);
+        final bgBottom = isDark ? const Color(0xFF05070C) : const Color(0xFFF7F7F7);
 
-    final user = _sb.auth.currentUser;
-    final showSignedBox = user != null;
+        final user = _sb.auth.currentUser;
+        final showSignedBox = user != null;
 
-    return Directionality(
+        return Directionality(
       textDirection: _isEnglish ? TextDirection.ltr : TextDirection.rtl,
       child: Scaffold(
         backgroundColor: isDark ? Colors.black : Colors.white,
@@ -387,15 +398,16 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                                     filled: true,
                                     onTap: showSignedBox ? _continueAsUser : _goUser,
                                   ),
-                                  _buildChoiceTile(
-                                    isNarrow: isNarrow,
-                                    title: tr['asGuest']!,
-                                    icon: Icons.person_outline_rounded,
-                                    topBadgeIcon: Icons.how_to_reg_outlined,
-                                    accent: primary,
-                                    filled: false,
-                                    onTap: _goGuest,
-                                  ),
+                                  if (!kIsOpsDesktopSurface)
+                                    _buildChoiceTile(
+                                      isNarrow: isNarrow,
+                                      title: tr['asGuest']!,
+                                      icon: Icons.person_outline_rounded,
+                                      topBadgeIcon: Icons.how_to_reg_outlined,
+                                      accent: primary,
+                                      filled: false,
+                                      onTap: _goGuest,
+                                    ),
                                 ],
                               ),
                               const SizedBox(height: 16),
@@ -442,6 +454,15 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                                 ],
                               ),
                               if (kIsWeb) const SizedBox(height: 8),
+                              Align(
+                                alignment: AlignmentDirectional.center,
+                                child: TextButton(
+                                  onPressed: () => unawaited(
+                                    setAppLang(_isEnglish ? 'ar' : 'en'),
+                                  ),
+                                  child: Text(_isEnglish ? 'العربية' : 'English'),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -454,6 +475,8 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
           ),
         ),
       ),
+    );
+      },
     );
   }
 

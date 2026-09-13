@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
+import '../payment/platform_fee_catalog.dart';
 import '../workflow/app_role_helper.dart';
 import '../../services/individual_market_offer_service.dart';
 import '../../services/subscription_service.dart';
@@ -126,7 +127,7 @@ class AppSubscriptionGate extends ChangeNotifier {
         return isMarketingAccount
             ? (listingRequestsAllowance?.shortStatusAr() ??
                 'اشترك في الباقة المناسبة لنشر طلباتك في الرئيسية.')
-            : 'نشر الطلب العقاري في الرئيسية مجاني — ادفع 30 ر.س فقط عند اختيار «فوري».';
+            : 'نشر الطلب العقاري في الرئيسية مجاني — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: true) ?? 'ادفع فقط عند اختيار «فوري»'}.';
       case SubscriptionGateAction.addPropertyListing:
         if (isMarketingAccount) {
           return 'اشترك في الباقة المناسبة لنوع حسابك (أساسية/احترافية/تميز) لنشر الإعلانات.';
@@ -148,7 +149,7 @@ class AppSubscriptionGate extends ChangeNotifier {
         return isMarketingAccount
             ? (listingRequestsAllowance?.shortStatusEn() ??
                 'Subscribe to post property requests on the home feed.')
-            : 'Posting on the home feed is free — pay SAR 30 only when you choose Instant.';
+            : 'Posting on the home feed is free — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: false) ?? 'pay only when you choose Instant'}.';
       case SubscriptionGateAction.addPropertyListing:
         if (isMarketingAccount) {
           return 'Subscribe to the plan for your account type to publish listings.';
@@ -174,7 +175,7 @@ class AppSubscriptionGate extends ChangeNotifier {
 
   void bindLifecycle() {
     final uid = _sb.auth.currentUser?.id;
-    if (!kIsWeb && uid != null && uid.isNotEmpty) {
+    if (uid != null && uid.isNotEmpty) {
       SubscriptionService.ensureRealtimeChannelFor(_sb, uid);
     }
     _subEvents ??= SubscriptionService.subscriptionEvents.listen((_) {
@@ -289,16 +290,25 @@ class AppSubscriptionGate extends ChangeNotifier {
           organizationId: oid,
         ),
         svc.fetchListingRequestsAllowance(organizationId: oid),
+        svc.myEntitlements(),
       ]);
 
       final ctx = results[0];
       subscriptionRow = results[1] as Map<String, dynamic>?;
       marketOfferAllowance = results[2] as IndividualMarketOfferAllowance;
       final listingRaw = results[3] as Map<String, dynamic>;
+      final entitlements = results[4] is Map
+          ? Map<String, dynamic>.from(results[4] as Map)
+          : <String, dynamic>{};
 
       if (ctx is SubscriptionBillingContext) {
         marketingFeatureAccess =
             ctx.ok && ctx.hasMarketingFeatureAccess;
+      }
+      if (entitlements['ok'] == true && entitlements['active'] == true) {
+        marketingFeatureAccess =
+            entitlements['can_use_marketing_workflow'] == true ||
+            marketingFeatureAccess;
       }
       if (!marketingFeatureAccess) {
         marketingFeatureAccess =

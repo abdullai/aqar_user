@@ -23,6 +23,8 @@ class NafathSessionResult {
     this.messageAr,
     this.messageEn,
     this.rawError,
+    this.accessToken,
+    this.refreshToken,
   });
 
   final NafathSessionMode mode;
@@ -33,6 +35,8 @@ class NafathSessionResult {
   final String? messageAr;
   final String? messageEn;
   final String? rawError;
+  final String? accessToken;
+  final String? refreshToken;
 
   static NafathSessionResult fromJson(Map<String, dynamic> j) {
     final modeStr = (j['mode'] ?? '').toString().trim();
@@ -62,6 +66,8 @@ class NafathSessionResult {
       messageAr: j['message_ar']?.toString(),
       messageEn: j['message_en']?.toString(),
       rawError: j['error']?.toString(),
+      accessToken: (j['access_token'] ?? j['accessToken'])?.toString(),
+      refreshToken: (j['refresh_token'] ?? j['refreshToken'])?.toString(),
     );
   }
 }

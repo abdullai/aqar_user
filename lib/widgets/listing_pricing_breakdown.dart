@@ -33,19 +33,22 @@ class ListingInvoiceModel {
     return (v * 100).round() / 100.0;
   }
 
+  /// `true` إن كانت الضريبة مضمّنة في السعر المدخل ويجب تفصيلها في الفاتورة.
+  bool get vatApplies => priceIncludesVat && vatRate > 0;
+
   /// السعر الأساسي قبل الضريبة (المبلغ الذي يستحقّه البائع فعلياً).
   double get basePrice {
-    if (priceIncludesVat) {
+    if (vatApplies) {
       return _round2(enteredPrice / (1.0 + vatRate));
     }
     return _round2(enteredPrice);
   }
 
-  /// قيمة الضريبة المضافة (موجبة دائماً).
-  double get vatAmount => _round2(basePrice * vatRate);
+  /// قيمة الضريبة المضافة — صفر إذا اختار المعلن سعراً بدون ضريبة.
+  double get vatAmount => vatApplies ? _round2(basePrice * vatRate) : 0.0;
 
-  /// الإجمالي بعد الضريبة (= السعر المدخل إن كان شامل، وإلا = السعر + الضريبة).
-  double get totalWithVat => _round2(basePrice + vatAmount);
+  /// الإجمالي بعد الضريبة (= السعر المدخل إن كان شامل، وإلا = الأساسي).
+  double get totalWithVat => vatApplies ? _round2(basePrice + vatAmount) : basePrice;
 
   /// قيمة عمولة التسويق.
   double get commissionTotal {
@@ -96,65 +99,62 @@ class ListingPricingBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // — نص الضريبة يتكيّف مع إجابة السؤال الأول.
+    final showVat = invoice.vatApplies;
     final vatPct = (invoice.vatRate * 100);
     final vatPctStr =
         vatPct == vatPct.roundToDouble() ? vatPct.toInt().toString() : vatPct.toStringAsFixed(1);
     final vatLabel = isAr
-        ? (invoice.priceIncludesVat
-            ? 'ضريبة القيمة المضافة ($vatPctStr%) — محتسبة من السعر الإجمالي'
-            : 'ضريبة القيمة المضافة ($vatPctStr%) — تُضاف على السعر الأساسي')
-        : (invoice.priceIncludesVat
-            ? 'VAT ($vatPctStr%) — included in entered total'
-            : 'VAT ($vatPctStr%) — added on top of base price');
+        ? 'ضريبة القيمة المضافة ($vatPctStr%) — محتسبة ضمن السعر'
+        : 'VAT ($vatPctStr%) — included in entered total';
 
-    // — نص العمولة يتكيّف مع نوع الخيار في «إضافة الإعلان».
     final commissionPct = (invoice.commissionRate * 100);
     final commissionPctStr = commissionPct == commissionPct.roundToDouble()
         ? commissionPct.toInt().toString()
         : commissionPct.toStringAsFixed(1);
     final commissionLabel = switch (invoice.commissionKind) {
       'percent' => isAr
-          ? 'عمولة التسويق العقاري — نسبة $commissionPctStr% من السعر الأساسي'
-          : 'Marketing commission — $commissionPctStr% of base price',
+          ? 'عمولة التسويق العقاري — $commissionPctStr%'
+          : 'Marketing commission — $commissionPctStr%',
       'fixed' => isAr
-          ? 'عمولة التسويق العقاري — مبلغ مقطوع متفق عليه'
-          : 'Marketing commission — agreed fixed amount',
+          ? 'عمولة التسويق العقاري — مبلغ مقطوع'
+          : 'Marketing commission — fixed amount',
       _ => isAr ? 'عمولة التسويق العقاري' : 'Marketing commission',
     };
 
+    final showCommission = invoice.commissionTotal > 0 &&
+        (invoice.commissionKind == 'percent' ||
+            invoice.commissionKind == 'fixed');
+    final showFinal = showVat || showCommission;
+
     final lines = <Widget>[
       _InvoiceLine(
-        label: isAr ? 'السعر الأساسي (قبل الضريبة)' : 'Base price (pre-VAT)',
+        label: showVat
+            ? (isAr ? 'السعر الأساسي (قبل الضريبة)' : 'Base price (pre-VAT)')
+            : (isAr ? 'السعر الأساسي' : 'Base price'),
         value: invoice.basePrice,
         currencyCode: invoice.currencyCode,
         isAr: isAr,
         emphasize: true,
       ),
-      const SizedBox(height: 4),
-      _InvoiceLine(
-        label: vatLabel,
-        value: invoice.vatAmount,
-        currencyCode: invoice.currencyCode,
-        isAr: isAr,
-        deemphasize: invoice.priceIncludesVat,
-        signPrefix: invoice.priceIncludesVat ? '' : '+ ',
-      ),
-      // عند السعر الشامل للضريبة: «الإجمالي مع الضريبة» = السعر المدخل
-      // فيُكرّر قيمة العقار — نتخطّاه ونبقي الأساسي + الضريبة + العمولة + النهائي.
-      if (!invoice.priceIncludesVat) ...[
+      if (showVat) ...[
         const SizedBox(height: 4),
         _InvoiceLine(
-          label: isAr
-              ? 'الإجمالي مع الضريبة (السعر + 5%)'
-              : 'Total with VAT (price + 5%)',
+          label: vatLabel,
+          value: invoice.vatAmount,
+          currencyCode: invoice.currencyCode,
+          isAr: isAr,
+          deemphasize: true,
+        ),
+        const SizedBox(height: 4),
+        _InvoiceLine(
+          label: isAr ? 'الأساسي مع الضريبة' : 'Base with VAT',
           value: invoice.totalWithVat,
           currencyCode: invoice.currencyCode,
           isAr: isAr,
           emphasize: true,
         ),
       ],
-      if (invoice.commissionTotal > 0) ...[
+      if (showCommission) ...[
         const Divider(height: 18),
         _InvoiceLine(
           label: commissionLabel,
@@ -164,18 +164,18 @@ class ListingPricingBreakdown extends StatelessWidget {
           signPrefix: '+ ',
         ),
       ],
-      const Divider(height: 22),
-      _InvoiceLine(
-        label: isAr
-            ? 'المجموع النهائي (الأساسي + الضريبة + العمولة)'
-            : 'Final total (base + VAT + commission)',
-        value: invoice.finalTotal,
-        currencyCode: invoice.currencyCode,
-        isAr: isAr,
-        big: true,
-        emphasize: true,
-        highlight: true,
-      ),
+      if (showFinal) ...[
+        const Divider(height: 22),
+        _InvoiceLine(
+          label: isAr ? 'المجموع النهائي' : 'Final total',
+          value: invoice.finalTotal,
+          currencyCode: invoice.currencyCode,
+          isAr: isAr,
+          big: true,
+          emphasize: true,
+          highlight: true,
+        ),
+      ],
     ];
 
     return Container(

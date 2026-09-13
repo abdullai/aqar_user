@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/market/instant_market_request_feed.dart';
+import '../core/payment/platform_fee_catalog.dart';
 import '../models/market_property_request_priority.dart';
 import '../models/market_property_request_row.dart';
 
@@ -94,7 +95,7 @@ class InstantMarketRequestBadge extends StatelessWidget {
   }
 }
 
-/// صف مميزات الطلب الفوري (مدفوع 30 ر.س).
+/// صف مميزات الطلب الفوري (المبلغ من كتالوج القاعدة).
 class InstantMarketRequestFeatureStrip extends StatelessWidget {
   const InstantMarketRequestFeatureStrip({
     super.key,
@@ -106,16 +107,18 @@ class InstantMarketRequestFeatureStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final fee = PlatformFeeCatalog.of(context, listen: true)
+        .instantPhrase(isAr: isAr);
     final items = isAr
-        ? const [
+        ? [
             ('أسبوع', 'أولوية في منطقتك'),
             ('72 س', 'تعزيز باقي المناطق'),
-            ('30 ر.س', 'عند اختيار «فوري» فقط'),
+            if (fee.isNotEmpty) (fee, 'عند اختيار «فوري» فقط'),
           ]
-        : const [
+        : [
             ('1 week', 'Top in your region'),
             ('72h', 'Boost elsewhere'),
-            ('SAR 30', 'When you choose Instant'),
+            if (fee.isNotEmpty) (fee, 'When you choose Instant'),
           ];
 
     return Wrap(

@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -13,6 +15,7 @@ import '../core/config/app_config.dart';
 import '../core/branding/branding_logo_image.dart';
 import '../core/listing/listing_media_urls.dart';
 import '../core/listing/property_listing_display.dart';
+import '../core/l10n/locale_content.dart';
 import '../core/listing/property_type_catalog.dart';
 import '../core/location/map_picker_geolocation.dart';
 import '../core/market/instant_market_request_feed.dart';
@@ -20,8 +23,10 @@ import '../core/utils/app_money.dart';
 import '../core/workflow/listing_workflow_stage.dart';
 import '../models/market_property_request_row.dart';
 import '../models/property.dart';
+import '../services/saudi_locations_service.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/instant_market_request_badge.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 
 /// طابع خريطة هادئ يُبرز الدبابيس دون ازدحام POI.
 const String _kElegantMapStyle = '''
@@ -141,9 +146,13 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
   bool _locating = false;
   String? _mapHint;
   bool _cardCollapsed = false;
+  Timer? _hintTimer;
 
   /// عادي / قمري / تضاريس / هجين. الافتراضي «عادي» احتراماً لتجربة المستخدم.
   MapType _mapType = MapType.normal;
+
+  /// إحداثيات الطلبات بعد الدبوس الصريح أو مركز المدينة.
+  final Map<String, LatLng> _requestPositions = {};
 
   bool get _isAr => widget.isAr;
 
@@ -157,6 +166,12 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     }
     _selected = _initialSelection();
     unawaited(_rebuildMarkers());
+  }
+
+  @override
+  void dispose() {
+    _hintTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -192,6 +207,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
                   r,
                   isAr: _isAr,
                   coverPublicUrl: widget.requestCoverImageUrl?.call(r),
+                  position: _requestPositions[r.id],
                 ),
               )
               .whereType<_MapDiscoveryEntry>();
@@ -249,7 +265,63 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     return 4.85;
   }
 
+  Future<void> _resolveRequestPositions() async {
+    if (widget.listingsOnly) {
+      _requestPositions.clear();
+      return;
+    }
+    final next = <String, LatLng>{};
+    for (final r in [
+      ...widget.requests,
+      if (widget.focusRequest != null &&
+          !widget.requests.any((x) => x.id == widget.focusRequest!.id))
+        widget.focusRequest!,
+    ]) {
+      if (!marketRequestEligibleForPublicMap(r)) continue;
+      final lat = r.latitude;
+      final lng = r.longitude;
+      if (_coordsOk(lat, lng)) {
+        next[r.id] = LatLng(lat!, lng!);
+        continue;
+      }
+      final cached = _requestPositions[r.id];
+      if (cached != null) {
+        next[r.id] = cached;
+        continue;
+      }
+      try {
+        final hit = await SaudiLocationsService.instance.findCoordsForPlace(
+          city: r.city,
+          governorate: r.governorateLabel,
+          region: r.regionLabel,
+        );
+        if (hit != null) {
+          next[r.id] = _jitterCityPoint(hit.lat, hit.lng, r.id);
+        }
+      } catch (_) {}
+    }
+    _requestPositions
+      ..clear()
+      ..addAll(next);
+  }
+
+  static bool _coordsOk(double? lat, double? lng) {
+    if (lat == null || lng == null) return false;
+    if (lat.isNaN || lng.isNaN) return false;
+    if (lat.abs() < 1e-5 && lng.abs() < 1e-5) return false;
+    return true;
+  }
+
+  static LatLng _jitterCityPoint(double lat, double lng, String id) {
+    final h = id.hashCode;
+    final dLat = ((h % 21) - 10) * 0.0036;
+    final dLng = (((h ~/ 21) % 21) - 10) * 0.0036;
+    return LatLng(lat + dLat, lng + dLng);
+  }
+
   Future<void> _rebuildMarkers() async {
+    await SaudiRiyalSymbolIcon.ensurePictureLoaded();
+    await _resolveRequestPositions();
     final entries = _visibleEntries;
     if (mounted) setState(() => _buildingMarkers = true);
     final markers = <Marker>{};
@@ -380,6 +452,18 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     }
   }
 
+  void _showMapHint(String message, {Duration? autoHide}) {
+    _hintTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _mapHint = message);
+    final hideAfter = autoHide;
+    if (hideAfter == null) return;
+    _hintTimer = Timer(hideAfter, () {
+      if (!mounted) return;
+      setState(() => _mapHint = null);
+    });
+  }
+
   Future<void> _locateMe() async {
     if (_locating) return;
     setState(() {
@@ -391,19 +475,14 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
       final pos = outcome.position;
       if (outcome.status == MapPickerLocateStatus.ok && pos != null) {
         await _controller?.animateCamera(CameraUpdate.newLatLngZoom(pos, 14));
-        if (mounted) {
-          setState(() {
-            _mapHint = _isAr
-                ? 'تم تقريب الخريطة حول موقعك الحالي.'
-                : 'Map centered around your current location.';
-          });
-        }
+        // لا نعرض شريط «تم تقريب الخريطة…» — يكفي تحريك الكاميرا.
       } else if (mounted) {
-        setState(() {
-          _mapHint = _isAr
+        _showMapHint(
+          _isAr
               ? 'لم يتم السماح بالموقع. يمكنك الاستمرار بتحريك الخريطة يدويًا.'
-              : 'Location was not allowed. You can still explore manually.';
-        });
+              : 'Location was not allowed. You can still explore manually.',
+          autoHide: const Duration(seconds: 4),
+        );
       }
     } finally {
       if (mounted) setState(() => _locating = false);
@@ -494,13 +573,33 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
       color: ink,
       maxWidth: 72,
     );
+    final priceDigits = AppMoney.stripSarMarks(priceLine).trim();
+    final priceHasDigits = RegExp(r'\d').hasMatch(priceDigits);
+    final showSar = priceHasDigits &&
+        !priceDigits.contains('م²') &&
+        !priceDigits.toLowerCase().contains('m²');
     final pPrice = paintLine(
-      priceLine,
+      showSar ? priceDigits : (priceDigits.isEmpty ? priceLine : priceDigits),
       fontSize: selected ? 14.5 : 13.2,
       weight: FontWeight.w900,
       color: ink,
       maxWidth: 168,
     );
+    final sarPainter = !isAr && showSar
+        ? paintLine(
+            'SAR',
+            fontSize: selected ? 10.4 : 9.6,
+            weight: FontWeight.w800,
+            color: ink,
+            maxWidth: 48,
+          )
+        : null;
+    final symbolH = pPrice.height;
+    final symbolSize = SaudiRiyalSymbolIcon.canvasSizeFor(symbolH);
+    final sarGap = 3.0 * dpr;
+    final currencyW = !showSar
+        ? 0.0
+        : (isAr ? symbolSize.width : (sarPainter?.width ?? 0));
     final pTitle = paintLine(
       titleLine,
       fontSize: selected ? 11.4 : 10.6,
@@ -517,11 +616,11 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     );
 
     final contentW = math.max(
-      pPrice.width + pBadge.width + 48 * dpr,
+      pPrice.width + currencyW + (showSar ? sarGap : 0) + pBadge.width + 48 * dpr,
       math.max(pTitle.width, pPlace.width),
     );
     final width =
-        (math.min(260.0, math.max(128.0, contentW / dpr + 28)) * dpr);
+        (math.min(280.0, math.max(128.0, contentW / dpr + 36)) * dpr);
     final tipH = 14.0 * dpr;
     final padX = 12.0 * dpr;
     final padTop = 9.0 * dpr;
@@ -600,10 +699,34 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     );
 
     final priceY = padTop + (badgeH - pPrice.height) / 2;
-    pPrice.paint(
-      canvas,
-      Offset(width - padX - pPrice.width, priceY),
-    );
+    final priceGroupW = pPrice.width + (showSar ? sarGap + currencyW : 0);
+    final priceGroupLeft = width - padX - priceGroupW;
+    if (isAr && showSar) {
+      SaudiRiyalSymbolIcon.paintOnCanvas(
+        canvas,
+        offset: Offset(
+          priceGroupLeft,
+          priceY + (pPrice.height - symbolSize.height) / 2,
+        ),
+        height: symbolH,
+        color: ink,
+      );
+      pPrice.paint(
+        canvas,
+        Offset(priceGroupLeft + currencyW + sarGap, priceY),
+      );
+    } else {
+      pPrice.paint(canvas, Offset(priceGroupLeft, priceY));
+      if (showSar && sarPainter != null) {
+        sarPainter.paint(
+          canvas,
+          Offset(
+            priceGroupLeft + pPrice.width + sarGap,
+            priceY + (pPrice.height - sarPainter.height) / 2,
+          ),
+        );
+      }
+    }
 
     final titleY = padTop + badgeH + gap + 1 * dpr;
     pTitle.paint(canvas, Offset((width - pTitle.width) / 2, titleY));
@@ -708,9 +831,6 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
           leading: !widget.embedAppBar
               ? AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           title: Text(
@@ -948,9 +1068,19 @@ class _MapDiscoveryEntry {
       key: 'property_${p.id}',
       position: LatLng(lat, lng),
       title: PropertyListingDisplay.displayListingTitle(p, isAr),
-      city: PropertyListingDisplay.cityLine(p) == '-'
-          ? p.city
-          : PropertyListingDisplay.cityLine(p),
+      city: LocaleContent.forUi(
+        () {
+          final line = PropertyListingDisplay.addressLine(
+            p,
+            isAr: isAr,
+            separator: ' — ',
+          ).trim();
+          if (line.isNotEmpty) return line;
+          final c = PropertyListingDisplay.cityLine(p);
+          return c == '-' ? p.city : c;
+        }(),
+        isAr: isAr,
+      ),
       amountLabel: soldLike
           ? (isAr ? 'مبيوع' : 'Sold')
           : _amountLabelForProperty(p, isAr: isAr),
@@ -970,9 +1100,10 @@ class _MapDiscoveryEntry {
     MarketPropertyRequestRow r, {
     required bool isAr,
     String? coverPublicUrl,
+    LatLng? position,
   }) {
-    final lat = r.latitude;
-    final lng = r.longitude;
+    final lat = position?.latitude ?? r.latitude;
+    final lng = position?.longitude ?? r.longitude;
     if (lat == null || lng == null || lat == 0 || lng == 0) return null;
     final cover = (coverPublicUrl ?? '').trim();
     final type = PropertyTypeCatalog.label(r.propertyType, isAr);
@@ -983,8 +1114,8 @@ class _MapDiscoveryEntry {
       key: 'request_${r.id}',
       position: LatLng(lat, lng),
       title: PropertyListingDisplay.displayRequestTitle(r, isAr),
-      city: r.city,
-      amountLabel: _budget(r),
+      city: LocaleContent.forUi(r.city, isAr: isAr),
+      amountLabel: _budget(r, isAr: isAr),
       typeLabel: [type, purpose].where((s) => s.trim().isNotEmpty).join(' '),
       imageUrl: cover,
       request: r,
@@ -999,27 +1130,17 @@ class _MapDiscoveryEntry {
     return isAr ? 'السعر عند التواصل' : 'Price on request';
   }
 
-  /// سطر العنوان على الدبوس: نوع + غرض (فيلا للبيع) بدون مدينة مكررة.
+  /// سطر العنوان على الدبوس: نوع + غرض بلا مدينة أو حي.
   String mapMarkerTitleLine({required bool isAr}) {
     final p = property;
     if (p != null) {
-      final type = PropertyListingDisplay.typeLabelForProperty(p, isAr);
-      final purpose = PropertyListingDisplay.purposeBitShort(p, isAr);
-      final core = [type, purpose].where((s) => s.trim().isNotEmpty).join(' ');
-      if (core.isNotEmpty) return _ellipsis(core, isAr ? 26 : 32);
+      final core = PropertyListingDisplay.compactListingTitle(p, isAr);
+      if (core.isNotEmpty) return _ellipsis(core, isAr ? 22 : 28);
     }
     final r = request;
     if (r != null) {
-      final type = PropertyTypeCatalog.label(r.propertyType, isAr);
-      final purpose = r.purpose == 'rent'
-          ? (isAr ? 'للإيجار' : 'for rent')
-          : (isAr ? 'للشراء' : 'to buy');
-      final core = [
-        if (isAr) 'مطلوب',
-        type,
-        purpose,
-      ].where((s) => s.trim().isNotEmpty).join(' ');
-      if (core.isNotEmpty) return _ellipsis(core, isAr ? 26 : 32);
+      final core = PropertyListingDisplay.compactRequestTitle(r, isAr);
+      if (core.isNotEmpty) return _ellipsis(core, isAr ? 22 : 28);
     }
     var t = typeLabel.trim();
     if (t.isEmpty) {
@@ -1027,7 +1148,26 @@ class _MapDiscoveryEntry {
           ? (isAr ? 'طلب عقاري' : 'Market request')
           : (isAr ? 'إعلان عقاري' : 'Listing');
     }
-    return _ellipsis(t, isAr ? 26 : 32);
+    return _ellipsis(t, isAr ? 22 : 28);
+  }
+
+  String cardHeadline({required bool isAr, required bool compact}) {
+    if (compact) {
+      final p = property;
+      if (p != null) {
+        final t = PropertyListingDisplay.compactListingTitle(p, isAr);
+        if (t.isNotEmpty) return t;
+      }
+      final r = request;
+      if (r != null) {
+        final t = PropertyListingDisplay.compactRequestTitle(r, isAr);
+        if (t.isNotEmpty) return t;
+      }
+    }
+    if (title.trim().isNotEmpty) return title;
+    return request != null
+        ? (isAr ? 'طلب عقاري' : 'Market request')
+        : (isAr ? 'إعلان عقاري' : 'Listing');
   }
 
   /// المدينة + المساحة تحت العنوان (السعر في السطر العلوي).
@@ -1046,16 +1186,38 @@ class _MapDiscoveryEntry {
 
     final p = property;
     if (p != null) {
-      addPart(PropertyListingDisplay.cityLine(p));
+      addPart(
+        PropertyListingDisplay.addressLine(p, isAr: isAr, separator: ' — '),
+      );
       if (p.area > 0) {
-        final a = _compact(p.area);
+        final a = AppMoney.formatNumber(
+          p.area,
+          isAr: isAr,
+          maxFractionDigits: 0,
+        );
         addPart(isAr ? '$a م²' : '$a m²');
       }
     } else if (request != null) {
-      addPart(city);
+      addPart(
+        PropertyListingDisplay.addressLineFromParts(
+          region: request!.regionLabel,
+          city: request!.city,
+          district: request!.districts
+              .map((e) => e.trim())
+              .where((e) => e.isNotEmpty)
+              .join(isAr ? '، ' : ', '),
+          governorate: request!.governorateLabel,
+          isAr: isAr,
+          separator: ' — ',
+        ),
+      );
       final amin = request!.areaMinM2;
       if (amin != null && amin > 0) {
-        final a = _compact(amin);
+        final a = AppMoney.formatNumber(
+          amin,
+          isAr: isAr,
+          maxFractionDigits: 0,
+        );
         addPart(isAr ? 'من $a م²' : 'from $a m²');
       }
     } else {
@@ -1089,44 +1251,43 @@ class _MapDiscoveryEntry {
       final c = p.currentBid;
       if (c != null && c > 0) value = c;
     }
-    final m = _money(value, p.currency);
+    final m = _money(value, p.currency, isAr: isAr);
     if (m.isNotEmpty) return m;
     if (p.area > 0) {
       final u = isAr ? 'م²' : 'm²';
-      return '${_compact(p.area)} $u';
+      final a = AppMoney.formatNumber(
+        p.area,
+        isAr: isAr,
+        maxFractionDigits: 0,
+      );
+      return '$a $u';
     }
     return '';
   }
 
-  static String _money(double v, String currency) {
+  static String _money(double v, String currency, {required bool isAr}) {
     if (v <= 0) return '';
-    final n = _compact(v);
-    final cur =
-        currency.trim().toUpperCase() == 'SAR' || currency.trim().isEmpty
-            ? AppMoney.saudiRiyalSignUnicode
-            : currency.trim().toUpperCase();
-    return '$n $cur';
+    final n = AppMoney.formatNumber(v, isAr: isAr, maxFractionDigits: 0);
+    final cur = currency.trim().toUpperCase();
+    if (cur == 'SAR' || cur.isEmpty) {
+      return AppMoney.sarPhrase(n, isAr: isAr);
+    }
+    return isAr ? '$cur $n' : '$n $cur';
   }
 
-  static String _budget(MarketPropertyRequestRow r) {
+  static String _budget(MarketPropertyRequestRow r, {required bool isAr}) {
     final min = r.budgetMin ?? 0;
     final max = r.budgetMax ?? 0;
-    if (min > 0 && max > 0) {
-      return '${_compact(min)}-${_compact(max)} ${AppMoney.saudiRiyalSignUnicode}';
+    String fmt(double v) =>
+        AppMoney.formatNumber(v, isAr: isAr, maxFractionDigits: 0);
+    if (min > 0 && max > 0 && (min - max).abs() > 0.009) {
+      return '${AppMoney.sarPhrase(fmt(min), isAr: isAr)}'
+          ' ${isAr ? 'إلى' : 'to'} '
+          '${AppMoney.sarPhrase(fmt(max), isAr: isAr)}';
     }
-    if (max > 0) return '${_compact(max)} ${AppMoney.saudiRiyalSignUnicode}';
-    if (min > 0) return '${_compact(min)} ${AppMoney.saudiRiyalSignUnicode}+';
+    if (max > 0) return AppMoney.sarPhrase(fmt(max), isAr: isAr);
+    if (min > 0) return AppMoney.sarPhrase(fmt(min), isAr: isAr);
     return '';
-  }
-
-  static String _compact(double value) {
-    if (value >= 1000000) {
-      return '${(value / 1000000).toStringAsFixed(value >= 10000000 ? 0 : 1)}م';
-    }
-    if (value >= 1000) {
-      return '${(value / 1000).toStringAsFixed(value >= 100000 ? 0 : 1)}ك';
-    }
-    return value.toStringAsFixed(0);
   }
 }
 
@@ -1240,13 +1401,10 @@ class _MapDiscoveryCard extends StatelessWidget {
                           ),
                           Expanded(
                             child: Text(
-                              entry.title.trim().isEmpty
-                                  ? (isRequest
-                                      ? (isAr
-                                          ? 'طلب عقاري'
-                                          : 'Market request')
-                                      : (isAr ? 'إعلان عقاري' : 'Listing'))
-                                  : entry.title,
+                              entry.cardHeadline(
+                                isAr: isAr,
+                                compact: isCompact,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -1261,11 +1419,9 @@ class _MapDiscoveryCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                IconButton(
+                AppPageCloseButton(
                   visualDensity: VisualDensity.compact,
-                  tooltip: isAr ? 'إغلاق' : 'Close',
                   onPressed: onDismiss,
-                  icon: const Icon(Icons.close_rounded),
                 ),
               ],
             ),
@@ -1335,14 +1491,30 @@ class _MapDiscoveryCard extends StatelessWidget {
                             ),
                             if (entry.amountLabel.isNotEmpty) ...[
                               const SizedBox(height: 4),
-                              Text(
-                                entry.amountLabel,
-                                style: TextStyle(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 16,
+                              if (RegExp(r'\d').hasMatch(entry.amountLabel))
+                                Align(
+                                  alignment: AlignmentDirectional.centerStart,
+                                  child: AppMoneyInline(
+                                    amountText: AppMoney.stripSarMarks(
+                                      entry.amountLabel,
+                                    ),
+                                    isAr: isAr,
+                                    style: TextStyle(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                )
+                              else
+                                Text(
+                                  entry.amountLabel,
+                                  style: TextStyle(
+                                    color: colorScheme.primary,
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 16,
+                                  ),
                                 ),
-                              ),
                             ],
                             const SizedBox(height: 8),
                             LayoutBuilder(
@@ -1361,7 +1533,13 @@ class _MapDiscoveryCard extends StatelessWidget {
                                           label: FittedBox(
                                             fit: BoxFit.scaleDown,
                                             child: Text(
-                                              isAr ? 'التفاصيل' : 'Details',
+                                              isRequest
+                                                  ? (isAr
+                                                      ? 'تفاصيل الطلب'
+                                                      : 'Request details')
+                                                  : (isAr
+                                                      ? 'التفاصيل'
+                                                      : 'Details'),
                                               maxLines: 1,
                                               softWrap: false,
                                             ),
@@ -1588,7 +1766,9 @@ String staticMapUrlForPosition({
   int height = 360,
   int zoom = 15,
 }) {
-  final key = Uri.encodeComponent(AppConfig.googleMapsWebBrowserKey);
+  final key = AppConfig.googleMapsWebBrowserKey.trim();
+  if (key.isEmpty) return '';
+  final encoded = Uri.encodeComponent(key);
   // لون هوية موثوق + إخفاء نقاط الاهتمام لخريطة أنظف.
   const style = '&style=feature:poi%7Cvisibility:off'
       '&style=feature:transit%7Cvisibility:off'
@@ -1600,5 +1780,5 @@ String staticMapUrlForPosition({
       '&maptype=roadmap'
       '$style'
       '&markers=color:0x0B4D3E%7Csize:mid%7C$lat,$lng'
-      '&key=$key';
+      '&key=$encoded';
 }

@@ -1,5 +1,8 @@
+// ignore_for_file: unused_element, unused_field
+
 // lib/screens/verify_screen.dart
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart'
     show kIsWeb, kDebugMode, defaultTargetPlatform, TargetPlatform;
@@ -17,6 +20,7 @@ import 'package:pin_code_fields/pin_code_fields.dart';
 import '../core/security/screen_protection.dart';
 
 import 'package:provider/provider.dart';
+import '../core/navigation/sensitive_nav_policy.dart';
 import '../core/session/app_session.dart';
 import '../core/auth/auth_signed_out_navigation_guard.dart';
 import '../core/auth/auth_local_sign_out.dart';
@@ -25,6 +29,7 @@ import '../core/session/return_after_auth.dart';
 import '../core/session/web_auth_tab_guard.dart';
 
 import '../core/config/app_config.dart';
+import '../core/utils/date_helper.dart';
 import '../main.dart' show suspendAutoLock;
 
 import '../services/fast_login_service.dart';
@@ -35,11 +40,18 @@ import '../services/connectivity_guard.dart';
 import '../services/user_install_session_service.dart';
 import '../services/user_session_coordination_service.dart';
 import '../core/navigation/post_auth_navigation.dart';
-import '../routes.dart';
 import '../services/compliance_audit_service.dart';
 import '../services/session_tracking_service.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/auth/login_security_db.dart';
+import '../core/auth/in_app_otp_handoff.dart';
+import '../core/auth/otp_autofill.dart';
+import '../core/auth/otp_pin_layout.dart';
+import '../core/auth/auth_challenge_service.dart';
+import '../widgets/aqar_text_field.dart';
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_stable.dart';
+import '../core/platform/app_surface.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/compound_display_name.dart';
 import '../core/utils/dashboard_greeting.dart';
@@ -57,7 +69,16 @@ import '../theme.dart' show AqarAuthScrollBehavior;
 enum OtpSource { inApp, dev }
 
 class VerifyScreen extends StatefulWidget {
-  const VerifyScreen({super.key});
+  const VerifyScreen({
+    super.key,
+    this.initialUsername,
+    this.initialChallengeId,
+    this.initialCode,
+  });
+
+  final String? initialUsername;
+  final String? initialChallengeId;
+  final String? initialCode;
 
   @override
   State<VerifyScreen> createState() => _VerifyScreenState();
@@ -65,15 +86,9 @@ class VerifyScreen extends StatefulWidget {
 
 class _VerifyScreenState extends State<VerifyScreen>
     with WidgetsBindingObserver, TickerProviderStateMixin {
-  /// مرحلة تطوير/اختبار (ويب أو غيره): أضف عند البناء
-  /// `--dart-define=AQAR_DEV_OTP=1234` لقبول هذا الرمز دون التحقق عبر السيرفر.
-  /// لا تضع قيمة في إنتاج المتجر.
-  static const String _kEnvDevOtp =
-      String.fromEnvironment('AQAR_DEV_OTP', defaultValue: '');
-
-  static const int _otpLen = 4;
-  static const int _maxSeconds = 60;
-  static const int _maxAttempts = 3;
+  static const int _otpLen = InAppOtpHandoff.otpLen;
+  static const int _maxSeconds = 90;
+  static const int _maxAttempts = 5;
   static const int _lockAfterCycles = 2;
 
   String _otpVerifiedKey(String uid) => 'otp_verified_$uid';
@@ -86,6 +101,7 @@ class _VerifyScreenState extends State<VerifyScreen>
   DateTime? _expiresAt;
 
   int _attemptsLeft = _maxAttempts;
+  int _failCount = 0;
   bool _error = false;
   bool _submitting = false;
 
@@ -112,13 +128,16 @@ class _VerifyScreenState extends State<VerifyScreen>
   String _profileUsername = '';
   String _deviceId = '';
   String? _avatarUrl;
+  String _challengeId = '';
 
   bool _argsRead = false;
   bool _expectedFromArgs = false;
+  bool _otpAlreadyRequested = false;
 
   OverlayEntry? _bannerEntry;
   Timer? _bannerTimer;
   bool _bannerPinnedManual = false;
+  bool _otpTopNoticeVisible = true;
   String? _lastBannerCode;
   int _lastBannerAtMs = 0;
 
@@ -188,11 +207,26 @@ class _VerifyScreenState extends State<VerifyScreen>
     return desktop;
   }
 
+  void _onOtpFocusChanged() {
+    if (_otpFocus.hasFocus) {
+      OtpAutofill.stampFocusedHtmlField();
+    }
+  }
+
+  void _kickOtpKeyboard() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _otpFocus.requestFocus();
+      OtpAutofill.stampFocusedHtmlField();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     // Prevent web auto-lock/sign-out during OTP or Chrome password checkup.
     suspendAutoLock.value = true;
+    SensitiveNavPolicy.enterVerify();
     WidgetsBinding.instance.addObserver(this);
 
     _otpFocus.onKeyEvent = (node, event) {
@@ -203,6 +237,8 @@ class _VerifyScreenState extends State<VerifyScreen>
       unawaited(_pasteOtpFromClipboard());
       return KeyEventResult.handled;
     };
+    _otpFocus.addListener(_onOtpFocusChanged);
+    _kickOtpKeyboard();
 
     // ✅ تهيئة Animation
     _pulseController = AnimationController(
@@ -250,16 +286,20 @@ class _VerifyScreenState extends State<VerifyScreen>
     await _checkLockedStatusAndExitIfNeeded();
     _listenOtpNotifications();
     unawaited(_startSmsUserConsentListen());
-    // اطلب الرمز فوراً بالتوازي مع تحميل الملف — لا تنتظر الترحيب.
     final otpKickoff = () async {
-      if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
-        onIncomingOtp(
-          _expectedCode,
-          source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
-        );
+      if (_expectedCode.trim().length >= _otpLen) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          onIncomingOtp(
+            _expectedCode,
+            source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
+          );
+        });
         return;
       }
-      await _requestOtpFromServer(force: forceRefetch);
+      if (!_otpAlreadyRequested) {
+        await _requestOtpFromServer(force: forceRefetch);
+      }
       await _waitForFirstOtpOrFetchFallback();
     }();
     await Future.wait([
@@ -268,6 +308,7 @@ class _VerifyScreenState extends State<VerifyScreen>
       otpKickoff,
     ]);
     _startOrResumeTimer();
+    _kickOtpKeyboard();
     if (_expectedFromArgs && _expectedCode.trim().isNotEmpty) {
       return;
     }
@@ -302,7 +343,9 @@ class _VerifyScreenState extends State<VerifyScreen>
     } catch (_) {}
 
     _otpController.dispose();
+    _otpFocus.removeListener(_onOtpFocusChanged);
     _otpFocus.dispose();
+    SensitiveNavPolicy.leaveVerify();
 
     super.dispose();
   }
@@ -379,6 +422,7 @@ class _VerifyScreenState extends State<VerifyScreen>
       if (state == AppLifecycleState.resumed) {
         setState(() => _privacyMask = false);
         _startOrResumeTimer(recalcOnly: true);
+        _bannerEntry?.markNeedsBuild();
       }
       return;
     }
@@ -389,7 +433,13 @@ class _VerifyScreenState extends State<VerifyScreen>
     } else if (state == AppLifecycleState.resumed) {
       setState(() => _privacyMask = false);
       _startOrResumeTimer(recalcOnly: true);
+      _bannerEntry?.markNeedsBuild();
     }
+  }
+
+  @override
+  void didChangeMetrics() {
+    _bannerEntry?.markNeedsBuild();
   }
 
   void _readArgsOnce() {
@@ -398,9 +448,14 @@ class _VerifyScreenState extends State<VerifyScreen>
     final rawArgs = ModalRoute.of(context)?.settings.arguments;
     final args = (rawArgs is Map) ? rawArgs : <String, dynamic>{};
 
+    final fromWidget = (widget.initialCode ?? '').trim();
     final fromArgs = ((args['code'] as String?)?.trim() ?? '');
-    _expectedFromArgs = fromArgs.isNotEmpty;
-    _expectedCode = _expectedFromArgs ? fromArgs : '';
+    final rawCode = fromWidget.isNotEmpty ? fromWidget : fromArgs;
+    final onlyCode = rawCode.replaceAll(RegExp(r'\D'), '');
+    _expectedFromArgs = onlyCode.isNotEmpty;
+    _expectedCode = onlyCode.length > _otpLen
+        ? onlyCode.substring(0, _otpLen)
+        : onlyCode;
 
     _nextRoute = PostAuthNavigation.resolveDashboardRoute(
       (args['next'] as String?) ?? _nextRoute,
@@ -421,8 +476,24 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (fn.isNotEmpty) {
       _displayName = fn;
     }
-    _username = (args['username'] as String?) ?? '';
+    _username = (args['username'] as String?) ??
+        (widget.initialUsername ?? '');
     _deviceId = (args['deviceId'] as String?) ?? '';
+    _challengeId = (args['challengeId'] as String?)?.trim() ??
+        (widget.initialChallengeId ?? '').trim();
+    if (_challengeId.isNotEmpty) {
+      unawaited(AuthChallengeService.persistPending(
+        challengeId: _challengeId,
+        username: _username,
+      ));
+    }
+    _otpAlreadyRequested = args['otpAlreadyRequested'] == true;
+    final av = (args['avatarUrl'] as String?)?.trim() ?? '';
+    if (av.isNotEmpty) _avatarUrl = av;
+    final expRaw = (args['otpExpiresAt'] as String?)?.trim() ?? '';
+    if (expRaw.isNotEmpty) {
+      _expiresAt = DateTime.tryParse(expRaw)?.toUtc();
+    }
   }
 
   Future<void> _loadCachedValidCode() async {
@@ -676,25 +747,12 @@ class _VerifyScreenState extends State<VerifyScreen>
 
   String _greeting() => DashboardGreeting.salutationOnly(isAr: _isAr);
 
-  String _two(int n) => n.toString().padLeft(2, '0');
-
   DateTime get _nowSaudi => DashboardGreeting.nowSaudiArabia();
 
-  String _formatDateDDMMYYYY(DateTime d) {
-    final v = d;
-    return '${_two(v.day)}/${_two(v.month)}/${v.year}';
-  }
+  String _formatDateYmd(DateTime d) =>
+      DateHelper.fmtCivilDate(d, isAr: _isAr);
 
-  String _formatTime12(DateTime d) {
-    final v = d;
-    int h = v.hour;
-    final m = _two(v.minute);
-    final isPm = h >= 12;
-    int h12 = h % 12;
-    if (h12 == 0) h12 = 12;
-    final suffix = _isAr ? (isPm ? 'م' : 'ص') : (isPm ? 'PM' : 'AM');
-    return '${_two(h12)}:$m $suffix';
-  }
+  String _formatTime24(DateTime d) => DateHelper.fmtClock(d);
 
   String _weekdayName(DateTime d) {
     final wd = d.weekday;
@@ -725,7 +783,7 @@ class _VerifyScreenState extends State<VerifyScreen>
 
   String _todayLine() {
     final now = _nowSaudi;
-    return '${_weekdayName(now)} ${_formatDateDDMMYYYY(now)} • ${_formatTime12(now)}';
+    return '${_weekdayName(now)} ${_formatDateYmd(now)} • ${_formatTime24(now)}';
   }
 
   String _lastLoginLine() {
@@ -733,7 +791,7 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (v == null) return _isAr ? 'غير متوفر' : 'N/A';
     // اعرض آخر دخول بتوقيت المملكة للاتساق مع التحية.
     final saudi = v.toUtc().add(const Duration(hours: 3));
-    return '${_formatDateDDMMYYYY(saudi)} • ${_formatTime12(saudi)}';
+    return '${_formatDateYmd(saudi)} • ${_formatTime24(saudi)}';
   }
 
   /// لا نعرض أرقام الهوية / المعرف العام / أي «اسم» مكوّن من أرقام فقط كتحية بشرية.
@@ -760,8 +818,16 @@ class _VerifyScreenState extends State<VerifyScreen>
 
     if (!force && _expectedFromArgs) return;
 
-    final uid = Supabase.instance.client.auth.currentUser?.id;
+    var uid = Supabase.instance.client.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) {
+      for (var i = 0; i < 20; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        uid = Supabase.instance.client.auth.currentUser?.id;
+        if (uid != null && uid.isNotEmpty) break;
+      }
+    }
+    if (uid == null || uid.isEmpty) {
+      if (_otpAlreadyRequested && !force) return;
       _toast(_isAr ? 'يلزم تسجيل الدخول قبل التحقق' : 'You must be logged in');
       return;
     }
@@ -770,6 +836,21 @@ class _VerifyScreenState extends State<VerifyScreen>
       final ok = await AuthService.requestOtp(u);
       if (!ok) {
         _toast(_isAr ? 'تعذر إرسال إشعار الرمز' : 'Failed to send in-app code');
+      } else {
+        final pending = await AuthChallengeService.readPending();
+        if ((pending.challengeId ?? '').isNotEmpty) {
+          _challengeId = pending.challengeId!;
+        }
+        final peeked = await InAppOtpHandoff.pollLatestCode(
+          requestedAtUtc: DateTime.now().toUtc(),
+          challengeId: _challengeId,
+        );
+        if (peeked != null && peeked.length >= _otpLen && mounted) {
+          onIncomingOtp(
+            peeked,
+            source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
+          );
+        }
       }
     } catch (_) {
       _toast(_isAr ? 'تعذر إرسال إشعار الرمز' : 'Failed to send in-app code');
@@ -780,7 +861,7 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (!await _ensureInternetOrShow()) return;
     if (_expectedCode.trim().isNotEmpty) return;
 
-    const delays = <int>[80, 200, 450, 800, 1300];
+    const delays = <int>[40, 90, 160, 280];
     for (final ms in delays) {
       await Future<void>.delayed(Duration(milliseconds: ms));
       if (!mounted) return;
@@ -796,6 +877,16 @@ class _VerifyScreenState extends State<VerifyScreen>
 
       await _fetchLatestOtpNotificationAndApply();
       if (_expectedCode.trim().isNotEmpty) return;
+      final peeked = await InAppOtpHandoff.fetchLatestCode(
+        challengeId: _challengeId,
+      );
+      if (peeked != null && peeked.length >= _otpLen && mounted) {
+        onIncomingOtp(
+          peeked,
+          source: kDebugMode ? OtpSource.dev : OtpSource.inApp,
+        );
+        return;
+      }
     }
   }
 
@@ -935,10 +1026,12 @@ class _VerifyScreenState extends State<VerifyScreen>
       code = (data['code'] ?? '').toString().trim();
       final expRaw = (data['expiresAt'] ?? '').toString().trim();
       exp = DateTime.tryParse(expRaw);
+      final cid = (data['challengeId'] ?? '').toString().trim();
+      if (cid.isNotEmpty) _challengeId = cid;
     } else if (data != null) {
       final s = data.toString();
       final only = s.replaceAll(RegExp(r'\D'), '');
-      if (only.length >= 4) code = only.substring(0, 4);
+      if (only.length >= _otpLen) code = only.substring(0, _otpLen);
       final m = RegExp(r'expiresAt"\s*:\s*"([^"]+)"').firstMatch(s);
       if (m != null) exp = DateTime.tryParse(m.group(1) ?? '');
     }
@@ -946,10 +1039,28 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (code.isEmpty) {
       final body = (row['body'] ?? '').toString();
       final only = body.replaceAll(RegExp(r'\D'), '');
-      if (only.length >= 4) code = only.substring(0, 4);
+      if (only.length >= _otpLen) code = only.substring(0, _otpLen);
     }
 
-    if (code.isEmpty) return;
+    if (code.isEmpty) {
+      unawaited(() async {
+        final peeked = await InAppOtpHandoff.fetchLatestCode(
+          challengeId: _challengeId,
+        );
+        if (!mounted) return;
+        if (peeked != null && peeked.length >= _otpLen) {
+          onIncomingOtp(
+            peeked,
+            source: kDebugMode ? OtpSource.dev : source,
+          );
+        }
+      }());
+      if (exp != null) {
+        _expiresAt = exp.isUtc ? exp : exp.toUtc();
+        _startOrResumeTimer();
+      }
+      return;
+    }
 
     if (exp != null) {
       _expiresAt = (exp.isUtc ? exp : exp.toUtc());
@@ -1037,15 +1148,111 @@ class _VerifyScreenState extends State<VerifyScreen>
     _lastBannerAtMs = now;
 
     _safeAsync(() => _playAndNotifyOtp(code, source));
+    unawaited(Clipboard.setData(ClipboardData(text: code)));
     _showBanner(code: code, source: source);
+  }
+
+  Future<void> _notifyThirdOtpAttempt() async {
+    final t = AppLocalizations.of(context);
+    final title = t?.otpAttemptsThirdNotifyTitle ??
+        (_isAr ? 'تنبيه محاولات رمز التحقق' : 'Verification attempt notice');
+    final body = t?.otpAttemptsThirdNotifyBody ??
+        (_isAr
+            ? 'أدخلت الرمز ثلاث مرات. راجع المحاولات المتبقية أو أعد إرسال رمز جديد.'
+            : 'You entered the code three times. Check remaining attempts or resend a new code.');
+    _toast('$title — $body');
+    if (kIsWeb) {
+      await _safeAsync(() => AppSoundCoordinator.playUiEffect(
+            assetPath: 'sounds/otp_chime.wav',
+            volume: 1.0,
+          ));
+      return;
+    }
+    await _safeAsync(() => NotificationService.showOtpNotification(
+          title: title,
+          body: body,
+          playChannelSound: true,
+        ));
+  }
+
+  double _overlayKeyboardInset(BuildContext context) {
+    final view = View.maybeOf(context);
+    var fromView = 0.0;
+    if (view != null && view.devicePixelRatio > 0) {
+      fromView = view.viewInsets.bottom / view.devicePixelRatio;
+    }
+    final mq = MediaQuery.maybeViewInsetsOf(context)?.bottom ?? 0;
+    return fromView > mq ? fromView : mq;
+  }
+
+  void _fillOtpFromSuggestion(String code) {
+    AppHaptics.selection();
+    unawaited(Clipboard.setData(ClipboardData(text: code)));
+    _applyIncomingCode(code, fromUserAction: true);
+    _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
+    _bannerEntry?.markNeedsBuild();
+  }
+
+  Widget _bankOtpKeyboardChip(String code, {required bool isDark}) {
+    final cs = Theme.of(context).colorScheme;
+    final bg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final fg = isDark ? Colors.white : const Color(0xFF0B1220);
+    return Material(
+      elevation: 18,
+      color: bg,
+      borderRadius: BorderRadius.circular(16),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _fillOtpFromSuggestion(code),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _isAr ? 'من عقار — اضغط للصق' : 'From Aqar — tap to paste',
+                maxLines: 1,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  color: cs.primary,
+                  fontFamily: 'Cairo',
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                code.split('').join('  '),
+                maxLines: 1,
+                textDirection: TextDirection.ltr,
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 26,
+                  letterSpacing: 2,
+                  color: fg,
+                  fontFamily: 'Cairo',
+                  height: 1.05,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _showBanner({required String code, required OtpSource source}) {
     if (!mounted) return;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showBanner(code: code, source: source);
+      });
+      return;
+    }
     _removeBanner();
 
     _bannerPinnedManual = false;
-    final overlay = Overlay.of(context);
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
@@ -1060,200 +1267,258 @@ class _VerifyScreenState extends State<VerifyScreen>
         ? (source == OtpSource.dev ? 'رمز (DEV)' : 'تم استلام رمز التحقق')
         : (source == OtpSource.dev ? 'DEV code' : 'Verification code received');
 
+    _otpTopNoticeVisible = true;
     _bannerEntry = OverlayEntry(
-      builder: (_) {
-        return LayoutBuilder(
-          builder: (context, c) {
-            final w = c.maxWidth;
-            final bool isTiny = w < 360;
-            final bool isXTiny = w < 320;
+      builder: (overlayCtx) {
+        final liveCode = InAppOtpHandoff.digitsFromAny(_expectedCode) ?? code;
+        final filled =
+            _otpDigitsFromUi().replaceAll(RegExp(r'\D'), '').length >= _otpLen;
+        final kb = _overlayKeyboardInset(overlayCtx);
+        return Positioned.fill(
+          child: Stack(
+            children: [
+              if (_otpTopNoticeVisible)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LayoutBuilder(
+                    builder: (context, c) {
+                      final w = c.maxWidth;
+                      final bool isTiny = w < 360;
+                      final bool isXTiny = w < 320;
 
-            final double side = (w * 0.04).clamp(8.0, 16.0);
-            final double topExtra =
-                (w * 0.02).clamp(4.0, 10.0) + (isTiny ? 2.0 : 4.0);
+                      final double side = (w * 0.04).clamp(8.0, 16.0);
+                      final double topExtra =
+                          (w * 0.02).clamp(4.0, 10.0) + (isTiny ? 2.0 : 4.0);
 
-            final double radius = (w * 0.055).clamp(16.0, 22.0);
-            final double titleFs = (w * 0.040).clamp(12.0, 15.0);
-            final double bodyFs = (w * 0.036).clamp(12.0, 14.0);
-            final double btnFs = (w * 0.034).clamp(11.8, 13.5);
+                      final double radius = (w * 0.055).clamp(16.0, 22.0);
+                      final double titleFs = (w * 0.040).clamp(12.0, 15.0);
+                      final double bodyFs = (w * 0.036).clamp(12.0, 14.0);
+                      final double btnFs = (w * 0.034).clamp(11.8, 13.5);
 
-            Widget actionButton({
-              required String label,
-              required VoidCallback onTap,
-              required Color textColor,
-              bool primary = false,
-            }) {
-              return TextButton(
-                onPressed: onTap,
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isXTiny ? 10 : 12,
-                    vertical: isXTiny ? 6 : 8,
-                  ),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: primary ? FontWeight.w900 : FontWeight.w800,
-                    fontSize: btnFs,
-                  ),
-                ),
-              );
-            }
-
-            final actionsRow = Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                actionButton(
-                  label: _isAr ? 'لصق' : 'Paste',
-                  textColor: titleColor,
-                  primary: true,
-                  onTap: () {
-                    AppHaptics.selection();
-                    _removeBanner();
-                    _applyIncomingCode(code, fromUserAction: true);
-                    _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
-                  },
-                ),
-                const SizedBox(width: 6),
-                actionButton(
-                  label: _isAr ? 'إدخال يدوي' : 'Manual',
-                  textColor: bodyColor,
-                  onTap: () {
-                    AppHaptics.selection();
-                    _bannerPinnedManual = true;
-                    _bannerTimer?.cancel();
-                    _bannerTimer = null;
-                    _otpFocus.requestFocus();
-                  },
-                ),
-                const SizedBox(width: 6),
-                actionButton(
-                  label: _isAr ? 'إلغاء' : 'Cancel',
-                  textColor: bodyColor,
-                  onTap: _removeBanner,
-                ),
-              ],
-            );
-
-            return SafeArea(
-              top: true,
-              bottom: false,
-              child: Padding(
-                padding: EdgeInsetsDirectional.only(
-                  start: side,
-                  end: side,
-                  top: topExtra,
-                ),
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: (w * 0.94).clamp(300.0, 560.0),
-                      ),
-                      child: Container(
-                        padding: EdgeInsetsDirectional.fromSTEB(
-                          isXTiny ? 10 : 12,
-                          isXTiny ? 9 : 10,
-                          isXTiny ? 10 : 12,
-                          isXTiny ? 8 : 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: bg,
-                          borderRadius: BorderRadius.circular(radius),
-                          border: Border.all(color: border),
-                          boxShadow: [
-                            BoxShadow(
-                              blurRadius: 18,
-                              offset: const Offset(0, 10),
-                              color: Colors.black
-                                  .withOpacity(isDark ? 0.35 : 0.12),
+                      Widget actionButton({
+                        required String label,
+                        required VoidCallback onTap,
+                        required Color textColor,
+                        bool primary = false,
+                      }) {
+                        return TextButton(
+                          onPressed: onTap,
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isXTiny ? 10 : 12,
+                              vertical: isXTiny ? 6 : 8,
                             ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  width: isXTiny ? 34 : 38,
-                                  height: isXTiny ? 34 : 38,
-                                  decoration: BoxDecoration(
-                                    color:
-                                        (isDark ? Colors.white : Colors.black)
-                                            .withOpacity(0.06),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(
-                                    Icons.notifications_active_outlined,
-                                    color: titleColor,
-                                    size: isXTiny ? 18 : 20,
-                                  ),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: textColor,
+                              fontWeight:
+                                  primary ? FontWeight.w900 : FontWeight.w800,
+                              fontSize: btnFs,
+                            ),
+                          ),
+                        );
+                      }
+
+                      final actionsRow = Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          actionButton(
+                            label: _isAr ? 'لصق' : 'Paste',
+                            textColor: titleColor,
+                            primary: true,
+                            onTap: () {
+                              _fillOtpFromSuggestion(liveCode);
+                              _removeBanner();
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          actionButton(
+                            label: _isAr ? 'إدخال يدوي' : 'Manual',
+                            textColor: bodyColor,
+                            onTap: () {
+                              AppHaptics.selection();
+                              _bannerPinnedManual = true;
+                              _otpTopNoticeVisible = false;
+                              _bannerTimer?.cancel();
+                              _bannerTimer = null;
+                              _otpFocus.requestFocus();
+                              _bannerEntry?.markNeedsBuild();
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          actionButton(
+                            label: _isAr ? 'إلغاء' : 'Cancel',
+                            textColor: bodyColor,
+                            onTap: () {
+                              _otpTopNoticeVisible = false;
+                              _bannerEntry?.markNeedsBuild();
+                            },
+                          ),
+                        ],
+                      );
+
+                      return SafeArea(
+                        top: true,
+                        bottom: false,
+                        child: Padding(
+                          padding: EdgeInsetsDirectional.only(
+                            start: side,
+                            end: side,
+                            top: topExtra,
+                          ),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            heightFactor: 1,
+                            child: Material(
+                              color: Colors.transparent,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth: (w * 0.94).clamp(300.0, 560.0),
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
+                                child: Container(
+                                  padding: EdgeInsetsDirectional.fromSTEB(
+                                    isXTiny ? 10 : 12,
+                                    isXTiny ? 9 : 10,
+                                    isXTiny ? 10 : 12,
+                                    isXTiny ? 8 : 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: bg,
+                                    borderRadius: BorderRadius.circular(radius),
+                                    border: Border.all(color: border),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        blurRadius: 18,
+                                        offset: const Offset(0, 10),
+                                        color: Colors.black
+                                            .withOpacity(isDark ? 0.35 : 0.12),
+                                      ),
+                                    ],
+                                  ),
                                   child: Column(
                                     mainAxisSize: MainAxisSize.min,
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: titleColor,
-                                          fontWeight: FontWeight.w900,
-                                          fontSize: titleFs,
-                                          height: 1.1,
+                                      InkWell(
+                                        onTap: liveCode.length >= _otpLen
+                                            ? () {
+                                                _fillOtpFromSuggestion(
+                                                  liveCode,
+                                                );
+                                                _removeBanner();
+                                              }
+                                            : null,
+                                        borderRadius:
+                                            BorderRadius.circular(12),
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Container(
+                                              width: isXTiny ? 34 : 38,
+                                              height: isXTiny ? 34 : 38,
+                                              decoration: BoxDecoration(
+                                                color: (isDark
+                                                        ? Colors.white
+                                                        : Colors.black)
+                                                    .withOpacity(0.06),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: Icon(
+                                                Icons
+                                                    .notifications_active_outlined,
+                                                color: titleColor,
+                                                size: isXTiny ? 18 : 20,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    title,
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      color: titleColor,
+                                                      fontWeight:
+                                                          FontWeight.w900,
+                                                      fontSize: titleFs,
+                                                      height: 1.1,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 3),
+                                                  Text(
+                                                    _isAr
+                                                        ? 'رمز التحقق: $liveCode'
+                                                        : 'Your code: $liveCode',
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      color: bodyColor,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      fontSize: bodyFs,
+                                                      height: 1.1,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                      const SizedBox(height: 3),
-                                      Text(
-                                        _isAr
-                                            ? 'رمز التحقق: $code'
-                                            : 'Your code: $code',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                          color: bodyColor,
-                                          fontWeight: FontWeight.w800,
-                                          fontSize: bodyFs,
-                                          height: 1.1,
+                                      SizedBox(height: isXTiny ? 8 : 10),
+                                      Align(
+                                        alignment:
+                                            AlignmentDirectional.centerEnd,
+                                        child: SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          physics:
+                                              const BouncingScrollPhysics(),
+                                          child: actionsRow,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-                              ],
-                            ),
-                            SizedBox(height: isXTiny ? 8 : 10),
-                            Align(
-                              alignment: AlignmentDirectional.centerEnd,
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                physics: const BouncingScrollPhysics(),
-                                child: actionsRow,
                               ),
                             ),
-                          ],
+                          ),
                         ),
-                      ),
+                      );
+                    },
+                  ),
+                ),
+              if (!filled &&
+                  liveCode.length >= _otpLen &&
+                  AppSurfaceScope.of(overlayCtx).showOtpKeyboardPasteChip)
+                Positioned(
+                  left: 12,
+                  right: 12,
+                  bottom: kb > 8 ? kb + 6 : 12,
+                  child: SafeArea(
+                    top: false,
+                    child: Center(
+                      child: _bankOtpKeyboardChip(liveCode, isDark: isDark),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+            ],
+          ),
         );
       },
     );
@@ -1261,10 +1526,11 @@ class _VerifyScreenState extends State<VerifyScreen>
     overlay.insert(_bannerEntry!);
 
     _bannerTimer?.cancel();
-    _bannerTimer = Timer(const Duration(seconds: 15), () {
+    _bannerTimer = Timer(const Duration(seconds: 10), () {
       if (!mounted) return;
       if (_bannerPinnedManual) return;
-      _removeBanner();
+      _otpTopNoticeVisible = false;
+      _bannerEntry?.markNeedsBuild();
     });
   }
 
@@ -1281,33 +1547,34 @@ class _VerifyScreenState extends State<VerifyScreen>
       _otp = '';
       _otpController.clear();
       _error = false;
-      _attemptsLeft = _maxAttempts;
       _userTypedSomething = false;
     });
     _otpFocus.requestFocus();
   }
 
   void _applyIncomingCode(String text, {required bool fromUserAction}) {
-    final only = digitsOnly(normalizeAsciiDigits(text));
-    if (only.isEmpty) return;
+    final value = OtpAutofill.sequentialValue(text);
+    if (value.text.isEmpty) return;
 
-    final raw = only.length >= _otpLen ? only.substring(0, _otpLen) : only;
-    final take = raw.padLeft(_otpLen, '0');
-
-    setState(() {
-      _otp = take;
-      _otpController.text = take;
-      _otpController.selection = TextSelection.collapsed(offset: take.length);
-      _error = false;
-      _userTypedSomething = fromUserAction ? true : _userTypedSomething;
-    });
-
+    final take = value.text;
+    _otp = take;
+    if (fromUserAction) _userTypedSomething = true;
+    _otpController.value = value;
+    if (_error) {
+      setState(() => _error = false);
+    }
     _otpFocus.requestFocus();
-    _maybeAutoSubmit();
-    // بعد اللصق قد يتأخر PinCodeTextField خطوة عن الـ controller — نعيد المحاولة بعد الإطار.
+    OtpAutofill.stampFocusedHtmlField();
+    if (take.length >= _otpLen) {
+      _maybeAutoSubmit();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _maybeAutoSubmit();
+      if (_otpController.text != take) {
+        _otpController.value = value;
+      }
+      if (take.length >= _otpLen) _maybeAutoSubmit();
+      _bannerEntry?.markNeedsBuild();
     });
   }
 
@@ -1383,48 +1650,39 @@ class _VerifyScreenState extends State<VerifyScreen>
       final c = digits.padLeft(_otpLen, '0');
 
       bool ok = false;
-      if (_matchesEnvDevOtp(c)) {
-        ok = true;
-        if (kDebugMode) {
-          // ignore: avoid_print
-          print('[VerifyScreen] AQAR_DEV_OTP bypass (staging only)');
-        }
-      } else {
-        final tried = <String>{};
-        Future<bool> rpcOnce(String un) async {
-          final t = un.trim();
-          if (t.isEmpty || tried.contains(t)) return false;
-          tried.add(t);
-          try {
-            final v = await Supabase.instance.client
-                .rpc(
-                  'verify_inapp_otp',
-                  params: {'p_username': t, 'p_code': c},
-                )
-                .timeout(const Duration(seconds: 12));
-            return (v is bool) ? v : (v?.toString() == 'true');
-          } catch (_) {
-            return false;
-          }
-        }
-
-        if (await rpcOnce(canonical)) {
-          ok = true;
-        } else {
-          for (final alt in _otpUsernameCandidates()) {
-            if (await rpcOnce(alt)) {
-              ok = true;
-              break;
-            }
-          }
-        }
+      String? verifyError;
+      final verified = await AuthChallengeService.verify(
+        code: c,
+        challengeId: _challengeId.isEmpty ? null : _challengeId,
+        username: canonical,
+      );
+      ok = verified.ok;
+      verifyError = verified.error;
+      if (verified.locked) {
+        _toast(_isAr
+            ? 'تم قفل رمز التحقق. أعد تسجيل الدخول.'
+            : 'Verification locked. Please sign in again.');
+        await _goToLogin(signOut: true, clearOtp: true);
+        return;
+      }
+      if (!ok && (verifyError == 'expired')) {
+        _toast(_isAr ? 'انتهت صلاحية الرمز.' : 'The code has expired.');
       }
 
       if (!ok) {
         AppHaptics.vibrate();
+        final remaining = verified.remainingAttempts;
         setState(() {
-          _attemptsLeft--;
+          _failCount += 1;
+          if (remaining != null) {
+            _attemptsLeft = remaining;
+          } else {
+            _attemptsLeft--;
+          }
           _error = true;
+          _otp = '';
+          _otpController.clear();
+          _userTypedSomething = false;
         });
 
         final state = await _getOtpFailState();
@@ -1454,6 +1712,10 @@ class _VerifyScreenState extends State<VerifyScreen>
           return;
         }
 
+        if (_failCount == 3) {
+          await _notifyThirdOtpAttempt();
+        }
+
         if (_attemptsLeft <= 0) {
           _toast(_isAr
               ? 'تم تجاوز الحد. تم إعادتك لتسجيل الدخول.'
@@ -1462,9 +1724,12 @@ class _VerifyScreenState extends State<VerifyScreen>
           return;
         }
 
-        _toast(_isAr
-            ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
-            : 'Invalid code. Left: $_attemptsLeft');
+        if (!mounted) return;
+        final t = AppLocalizations.of(context);
+        _toast(t?.otpAttemptsRemaining(_attemptsLeft) ??
+            (_isAr
+                ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
+                : 'Invalid code. Left: $_attemptsLeft'));
         _otpFocus.requestFocus();
         return;
       }
@@ -1562,32 +1827,25 @@ class _VerifyScreenState extends State<VerifyScreen>
 
     try {
       if (!kIsWeb) {
-        final deviceSlot = await UserInstallSessionService
-            .registerDeviceSlotAfterSignIn()
-            .timeout(const Duration(seconds: 12));
+        final deviceSlot =
+            await UserInstallSessionService.registerDeviceSlotAfterSignIn()
+                .timeout(const Duration(seconds: 12));
         if (!deviceSlot.ok && deviceSlot.code == 'device_limit') {
-          final ctx =
-              UserSessionCoordinationService.navigatorKey?.currentContext;
-          if (ctx != null && ctx.mounted) {
-            await PostAuthNavigation.openRouteReplacingStack(
-              ctx,
-              AppRoutes.deviceManagement,
-              arguments: <String, dynamic>{'mandatory': true},
-            );
-          }
+          // PostAuthShell يعرض شاشة الأجهزة الإلزامية — لا تفتح مساراً ثانياً يومض.
           return;
         }
       }
     } catch (_) {}
 
     try {
-      final sessionHints =
-          await UserInstallSessionService.sessionHintsForBump()
-              .timeout(const Duration(seconds: 8));
+      await FastLoginService.markFreshCredentialLogin();
+      final sessionHints = await UserInstallSessionService.sessionHintsForBump()
+          .timeout(const Duration(seconds: 8));
       await UserSessionCoordinationService.afterSignIn(
         uid,
         cityHint: sessionHints.city,
         deviceLabel: sessionHints.label,
+        forceBump: true,
       ).timeout(const Duration(seconds: 10));
     } catch (_) {}
 
@@ -1596,6 +1854,10 @@ class _VerifyScreenState extends State<VerifyScreen>
         sb,
         loginMethod: 'otp',
       ).timeout(const Duration(seconds: 8));
+      await FastLoginService.rememberSuccessfulAuth(
+        loginMethod: 'otp',
+        entryRoute: '/login',
+      );
     } catch (_) {}
 
     try {
@@ -1609,6 +1871,8 @@ class _VerifyScreenState extends State<VerifyScreen>
         usernameNationalId: username,
         displayName: displayName.isNotEmpty ? displayName : null,
       ).timeout(const Duration(seconds: 6));
+      await FastLoginService.markTrustedInstall(uid: uid)
+          .timeout(const Duration(seconds: 4));
     } catch (_) {}
   }
 
@@ -1626,6 +1890,7 @@ class _VerifyScreenState extends State<VerifyScreen>
 
     setState(() {
       _attemptsLeft = _maxAttempts;
+      _failCount = 0;
       _error = false;
       _otp = '';
       _otpController.clear();
@@ -1840,13 +2105,6 @@ class _VerifyScreenState extends State<VerifyScreen>
     });
   }
 
-  bool _matchesEnvDevOtp(String fourDigitCode) {
-    final o = _kEnvDevOtp.trim();
-    if (o.length != _otpLen) return false;
-    if (!RegExp(r'^\d{4}$').hasMatch(o)) return false;
-    return fourDigitCode == o;
-  }
-
   Widget _infoRow({
     required IconData icon,
     required String text,
@@ -1868,9 +2126,10 @@ class _VerifyScreenState extends State<VerifyScreen>
             overflow: TextOverflow.visible,
             style: TextStyle(
               color: color,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
               fontSize: fontSize,
               height: 1.2,
+              fontFamily: 'Cairo',
             ),
           ),
         ],
@@ -1879,12 +2138,21 @@ class _VerifyScreenState extends State<VerifyScreen>
   }
 
   Future<void> _pasteOtpFromClipboard({bool silent = false}) async {
+    final sent = InAppOtpHandoff.digitsFromAny(_expectedCode);
+    if (sent != null && sent.length >= _otpLen) {
+      if (silent) {
+        _applyIncomingCode(sent, fromUserAction: true);
+      } else {
+        _fillOtpFromSuggestion(sent);
+      }
+      return;
+    }
     try {
       final data = await Clipboard.getData(Clipboard.kTextPlain);
       final raw = digitsOnly(normalizeAsciiDigits(data?.text ?? ''));
       if (raw.isEmpty) {
         if (!silent) {
-          _toast(_isAr ? 'لا يوجد رمز في الحافظة' : 'Clipboard has no code');
+          _toast(_isAr ? 'لا يوجد رمز بعد' : 'No code yet');
         }
         return;
       }
@@ -1905,14 +2173,9 @@ class _VerifyScreenState extends State<VerifyScreen>
       builder: (context, c) {
         final cs = Theme.of(context).colorScheme;
         final maxW = c.maxWidth;
-
-        const len = _otpLen;
-        const gap = 10.0;
-
-        final available = (maxW - (gap * (len - 1))).clamp(160.0, 1000.0);
-        final raw = available / len;
-        final fieldW = raw.clamp(42.0, 62.0);
-        final fieldH = (fieldW + 4).clamp(50.0, 66.0);
+        final metrics = OtpPinLayout.of(maxW);
+        final fieldW = metrics.fieldWidth;
+        final fieldH = metrics.fieldHeight;
 
         final inactiveBorder = isDark
             ? Colors.white.withOpacity(0.18)
@@ -1938,10 +2201,16 @@ class _VerifyScreenState extends State<VerifyScreen>
             focusNode: _otpFocus,
             autoDisposeControllers: false,
             autoFocus: true,
+            autoUnfocus: false,
+            enablePinAutofill: true,
+            useExternalAutoFillGroup: true,
             keyboardType: TextInputType.number,
             enableActiveFill: true,
             animationType: AnimationType.fade,
             animationDuration: const Duration(milliseconds: 120),
+            errorTextSpace: 0,
+            scrollPadding: aqarFieldScrollPadding(context),
+            onTap: () => OtpAutofill.stampFocusedHtmlField(),
             inputFormatters: [
               TextInputFormatter.withFunction((oldValue, newValue) {
                 final normalized =
@@ -1956,12 +2225,13 @@ class _VerifyScreenState extends State<VerifyScreen>
               }),
               LengthLimitingTextInputFormatter(_otpLen),
             ],
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             pinTheme: PinTheme(
               shape: PinCodeFieldShape.box,
               borderRadius: BorderRadius.circular(12),
               fieldHeight: fieldH,
               fieldWidth: fieldW,
+              fieldOuterPadding: EdgeInsets.zero,
               inactiveColor: useInactive,
               activeColor: useActive,
               selectedColor: useSelected,
@@ -1972,17 +2242,15 @@ class _VerifyScreenState extends State<VerifyScreen>
             ),
             textStyle: TextStyle(
               fontWeight: FontWeight.w900,
-              fontSize: fontSize + 4,
+              fontSize: metrics.fontSize,
             ),
             onChanged: (v) {
               final only = digitsOnly(normalizeAsciiDigits(v));
-              setState(() {
-                _otp =
-                    only.length > _otpLen ? only.substring(0, _otpLen) : only;
-                if (_error) _error = false;
-                _userTypedSomething = _otp.isNotEmpty;
-              });
-
+              _otp = only.length > _otpLen ? only.substring(0, _otpLen) : only;
+              if (_otp.isNotEmpty) _userTypedSomething = true;
+              if (_error) {
+                setState(() => _error = false);
+              }
               _maybeAutoSubmit();
             },
             onCompleted: (_) {
@@ -1990,13 +2258,12 @@ class _VerifyScreenState extends State<VerifyScreen>
               _maybeAutoSubmit();
             },
             beforeTextPaste: (text) {
-              final only =
-                  digitsOnly(normalizeAsciiDigits(text ?? ''));
-              if (only.isEmpty) return true;
-              AppHaptics.selection();
-              _applyIncomingCode(only, fromUserAction: true);
-              _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
-              // على الويب أيضاً نمنع السلوك الافتراضي لضبط الحقل و _otp معاً
+              final sent = InAppOtpHandoff.digitsFromAny(_expectedCode);
+              final only = digitsOnly(normalizeAsciiDigits(text ?? ''));
+              final use =
+                  (sent != null && sent.length >= _otpLen) ? sent : only;
+              if (use.isEmpty) return true;
+              _fillOtpFromSuggestion(use);
               return false;
             },
           ),
@@ -2106,35 +2373,39 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (!hasName) {
       return FittedBox(
         fit: BoxFit.scaleDown,
-        alignment: AlignmentDirectional.centerStart,
+        alignment: Alignment.center,
         child: Text(
           top,
           maxLines: 1,
+          textAlign: TextAlign.center,
           softWrap: false,
           style: TextStyle(
             fontSize: fontSize,
             fontWeight: FontWeight.w900,
             color: color,
             height: 1.15,
+            fontFamily: 'Cairo',
           ),
         ),
       );
     }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         FittedBox(
           fit: BoxFit.scaleDown,
-          alignment: AlignmentDirectional.centerStart,
+          alignment: Alignment.center,
           child: Text(
             top,
             maxLines: 1,
+            textAlign: TextAlign.center,
             softWrap: false,
             style: TextStyle(
-              fontSize: fontSize * 0.82,
-              fontWeight: FontWeight.w800,
-              color: color.withValues(alpha: 0.85),
+              fontSize: fontSize * 0.92,
+              fontWeight: FontWeight.w900,
+              color: color,
               height: 1.15,
+              fontFamily: 'Cairo',
             ),
           ),
         ),
@@ -2142,15 +2413,39 @@ class _VerifyScreenState extends State<VerifyScreen>
         Text(
           name.trim(),
           maxLines: 2,
+          textAlign: TextAlign.center,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: fontSize,
             fontWeight: FontWeight.w900,
             color: color,
             height: 1.2,
+            fontFamily: 'Cairo',
           ),
         ),
       ],
+    );
+  }
+
+  Widget _otpKeyboardDock() {
+    if (_bannerEntry != null) return const SizedBox.shrink();
+    if (!AppSurfaceScope.of(context).showOtpKeyboardPasteChip) {
+      return const SizedBox.shrink();
+    }
+    final kb = _overlayKeyboardInset(context);
+    final code = InAppOtpHandoff.digitsFromAny(_expectedCode);
+    if (code == null || code.length < _otpLen) return const SizedBox.shrink();
+    if (_otpDigitsFromUi().replaceAll(RegExp(r'\D'), '').length >= _otpLen) {
+      return const SizedBox.shrink();
+    }
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: kb > 8 ? kb + 6 : 12,
+      child: Center(
+        child: _bankOtpKeyboardChip(code, isDark: isDark),
+      ),
     );
   }
 
@@ -2161,8 +2456,8 @@ class _VerifyScreenState extends State<VerifyScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = isDark ? const Color(0xFF0B1220) : const Color(0xFFF5F7FA);
     final card = isDark ? const Color(0xFF121A2A) : Colors.white;
-    final titleColor = isDark ? Colors.white : const Color(0xFF0B1220);
-    final subColor = isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569);
+    final titleColor = isDark ? Colors.white : const Color(0xFF041018);
+    final subColor = isDark ? const Color(0xFFE2E8F0) : const Color(0xFF16324A);
 
     final nameSize = _font(context, 18.0, 15.5);
     final bodySize = _font(context, 13.5, 12.2);
@@ -2183,356 +2478,367 @@ class _VerifyScreenState extends State<VerifyScreen>
             // Explicit back buttons still call _goToLogin.
             onPopInvokedWithResult: (didPop, _) {
               if (didPop) return;
+              unawaited(_goToLogin(signOut: true, clearOtp: true));
             },
             child: ScrollConfiguration(
               behavior: const AqarAuthScrollBehavior(),
-              child: Scaffold(
-              backgroundColor: bg,
-              resizeToAvoidBottomInset: true,
-              body: SafeArea(
-                child: Stack(
-                  children: [
-                    // بدون شريط تحميل يحجب الواجهة — الرمز يظهر فور الجاهزية.
-                    LayoutBuilder(
-                      builder: (context, c) {
-                        final w = c.maxWidth;
-                        // جوالات / شاشات ضيقة: عرض شبه كامل بدون دائرة هوية.
-                        final isSmall = w < 520;
-                        final isTiny = w < 360;
-                        final phoneLike = w < 720;
-                        final cardMax = phoneLike
-                            ? (w - (isTiny ? 8.0 : 12.0) * 2).clamp(280.0, w)
-                            : 560.0;
+              child: AppKeyboardStableScope(
+                child: Scaffold(
+                  backgroundColor: bg,
+                  resizeToAvoidBottomInset: false,
+                  body: SafeArea(
+                    child: Stack(
+                      children: [
+                        // بدون شريط تحميل يحجب الواجهة — الرمز يظهر فور الجاهزية.
+                        LayoutBuilder(
+                          builder: (context, c) {
+                            final w = c.maxWidth;
+                            // جوالات / شاشات ضيقة: عرض شبه كامل بدون دائرة هوية.
+                            final isSmall = w < 520;
+                            final isTiny = w < 360;
+                            final phoneLike = w < 720;
+                            final cardMax = phoneLike
+                                ? (w - (isTiny ? 8.0 : 12.0) * 2)
+                                    .clamp(280.0, w)
+                                : 560.0;
 
-                        return Align(
-                          alignment: Alignment.topCenter,
-                          child: SingleChildScrollView(
-                            padding: EdgeInsets.fromLTRB(
-                              phoneLike ? (isTiny ? 6 : 10) : 16,
-                              phoneLike ? 8 : 16,
-                              phoneLike ? (isTiny ? 6 : 10) : 16,
-                              16 + MediaQuery.viewInsetsOf(context).bottom,
-                            ),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(maxWidth: cardMax),
-                              child: Card(
-                                color: card,
-                                elevation: phoneLike ? 4 : 10,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    phoneLike ? 16 : 24,
-                                  ),
+                            final kb = AppKeyboardInset.bottomOf(context);
+                            final visH = math.max(
+                              180.0,
+                              c.maxHeight - (kb > 8 ? kb : 0),
+                            );
+                            final bottomPad = 16.0 + (kb > 8 ? 56.0 : 0);
+
+                            return SizedBox(
+                              height: visH,
+                              child: Align(
+                              alignment: Alignment.topCenter,
+                              child: SingleChildScrollView(
+                                padding: EdgeInsets.fromLTRB(
+                                  phoneLike ? (isTiny ? 6 : 10) : 16,
+                                  phoneLike ? 8 : 16,
+                                  phoneLike ? (isTiny ? 6 : 10) : 16,
+                                  bottomPad,
                                 ),
-                                child: Padding(
-                                  padding: EdgeInsets.all(isSmall ? 14 : 22),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Align(
-                                        alignment: AlignmentDirectional.centerEnd,
-                                        child: AppPageCloseButton(
-                                          isArabic: _isAr,
-                                          onPressed: () => _goToLogin(
-                                            signOut: true,
-                                            clearOtp: true,
-                                          ),
-                                        ),
+                                child: ConstrainedBox(
+                                  constraints:
+                                      BoxConstraints(maxWidth: cardMax),
+                                  child: Card(
+                                    color: card,
+                                    elevation: phoneLike ? 4 : 10,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(
+                                        phoneLike ? 16 : 24,
                                       ),
-                                      Container(
-                                        width: double.infinity,
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: isTiny ? 10 : 12,
-                                          vertical: isTiny ? 8 : 10,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: isDark
-                                              ? Colors.white
-                                                  .withValues(alpha: 0.04)
-                                              : Colors.black
-                                                  .withValues(alpha: 0.03),
-                                          borderRadius:
-                                              BorderRadius.circular(14),
-                                          border: Border.all(
-                                            color: isDark
-                                                ? Colors.white
-                                                    .withValues(alpha: 0.14)
-                                                : Colors.black
-                                                    .withValues(alpha: 0.10),
-                                          ),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            _singleLineGreeting(
-                                              greeting: _greeting(),
-                                              name: displayName,
-                                              color: titleColor,
-                                              fontSize: nameSize,
-                                            ),
-                                            const SizedBox(height: 8),
-                                            _infoRow(
-                                              icon: Icons
-                                                  .calendar_today_rounded,
-                                              text: _todayLine(),
-                                              color: subColor,
-                                              fontSize: bodySize,
-                                            ),
-                                            const SizedBox(height: 6),
-                                            _infoRow(
-                                              icon: Icons.login_rounded,
-                                              text: (_isAr
-                                                      ? 'آخر تسجيل دخول: '
-                                                      : 'Last login: ') +
-                                                  _lastLoginLine(),
-                                              color: subColor,
-                                              fontSize: bodySize,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Text(
-                                        t.verifyTitle,
-                                        style: TextStyle(
-                                          fontSize: _font(context, 18, 16.5),
-                                          fontWeight: FontWeight.w900,
-                                          color: titleColor,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        t.verifySubtitle,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: subColor,
-                                          fontSize: bodySize,
-                                        ),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                      if (_restApiFailureHint != null) ...[
-                                        const SizedBox(height: 12),
-                                        Container(
-                                          width: double.infinity,
-                                          padding: const EdgeInsets.all(12),
-                                          decoration: BoxDecoration(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .errorContainer
-                                                .withValues(alpha: 0.85),
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                            border: Border.all(
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .error
-                                                  .withValues(alpha: 0.4),
-                                            ),
-                                          ),
-                                          child: SelectableText(
-                                            _restApiFailureHint!,
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.w700,
-                                              color: Theme.of(context)
-                                                  .colorScheme
-                                                  .onErrorContainer,
-                                              fontSize: bodySize,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                      const SizedBox(height: 14),
-
-                                      // ✅ Timer and Resend in one line (محاذاة في خط واحد)
-                                      Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
+                                    ),
+                                    child: Padding(
+                                      padding:
+                                          EdgeInsets.all(isSmall ? 14 : 22),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(Icons.timer_outlined,
-                                                  size: 18, color: subColor),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                showResend
-                                                    ? (_isAr
-                                                        ? 'انتهى الوقت'
-                                                        : 'Time expired')
-                                                    : (_isAr
-                                                        ? 'المتبقي: $_secondsLeft ث'
-                                                        : 'Remaining: $_secondsLeft s'),
-                                                style: TextStyle(
+                                          AppPageCloseButton.startCorner(
+                                            onPressed: () => _goToLogin(
+                                              signOut: true,
+                                              clearOtp: true,
+                                            ),
+                                          ),
+                                          Container(
+                                            width: double.infinity,
+                                            padding: EdgeInsets.symmetric(
+                                              horizontal: isTiny ? 10 : 12,
+                                              vertical: isTiny ? 8 : 10,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: isDark
+                                                  ? Colors.white
+                                                      .withValues(alpha: 0.04)
+                                                  : Colors.black
+                                                      .withValues(alpha: 0.03),
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                              border: Border.all(
+                                                color: isDark
+                                                    ? Colors.white
+                                                        .withValues(alpha: 0.14)
+                                                    : Colors.black.withValues(
+                                                        alpha: 0.10),
+                                              ),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.center,
+                                              children: [
+                                                _singleLineGreeting(
+                                                  greeting: _greeting(),
+                                                  name: displayName,
+                                                  color: titleColor,
+                                                  fontSize: nameSize,
+                                                ),
+                                                const SizedBox(height: 8),
+                                                _infoRow(
+                                                  icon: Icons
+                                                      .calendar_today_rounded,
+                                                  text: _todayLine(),
                                                   color: subColor,
-                                                  fontWeight: FontWeight.w900,
+                                                  fontSize: bodySize,
+                                                ),
+                                                const SizedBox(height: 6),
+                                                _infoRow(
+                                                  icon: Icons.login_rounded,
+                                                  text: (_isAr
+                                                          ? 'آخر تسجيل دخول: '
+                                                          : 'Last login: ') +
+                                                      _lastLoginLine(),
+                                                  color: subColor,
+                                                  fontSize: bodySize,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          if (_restApiFailureHint != null) ...[
+                                            const SizedBox(height: 12),
+                                            Container(
+                                              width: double.infinity,
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .errorContainer
+                                                    .withValues(alpha: 0.85),
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                                border: Border.all(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .error
+                                                      .withValues(alpha: 0.4),
+                                                ),
+                                              ),
+                                              child: SelectableText(
+                                                _restApiFailureHint!,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onErrorContainer,
                                                   fontSize: bodySize,
                                                 ),
                                               ),
-                                            ],
-                                          ),
-                                          const SizedBox(width: 16),
-                                          TextButton.icon(
-                                            onPressed: showResend && !_offline
-                                                ? _resendCode
-                                                : null,
-                                            icon: const Icon(Icons.refresh),
-                                            label: Text(
-                                              _isAr ? 'إعادة إرسال' : 'Resend',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.w900,
-                                                fontSize: bodySize,
-                                              ),
                                             ),
-                                          ),
-                                        ],
-                                      ),
+                                          ],
+                                          const SizedBox(height: 14),
 
-                                      const SizedBox(height: 10),
-                                      FieldGroupFrame(
-                                        title: t.fieldGroupOtpTitle,
-                                        subtitle: t.fieldGroupOtpSubtitle,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
-                                          horizontal: 12,
-                                        ),
-                                        child: Column(
-                                          children: [
-                                            Directionality(
-                                              textDirection: TextDirection.ltr,
-                                              child: _otpBoxes(
-                                                isDark: isDark,
-                                                fontSize: bodySize,
+                                          // عدّاد إعادة الإرسال فوق الحقول — يلتف على الشاشات الضيقة ولا يختنق مع الأزرار.
+                                          Wrap(
+                                            alignment: WrapAlignment.center,
+                                            crossAxisAlignment:
+                                                WrapCrossAlignment.center,
+                                            spacing: 8,
+                                            runSpacing: 4,
+                                            children: [
+                                              Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(Icons.timer_outlined,
+                                                      size: 18,
+                                                      color: subColor),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    showResend
+                                                        ? (_isAr
+                                                            ? 'انتهى الوقت'
+                                                            : 'Time expired')
+                                                        : (_isAr
+                                                            ? 'المتبقي: $_secondsLeft ث'
+                                                            : 'Remaining: $_secondsLeft s'),
+                                                    style: TextStyle(
+                                                      color: subColor,
+                                                      fontWeight:
+                                                          FontWeight.w900,
+                                                      fontSize: bodySize,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Align(
-                                              alignment: Alignment.center,
-                                              child: TextButton.icon(
-                                                onPressed: _offline
-                                                    ? null
-                                                    : () => unawaited(
-                                                          _pasteOtpFromClipboard(),
-                                                        ),
-                                                icon: const Icon(
-                                                  Icons.content_paste_rounded,
-                                                  size: 18,
-                                                ),
+                                              TextButton.icon(
+                                                onPressed:
+                                                    showResend && !_offline
+                                                        ? _resendCode
+                                                        : null,
+                                                icon: const Icon(Icons.refresh),
                                                 label: Text(
                                                   _isAr
-                                                      ? 'لصق الرمز'
-                                                      : 'Paste code',
+                                                      ? 'إعادة إرسال'
+                                                      : 'Resend',
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.w900,
                                                     fontSize: bodySize,
                                                   ),
                                                 ),
                                               ),
+                                            ],
+                                          ),
+
+                                          const SizedBox(height: 10),
+                                          FieldGroupFrame(
+                                            title: t.verifySubtitle,
+                                            titleTextAlign: TextAlign.center,
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 14,
+                                              horizontal: 12,
                                             ),
-                                          ],
-                                        ),
-                                      ),
-                                      if (_error) ...[
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          t.invalidCode,
-                                          style: TextStyle(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .error,
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: bodySize,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          _isAr
-                                              ? 'المحاولات المتبقية: $_attemptsLeft'
-                                              : 'Attempts left: $_attemptsLeft',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: bodySize,
-                                            color: subColor,
-                                          ),
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ],
-                                      const SizedBox(height: 16),
-                                      SizedBox(
-                                        width: double.infinity,
-                                        height: 50,
-                                        child: ElevatedButton(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Theme.of(context)
-                                                .colorScheme
-                                                .primary,
-                                            foregroundColor: Colors.white,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(16),
-                                            ),
-                                          ),
-                                          onPressed: (_submitting || _offline)
-                                              ? null
-                                              : _submit,
-                                          child: _submitting
-                                              ? SizedBox(
-                                                  width: 22,
-                                                  height: 22,
-                                                  child: AppLogoLoading(
-                                                    compact: true,
-                                                    size: 20,
-                                                  ),
-                                                )
-                                              : Text(
-                                                  t.confirm,
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.w900,
-                                                    fontSize:
-                                                        _font(context, 16, 15),
+                                            child: Column(
+                                              children: [
+                                                Directionality(
+                                                  textDirection:
+                                                      TextDirection.ltr,
+                                                  child: _otpBoxes(
+                                                    isDark: isDark,
+                                                    fontSize: bodySize,
                                                   ),
                                                 ),
-                                        ),
+                                                const SizedBox(height: 8),
+                                                Align(
+                                                  alignment: Alignment.center,
+                                                  child: TextButton.icon(
+                                                    onPressed: _offline
+                                                        ? null
+                                                        : () => unawaited(
+                                                              _pasteOtpFromClipboard(),
+                                                            ),
+                                                    icon: const Icon(
+                                                      Icons
+                                                          .content_paste_rounded,
+                                                      size: 18,
+                                                    ),
+                                                    label: Text(
+                                                      _isAr
+                                                          ? 'لصق الرمز'
+                                                          : 'Paste code',
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                        fontSize: bodySize,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          Text(
+                                            t.otpAttemptsRemaining(
+                                                _attemptsLeft),
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w900,
+                                              fontSize: bodySize,
+                                              color: _error
+                                                  ? Theme.of(context)
+                                                      .colorScheme
+                                                      .error
+                                                  : subColor,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          if (_error) ...[
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              t.invalidCode,
+                                              style: TextStyle(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .error,
+                                                fontWeight: FontWeight.w900,
+                                                fontSize: bodySize,
+                                              ),
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ],
+                                          const SizedBox(height: 16),
+                                          SizedBox(
+                                            width: double.infinity,
+                                            height: 50,
+                                            child: ElevatedButton(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor:
+                                                    Theme.of(context)
+                                                        .colorScheme
+                                                        .primary,
+                                                foregroundColor: Colors.white,
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(16),
+                                                ),
+                                              ),
+                                              onPressed:
+                                                  (_submitting || _offline)
+                                                      ? null
+                                                      : _submit,
+                                              child: _submitting
+                                                  ? SizedBox(
+                                                      width: 22,
+                                                      height: 22,
+                                                      child: AppLogoLoading(
+                                                        compact: true,
+                                                        size: 20,
+                                                      ),
+                                                    )
+                                                  : Text(
+                                                      t.confirm,
+                                                      style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                        fontSize: _font(
+                                                            context, 16, 15),
+                                                      ),
+                                                    ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          TextButton(
+                                            onPressed: _clear,
+                                            child:
+                                                Text(_isAr ? 'مسح' : 'Clear'),
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(height: 10),
-                                      TextButton(
-                                        onPressed: _clear,
-                                        child: Text(_isAr ? 'مسح' : 'Clear'),
-                                      ),
-                                    ],
+                                    ),
                                   ),
+                                ),
+                              ),
+                              ),
+                            );
+                          },
+                        ),
+                        if (_privacyMask)
+                          Positioned.fill(
+                            child: Container(
+                              color: Colors.black,
+                              alignment: Alignment.center,
+                              child: Text(
+                                _isAr ? 'محتوى محمي' : 'Protected content',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
                                 ),
                               ),
                             ),
                           ),
-                        );
-                      },
-                    ),
-                    if (_privacyMask)
-                      Positioned.fill(
-                        child: Container(
-                          color: Colors.black,
-                          alignment: Alignment.center,
-                          child: Text(
-                            _isAr ? 'محتوى محمي' : 'Protected content',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w900,
-                              fontSize: 16,
-                            ),
+                        if (_offline)
+                          _offlineOverlay(
+                            isDark: isDark,
+                            primary: Theme.of(context).colorScheme.primary,
                           ),
-                        ),
-                      ),
-                    if (_offline)
-                      _offlineOverlay(
-                        isDark: isDark,
-                        primary: Theme.of(context).colorScheme.primary,
-                      ),
-                  ],
+                        _otpKeyboardDock(),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
             ),
           );
         },

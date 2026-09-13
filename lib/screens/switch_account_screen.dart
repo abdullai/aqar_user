@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../main.dart' show langNotifier;
+import '../core/gestures/app_keyboard_popups.dart';
 import 'account_status_screen.dart';
 import 'become_independent_screen.dart';
 import 'join_new_organization_screen.dart';
@@ -29,7 +30,7 @@ class SwitchAccountScreen extends StatelessWidget {
                   : 'May require leaving your current team per platform rules.',
             ),
             onTap: () {
-              showDialog<void>(
+              showAppDialog<void>(
                 context: context,
                 builder: (ctx) => AlertDialog(
                   title: Text(_isAr ? 'تأكيد' : 'Confirm'),

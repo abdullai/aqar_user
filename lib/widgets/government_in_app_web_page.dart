@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'app_logo_loading.dart';
+import 'app_page_close_button.dart';
 
 /// عرض صفحة جهة حكومية داخل التطبيق فقط — دون `launchUrl` أو متصفح خارجي.
 class GovernmentInAppWebViewPage extends StatefulWidget {
@@ -54,10 +55,9 @@ class _GovernmentInAppWebViewPageState extends State<GovernmentInAppWebViewPage>
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(
           onPressed: () => Navigator.pop(context),
-          tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
         ),
       ),
       body: Stack(

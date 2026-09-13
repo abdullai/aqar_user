@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 
 import '../l10n/app_localizations.dart';
 import '../shared/core/supabase_config.dart';
+import '../core/network/web_online.dart';
 
 /// خدمة مركزية لفحص الاتصال — مصدر واحد للتحقق من الشبكة.
 ///
@@ -19,6 +20,7 @@ class ConnectivityGuard {
 
   /// فحص سريع عبر المكوّن فقط (بدون HTTP). فشل الفحص → نفترض الاتصال متاحاً.
   static Future<bool> hasPluginLink() async {
+    if (kIsWeb) return readWebNavigatorOnLine();
     try {
       final result = await _connectivity
           .checkConnectivity()

@@ -34,9 +34,9 @@ class ListingWorkflowUiContext {
   });
 
   static const _ownerTabAr = [
-    'بانتظار عروض المسوقين',
-    'العروض المقدمة',
-    'بانتظار التصريح',
+    'بانتظار المسوقين',
+    'بانتظار موافقة المالك',
+    'إصدار التصاريح',
     'لم يتخذ إجراء 72 ساعة',
     'مفسوخ / ملغى',
     'العقارات المحجوزة',
@@ -44,9 +44,9 @@ class ListingWorkflowUiContext {
   ];
 
   static const _ownerTabEn = [
-    'Awaiting marketer offers',
-    'Submitted offers',
-    'Awaiting permit',
+    'Awaiting marketers',
+    'Awaiting owner approval',
+    'Permit issuance',
     'No action (72h)',
     'Cancelled / terminated',
     'Reserved properties',
@@ -116,18 +116,24 @@ class ListingWorkflowUiContext {
           'pending',
         }.contains(st);
 
-    final showMarketerOffer = stage != ListingWorkflowStage.inactive72h &&
-        (activelyCollecting ||
-            stage == ListingWorkflowStage.waitingMarketers ||
-            st == 'new' ||
-            st == 'invited' ||
-            st == 'pending');
+    final inactive72 = stage == ListingWorkflowStage.inactive72h ||
+        wf == 'inactive_72h' ||
+        wf == 'inactive72h' ||
+        wf == 'owner_action_required' ||
+        st == 'inactive_72h' ||
+        st == 'inactive72h' ||
+        st == 'owner_action_required' ||
+        r['_hub_inactive_72h'] == true;
 
-    final published = wf != 'waiting_marketers' &&
-        st != 'waiting_marketers' &&
+    final showMarketerOffer = !inactive72 &&
+        !showRelist &&
+        (activelyCollecting ||
+            stage == ListingWorkflowStage.waitingMarketers) &&
+        stage != ListingWorkflowStage.inactive72h;
+
+    final published = !inactive72 &&
         (stage == ListingWorkflowStage.published ||
-            stage == ListingWorkflowStage.reserved ||
-            const {'published', 'active', 'approved', 'live'}.contains(st));
+            stage == ListingWorkflowStage.reserved);
 
     final deadline = _parseDt(r['permit_deadline_at']) ??
         _parseDt(r['request_permit_deadline_at']) ??
@@ -168,8 +174,7 @@ class ListingWorkflowUiContext {
       legacyListingStatus: p.status,
     ).clamp(0, 6);
 
-    final published = p.isActive ||
-        stage == ListingWorkflowStage.published ||
+    final published = stage == ListingWorkflowStage.published ||
         stage == ListingWorkflowStage.reserved;
 
     final deadline = p.reservationExpiresAt ?? p.permitDeadlineAt;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/property.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../shared/core/supabase_schema_selects.dart';
 import '../widgets/app_logo_loading.dart';
 import 'property_details_page.dart';
@@ -49,7 +50,7 @@ class _ListingLoaderPageState extends State<ListingLoaderPage> {
       if (!mounted) return;
 
       if (row == null) {
-        await showDialog<void>(
+        await showAppDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: Text(_isAr ? 'غير موجود' : 'Not found'),
@@ -92,7 +93,7 @@ class _ListingLoaderPageState extends State<ListingLoaderPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(_isAr ? 'خطأ' : 'Error'),

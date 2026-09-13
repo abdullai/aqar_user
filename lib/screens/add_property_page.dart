@@ -1,4 +1,6 @@
-﻿// lib/screens/add_property_page.dart
+﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field, unused_local_variable
+
+// lib/screens/add_property_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -6,15 +8,14 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/branding/app_branding.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart' show suspendAutoLock;
@@ -22,9 +23,10 @@ import '../services/marketing_flow_service.dart';
 import '../services/org_activity_service.dart';
 import '../services/saudi_districts_service.dart';
 import '../services/saudi_locations_service.dart';
-import '../services/watermark_service.dart';
+import '../services/location_hierarchy_service.dart';
 import '../utils/video_duration_check.dart';
 import '../core/forms/wizard_form_draft.dart';
+import '../core/utils/date_helper.dart';
 import '../core/forms/wizard_step_navigation.dart';
 import '../core/forms/active_form_guard.dart';
 import '../core/forms/publish_content_fingerprint_store.dart';
@@ -32,15 +34,20 @@ import '../core/session/app_session.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/form_exit_confirm_dialog.dart';
+import '../widgets/budget_text_field.dart';
 import '../widgets/terms_acceptance_checkbox.dart';
 import 'platform_policies_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/field_group_frame.dart';
+import '../widgets/deed_civil_hijri_date_text.dart';
 import '../widgets/deed_date_calendar_dialog.dart';
 import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/adaptive_post_publish_dialog.dart';
 import '../widgets/publisher_identity_options_card.dart';
 import '../core/profile/publisher_identity_prefs.dart';
+import '../widgets/equal_option_tile_grid.dart';
+import '../widgets/rent_term_schedule_fields.dart';
+import '../core/market/market_request_rent_schedule.dart';
 import '../widgets/stable_select_chip.dart';
 import '../widgets/property_type_hierarchy_picker.dart';
 import '../widgets/year_built_picker_field.dart';
@@ -48,8 +55,12 @@ import '../widgets/smart_count_field.dart';
 import '../widgets/searchable_select_field.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/saudi_input_formatters.dart';
+import '../core/listing/deed_number_integrity.dart';
 import '../core/listing/listing_area_unit.dart';
 import '../core/listing/marketing_add_property_flow_config.dart';
+import '../core/listing/listing_media_seal.dart';
+import '../core/listing/listing_storage_paths.dart';
+import '../core/listing/post_publish_nav_result.dart';
 import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../services/subscription_service.dart';
@@ -59,12 +70,20 @@ import '../core/listing/property_type_catalog.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/display_ids.dart';
-import '../core/utils/listing_date_display.dart';
 import '../core/navigation/post_auth_navigation.dart';
+import '../core/navigation/safe_overlay_pop.dart';
+import '../core/gestures/app_keyboard_inset.dart';
+import '../widgets/composer_step_constellation.dart';
+import '../widgets/rega_official_bench_card.dart';
 import '../services/fal_license_service.dart';
+import '../services/rega_open_indicators_service.dart';
 import 'listing_request_status_page.dart';
 import 'map_picker_page.dart';
 import 'rega_ad_license_import_page.dart';
+import '../core/listing/in_app_tour.dart';
+import '../widgets/in_app_tour_builder_sheet.dart';
+import 'photo_shoot_book_page.dart';
+import '../services/photographer_service.dart';
 import 'subscriptions/subscriptions_root_screen.dart';
 
 /// مصدر رخصة الإعلان (الخطوة الأولى من المعالج).
@@ -123,8 +142,10 @@ String _formSliceTitle(AddPropertyFormSlice s, bool isAr) {
 
 String _formSliceHint(AddPropertyFormSlice s, bool isAr) {
   switch (s) {
-    case AddPropertyFormSlice.classification:
-      return isAr ? 'النوع، الاستخدام، الغرض.' : 'Type, usage, purpose.';
+      case AddPropertyFormSlice.classification:
+        return isAr
+            ? 'الغرض (بيع أو إيجار)، النوع، والاستخدام.'
+            : 'Purpose (sale or rent), type, and usage.';
     case AddPropertyFormSlice.location:
       return isAr
           ? 'منطقة، محافظة، مدينة، حي (يُكمَل تلقائياً بعد الخريطة إن وُجدت).'
@@ -146,6 +167,7 @@ Color _purposeAccentColor(String code) {
       return const Color(0xFF0F766E);
     case 'rent':
     case 'daily_rent':
+    case 'weekly_rent':
     case 'monthly_rent':
     case 'yearly_rent':
       return const Color(0xFF2563EB);
@@ -203,11 +225,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   String _advertiserRole = 'owner';
   /// موقع تقريبي (لا يُعرض بدقة على خريطة الإعلانات).
   bool _locationIsApproximate = false;
-  /// إظهار اسم/صفة المعلن مع التوثيق على بطاقات الرئيسية (اختياري).
-  bool _showOwnerNameOnCards = true;
+  /// إظهار اسم/صفة المعلن مع التوثيق على بطاقات الرئيسية (اختياري — مغلق افتراضياً).
+  bool _showOwnerNameOnCards = false;
   PublicNameSource _pubNameSource = PublicNameSource.official;
-  PublicPhoneSource _pubPhoneSource = PublicPhoneSource.primary;
-  bool _publishPresenceOnCards = true;
+  PublicPhoneSource _pubPhoneSource = PublicPhoneSource.hidden;
+  bool _publishPresenceOnCards = false;
   String _officialNameCached = '';
   String _displayAliasCached = '';
   String _primaryPhoneCached = '';
@@ -221,7 +243,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   // — `null` يعني أن المعلن لم يجب بعد على السؤال الأول (واجب قبل النشر).
   bool? _priceIncludesVat;
   // — `none` افتراضياً؛ يتحوّل إلى `percent` (2.5%) أو `fixed` (مبلغ مقطوع).
-  String _commissionKind = 'none';
+  String _commissionKind = '';
   final TextEditingController _commissionFixedCtrl = TextEditingController();
   static const double _kVatRate = 0.05;
   static const double _kMarketingCommissionRate = 0.025;
@@ -233,8 +255,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   static const _draftNamespace = 'add_property_listing';
   AppSession? _appSession;
 
-  // نوع العرض (بيع/إيجار/مزاد/استثمار)
+  // نوع العرض (بيع/إيجار/مزاد/استثمار) — الإيجار يُفصَّل يومي/أسبوعي/شهري/سنوي كما في الطلب.
   String _purpose = 'sale';
+  String _rentTerm = 'monthly';
+  int _rentDays = 1;
+  int _rentWeeks = 1;
+  int _rentMonths = 1;
+  int _rentYears = 1;
+  DateTime? _rentStart;
 
   // حقول إضافية عامة
   int? _bedrooms;
@@ -247,6 +275,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   final _videoUrl = TextEditingController();
   final _virtualTourUrl = TextEditingController();
+  InAppTour? _inAppTour;
+  Map<String, dynamic>? _pendingPhotoShoot;
   DateTime? _availabilityDate;
   DateTime? _deedDate;
   bool _uploadingVideo = false;
@@ -324,7 +354,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   bool _saving = false;
   String? _error;
 
-  /// 0: رخصة/هيئة — 1: تصنيف — 2: خريطة — 3: موقع — 4: صك/تسعير — 5: تفاصيل — 6: وسائط
+  /// 0: رخصة — 1: تصنيف/غرض — 2: خريطة+موقع — 3: صك/تسعير — 4: تفاصيل — 5: وسائط
   int _wizardStep = 0;
 
   /// «بيع / إيجار / شراء» في مسار المسوّق المرخّص.
@@ -336,8 +366,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   /// غرض فرعي: إيجار (يومي/شهري/سنوي) أو بيع (مزاد/استثمار).
   String? _subPurposeCode;
 
-  int get _kWizardLastStep =>
-      _marketingLicensedSplit ? 7 : 6;
+  int get _kWizardLastStep => 5;
 
   bool get _marketingFlowActive => widget.marketingFlow != null;
 
@@ -351,7 +380,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   Map<String, dynamic> _regaPayloadForInsert = {};
 
   // المالك الفرد يستطيع إنشاء إعلان أولي دون رخصة فال؛ المسوق يدخل عبر بوابة الهيئة.
-  _AdLicenseSource _adLicenseSource = _AdLicenseSource.none;
+  // لا نضع صح مسبقاً — المستخدم يختار المصدر بنفسه.
+  _AdLicenseSource _adLicenseSource = _AdLicenseSource.unset;
+  bool? _hasRegaAdLicense;
+  bool _consentMarketNoLicense = false;
+  bool _showPhoneOnMarket = false;
+  final _regaAdLicenseNo = TextEditingController();
+  final _ejarContractNo = TextEditingController();
+  final _ejarUnitNo = TextEditingController();
+  final _ejarFloorNo = TextEditingController();
+  String? _licenseStepError;
 
   /// إلزامي: هل على العقار التزامات (قيد/اشتراط)؟
   bool? _propertyHasObligations;
@@ -372,6 +410,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   /// رقم رخصة فال/الوساطة (10 أرقام) للتحقق عبر الهيئة.
   final _regaFalLicenseNo = TextEditingController();
   Timer? _regaDebounce;
+  Timer? _deedDupDebounce;
+  String? _deedDuplicateWarning;
   bool _regaChecking = false;
   String? _regaVerifyBanner;
   bool? _regaVerifyOk;
@@ -497,17 +537,96 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       PropertyTypeCatalog.showsFloorFieldsEffective(_type);
 
   static String normalizeDeedNumber(String raw) =>
-      raw.replaceAll(RegExp(r'\s+'), '').trim();
+      DeedNumberIntegrity.normalize(raw);
 
   final List<Map<String, String>> _purposeTypes = [
     {'code': 'sale', 'ar': 'بيع', 'en': 'Sale'},
     {'code': 'rent', 'ar': 'إيجار', 'en': 'Rent'},
-    {'code': 'daily_rent', 'ar': 'إيجار يومي', 'en': 'Daily Rent'},
-    {'code': 'monthly_rent', 'ar': 'إيجار شهري', 'en': 'Monthly Rent'},
-    {'code': 'yearly_rent', 'ar': 'إيجار سنوي', 'en': 'Yearly Rent'},
     {'code': 'auction', 'ar': 'مزاد', 'en': 'Auction'},
     {'code': 'investment', 'ar': 'استثمار', 'en': 'Investment'},
   ];
+
+  bool get _purposeIsRent =>
+      _purpose == 'rent' || _purpose.contains('rent');
+
+  DateTime? get _rentEndComputed =>
+      _rentStart == null || !_purposeIsRent
+          ? null
+          : MarketRequestRentSchedule.endOf(
+              term: _rentTerm,
+              start: _rentStart!,
+              days: _rentDays,
+              weeks: _rentWeeks,
+              months: _rentMonths,
+              years: _rentYears,
+            );
+
+  void _applyPurposeGroup(String code) {
+    if (code == 'rent') {
+      if (_rentTerm.isEmpty) _rentTerm = 'monthly';
+      _purpose = '${_rentTerm}_rent';
+      _rentStart ??= MarketRequestRentSchedule.dateOnly(DateTime.now());
+      return;
+    }
+    _purpose = code;
+  }
+
+  void _applyListingRentTerm(String term) {
+    var next = term;
+    var years = _rentYears;
+    var months = _rentMonths;
+    if (term == 'monthly' && _rentMonths >= 12) {
+      next = 'yearly';
+      years = 1;
+      months = 1;
+    }
+    _rentTerm = next;
+    _rentYears = years;
+    _rentMonths = months;
+    _purpose = '${next}_rent';
+  }
+
+  void _setListingRentMonths(int n) {
+    if (n >= 12) {
+      _rentTerm = 'yearly';
+      _rentYears = 1;
+      _rentMonths = 12;
+    } else {
+      _rentMonths = n.clamp(1, 11);
+      _rentTerm = 'monthly';
+    }
+    _purpose = '${_rentTerm}_rent';
+  }
+
+  Future<void> _pickListingRentStart() async {
+    final picked = await showDeedDateCalendarDialog(
+      context: context,
+      isAr: _isAr,
+      initialDate: _rentStart ?? DateTime.now(),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _rentStart = MarketRequestRentSchedule.dateOnly(picked));
+  }
+
+  Widget _listingRentSchedule({required bool busy}) {
+    return RentTermScheduleFields(
+      isAr: _isAr,
+      busy: busy,
+      rentTerm: _rentTerm,
+      rentDays: _rentDays,
+      rentWeeks: _rentWeeks,
+      rentMonths: _rentMonths,
+      rentYears: _rentYears,
+      rentStart: _rentStart,
+      rentEnd: _rentEndComputed,
+      onTerm: (t) => setState(() => _applyListingRentTerm(t)),
+      onDays: (n) => setState(() => _rentDays = n),
+      onWeeks: (n) => setState(() => _rentWeeks = n),
+      onMonths: (n) => setState(() => _setListingRentMonths(n)),
+      onYears: (n) => setState(() => _rentYears = n),
+      onPickStart: () => unawaited(_pickListingRentStart()),
+    );
+  }
 
   @override
   void initState() {
@@ -532,12 +651,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       return;
     }
     _loadSaudiLocations();
+    unawaited(RegaOpenIndicatorsService.instance.ensureLoaded());
     _loadOwnerName();
     _restoreTempCoords();
     _advertiserRole = _advertiserRoleCode;
     _wireAddPropertyNumericListeners();
+    _deedNumber.addListener(_scheduleDeedDuplicateCheck);
     _price.addListener(_onPriceOrAreaChanged);
     _area.addListener(_onPriceOrAreaChanged);
+    _regaAdLicenseNo.addListener(_scheduleRegaLicenseVerify);
     _regaFalLicenseNo.addListener(_scheduleRegaLicenseVerify);
     _applyInitialRegaPayload();
     _applyMarketingFlowBootstrap();
@@ -594,7 +716,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   /// إغلاق نموذج الإضافة والعودة للوحة على تبويب الرئيسية (بدون إعادة بناء الويب).
-  Future<void> _popToDashboardHomeAfterPublish() async {
+  Future<void> _popToDashboardHomeAfterPublish(
+    PostPublishNavResult result,
+  ) async {
     _publishSucceeded = true;
     if (mounted) setState(() => _publishLock = false);
     ActiveFormGuard.instance.unregister('add_property_listing');
@@ -607,7 +731,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (!mounted) return;
     final nav = Navigator.of(context);
     if (nav.canPop()) {
-      nav.pop(true);
+      nav.pop(result);
       return;
     }
     await PostAuthNavigation.openDashboard(context);
@@ -632,6 +756,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'commission_fixed': _commissionFixedCtrl.text,
       'video_url': _videoUrl.text,
       'virtual_tour_url': _virtualTourUrl.text,
+      'in_app_tour': _inAppTour?.toJson(),
+      'pending_photo_shoot': _pendingPhotoShoot,
       'lat': _latCtrl.text,
       'lng': _lngCtrl.text,
       'plan_number': _planNumber.text,
@@ -640,6 +766,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'extended_usage_notes': _extendedUsageNotes.text,
       'rega_fal_license_no': _regaFalLicenseNo.text,
       'purpose': _purpose,
+      'rent_term': _rentTerm,
+      'rent_days': _rentDays,
+      'rent_weeks': _rentWeeks,
+      'rent_months': _rentMonths,
+      'rent_years': _rentYears,
+      'rent_start': _rentStart?.toIso8601String(),
       'type': _type,
       'currency': _currency,
       'commission_kind': _commissionKind,
@@ -660,10 +792,21 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'price_includes_vat': _priceIncludesVat,
       'property_has_obligations': _propertyHasObligations,
       'ad_license_source': _adLicenseSource.name,
+      'has_rega_ad_license': _hasRegaAdLicense,
+      'consent_market_no_license': _consentMarketNoLicense,
+      'show_phone_on_market': _showPhoneOnMarket,
+      'rega_ad_license_no': _regaAdLicenseNo.text,
+      'ejar_contract_no': _ejarContractNo.text,
+      'ejar_unit_no': _ejarUnitNo.text,
+      'ejar_floor_no': _ejarFloorNo.text,
       'bedrooms': _bedrooms,
       'bathrooms': _bathrooms,
       'parking_spots': _parkingSpots,
       'year_built': _yearBuilt,
+      'amenities': {
+        for (final e in _amenities.entries)
+          if (e.value) e.key: true,
+      },
       'image_meta': _images
           .map((e) => {
                 'name': e.name,
@@ -700,6 +843,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _commissionFixedCtrl.text = '${d['commission_fixed'] ?? ''}';
     _videoUrl.text = '${d['video_url'] ?? ''}';
     _virtualTourUrl.text = '${d['virtual_tour_url'] ?? ''}';
+    _inAppTour = InAppTour.fromRaw(d['in_app_tour']);
+    final shoot = d['pending_photo_shoot'];
+    _pendingPhotoShoot = shoot is Map
+        ? Map<String, dynamic>.from(shoot)
+        : null;
     _latCtrl.text = '${d['lat'] ?? ''}';
     _lngCtrl.text = '${d['lng'] ?? ''}';
     _planNumber.text = '${d['plan_number'] ?? ''}';
@@ -708,9 +856,37 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _extendedUsageNotes.text = '${d['extended_usage_notes'] ?? ''}';
     _regaFalLicenseNo.text = '${d['rega_fal_license_no'] ?? ''}';
     _purpose = '${d['purpose'] ?? _purpose}';
+    if (_purpose.contains('rent')) {
+      _primaryPurposeGroup = 'rent';
+    } else {
+      _primaryPurposeGroup = 'sale';
+      if (_purpose == 'auction' || _purpose == 'investment') {
+        _subPurposeCode = _purpose;
+      }
+    }
+    _rentTerm = '${d['rent_term'] ?? _rentTerm}';
+    if (_purpose.contains('rent') && _rentTerm.isEmpty) {
+      if (_purpose.startsWith('daily')) {
+        _rentTerm = 'daily';
+      } else if (_purpose.startsWith('weekly')) {
+        _rentTerm = 'weekly';
+      } else if (_purpose.startsWith('yearly')) {
+        _rentTerm = 'yearly';
+      } else {
+        _rentTerm = 'monthly';
+      }
+    }
+    _rentDays = (d['rent_days'] as num?)?.toInt().clamp(1, 6) ?? _rentDays;
+    _rentWeeks = (d['rent_weeks'] as num?)?.toInt().clamp(1, 3) ?? _rentWeeks;
+    _rentMonths = (d['rent_months'] as num?)?.toInt().clamp(1, 12) ?? _rentMonths;
+    _rentYears = (d['rent_years'] as num?)?.toInt().clamp(1, 10) ?? _rentYears;
+    final rs = '${d['rent_start'] ?? ''}';
+    if (rs.isNotEmpty) {
+      _rentStart = DateTime.tryParse(rs);
+    }
     _type = '${d['type'] ?? _type}';
     _currency = '${d['currency'] ?? _currency}';
-    _commissionKind = '${d['commission_kind'] ?? _commissionKind}';
+    _commissionKind = '${d['commission_kind'] ?? ''}';
     _selectedRegion = d['selected_region']?.toString();
     _selectedGovernorate = d['selected_governorate']?.toString();
     _usageResidential = d['usage_residential'] == true;
@@ -736,10 +912,31 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _adLicenseSource = _AdLicenseSource.values.byName(als);
       } catch (_) {}
     }
+    if (d.containsKey('has_rega_ad_license')) {
+      _hasRegaAdLicense = d['has_rega_ad_license'] as bool?;
+    }
+    _consentMarketNoLicense = d['consent_market_no_license'] == true;
+    _showPhoneOnMarket = d['show_phone_on_market'] == true;
+    _regaAdLicenseNo.text = '${d['rega_ad_license_no'] ?? _regaAdLicenseNo.text}';
+    _ejarContractNo.text = '${d['ejar_contract_no'] ?? ''}';
+    _ejarUnitNo.text = '${d['ejar_unit_no'] ?? ''}';
+    _ejarFloorNo.text = '${d['ejar_floor_no'] ?? ''}';
     _bedrooms = (d['bedrooms'] as num?)?.toInt();
     _bathrooms = (d['bathrooms'] as num?)?.toInt();
     _parkingSpots = (d['parking_spots'] as num?)?.toInt();
     _yearBuilt = (d['year_built'] as num?)?.toInt();
+    for (final k in _amenities.keys) {
+      _amenities[k] = false;
+    }
+    final draftAm = d['amenities'];
+    if (draftAm is Map) {
+      for (final e in draftAm.entries) {
+        final k = e.key.toString();
+        if (_amenities.containsKey(k) && e.value == true) {
+          _amenities[k] = true;
+        }
+      }
+    }
     _images.clear();
     final imgs = d['image_b64'];
     if (imgs is List) {
@@ -784,13 +981,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       data: _snapshotListingDraft(),
     );
     if (showSnack && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(_isAr
-              ? 'تم حفظ مسودة الإعلان.'
-              : 'Listing draft saved.'),
-        ),
+      final l10n = AppLocalizations.of(context);
+      showFormExitNotice(
+        context,
+        l10n?.formExitDraftSaved ??
+            (_isAr
+                ? 'حُفظت البيانات التي أدخلتها كمسودة على هذا الجهاز. يمكنك العودة لآخر حقل وصلت إليه وإكمال الإدخال. المسودة لا تُرسل إلى قاعدة البيانات، وتُحذف تلقائياً عند تسجيل الخروج.'
+                : 'Your entries were saved as a draft on this device. You can return to the last field you filled and continue. This draft is not stored in the database and is removed when you sign out.'),
       );
     }
   }
@@ -809,10 +1006,30 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _addressLine.clear();
     _price.clear();
     _area.clear();
-    _wizardStep = _marketingFlowActive ? 1 : 0;
+    _wizardStep = 0;
     _termsAccepted = false;
     _images.clear();
     if (mounted) setState(() {});
+  }
+
+  Future<void> _onComposerClosePressed() async {
+    if (_publishLock || _saving) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr
+              ? 'جاري نشر الإعلان… يرجى الانتظار حتى ظهور رقم الإعلان.'
+              : 'Publishing in progress… please wait for the listing number.'),
+        ),
+      );
+      return;
+    }
+    if (!_hasUnsavedWizardInput()) {
+      SafeOverlayPop.pop(context);
+      return;
+    }
+    await _handleListingFormExit();
   }
 
   Future<void> _handleListingFormExit() async {
@@ -826,11 +1043,19 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     if (choice == FormExitChoice.saveDraft) {
       await _persistListingDraft();
-      if (mounted) Navigator.of(context).pop();
       return;
     }
     await _clearListingDraftAndForm();
-    if (mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    showFormExitNotice(
+      context,
+      l10n?.formExitCleared ??
+          (_isAr
+              ? 'مُسحت كل البيانات التي أدخلتها في الحقول. لم تُحفظ كمسودة.'
+              : 'All entered data was cleared. Nothing was saved as a draft.'),
+    );
+    SafeOverlayPop.pop(context, 'closed');
   }
 
   Future<void> _ensureMarketingSubscriptionForAddProperty() async {
@@ -846,7 +1071,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             builder: (_) => SubscriptionsRootScreen(
               lang: widget.lang,
               accountType: widget.marketingFlow?.accountType ?? '',
-              embedAppBar: !widget.embedAppBar,
+              embedAppBar: false,
             ),
           ),
         );
@@ -863,23 +1088,24 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   void _applyMarketingFlowBootstrap() {
     final flow = widget.marketingFlow;
     if (flow == null) return;
-
-    if (flow.skipLicenseStep) {
-      _wizardStep = 1;
-      if (flow.path == MarketingListingPath.licensed) {
-        _adLicenseSource = _AdLicenseSource.inApp;
-        _propertyHasObligations = false;
-      } else {
-        _adLicenseSource = _AdLicenseSource.none;
-        _regaPayloadForInsert = {
-          ..._regaPayloadForInsert,
-          'no_license_market_consent': true,
-          'market_without_rega_license': true,
-        };
-        _usageResidential = true;
-        _subPurposeCode = 'sale';
-        _primaryPurposeGroup = 'sale';
-      }
+    _wizardStep = 0;
+    if (flow.path == MarketingListingPath.licensed) {
+      _hasRegaAdLicense = true;
+      _adLicenseSource = _AdLicenseSource.inApp;
+      final n = (flow.initialRegaPayload?['rega_ad_license_number'] ?? '')
+          .toString()
+          .replaceAll(RegExp(r'\D'), '');
+      if (n.length == 10) _regaAdLicenseNo.text = n;
+    } else if (flow.path == MarketingListingPath.noLicenseMarket) {
+      _hasRegaAdLicense = false;
+      _adLicenseSource = _AdLicenseSource.none;
+      _consentMarketNoLicense = true;
+      _showPhoneOnMarket = flow.showOwnerPhoneOnMarket;
+      _regaPayloadForInsert = {
+        ..._regaPayloadForInsert,
+        'no_license_market_consent': true,
+        'market_without_rega_license': true,
+      };
     }
 
     final payload = flow.initialRegaPayload ?? widget.initialRegaPayload;
@@ -891,23 +1117,20 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
-  /// يعيد ترتيب خطوات المعالج للمسار المرخّص (غرض → نوع → موقع → خريطة …).
+  /// 0 رخصة · 1 تصنيف · 23 خريطة+موقع · 4 صك · 5 تفاصيل · 6 وسائط
   int _wizardPaneKind(int step) {
-    if (!_marketingLicensedSplit) return step;
     switch (step) {
+      case 0:
+        return 0;
       case 1:
-        return 101;
+        return 1;
       case 2:
-        return 102;
+        return 23;
       case 3:
-        return 3;
-      case 4:
-        return 2;
-      case 5:
         return 4;
-      case 6:
+      case 4:
         return 5;
-      case 7:
+      case 5:
         return 6;
       default:
         return step;
@@ -917,13 +1140,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   void _syncPurposeFromPrimaryGroup() {
     switch (_primaryPurposeGroup) {
       case 'rent':
-        _purpose = _subPurposeCode ?? 'monthly_rent';
-        break;
-      case 'purchase':
-        _purpose = 'sale';
+        _applyPurposeGroup('rent');
         break;
       case 'sale':
       default:
+        _isAuction = _subPurposeCode == 'auction';
         _purpose = _subPurposeCode ?? 'sale';
         break;
     }
@@ -1000,7 +1221,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final m = widget.initialRegaPayload;
     if (m == null || m.isEmpty) return;
     _adLicenseSource = _AdLicenseSource.inApp;
+    _hasRegaAdLicense = true;
     _regaPayloadForInsert = Map<String, dynamic>.from(m);
+    final adNo = (m['rega_ad_license_number'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+    if (adNo.length == 10) _regaAdLicenseNo.text = adNo;
 
     final pu = (m['rega_unit_price'] ?? '').toString();
     if (pu.isNotEmpty) {
@@ -1121,7 +1345,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   void _scheduleRegaLicenseVerify() {
     _regaDebounce?.cancel();
     _regaDebounce = Timer(const Duration(milliseconds: 700), () async {
-      final digits = _regaFalLicenseNo.text.replaceAll(RegExp(r'\D'), '');
+      final digits = _regaAdLicenseNo.text.replaceAll(RegExp(r'\D'), '');
       if (digits.length != 10) {
         if (mounted) {
           setState(() {
@@ -1131,12 +1355,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         }
         return;
       }
+      _regaPayloadForInsert = {
+        ..._regaPayloadForInsert,
+        'rega_ad_license_number': digits,
+      };
       if (mounted) {
         setState(() {
           _regaChecking = true;
           _regaVerifyBanner = _isAr
-              ? 'جاري التحقق من الهيئة العامة للعقار أو الجهات المعنية عن رقم الترخيص…'
-              : 'Verifying license with REGA and related authorities…';
+              ? 'جاري التحقق من الهيئة العامة للعقار… يمكنك المتابعة يدوياً إن تعذر الجلب.'
+              : 'Checking REGA… you can continue with manual entry if lookup fails.';
         });
       }
       final res = await FalLicenseService(_sb).verify(digits);
@@ -1146,13 +1374,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _regaVerifyOk = res.valid;
         _regaVerifyBanner = res.valid
             ? (res.licenseStatusText ??
-                (_isAr ? 'تم التحقق: رخصة سارية' : 'Verified: active license'))
-            : (res.errorMessage ?? res.status);
+                (_isAr ? 'تم التحقق: الرخصة سارية' : 'Verified: active license'))
+            : (_isAr
+                ? 'تعذر الجلب من الهيئة. أكمل الحقول يدوياً ثم التالي.'
+                : 'Authority lookup failed. Continue with manual fields, then Next.');
       });
       if (res.valid) {
         _regaPayloadForInsert = {
           ..._regaPayloadForInsert,
           'fal_license_verify': {
+            'valid': true,
             'status': res.status,
             'license_no': res.licenseNo,
             'broker_name': res.brokerName,
@@ -1175,6 +1406,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _regaPayloadForInsert = {..._regaPayloadForInsert, ...m};
       final n = (m['rega_ad_license_number'] ?? '').toString().trim();
       if (n.isNotEmpty) {
+        _regaAdLicenseNo.text = n.replaceAll(RegExp(r'\D'), '');
         _regaFalLicenseNo.text = n;
       }
     });
@@ -1262,8 +1494,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _obligationsDetail.dispose();
     _extendedUsageNotes.dispose();
     _regaDebounce?.cancel();
+    _deedDupDebounce?.cancel();
+    _deedNumber.removeListener(_scheduleDeedDuplicateCheck);
+    _regaAdLicenseNo.removeListener(_scheduleRegaLicenseVerify);
     _regaFalLicenseNo.removeListener(_scheduleRegaLicenseVerify);
     _regaFalLicenseNo.dispose();
+    _regaAdLicenseNo.dispose();
+    _ejarContractNo.dispose();
+    _ejarUnitNo.dispose();
+    _ejarFloorNo.dispose();
     _price.removeListener(_onPriceOrAreaChanged);
     _area.removeListener(_onPriceOrAreaChanged);
     _area.dispose();
@@ -1313,9 +1552,20 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (_uploadingVideo) return false;
     if (_uploadingLicensePdf) return false;
     if (_adLicenseSource == _AdLicenseSource.unset) return false;
+    if (_hasRegaAdLicense == null) return false;
+    if (_hasRegaAdLicense == true &&
+        _regaAdLicenseNo.text.replaceAll(RegExp(r'\D'), '').length != 10) {
+      return false;
+    }
+    if (_hasRegaAdLicense == false && !_consentMarketNoLicense) return false;
     if (_propertyHasObligations == null) return false;
     // — يجب الإجابة على سؤال «هل الإجمالي شامل ضريبة 5%؟».
     if (_priceIncludesVat == null) return false;
+    if (_commissionKind != 'none' &&
+        _commissionKind != 'percent' &&
+        _commissionKind != 'fixed') {
+      return false;
+    }
     // — اختيار «مبلغ مقطوع» يستوجب إدخال قيمة موجبة.
     if (_commissionKind == 'fixed' && _fixedCommissionValue() <= 0) {
       return false;
@@ -1337,10 +1587,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final lng = _parseNullableDouble(_lngCtrl.text);
       if (lat == null || lng == null) return false;
     }
-    if (!_marketingSimplifiedForm &&
-        !_marketingLicensedSplit &&
-        !_usageResidential &&
-        !_usageCommercial) {
+    if (!_usageResidential && !_usageCommercial) {
       return false;
     }
     if (_isLand && _streetCount != null && _streetCount! > 0) {
@@ -1363,18 +1610,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   String _wizardScreenTitle(bool isAr) {
     final pane = _wizardPaneKind(_wizardStep);
     switch (pane) {
-      case 101:
-        return isAr ? 'نوع الإعلان' : 'Listing type';
-      case 102:
-        return isAr ? 'نوع العقار' : 'Property type';
       case 0:
-        return isAr ? 'الهيئة ورخصة الإعلان' : 'REGA & ad license';
+        return isAr ? 'رخصة الإعلان' : 'Ad license';
       case 1:
-        return isAr ? 'التصنيف' : 'Classification';
-      case 2:
-        return isAr ? 'الخريطة' : 'Map';
-      case 3:
-        return isAr ? 'الموقع' : 'Location';
+        return isAr ? 'المعلومات الأساسية' : 'Basics';
+      case 23:
+        return isAr ? 'الموقع والخريطة' : 'Location & map';
       case 4:
         return isAr ? 'الصك والتسعير' : 'Deed & pricing';
       case 5:
@@ -1386,16 +1627,71 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
+  bool _validateLicenseStep() {
+    if (_hasRegaAdLicense == null) {
+      final msg = _isAr ? 'اختر نعم أو لا' : 'Choose Yes or No';
+      setState(() {
+        _error = msg;
+        _licenseStepError = msg;
+      });
+      _scrollToKey(_regaCardKey);
+      return false;
+    }
+    if (_hasRegaAdLicense == true) {
+      final digits = _regaAdLicenseNo.text.replaceAll(RegExp(r'\D'), '');
+      if (digits.length != 10) {
+        final msg = _isAr
+            ? 'أدخل رقم ترخيص الإعلان المكوّن من 10 أرقام'
+            : 'Enter the 10-digit ad license number';
+        setState(() {
+          _error = msg;
+          _licenseStepError = msg;
+        });
+        _scrollToKey(_regaCardKey);
+        return false;
+      }
+      _adLicenseSource = _AdLicenseSource.inApp;
+      _regaPayloadForInsert = {
+        ..._regaPayloadForInsert,
+        'rega_ad_license_number': digits,
+        'source': 'unified_listing_license_v1',
+        'manual_if_authority_unavailable': _regaVerifyOk != true,
+      };
+      return true;
+    }
+    if (!_consentMarketNoLicense) {
+      final msg = _isAr
+          ? 'يجب الموافقة على طرح الإعلان في السوق العقاري'
+          : 'You must agree to publish the listing on the market';
+      setState(() {
+        _error = msg;
+        _licenseStepError = msg;
+      });
+      _scrollToKey(_regaCardKey);
+      return false;
+    }
+    _adLicenseSource = _AdLicenseSource.none;
+    _regaPayloadForInsert = {
+      ..._regaPayloadForInsert,
+      'no_license_market_consent': true,
+      'market_without_rega_license': true,
+      'show_owner_phone_on_market': _showPhoneOnMarket,
+    };
+    return true;
+  }
+
   bool _validateWizardStep(int step) {
     final pane = _wizardPaneKind(step);
     switch (pane) {
       case 0:
-        if (_marketingFlowActive) return true;
-        if (_adLicenseSource == _AdLicenseSource.unset) {
-          final msg =
-              _isAr ? 'اختر مصدر رخصة الإعلان' : 'Choose ad license source';
+        return _validateLicenseStep();
+      case 1:
+        _syncPurposeFromPrimaryGroup();
+        if (!_usageResidential && !_usageCommercial) {
+          final msg = _isAr
+              ? 'حدد الاستخدام (سكني / تجاري)'
+              : 'Select usage (residential / commercial)';
           setState(() => _error = msg);
-          _scrollToKey(_regaCardKey);
           return false;
         }
         if (_propertyHasObligations == null) {
@@ -1403,7 +1699,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               ? 'حدد وجود التزامات على العقار'
               : 'Indicate if the property has obligations';
           setState(() => _error = msg);
-          _scrollToKey(_regaCardKey);
           return false;
         }
         if (_propertyHasObligations == true &&
@@ -1412,48 +1707,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               ? 'وضّح التزامات العقار (3 أحرف على الأقل)'
               : 'Describe obligations (min. 3 characters)';
           setState(() => _error = msg);
-          _scrollToKey(_regaCardKey);
           return false;
         }
-        return true;
-      case 101:
-        _syncPurposeFromPrimaryGroup();
-        return true;
-      case 102:
-        if (!(_formKeyClassification.currentState?.validate() ?? true)) {
-          return false;
-        }
-        return true;
-      case 1:
-        if (_marketingSimplifiedForm) {
-          _applyPropertyCategoryDefaults();
-        } else if (!_marketingLicensedSplit &&
-            !_usageResidential &&
-            !_usageCommercial) {
-          final msg = _isAr
-              ? 'حدد الاستخدام (سكني / تجاري)'
-              : 'Select usage (residential / commercial)';
-          setState(() => _error = msg);
-          return false;
-        }
-        if (_marketingSimplifiedForm && _propertyHasObligations == null) {
-          final msg = _isAr
-              ? 'حدد وجود التزامات على العقار'
-              : 'Indicate if the property has obligations';
-          setState(() => _error = msg);
-          return false;
-        }
-        if (_marketingSimplifiedForm &&
-            _propertyHasObligations == true &&
-            _obligationsDetail.text.trim().length < 3) {
-          final msg = _isAr
-              ? 'وضّح التزامات العقار (3 أحرف على الأقل)'
-              : 'Describe obligations (min. 3 characters)';
-          setState(() => _error = msg);
-          return false;
-        }
-        if (_marketingSimplifiedForm && _subPurposeCode == null) {
-          final msg = _isAr ? 'اختر الغرض الفرعي' : 'Select sub-purpose';
+        if (_purposeIsRent && _rentTerm.trim().isEmpty) {
+          final msg = _isAr ? 'اختر مدة الإيجار' : 'Select a rent period';
           setState(() => _error = msg);
           return false;
         }
@@ -1463,19 +1720,23 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _refreshAutoTitle();
         return true;
       case 2:
-        if (!_useMapCoords) return true;
-        final lat = _parseNullableDouble(_latCtrl.text);
-        final lng = _parseNullableDouble(_lngCtrl.text);
-        if (lat == null || lng == null) {
-          final msg = _isAr
-              ? 'حدد النقطة على الخريطة أو عطّل الخيار'
-              : 'Pick a map point or turn off map';
-          setState(() => _error = msg);
-          _scrollToKey(_coordsKey);
-          return false;
-        }
-        return _formKeyCoords.currentState?.validate() ?? false;
       case 3:
+      case 23:
+        if (_useMapCoords) {
+          final lat = _parseNullableDouble(_latCtrl.text);
+          final lng = _parseNullableDouble(_lngCtrl.text);
+          if (lat == null || lng == null) {
+            final msg = _isAr
+                ? 'حدد النقطة على الخريطة أو عطّل الخيار'
+                : 'Pick a map point or turn off map';
+            setState(() => _error = msg);
+            _scrollToKey(_coordsKey);
+            return false;
+          }
+          if (!(_formKeyCoords.currentState?.validate() ?? false)) {
+            return false;
+          }
+        }
         return _formKeyLocation.currentState?.validate() ?? false;
       case 4:
         _refreshAutoTitle();
@@ -1542,8 +1803,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   void _wizardPrev() {
-    final minStep = _marketingFlowActive ? 1 : 0;
-    if (_wizardStep <= minStep) return;
+    if (_wizardStep <= 0) return;
     setState(() {
       _wizardStep--;
       _error = null;
@@ -1561,11 +1821,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       });
       unawaited(_persistListingDraft(showSnack: false));
       _scrollWizardStepToTop();
-      if (_marketingLicensedSplit &&
-          _wizardPaneKind(_wizardStep) == 2 &&
-          _useMapCoords) {
+      if (_wizardPaneKind(_wizardStep) == 23) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) unawaited(_openMapPicker(kingdomOverview: false));
+          if (mounted && _useMapCoords && _lat == null && _lng == null) {
+            unawaited(_openMapPicker(kingdomOverview: true));
+          }
         });
       }
     }
@@ -1640,12 +1900,19 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         final wasLand = _isLand;
         _type = v;
         if (wasLand && !_isLand) _clearLandOnlyFormFields();
+        for (final k in _amenities.keys.toList()) {
+          if (!PropertyTypeCatalog.amenityKeyRelevantForType(_type, k)) {
+            _amenities[k] = false;
+          }
+        }
         _maybeSuggestSmartTitle();
       }),
       onPurposeChanged: (v) => setState(() {
-        _purpose = v;
+        _applyPurposeGroup(v);
         _maybeSuggestSmartTitle();
+        _scheduleDeedDuplicateCheck();
       }),
+      rentSchedule: _purposeIsRent ? _listingRentSchedule(busy: _saving) : null,
       priceOnSum: _priceOnSum,
       onPriceOnSumChanged: (v) => setState(() {
         _priceOnSum = v;
@@ -1713,6 +1980,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       deedNumber: _deedNumber,
       deedIssuer: _deedIssuer,
       deedDate: _deedDate,
+      deedDuplicateWarning: _deedDuplicateWarning,
       onPickDeedDate: _pickDeedDate,
       onClearDeedDate: () => setState(() => _deedDate = null),
       buildingNumber: _buildingNumber,
@@ -1848,53 +2116,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   Future<void> _loadSaudiLocations() async {
     setState(() => _locationsLoading = true);
     try {
-      final all = await SaudiLocationsService.instance.loadAll();
-      _governoratesByRegion.clear();
-      _citiesByGovernorate.clear();
-
-      final regions = <String>{};
-      final governoratesByRegion = <String, Set<String>>{};
-      final citiesByGovernorate = <String, Set<String>>{};
-
-      for (final item in all) {
-        final region = _isAr ? item.regionAr.trim() : item.regionEn.trim();
-        final governorate = _isAr
-            ? (item.governorateAr?.trim() ?? '')
-            : (item.governorateEn?.trim() ?? '');
-        final city = _isAr ? item.cityAr.trim() : item.cityEn.trim();
-
-        if (region.isEmpty || city.isEmpty) continue;
-
-        regions.add(region);
-
-        if (governorate.isNotEmpty) {
-          governoratesByRegion
-              .putIfAbsent(region, () => <String>{})
-              .add(governorate);
-          citiesByGovernorate
-              .putIfAbsent(governorate, () => <String>{})
-              .add(city);
-        } else {
-          governoratesByRegion
-              .putIfAbsent(region, () => <String>{})
-              .add(region);
-          citiesByGovernorate.putIfAbsent(region, () => <String>{}).add(city);
-        }
-      }
-
-      final sortedRegions = regions.toList()..sort();
-      final sortedGovernoratesByRegion = <String, List<String>>{};
-      for (final entry in governoratesByRegion.entries) {
-        final list = entry.value.toList()..sort();
-        sortedGovernoratesByRegion[entry.key] = list;
-      }
-
-      final sortedCitiesByGovernorate = <String, List<String>>{};
-      for (final entry in citiesByGovernorate.entries) {
-        final list = entry.value.toList()..sort();
-        sortedCitiesByGovernorate[entry.key] = list;
-      }
-
+      final cascade =
+          await LocationHierarchyService.instance.cascade(isAr: _isAr);
       Map<String, List<String>> distMap = {};
       try {
         distMap =
@@ -1905,22 +2128,31 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       setState(() {
         _regionOptions
           ..clear()
-          ..addAll(sortedRegions);
+          ..addAll(cascade.regions);
         _governoratesByRegion
           ..clear()
-          ..addAll(sortedGovernoratesByRegion);
+          ..addAll(cascade.governoratesByRegion);
         _citiesByGovernorate
           ..clear()
-          ..addAll(sortedCitiesByGovernorate);
+          ..addAll(cascade.citiesByGovernorate);
         _districtsByCity = distMap;
         _locationsLoading = false;
+        if (_regionOptions.isEmpty) {
+          _regionManual = true;
+          _governorateManual = true;
+          _cityManual = true;
+          _districtManual = true;
+        }
         _syncLocationSelectionsFromControllers();
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _locationsLoading = false;
-        _error = e.toString();
+        _regionManual = true;
+        _governorateManual = true;
+        _cityManual = true;
+        _districtManual = true;
       });
     }
   }
@@ -1965,12 +2197,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   bool _licensedAdPayloadComplete() {
     String digits(dynamic raw) =>
         raw.toString().replaceAll(RegExp(r'\D'), '');
-    final ad = digits(_regaPayloadForInsert['rega_ad_license_number']);
-    final fal = digits(_regaPayloadForInsert['fal_broker_license_number']);
-    return ad.length == 10 && fal.length == 10;
+    final ad = digits(
+      _regaPayloadForInsert['rega_ad_license_number'] ?? _regaAdLicenseNo.text,
+    );
+    return ad.length == 10;
   }
 
   bool get _forceListingRequestPath =>
+      _hasRegaAdLicense == false ||
+      _adLicenseSource == _AdLicenseSource.none ||
       widget.marketingFlow?.listingRequestOnly == true;
 
   Future<bool> _isVerifiedMarketer(String userId) async {
@@ -2001,7 +2236,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       return;
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -2051,7 +2286,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (kIsWeb ||
         !(defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS)) {
-      await showModalBottomSheet<void>(
+      await showAppModalBottomSheet<void>(
         context: context,
         showDragHandle: true,
         builder: (ctx) {
@@ -2099,7 +2334,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       return;
     }
 
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -2322,8 +2557,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         }
       }
     }
-    final res = await Navigator.of(context).push<Map<String, dynamic>>(
+    if (!mounted) return;
+    final res = await Navigator.of(context, rootNavigator: true)
+        .push<Map<String, dynamic>>(
       MaterialPageRoute(
+        fullscreenDialog: true,
+        settings: const RouteSettings(name: '/map-picker'),
         builder: (_) => MapPickerPage(
           initial: initial,
           isAr: _isAr,
@@ -2335,7 +2574,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           pinKindLabel: _isAr ? 'إعلان عقاري' : 'Property listing',
           pinAmountLabel: _price.text.trim().isEmpty
               ? null
-              : '${_price.text.trim()} ${_currency.toUpperCase() == 'SAR' ? AppMoney.saudiRiyalSignUnicode : _currency}',
+              : (_currency.toUpperCase() == 'SAR'
+                  ? AppMoney.sarPhrase(_price.text.trim(), isAr: _isAr)
+                  : '${_price.text.trim()} $_currency'),
         ),
       ),
     );
@@ -2677,8 +2918,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final id = PublisherIdentityPrefs.instance;
       setState(() {
         _pubNameSource = id.nameSource;
-        _pubPhoneSource = id.phoneSource;
-        _publishPresenceOnCards = id.publishPresenceOnCards;
+        _pubPhoneSource = PublicPhoneSource.hidden;
+        _publishPresenceOnCards = false;
         _officialNameCached = id.officialName(isAr: _isAr);
         _displayAliasCached = id.aliasName(isAr: _isAr);
         _primaryPhoneCached = id.primaryPhone;
@@ -2885,15 +3126,25 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
-  Future<void> _showSuccessChoice({String? listingPublicCode}) async {
+  Future<void> _showSuccessChoice({
+    String? listingPublicCode,
+    String? propertyId,
+  }) async {
     final code = (listingPublicCode ?? '').trim();
+    final t = AppLocalizations.of(context);
     final choice = await showAdaptivePostPublishDialog(
       context: context,
       isAr: _isAr,
-      title: _isAr ? 'تم نشر الإعلان' : 'Listing published',
-      body: _isAr
-          ? 'اختر الخطوة التالية.'
-          : 'Choose the next step.',
+      leadingIcon: Icons.home_rounded,
+      accentColor: const Color(0xFF0F766E),
+      title: t?.listingPublishLiveSuccessTitle ??
+          (_isAr ? 'تم إرسال الطلب إلى الرئيسية' : 'Sent to Home'),
+      body: t?.listingPublishLiveSuccessBody ??
+          (_isAr
+              ? 'إعلانك منشور ومعتمد ومرتبط بالبيانات الحكومية. يظهر رقم الإعلان على البطاقة، والرئيسية تُحدَّث فوراً وتفتح عليه في الأعلى.'
+              : 'Your listing is live, verified, and linked to official records. The listing number appears on the card, and Home refreshes instantly to open on it at the top.'),
+      statusChip: t?.listingPublishLiveStatusChip ??
+          (_isAr ? 'منشور في الرئيسية' : 'Live on Home'),
       codeLine: code.isEmpty
           ? null
           : (_isAr
@@ -2903,6 +3154,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         AdaptivePostPublishAction(
           id: 'back',
           label: _isAr ? 'الرئيسية' : 'Home',
+          icon: Icons.home_outlined,
           outlined: true,
         ),
         AdaptivePostPublishAction(
@@ -2928,8 +3180,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       }
       return;
     }
-    // الرئيسية (أو إغلاق الحوار): أغلِق صفحة الإضافة → اللوحة تضبط التبويب 0.
-    await _popToDashboardHomeAfterPublish();
+    await _popToDashboardHomeAfterPublish(
+      PostPublishNavResult.liveHome(
+        propertyId: propertyId,
+        listingPublicCode: code.isEmpty ? null : code,
+      ),
+    );
   }
 
   Future<void> _showRequestSuccess({
@@ -2937,13 +3193,20 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     String? listingRequestPublicCode,
   }) async {
     final code = (listingRequestPublicCode ?? '').trim();
+    final t = AppLocalizations.of(context);
     final choice = await showAdaptivePostPublishDialog(
       context: context,
       isAr: _isAr,
-      title: _isAr ? 'تم إرسال طلب التسويق' : 'Request submitted',
-      body: _isAr
-          ? 'تم إرسال طلبك وسيتم مراجعته وتعيين مسوق له.'
-          : 'Your request was sent. It will be reviewed and assigned to a marketer.',
+      leadingIcon: Icons.handshake_outlined,
+      accentColor: const Color(0xFF0F766E),
+      title: t?.listingPublishMarketingSuccessTitle ??
+          (_isAr ? 'تم إرسال طلب التسويق' : 'Marketing request sent'),
+      body: t?.listingPublishMarketingSuccessBody ??
+          (_isAr
+              ? 'سيُراجع الطلب ويُعيَّن له مسوّق معتمد. لا يظهر في الرئيسية حتى يُعتمد ويُربط بالتصريح الحكومي. تابع الحالة من «متابعة الطلب».'
+              : 'Your request will be reviewed and assigned to a licensed marketer. It will not appear on Home until it is approved and linked to the official permit. Track it from Follow request.'),
+      statusChip: t?.listingPublishMarketingStatusChip ??
+          (_isAr ? 'بانتظار مسوّق معتمد' : 'Waiting for a marketer'),
       codeLine: code.isEmpty
           ? null
           : (_isAr
@@ -2953,6 +3216,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         AdaptivePostPublishAction(
           id: 'home',
           label: _isAr ? 'الرئيسية' : 'Home',
+          icon: Icons.home_outlined,
         ),
         AdaptivePostPublishAction(
           id: 'status',
@@ -2988,10 +3252,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         ),
       );
       if (!mounted) return;
-      await _popToDashboardHomeAfterPublish();
+      await _popToDashboardHomeAfterPublish(
+        PostPublishNavResult.marketingDesk(listingRequestId: requestId),
+      );
       return;
     }
-    await _popToDashboardHomeAfterPublish();
+    await _popToDashboardHomeAfterPublish(
+      PostPublishNavResult.marketingDesk(listingRequestId: requestId),
+    );
   }
 
   void _resetForm() {
@@ -3017,7 +3285,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _price.clear();
       _commissionFixedCtrl.clear();
       _priceIncludesVat = null;
-      _commissionKind = 'none';
+      _commissionKind = '';
       _usedDefaultCover = false;
       _currentBid.clear();
       _type = 'villa';
@@ -3038,7 +3306,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _noLegalObstacles = false;
       _advertiserRole = _advertiserRoleCode;
       _locationIsApproximate = false;
-      _showOwnerNameOnCards = true;
+      _showOwnerNameOnCards = false;
       _propertyAgeBucket = null;
       _bedrooms = null;
       _bathrooms = null;
@@ -3092,7 +3360,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       for (final k in _amenities.keys) {
         _amenities[k] = false;
       }
-      _adLicenseSource = _AdLicenseSource.none;
+      _adLicenseSource = _AdLicenseSource.unset;
       _propertyHasObligations = null;
       _obligationsDetail.clear();
       _extendedUsageNotes.clear();
@@ -3105,7 +3373,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _regaVerifyOk = null;
       _error = null;
       _termsAccepted = false;
-      _wizardStep = _marketingFlowActive ? 1 : 0;
+      _wizardStep = 0;
+      _hasRegaAdLicense = null;
+      _consentMarketNoLicense = false;
+      _showPhoneOnMarket = false;
+      _licenseStepError = null;
+      _regaAdLicenseNo.clear();
+      _ejarContractNo.clear();
+      _ejarUnitNo.clear();
+      _ejarFloorNo.clear();
     });
   }
 
@@ -3178,7 +3454,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       });
     } else if (_isBuilding) {
       map.addAll({
-        'floors_count': _floorsCount,
+        'floors_count': _totalFloors ?? _floorsCount,
         'units_count': _unitsCount,
         'has_elevator': _hasElevator,
         'independent_entrance': _independentEntrance,
@@ -3268,7 +3544,177 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (boundaries.isNotEmpty) {
       out['parcel_boundaries'] = boundaries;
     }
+    if (_inAppTour != null && _inAppTour!.isNotEmpty) {
+      out['in_app_tour'] = _inAppTour!.toJson();
+    }
+    if (_purposeIsRent) {
+      out['rent_term'] = _rentTerm;
+      out['rent_days'] = _rentDays;
+      out['rent_weeks'] = _rentWeeks;
+      out['rent_months'] = _rentMonths;
+      out['rent_years'] = _rentYears;
+      if (_rentStart != null) {
+        out['rent_start'] = _rentStart!.toIso8601String();
+      }
+      final end = _rentEndComputed;
+      if (end != null) {
+        out['rent_end'] = end.toIso8601String();
+      }
+    }
+    final ejarNo = _ejarContractNo.text.replaceAll(RegExp(r'\D'), '');
+    if (ejarNo.isNotEmpty) {
+      out['ejar'] = {
+        'contract_no': ejarNo,
+        'unit_number': _ejarUnitNo.text.trim(),
+        'floor_number': _ejarFloorNo.text.trim(),
+        'source': 'manual_pending_authority',
+      };
+    }
     return out;
+  }
+
+  Map<String, dynamic> _listingGuidanceWithBoundMedia(
+    _PreparedListingMedia? media,
+  ) {
+    final out = _listingGuidanceForInsert();
+    if (media != null && media.imagePaths.isNotEmpty) {
+      out['image_paths'] = List<String>.from(media.imagePaths);
+    }
+    final v = (media?.videoPath ?? _videoUrl.text).trim();
+    if (v.isNotEmpty) out['video_path'] = v;
+    final tour = _virtualTourUrl.text.trim();
+    if (tour.isNotEmpty) out['virtual_tour_url'] = tour;
+    if (_inAppTour != null && _inAppTour!.isNotEmpty) {
+      final mapped = (media != null && media.imagePaths.isNotEmpty)
+          ? _inAppTour!.remapped(media.imagePaths)
+          : _inAppTour!;
+      out['in_app_tour'] = mapped.toJson();
+    }
+    return out;
+  }
+
+  String _storageFileName(String path) {
+    final p = path.trim().replaceAll('\\', '/');
+    final i = p.lastIndexOf('/');
+    return i >= 0 ? p.substring(i + 1) : p;
+  }
+
+  Future<void> _patchTableStripUnknown({
+    required String table,
+    required String id,
+    required Map<String, dynamic> patch,
+  }) async {
+    var body = Map<String, dynamic>.from(patch);
+    for (var i = 0; i < 14 && body.isNotEmpty; i++) {
+      try {
+        await _sb.from(table).update(body).eq('id', id);
+        return;
+      } catch (e) {
+        final col = _postgrestUnknownColumn(e);
+        if (col != null && body.containsKey(col)) {
+          body.remove(col);
+          continue;
+        }
+        rethrow;
+      }
+    }
+    if (body.isNotEmpty) {
+      throw StateError('Could not persist listing media metadata');
+    }
+  }
+
+  Future<void> _bindPropertyListingMedia({
+    required String propertyId,
+    required _PreparedListingMedia media,
+  }) async {
+    final g = _listingGuidanceWithBoundMedia(media);
+    final first = media.imagePaths.isNotEmpty ? media.imagePaths.first : null;
+    final video = (media.videoPath ?? _videoUrl.text).trim();
+    final tour = _virtualTourUrl.text.trim();
+    await _patchTableStripUnknown(
+      table: 'properties',
+      id: propertyId,
+      patch: {
+        'listing_guidance': g,
+        'default_cover_used': !(media.hasRealMedia || tour.isNotEmpty),
+        if (video.isNotEmpty) 'video_url': video,
+        if (tour.isNotEmpty) 'virtual_tour_url': tour,
+        if (first != null) 'image_url': first,
+      },
+    );
+  }
+
+  Future<void> _insertPropertyMediaRows({
+    required String propertyId,
+    required _PreparedListingMedia media,
+  }) async {
+    final rows = <Map<String, dynamic>>[];
+    for (var i = 0; i < media.imagePaths.length; i++) {
+      final p = media.imagePaths[i];
+      rows.add({
+        'property_id': propertyId,
+        'path': p,
+        'file_name': _storageFileName(p),
+        'sort_order': i,
+      });
+    }
+    final video = (media.videoPath ?? '').trim();
+    if (video.isNotEmpty) {
+      rows.add({
+        'property_id': propertyId,
+        'path': video,
+        'file_name': _storageFileName(video),
+        'media_type': 'video',
+        'sort_order': rows.length,
+      });
+    }
+    if (rows.isEmpty) return;
+
+    try {
+      await _sb.from('property_images').insert(rows);
+      return;
+    } catch (_) {}
+    try {
+      await _sb.from('property_images').insert([
+        for (final r in rows)
+          {
+            'property_id': r['property_id'],
+            'path': r['path'],
+            'file_name': r['file_name'],
+            'sort_order': r['sort_order'],
+          },
+      ]);
+      return;
+    } catch (_) {}
+    await _sb.from('property_images').insert([
+      for (final r in rows)
+        {
+          'property_id': r['property_id'],
+          'path': r['path'],
+          'sort_order': r['sort_order'],
+        },
+    ]);
+  }
+
+  Future<void> _rollbackCreatedListing({
+    String? propertyId,
+    String? requestId,
+  }) async {
+    final property = (propertyId ?? '').trim();
+    final request = (requestId ?? '').trim();
+    if (property.isNotEmpty) {
+      try {
+        await _sb.from('property_images').delete().eq('property_id', property);
+      } catch (_) {}
+      try {
+        await _sb.from('properties').delete().eq('id', property);
+      } catch (_) {}
+    }
+    if (request.isNotEmpty) {
+      try {
+        await _sb.from('listing_requests').delete().eq('id', request);
+      } catch (_) {}
+    }
   }
 
   Map<String, dynamic> _buildPayload({
@@ -3333,14 +3779,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'show_advertiser_name': _showOwnerNameOnCards,
       'owner_requests_public_name': _showOwnerNameOnCards,
       'publisher_public_name_source': _pubNameSource.name,
-      'publisher_public_phone_source': _pubPhoneSource.name,
+      'publisher_public_phone_source': PublicPhoneSource.hidden.name,
       'publisher_publish_presence': _publishPresenceOnCards,
       if (_showOwnerNameOnCards)
         'advertiser_public_name':
             PublisherIdentityPrefs.instance.resolvedPublicName(isAr: _isAr),
-      if (_pubPhoneSource != PublicPhoneSource.hidden)
-        'contact_phone':
-            PublisherIdentityPrefs.instance.resolvedPublicPhone(),
     };
     final deedNorm = normalizeDeedNumber(_deedNumber.text);
     payload['deed_number'] = deedNorm.isEmpty ? null : deedNorm;
@@ -3391,7 +3834,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     return payload;
   }
 
-  Map<String, dynamic> _buildRequestPayload({required String ownerId}) {
+  Map<String, dynamic> _buildRequestPayload({
+    required String ownerId,
+    _PreparedListingMedia? media,
+  }) {
     final lat = _useMapCoords ? _parseNullableDouble(_latCtrl.text) : _lat;
     final lng = _useMapCoords ? _parseNullableDouble(_lngCtrl.text) : _lng;
     final areaStoredM2 = _areaValueInSquareMeters() ?? _parseDouble(_area.text);
@@ -3426,7 +3872,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'current_bid': _isAuction ? _parseDouble(_currentBid.text) : null,
       'latitude': lat,
       'longitude': lng,
-      'video_url': _videoUrl.text.trim().isEmpty ? null : _videoUrl.text.trim(),
+      'video_url': () {
+        final v = (media?.videoPath ?? _videoUrl.text).trim();
+        return v.isEmpty ? null : v;
+      }(),
       'listing_guidance': _listingGuidanceForInsert(),
       'virtual_tour_url': _virtualTourUrl.text.trim().isEmpty
           ? null
@@ -3442,14 +3891,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'show_advertiser_name': _showOwnerNameOnCards,
       'owner_requests_public_name': _showOwnerNameOnCards,
       'publisher_public_name_source': _pubNameSource.name,
-      'publisher_public_phone_source': _pubPhoneSource.name,
+      'publisher_public_phone_source': PublicPhoneSource.hidden.name,
       'publisher_publish_presence': _publishPresenceOnCards,
       if (_showOwnerNameOnCards)
         'advertiser_public_name':
             PublisherIdentityPrefs.instance.resolvedPublicName(isAr: _isAr),
-      if (_pubPhoneSource != PublicPhoneSource.hidden)
-        'contact_phone':
-            PublisherIdentityPrefs.instance.resolvedPublicPhone(),
     };
     final dNorm = normalizeDeedNumber(_deedNumber.text);
     details['deed_number'] = dNorm.isEmpty ? null : dNorm;
@@ -3494,20 +3940,34 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     } else {
       details['furnished'] = null;
     }
-    details['floor'] = _showFloorFields ? _floor : null;
-    details['total_floors'] = _showFloorFields ? _totalFloors : null;
-    if (widget.marketingFlow?.listingRequestOnly == true) {
-      details['no_rega_ad_license'] = true;
-      details['market_without_rega_license'] = true;
-      details['market_consent'] = true;
-      if (widget.marketingFlow?.showOwnerPhoneOnMarket == true) {
-        details['show_owner_phone_on_market'] = true;
-        details['reveal_phone_from_market'] = true;
-      }
+    details['floor'] = PropertyTypeCatalog.showsUnitFloorFieldEffective(_type)
+        ? _floor
+        : null;
+    details['total_floors'] =
+        PropertyTypeCatalog.showsTotalFloorsFieldEffective(_type)
+            ? _totalFloors
+            : null;
+    details['no_rega_ad_license'] = _hasRegaAdLicense != true;
+    details['market_without_rega_license'] = _hasRegaAdLicense != true;
+    details['market_consent'] = _consentMarketNoLicense;
+    if (_showPhoneOnMarket) {
+      details['show_owner_phone_on_market'] = true;
+      details['reveal_phone_from_market'] = true;
     }
     if (_regaPayloadForInsert.isNotEmpty) {
       details['rega_payload'] = _regaPayloadForInsert;
     }
+    if (media != null && media.imagePaths.isNotEmpty) {
+      details['request_image_paths'] = media.imagePaths;
+      details['default_cover_used'] = false;
+      details['media_integrity'] = media.integrity;
+    }
+    if (media != null && (media.videoPath ?? '').trim().isNotEmpty) {
+      details['request_video_path'] = media.videoPath!.trim();
+      details['video_url'] = media.videoPath!.trim();
+    }
+    final usedSmartCover =
+        media != null && media.hasRealMedia ? false : _usedDefaultCover;
     return <String, dynamic>{
       'owner_id': ownerId,
       'title': _title.text.trim(),
@@ -3520,127 +3980,286 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'marketing_commission_rate': _kMarketingCommissionRate,
       'marketing_commission_amount':
           _commissionKind == 'fixed' ? _fixedCommissionValue() : 0,
-      'default_cover_used': _usedDefaultCover,
+      'default_cover_used': usedSmartCover,
       'status': 'pending',
       'workflow_stage': 'waiting_marketers',
+      'no_rega_ad_license': true,
+      'market_without_rega_license': true,
       if (lat != null) 'lat': lat,
       if (lng != null) 'lng': lng,
       'payload_json': jsonEncode(details),
     };
   }
 
-  Future<List<String>> _uploadRequestImages(
-      {required String ownerId, required String requestId}) async {
-    final bucket = _sb.storage.from('property-images');
-    final uuid = const Uuid();
-    final paths = <String>[];
-    for (int i = 0; i < _images.length; i++) {
-      final picked = _images[i];
-      final fileName = '${uuid.v4()}.jpg';
-      final path = 'requests/$requestId/$ownerId/$fileName';
-      Uint8List bytesToUpload = picked.bytes;
-      try {
-        bytesToUpload = await WatermarkService.addTextWatermark(picked.bytes,
-            text: AppBranding.copyrightBilingual());
-      } catch (_) {
-        bytesToUpload = picked.bytes;
-      }
-      await bucket.uploadBinary(path, bytesToUpload,
-          fileOptions:
-              const FileOptions(upsert: false, contentType: 'image/jpeg'));
-      paths.add(path);
-    }
-    final patch = <String, dynamic>{'request_image_paths': paths};
-    final vPath = _videoUrl.text.trim();
-    if (vPath.isNotEmpty) {
-      patch['request_video_path'] = vPath;
-    }
-    await _mergeRequestPayloadJson(requestId, patch);
-    return paths;
+  /// عمود مذكور في PGRST204 / schema cache ولم يُنشأ في هذه البيئة.
+  String? _postgrestUnknownColumn(Object e) {
+    final s = e.toString();
+    final m = RegExp(
+      r"Could not find the '([^']+)' column",
+      caseSensitive: false,
+    ).firstMatch(s);
+    if (m != null) return m.group(1);
+    return null;
   }
 
-  /// يحفظ مسارات الصور داخل `payload_json` لأن أعمدة image_paths/images غير مضمونة في المخطط.
+  String _friendlyListingRequestSaveError(Object e) {
+    final raw = e.toString().toLowerCase();
+    if (raw.contains('duplicate_listing_content') ||
+        raw.contains('23505')) {
+      return _isAr
+          ? 'هذا الإعلان مرفوع سابقاً بنفس رقم الصك وتاريخه وبياناته. راجع صفحتك أو عدّل البيانات قبل النشر.'
+          : 'This listing was already submitted with the same deed number, date, and details. Check My Page or change the data before publishing.';
+    }
+    final col = _postgrestUnknownColumn(e);
+    if (col != null) {
+      return _isAr
+          ? 'تعذر حفظ طلب التسويق (عمود غير موجود في قاعدة البيانات). أُعيدت المحاولة بدون ذلك العمود.'
+          : 'Could not save the marketing request (unknown database column). Retrying without it.';
+    }
+    if (e is PostgrestException) {
+      final m = e.message.trim();
+      if (m.toLowerCase().contains('row-level security')) {
+        return _isAr
+            ? 'تعذر حفظ الطلب بسبب صلاحيات قاعدة البيانات.'
+            : 'Could not save the request because of database permissions.';
+      }
+      return m.isNotEmpty
+          ? m
+          : (_isAr ? 'تعذر حفظ طلب التسويق.' : 'Could not save the marketing request.');
+    }
+    return _isAr ? 'تعذر حفظ طلب التسويق.' : 'Could not save the marketing request.';
+  }
+
+  String _listingMediaUploadError(Object e) {
+    if (e is PostgrestException || _postgrestUnknownColumn(e) != null) {
+      return _friendlyListingRequestSaveError(e);
+    }
+    final s = e.toString().toLowerCase();
+    final network = s.contains('socket') ||
+        s.contains('failed host lookup') ||
+        s.contains('network') ||
+        s.contains('offline') ||
+        s.contains('timed out') ||
+        s.contains('timeout') ||
+        s.contains('clientexception') ||
+        s.contains('xmlhttprequest');
+    if (network) {
+      return _isAr
+          ? 'تعذّر رفع الصور أو الفيديو. تحقق من الاتصال وأعد المحاولة.'
+          : 'Could not upload photos or video. Check your connection and retry.';
+    }
+    if (s.contains('413') ||
+        s.contains('payload too large') ||
+        s.contains('entity too large') ||
+        s.contains('maximum allowed')) {
+      return _isAr
+          ? 'الملف أكبر من الحد المسموح. اختر صورة أو فيديو أصغر.'
+          : 'The file is larger than allowed. Pick a smaller photo or video.';
+    }
+    if (s.contains('bucket') ||
+        s.contains('storage') ||
+        s.contains('row-level security') ||
+        s.contains('unauthorized') ||
+        s.contains('403')) {
+      return _isAr
+          ? 'تعذّر رفع الملف إلى التخزين. تحقق من صلاحية الرفع ثم أعد المحاولة.'
+          : 'Could not upload to storage. Check upload permission and retry.';
+    }
+    return _isAr
+        ? 'تعذّر رفع الصور أو الفيديو. أعد المحاولة.'
+        : 'Could not upload photos or video. Please retry.';
+  }
+
+  Future<_PreparedListingMedia> _prepareAndUploadListingMedia({
+    required String ownerId,
+    String? requestId,
+    String? propertyId,
+  }) async {
+    if (_images.isEmpty) {
+      final vPath = _videoUrl.text.trim();
+      return _PreparedListingMedia(
+        imagePaths: const [],
+        imageHashes: const [],
+        videoPath: vPath.isEmpty ? null : vPath,
+      );
+    }
+    final batch = const Uuid().v4();
+    final folder = ListingStoragePaths.listingImagesFolder(
+      ownerId: ownerId,
+      propertyId: propertyId,
+      requestId: requestId,
+      batchId: batch,
+    );
+    final bucket = _sb.storage.from('property-images');
+    final paths = <String>[];
+    final hashes = <String>[];
+    Object? lastErr;
+    for (final picked in _images) {
+      var uploaded = false;
+      for (var attempt = 0; attempt < 2 && !uploaded; attempt++) {
+        try {
+          final sealed =
+              ListingMediaSeal.preserve(picked.bytes, name: picked.name);
+          final fileName = '${const Uuid().v4()}.${sealed.ext}';
+          final path = '$folder/$fileName';
+          await bucket
+              .uploadBinary(
+                path,
+                sealed.bytes,
+                fileOptions: FileOptions(
+                  upsert: true,
+                  contentType: sealed.mime,
+                ),
+              )
+              .timeout(const Duration(seconds: 45));
+          paths.add(path);
+          hashes.add(sealed.sha256Hex);
+          uploaded = true;
+        } catch (e) {
+          lastErr = e;
+          if (ListingStoragePaths.looksLikePermissionDenied(e)) {
+            break;
+          }
+          if (attempt == 0) {
+            await Future<void>.delayed(const Duration(milliseconds: 400));
+          }
+        }
+      }
+      if (!uploaded &&
+          lastErr != null &&
+          ListingStoragePaths.looksLikePermissionDenied(lastErr)) {
+        break;
+      }
+    }
+    if (paths.length != _images.length) {
+      if (paths.isNotEmpty) {
+        try {
+          await bucket.remove(paths);
+        } catch (_) {}
+      }
+      throw lastErr ?? StateError('Not all listing media uploaded');
+    }
+    final vPath = _videoUrl.text.trim();
+    return _PreparedListingMedia(
+      imagePaths: paths,
+      imageHashes: hashes,
+      videoPath: vPath.isEmpty ? null : vPath,
+    );
+  }
+
+  Future<List<String>> _uploadRequestImages({
+    required String ownerId,
+    required String requestId,
+  }) async {
+    final prepared = await _prepareAndUploadListingMedia(
+      ownerId: ownerId,
+      requestId: requestId,
+    );
+    await _mergeRequestPayloadJson(requestId, {
+      if (prepared.imagePaths.isNotEmpty)
+        'request_image_paths': prepared.imagePaths,
+      if ((prepared.videoPath ?? '').isNotEmpty)
+        'request_video_path': prepared.videoPath,
+      'media_integrity': prepared.integrity,
+      if (prepared.hasRealMedia) 'default_cover_used': false,
+    });
+    return prepared.imagePaths;
+  }
+
+  /// يحفظ مسارات الصور داخل `payload_json` بمعزل عن أعمدة اختيارية قد تفشل التحديث.
   Future<void> _mergeRequestPayloadJson(
     String requestId,
     Map<String, dynamic> patch,
   ) async {
+    Map<String, dynamic> merged = {};
     try {
       final row = await _sb
           .from('listing_requests')
           .select('payload_json')
           .eq('id', requestId)
           .maybeSingle();
-      Map<String, dynamic> merged = {};
       final raw = row?['payload_json'];
       if (raw is String && raw.trim().isNotEmpty) {
         final dec = jsonDecode(raw);
-        if (dec is Map) {
-          merged = Map<String, dynamic>.from(dec);
-        }
+        if (dec is Map) merged = Map<String, dynamic>.from(dec);
       } else if (raw is Map) {
         merged = Map<String, dynamic>.from(raw);
       }
-      merged.addAll(patch);
-      if (patch['request_image_paths'] is List &&
-          (patch['request_image_paths'] as List).isNotEmpty) {
-        merged['default_cover_used'] = false;
-      }
+    } catch (_) {}
+    merged.addAll(patch);
+    if (patch['request_image_paths'] is List &&
+        (patch['request_image_paths'] as List).isNotEmpty) {
+      merged['default_cover_used'] = false;
+    }
+    try {
       await _sb.from('listing_requests').update({
         'payload_json': jsonEncode(merged),
-        if ((patch['request_image_paths'] as List?)?.isNotEmpty == true)
-          'default_cover_used': false,
       }).eq('id', requestId);
-    } catch (_) {}
+    } catch (_) {
+      try {
+        await _sb.from('listing_requests').update({
+          'payload_json': merged,
+        }).eq('id', requestId);
+      } catch (_) {}
+    }
+    if ((patch['request_image_paths'] as List?)?.isNotEmpty == true ||
+        patch['default_cover_used'] == false) {
+      try {
+        await _sb.from('listing_requests').update({
+          'default_cover_used': false,
+        }).eq('id', requestId);
+      } catch (_) {}
+    }
   }
 
-  bool _rowStillListedForSaleLike(Map<String, dynamic> row) {
-    if (row['deleted_by_user'] == true || row['delete_approved'] == true) {
-      return false;
-    }
-    final st = (row['status'] ?? '').toString().toLowerCase();
-    const gone = {
-      'archived',
-      'deleted',
-      'inactive',
-      'closed',
-      'hidden',
-      'rejected',
-      'cancelled',
-      'sold',
-      'completed',
-      'withdrawn',
-    };
-    if (gone.contains(st)) return false;
-    var purp = (row['purpose'] ?? 'sale').toString().toLowerCase();
-    if (purp.isEmpty) purp = 'sale';
-    if (row['is_auction'] == true) {
-      purp = 'auction';
-    }
-    return const {'sale', 'auction', 'investment'}.contains(purp);
+  bool _rowStillListedForSaleLike(Map<String, dynamic> row) =>
+      DeedNumberIntegrity.stillListedForSaleLike(row);
+
+  void _scheduleDeedDuplicateCheck() {
+    _deedDupDebounce?.cancel();
+    _deedDupDebounce = Timer(const Duration(milliseconds: 480), () {
+      unawaited(_refreshDeedDuplicateWarning());
+    });
+  }
+
+  Future<void> _refreshDeedDuplicateWarning() async {
+    final msg = await _blockingDuplicateSaleDeedMessage();
+    if (!mounted) return;
+    if (msg == _deedDuplicateWarning) return;
+    setState(() => _deedDuplicateWarning = msg);
   }
 
   Future<String?> _blockingDuplicateSaleDeedMessage() async {
-    const salePurposes = {'sale', 'auction', 'investment'};
-    if (!salePurposes.contains(_purpose)) return null;
+    if (!DeedNumberIntegrity.isSaleLikePurpose(_purpose)) {
+      return null;
+    }
     final deed = normalizeDeedNumber(_deedNumber.text);
+    final deedDate = _deedDate == null
+      ? null
+      : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+        .toIso8601String()
+        .substring(0, 10);
     if (deed.isEmpty) return null;
-    try {
-      final res = await _sb
-          .from('properties')
-          .select('id,title,status,is_auction,deleted_by_user,delete_approved')
-          .eq('deed_number', deed)
-          .limit(40);
-      final list = (res as List).cast<Map<String, dynamic>>();
-      for (final row in list) {
-        if (_rowStillListedForSaleLike(row)) {
-          final t = (row['title'] ?? '').toString().trim();
-          return _isAr
-              ? 'يوجد إعلان آخر بنفس رقم الصك ما زال نشطًا للبيع أو المزاد أو الاستثمار${t.isNotEmpty ? ': $t' : ''}.'
-              : 'Another listing with the same deed is still active for sale/auction/investment${t.isNotEmpty ? ': $t' : ''}.';
-        }
-      }
-    } catch (_) {}
-    return null;
+    await DeedNumberIntegrity.verifyWithAuthority(deedNumber: deed);
+    final hit = await DeedNumberIntegrity.findActiveSaleLikeDuplicate(
+      client: _sb,
+      deedNumber: deed,
+    );
+    if (hit == null) return null;
+    unawaited(
+      DeedNumberIntegrity.notifyProjectOps(
+        deedNumber: deed,
+        reason: 'active_sale_like_duplicate',
+      ),
+    );
+    final l10n = mounted ? AppLocalizations.of(context) : null;
+    final base = l10n?.deedDuplicateActive ??
+        (_isAr
+            ? 'رقم الصك هذا مستخدم في إعلان بيع أو مزاد أو استثمار ما زال قائماً ولم تُنهَ صفقته. لا يُسمح بإعلان ثانٍ بنفس الصك حتى إغلاق الصفقة السابقة.'
+            : 'This deed number is already on an active sale, auction, or investment listing whose deal is not finished. A second listing with the same deed is not allowed until that deal is closed.');
+    final t = hit.title;
+    if (t.isEmpty) return base;
+    return _isAr ? '$base\n($t)' : '$base\n($t)';
   }
 
   /// يمنع إعادة نشر نفس المحتوى فوراً (خصائص + طلبات تسويق خلال 24 ساعة).
@@ -3664,6 +4283,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final price = _parseDouble(_price.text);
     final area = _parseDouble(_area.text);
     final deed = normalizeDeedNumber(_deedNumber.text);
+    final deedDate = _deedDate == null
+      ? null
+      : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+        .toIso8601String()
+        .substring(0, 10);
     final fingerprint = _currentPublishFingerprint();
     final memHit = _lastSuccessfulPublishFingerprint == fingerprint;
     final stored = await PublishContentFingerprintStore.readIfFresh();
@@ -3680,7 +4304,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final res = await _sb
           .from('properties')
           .select(
-            'id,title,city,price,area,deed_number,created_at,deleted_by_user',
+            'id,title,city,price,area,deed_number,deed_date,created_at,deleted_by_user',
           )
           .eq('owner_id', ownerId)
           .gte('created_at', since)
@@ -3695,6 +4319,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           price,
           area,
           deed,
+          deedDate,
         )) {
           return _isAr
               ? 'يبدو أنك نشرت إعلاناً مطابقاً خلال الـ 24 ساعة الماضية. راجع «صفحتي» قبل إعادة النشر.'
@@ -3728,6 +4353,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           price,
           area,
           deed,
+          deedDate,
         )) {
           return _isAr
               ? 'طلب تسويق مطابق قُدِّم منذ قليل. راجع «صفحتي» قبل إعادة الإرسال.'
@@ -3745,6 +4371,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     double price,
     double area,
     String deed,
+    String? deedDate,
   ) {
     final sameTitle =
         (row['title'] ?? '').toString().trim().toLowerCase() ==
@@ -3761,7 +4388,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final rowDeed =
         normalizeDeedNumber((row['deed_number'] ?? '').toString());
     if (rowDeed.isEmpty) return true;
-    return rowDeed == deed;
+    if (rowDeed != deed) return false;
+    if (deedDate == null) return true;
+    final rowDate = (row['deed_date'] ?? '').toString().trim();
+    return rowDate.isEmpty || rowDate == deedDate;
   }
 
   /// عند عدم رفع أي وسائط، نُعلّم الغلاف الذكي في قاعدة البيانات
@@ -3891,7 +4521,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       if (!mounted) return;
       setState(() => _error = dupMsg);
       _scrollToKey(_formCardKey);
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(_isAr ? 'تنبيه' : 'Notice'),
@@ -3921,49 +4551,77 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final verified = await _isVerifiedMarketer(ownerId);
       if (!verified || _forceListingRequestPath) {
         // فرد أو مسوّق بدون ترخيص REGA: طلب تسويق — لا يظهر في الرئيسية.
-        final requestPayload = _buildRequestPayload(ownerId: ownerId);
+        final requestPayload =
+            _buildRequestPayload(ownerId: ownerId, media: null);
         Map<String, dynamic> insertedReq;
-        try {
-          insertedReq = await _sb
-              .from('listing_requests')
-              .insert(requestPayload)
-              .select('id,listing_request_public_code')
-              .single();
-        } catch (e) {
-          final msg = e.toString().toLowerCase();
-          // — تنظيف الأعمدة الجديدة إن لم يكن الترحيل V9 قد طُبِّق على هذه البيئة.
-          var changed = false;
-          for (final col in const [
-            'price_includes_vat',
-            'vat_rate',
-            'marketing_commission_kind',
-            'marketing_commission_rate',
-            'marketing_commission_amount',
-            'default_cover_used',
-          ]) {
-            if (msg.contains(col) && msg.contains('does not exist')) {
-              requestPayload.remove(col);
-              changed = true;
-            }
-          }
-          if (changed) {
-            insertedReq = await _sb
+        Future<Map<String, dynamic>> insertListingRequest(
+          Map<String, dynamic> payload,
+        ) async {
+          try {
+            final ins = await _sb
                 .from('listing_requests')
-                .insert(requestPayload)
+                .insert(payload)
                 .select('id,listing_request_public_code')
                 .single();
-          } else if (msg.contains('listing_request_public_code') &&
-              (msg.contains('column') ||
-                  msg.contains('schema') ||
-                  msg.contains('could not find'))) {
-            insertedReq = await _sb
-                .from('listing_requests')
-                .insert(requestPayload)
-                .select('id')
-                .single();
-          } else {
+            return Map<String, dynamic>.from(ins as Map);
+          } catch (e) {
+            final unknown = _postgrestUnknownColumn(e);
+            if (unknown != null && payload.containsKey(unknown)) {
+              payload.remove(unknown);
+              return insertListingRequest(payload);
+            }
+            final msg = e.toString().toLowerCase();
+            var changed = false;
+            for (final col in const [
+              'price_includes_vat',
+              'vat_rate',
+              'marketing_commission_kind',
+              'marketing_commission_rate',
+              'marketing_commission_amount',
+              'default_cover_used',
+              'no_rega_ad_license',
+              'market_without_rega_license',
+            ]) {
+              if (payload.containsKey(col) &&
+                  (msg.contains(col)) &&
+                  (msg.contains('does not exist') ||
+                      msg.contains('could not find') ||
+                      msg.contains('schema cache') ||
+                      msg.contains('pgrst204'))) {
+                payload.remove(col);
+                changed = true;
+              }
+            }
+            if (changed) {
+              return insertListingRequest(payload);
+            }
+            if (msg.contains('listing_request_public_code') &&
+                (msg.contains('column') ||
+                    msg.contains('schema') ||
+                    msg.contains('could not find'))) {
+              final ins = await _sb
+                  .from('listing_requests')
+                  .insert(payload)
+                  .select('id')
+                  .single();
+              return Map<String, dynamic>.from(ins as Map);
+            }
             rethrow;
           }
+        }
+
+        try {
+          insertedReq = await insertListingRequest(
+            Map<String, dynamic>.from(requestPayload),
+          );
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _saving = false;
+            _publishLock = false;
+            _error = _friendlyListingRequestSaveError(e);
+          });
+          return;
         }
         final requestId = insertedReq['id'] as String;
         final reqPub =
@@ -3976,8 +4634,37 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             titleHint: _title.text.trim(),
           );
         } catch (_) {}
+        _PreparedListingMedia? media;
+        if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) {
+          try {
+            media = await _prepareAndUploadListingMedia(
+              ownerId: ownerId,
+              requestId: requestId,
+            );
+          } catch (e) {
+            if (!mounted) return;
+            setState(() {
+              _saving = false;
+              _publishLock = false;
+              _error = _listingMediaUploadError(e);
+            });
+            return;
+          }
+        }
+        final tour = _virtualTourUrl.text.trim();
         try {
-          await _uploadRequestImages(ownerId: ownerId, requestId: requestId);
+          await _mergeRequestPayloadJson(requestId, {
+            if (media != null && media.imagePaths.isNotEmpty)
+              'request_image_paths': media.imagePaths,
+            if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
+              'request_video_path': media.videoPath,
+            if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
+              'video_url': media.videoPath,
+            if (tour.isNotEmpty) 'virtual_tour_url': tour,
+            'listing_guidance': _listingGuidanceWithBoundMedia(media),
+            if (media != null) 'media_integrity': media.integrity,
+            if (media != null && media.hasRealMedia) 'default_cover_used': false,
+          });
         } catch (_) {}
     if (!mounted) return;
     // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
@@ -4085,42 +4772,73 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           titleHint: _title.text.trim(),
         );
       } catch (_) {}
-      final bucket = _sb.storage.from('property-images');
-      final uuid = const Uuid();
-      final imagesToInsert = <Map<String, dynamic>>[];
-      for (int i = 0; i < _images.length; i++) {
-        final picked = _images[i];
-        final fileName = '${uuid.v4()}.jpg';
-        final path = '$ownerId/$fileName';
-        Uint8List bytesToUpload = picked.bytes;
+      _PreparedListingMedia media;
+      if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) {
         try {
-          bytesToUpload = await WatermarkService.addTextWatermark(picked.bytes,
-              text: AppBranding.copyrightBilingual());
-        } catch (_) {
-          bytesToUpload = picked.bytes;
-        }
-        await bucket.uploadBinary(path, bytesToUpload,
-            fileOptions:
-                const FileOptions(upsert: false, contentType: 'image/jpeg'));
-        imagesToInsert
-            .add({'property_id': propertyId, 'path': path, 'sort_order': i});
-      }
-      if (imagesToInsert.isNotEmpty) {
-        await _sb.from('property_images').insert(imagesToInsert);
-      }
-      final videoPath = _videoUrl.text.trim();
-      if (videoPath.isNotEmpty) {
-        try {
-          await _sb.from('property_images').insert({
-            'property_id': propertyId,
-            'path': videoPath,
-            'file_name': videoPath,
-            'media_type': 'video',
-            'sort_order': imagesToInsert.length,
+          media = await _prepareAndUploadListingMedia(
+            ownerId: ownerId,
+            propertyId: propertyId,
+          );
+        } catch (e) {
+          await _rollbackCreatedListing(propertyId: propertyId);
+          if (!mounted) return;
+          setState(() {
+            _saving = false;
+            _publishLock = false;
+            _error = _listingMediaUploadError(e);
           });
-        } catch (_) {
-          // مخطط قديم بدون media_type أو سياسة RLS مختلفة — يبقى video_url على صف العقار.
+          return;
         }
+      } else {
+        media = _PreparedListingMedia(
+          imagePaths: const [],
+          imageHashes: const [],
+          videoPath: _videoUrl.text.trim().isEmpty
+              ? null
+              : _videoUrl.text.trim(),
+        );
+      }
+      try {
+        await _insertPropertyMediaRows(
+          propertyId: propertyId,
+          media: media,
+        );
+      } catch (e) {
+        await _rollbackCreatedListing(propertyId: propertyId);
+        rethrow;
+      }
+      try {
+        await _bindPropertyListingMedia(
+          propertyId: propertyId,
+          media: media,
+        );
+      } catch (e) {
+        await _rollbackCreatedListing(propertyId: propertyId);
+        rethrow;
+      }
+      final pending = _pendingPhotoShoot;
+      if (pending != null) {
+        try {
+          await PhotographerService(_sb).createShoot(
+            photographerId: (pending['photographer_id'] ?? '').toString(),
+            propertyId: propertyId,
+            kinds: (pending['shoot_kinds'] is List)
+                ? [
+                    for (final e in pending['shoot_kinds'] as List)
+                      e.toString(),
+                  ]
+                : const ['photos'],
+            locationText: (pending['location_text'] ?? '').toString(),
+            latitude: (pending['latitude'] as num?)?.toDouble(),
+            longitude: (pending['longitude'] as num?)?.toDouble(),
+            preferredAt: DateTime.tryParse('${pending['preferred_at'] ?? ''}'),
+            quotedAmountSar:
+                (pending['quoted_amount_sar'] as num?)?.toDouble(),
+            maxPhotos: (pending['max_photos'] as num?)?.toInt() ?? 30,
+            maxVideos: (pending['max_videos'] as num?)?.toInt() ?? 1,
+            includeTour: pending['include_tour'] == true,
+          );
+        } catch (_) {}
       }
     if (!mounted) return;
     // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
@@ -4130,11 +4848,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final pub = (inserted['listing_public_code'] ?? '').toString().trim();
     await _showSuccessChoice(
       listingPublicCode: pub.isEmpty ? null : pub,
+      propertyId: propertyId,
     );
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = _postgrestUnknownColumn(e) != null || e is PostgrestException
+            ? _friendlyListingRequestSaveError(e)
+            : e.toString();
         _publishLock = false;
       });
     } finally {
@@ -4198,7 +4919,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         return;
       }
       final uuid = const Uuid().v4();
-      final path = 'licenses/${user.id.trim()}/$uuid.pdf';
+      final path = ListingStoragePaths.licensePdfPath(
+        ownerId: user.id.trim(),
+        fileId: uuid,
+      );
       await _sb.storage.from('property-images').uploadBinary(
             path,
             bytes,
@@ -4238,7 +4962,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   Future<void> _showExtendedUsesDialog() async {
     final ctrl = TextEditingController(text: _extendedUsageNotes.text);
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -4469,7 +5193,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   Future<void> _showVideoPickMenu() async {
     if (_saving || _uploadingVideo) return;
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showAppModalBottomSheet<String>(
       context: context,
       builder: (ctx) {
         return SafeArea(
@@ -4515,10 +5239,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final pane = _wizardPaneKind(_wizardStep);
-    final stepCount =
-        _kWizardLastStep - (_marketingFlowActive ? 1 : 0) + 1;
-    final displayStep =
-        _marketingFlowActive ? _wizardStep : _wizardStep + 1;
+    final stepCount = _kWizardLastStep + 1;
+    final displayStep = _wizardStep + 1;
     return Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: PopScope(
@@ -4545,14 +5267,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         },
         child: Scaffold(
           backgroundColor: cs.surface,
+          resizeToAvoidBottomInset: false,
           appBar: AppBar(
             automaticallyImplyLeading: false,
-            leading: (!widget.embedAppBar && !_publishLock && !_saving)
+            leading: (!_publishLock && !_saving)
                 ? AppPageCloseButton(
                     isArabic: _isAr,
-                    onPressed: () {
-                      if (Navigator.canPop(context)) Navigator.pop(context);
-                    },
+                    onPressed: () => unawaited(_onComposerClosePressed()),
                   )
                 : null,
             title: Text(_isAr ? 'إضافة إعلان' : 'Add Listing'),
@@ -4580,7 +5301,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               ),
           ],
         ),
-        body: Stack(
+        body: AppKeyboardPad(
+          extra: 8,
+          child: Stack(
           children: [
             SafeArea(
           child: Column(
@@ -4615,11 +5338,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(
-                    value: displayStep / stepCount,
-                  ),
+                ComposerStepConstellation(
+                  step: displayStep,
+                  total: stepCount,
+                  accent: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(height: 12),
                 KeyedSubtree(
@@ -4628,44 +5350,71 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Visibility(
-                        visible: pane == 0 && !_marketingFlowActive,
+                        visible: pane == 0,
                         maintainState: true,
                         child: KeyedSubtree(
                           key: _regaCardKey,
                           child: _AdLicenseStepCard(
                             isAr: _isAr,
-                            adLicenseSource: _adLicenseSource,
-                            onAdLicenseSourceChanged: (v) => setState(() {
-                              _adLicenseSource = v;
-                              if (v != _AdLicenseSource.external) {
-                                _licensePdfStoragePath = null;
+                            hasRegaAdLicense: _hasRegaAdLicense,
+                            onHasRegaAdLicenseChanged: (v) => setState(() {
+                              _hasRegaAdLicense = v;
+                              _licenseStepError = null;
+                              _error = null;
+                              if (v == true) {
+                                _adLicenseSource = _AdLicenseSource.inApp;
+                                _consentMarketNoLicense = false;
+                              } else if (v == false) {
+                                _adLicenseSource = _AdLicenseSource.none;
+                                _regaVerifyOk = null;
+                                _regaVerifyBanner = null;
+                              } else {
+                                _adLicenseSource = _AdLicenseSource.unset;
                               }
                             }),
-                            propertyHasObligations: _propertyHasObligations,
-                            onPropertyHasObligationsChanged: (v) =>
-                                setState(() => _propertyHasObligations = v),
-                            obligationsDetail: _obligationsDetail,
-                            onOpenExtendedUses: _showExtendedUsesDialog,
-                            extendedUsagePreview: _extendedUsageNotes.text,
-                            regaFalLicenseNo: _regaFalLicenseNo,
+                            licenseController: _regaAdLicenseNo,
+                            consentMarket: _consentMarketNoLicense,
+                            onConsentMarketChanged: (v) => setState(() {
+                              _consentMarketNoLicense = v;
+                              _licenseStepError = null;
+                            }),
+                            showPhoneOnMarket: _showPhoneOnMarket,
+                            onShowPhoneOnMarketChanged: (v) =>
+                                setState(() => _showPhoneOnMarket = v),
+                            fieldError: _licenseStepError,
                             regaChecking: _regaChecking,
                             regaVerifyBanner: _regaVerifyBanner,
                             regaVerifyOk: _regaVerifyOk,
+                            onVerify: _scheduleRegaLicenseVerify,
                             onOpenRegaImport: _openRegaImportPage,
                           ),
                         ),
                       ),
                       Visibility(
-                        visible:
-                            pane == 1 || pane == 101 || pane == 102,
+                        visible: pane == 1,
                         maintainState: true,
-                        child: _buildPropertyFormSlice(
-                          AddPropertyFormSlice.classification,
-                          _formKeyClassification,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildPropertyFormSlice(
+                              AddPropertyFormSlice.classification,
+                              _formKeyClassification,
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              onPressed: _saving ? null : _showExtendedUsesDialog,
+                              icon: const Icon(Icons.open_in_new, size: 20),
+                              label: Text(
+                                _isAr
+                                    ? 'استخدامات موسّعة وتفاصيل إضافية'
+                                    : 'Extended uses & extra detail',
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                       Visibility(
-                        visible: pane == 2,
+                        visible: pane == 2 || pane == 23,
                         maintainState: true,
                         child: KeyedSubtree(
                           key: _coordsKey,
@@ -4714,19 +5463,43 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ),
                       ),
                       Visibility(
-                        visible: pane == 3,
+                        visible: pane == 3 || pane == 23,
                         maintainState: true,
-                        child: _buildPropertyFormSlice(
-                          AddPropertyFormSlice.location,
-                          _formKeyLocation,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildPropertyFormSlice(
+                              AddPropertyFormSlice.location,
+                              _formKeyLocation,
+                            ),
+                            const SizedBox(height: 12),
+                            _EjarOptionalFieldsCard(
+                              isAr: _isAr,
+                              saving: _saving,
+                              contractCtrl: _ejarContractNo,
+                              unitCtrl: _ejarUnitNo,
+                              floorCtrl: _ejarFloorNo,
+                            ),
+                          ],
                         ),
                       ),
                       Visibility(
                         visible: pane == 4,
                         maintainState: true,
-                        child: _buildPropertyFormSlice(
-                          AddPropertyFormSlice.pricing,
-                          _formKeyPricing,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildPropertyFormSlice(
+                              AddPropertyFormSlice.pricing,
+                              _formKeyPricing,
+                            ),
+                            RegaOfficialBenchCard(
+                              isAr: _isAr,
+                              city: (_selectedCity ?? _city.text).trim(),
+                              typeCode: _type,
+                              isRent: _purposeIsRent,
+                            ),
+                          ],
                         ),
                       ),
                       Visibility(
@@ -4767,6 +5540,84 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                 onRemoveImage: _removeImageAt,
                                 onMoveImage: _moveImage,
                               ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                onPressed: _saving
+                                    ? null
+                                    : () async {
+                                        final refs = [
+                                          for (var i = 0;
+                                              i < _images.length;
+                                              i++)
+                                            '$i',
+                                        ];
+                                        final bytes = <String, Uint8List>{
+                                          for (var i = 0;
+                                              i < _images.length;
+                                              i++)
+                                            '$i': _images[i].bytes,
+                                        };
+                                        final tour =
+                                            await showInAppTourBuilderSheet(
+                                          context: context,
+                                          isAr: _isAr,
+                                          imageRefs: refs,
+                                          initial: _inAppTour,
+                                          previewBytes: bytes,
+                                        );
+                                        if (tour != null && mounted) {
+                                          setState(() => _inAppTour = tour);
+                                        }
+                                      },
+                                icon: const Icon(Icons.threed_rotation_outlined),
+                                label: Text(
+                                  AppLocalizations.of(context)!.inAppTourBuild,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                AppLocalizations.of(context)!.inAppTourEngineHint,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              FilledButton.tonalIcon(
+                                onPressed: _saving
+                                    ? null
+                                    : () async {
+                                        final loc = [
+                                          _city.text.trim(),
+                                          _location.text.trim(),
+                                        ].where((s) => s.isNotEmpty).join(' · ');
+                                        await Navigator.of(context)
+                                            .push<Object?>(
+                                          MaterialPageRoute<Object?>(
+                                            builder: (_) => PhotoShootBookPage(
+                                              lang: widget.lang,
+                                              locationText: loc,
+                                              latitude: double.tryParse(
+                                                  _latCtrl.text.trim()),
+                                              longitude: double.tryParse(
+                                                  _lngCtrl.text.trim()),
+                                              onQueued: (d) => setState(
+                                                () => _pendingPhotoShoot = d,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                icon: const Icon(Icons.photo_camera_outlined),
+                                label: Text(
+                                  AppLocalizations.of(context)!
+                                      .photographerRequestFromMedia,
+                                ),
+                              ),
                               if (_requiresExternalLicenseBundle) ...[
                                 const SizedBox(height: 14),
                                 _LicensePdfUploadRow(
@@ -4805,8 +5656,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                     contentPadding: EdgeInsets.zero,
                     title: Text(
                       _isAr
-                          ? 'إظهار اسمي/صفتي مع رمز التوثيق على بطاقات الرئيسية'
-                          : 'Show my name/role with verification on Home cards',
+                          ? 'إظهار اسمي في السوق العقاري وتفاصيل الإعلان'
+                          : 'Show my name on the market and listing details',
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         height: 1.25,
@@ -4814,8 +5665,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                     ),
                     subtitle: Text(
                       _isAr
-                          ? 'يمكن إخفاؤه لاحقاً؛ يظهر للزوار عند التفعيل فقط.'
-                          : 'Visitors see it only when enabled.',
+                          ? 'اختياري. الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو المستعار. الجوال لا يظهر للعامة.'
+                          : 'Optional. Official name or alias. Phone stays hidden from the public.',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     value: _showOwnerNameOnCards,
@@ -4823,37 +5674,32 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                         ? null
                         : (v) => setState(() => _showOwnerNameOnCards = v),
                   ),
-                  if (_showOwnerNameOnCards) ...[
-                    const SizedBox(height: 8),
-                    PublisherIdentityOptionsCard(
-                      isAr: _isAr,
-                      compact: true,
-                      enabled: !(_saving || _publishLock),
-                      nameSource: _pubNameSource,
-                      phoneSource: _pubPhoneSource,
-                      publishPresence: _publishPresenceOnCards,
-                      officialName: _officialNameCached,
-                      displayAlias: _displayAliasCached,
-                      primaryPhone: _primaryPhoneCached,
-                      secondaryPhone: _secondaryPhoneCached,
-                      onNameSourceChanged: (v) async {
-                        await PublisherIdentityPrefs.instance.setNameSource(v);
-                        if (!mounted) return;
-                        setState(() => _pubNameSource = v);
-                      },
-                      onPhoneSourceChanged: (v) async {
-                        await PublisherIdentityPrefs.instance.setPhoneSource(v);
-                        if (!mounted) return;
-                        setState(() => _pubPhoneSource = v);
-                      },
-                      onPublishPresenceChanged: (v) async {
-                        await PublisherIdentityPrefs.instance
-                            .setPublishPresenceOnCards(v);
-                        if (!mounted) return;
-                        setState(() => _publishPresenceOnCards = v);
-                      },
-                    ),
-                  ],
+                  const SizedBox(height: 8),
+                  PublisherIdentityOptionsCard(
+                    isAr: _isAr,
+                    compact: true,
+                    enabled: !(_saving || _publishLock),
+                    hidePhoneOptions: true,
+                    marketContactLocked: true,
+                    nameSource: _pubNameSource,
+                    phoneSource: _pubPhoneSource,
+                    publishPresence: _publishPresenceOnCards,
+                    officialName: _officialNameCached,
+                    displayAlias: _displayAliasCached,
+                    primaryPhone: _primaryPhoneCached,
+                    secondaryPhone: _secondaryPhoneCached,
+                    onNameSourceChanged: (v) async {
+                      await PublisherIdentityPrefs.instance.setNameSource(v);
+                      if (!mounted) return;
+                      setState(() => _pubNameSource = v);
+                    },
+                    onPublishPresenceChanged: (v) async {
+                      await PublisherIdentityPrefs.instance
+                          .setPublishPresenceOnCards(v);
+                      if (!mounted) return;
+                      setState(() => _publishPresenceOnCards = v);
+                    },
+                  ),
                   const SizedBox(height: 12),
                   TermsAcceptanceCheckbox(
                     isAr: _isAr,
@@ -4947,9 +5793,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                           : 'Publish listing'),
                             );
                       final backBtn = OutlinedButton(
-                        onPressed: (_wizardStep >
-                                    (_marketingFlowActive ? 1 : 0) &&
-                                !_saving)
+                        onPressed: (_wizardStep > 0 && !_saving)
                             ? _wizardPrev
                             : null,
                         child: Text(_isAr ? 'السابق' : 'Back'),
@@ -5013,6 +5857,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               ),
           ],
         ),
+        ),
       ),
       ),
     );
@@ -5025,150 +5870,89 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
 class _AdLicenseStepCard extends StatelessWidget {
   final bool isAr;
-  final _AdLicenseSource adLicenseSource;
-  final ValueChanged<_AdLicenseSource> onAdLicenseSourceChanged;
-  final bool? propertyHasObligations;
-  final ValueChanged<bool?> onPropertyHasObligationsChanged;
-  final TextEditingController obligationsDetail;
-  final VoidCallback onOpenExtendedUses;
-  final String extendedUsagePreview;
-  final TextEditingController regaFalLicenseNo;
+  final bool? hasRegaAdLicense;
+  final ValueChanged<bool?> onHasRegaAdLicenseChanged;
+  final TextEditingController licenseController;
+  final bool consentMarket;
+  final ValueChanged<bool> onConsentMarketChanged;
+  final bool showPhoneOnMarket;
+  final ValueChanged<bool> onShowPhoneOnMarketChanged;
+  final String? fieldError;
   final bool regaChecking;
   final String? regaVerifyBanner;
   final bool? regaVerifyOk;
+  final VoidCallback onVerify;
   final VoidCallback onOpenRegaImport;
 
   const _AdLicenseStepCard({
     required this.isAr,
-    required this.adLicenseSource,
-    required this.onAdLicenseSourceChanged,
-    required this.propertyHasObligations,
-    required this.onPropertyHasObligationsChanged,
-    required this.obligationsDetail,
-    required this.onOpenExtendedUses,
-    required this.extendedUsagePreview,
-    required this.regaFalLicenseNo,
+    required this.hasRegaAdLicense,
+    required this.onHasRegaAdLicenseChanged,
+    required this.licenseController,
+    required this.consentMarket,
+    required this.onConsentMarketChanged,
+    required this.showPhoneOnMarket,
+    required this.onShowPhoneOnMarketChanged,
+    required this.fieldError,
     required this.regaChecking,
     required this.regaVerifyBanner,
     required this.regaVerifyOk,
+    required this.onVerify,
     required this.onOpenRegaImport,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final digits = licenseController.text.replaceAll(RegExp(r'\D'), '');
+    final showVerifyBtn = hasRegaAdLicense == true && digits.length == 10;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                const Color(0xFF0F766E).withOpacity(0.14),
-                cs.surface,
-              ],
-              begin: AlignmentDirectional.topEnd,
-              end: AlignmentDirectional.bottomStart,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: const Color(0xFF0F766E).withOpacity(0.38),
-            ),
-          ),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.account_balance_outlined,
-                    color: Color(0xFF0F766E),
-                    size: 26,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      isAr
-                          ? 'الهيئة العامة للعقار ورخصة الإعلان'
-                          : 'REGA & advertisement license',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 15.5,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                isAr
-                    ? 'المالك الفرد يستطيع المتابعة بدون رخصة فال. المسوق المرخّص يربط رخصة فال وترخيص الإعلان من الهيئة عند وجود إعلان جاهز.'
-                    : 'Individual owners can continue without FAL. Licensed marketers link FAL and the REGA ad license when a licensed ad is ready.',
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  fontSize: 12,
-                  height: 1.3,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
         Text(
-          isAr ? 'مصدر رخصة الإعلان' : 'Ad license source',
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+          isAr
+              ? 'هل لديك رقم ترخيص إعلان عقاري صادر من الهيئة العامة للعقار؟'
+              : 'Do you have a REGA real-estate ad license number?',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w900,
+                height: 1.35,
+              ),
         ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+        const SizedBox(height: 16),
+        Row(
           children: [
-            StableSelectChip(
-              label: isAr ? 'من داخل التطبيق' : 'In-app',
-              exclusive: true,
-              selected: adLicenseSource == _AdLicenseSource.inApp,
-              onSelected: (_) =>
-                  onAdLicenseSourceChanged(_AdLicenseSource.inApp),
+            Expanded(
+              child: _LicenseAnswerTile(
+                label: isAr ? 'نعم' : 'Yes',
+                selected: hasRegaAdLicense == true,
+                onTap: () => onHasRegaAdLicenseChanged(true),
+              ),
             ),
-            StableSelectChip(
-              label: isAr ? 'من خارج التطبيق' : 'Outside app',
-              exclusive: true,
-              selected: adLicenseSource == _AdLicenseSource.external,
-              onSelected: (_) =>
-                  onAdLicenseSourceChanged(_AdLicenseSource.external),
-            ),
-            StableSelectChip(
-              label: isAr ? 'لا يوجد بعد' : 'None yet',
-              exclusive: true,
-              selected: adLicenseSource == _AdLicenseSource.none,
-              onSelected: (_) =>
-                  onAdLicenseSourceChanged(_AdLicenseSource.none),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _LicenseAnswerTile(
+                label: isAr ? 'لا' : 'No',
+                selected: hasRegaAdLicense == false,
+                onTap: () => onHasRegaAdLicenseChanged(false),
+              ),
             ),
           ],
         ),
-        if (adLicenseSource != _AdLicenseSource.none) ...[
-          const SizedBox(height: 14),
-          Text(
-            isAr
-                ? 'رقم رخصة فال / الوساطة (10 أرقام)'
-                : 'FAL / brokerage license (10 digits)',
-            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-          ),
-          const SizedBox(height: 6),
-          AqarTextFormField(
-            controller: regaFalLicenseNo,
+        if (hasRegaAdLicense == true) ...[
+          const SizedBox(height: 20),
+          AqarTextField(
+            controller: licenseController,
             keyboardType: TextInputType.number,
             inputFormatters: latinDigitsOnlyFormatters(maxLength: 10),
-            maxLength: 10,
+            textAlign: TextAlign.center,
             decoration: InputDecoration(
+              labelText: isAr
+                  ? 'أدخل رقم ترخيص الإعلان'
+                  : 'Enter ad license number',
+              hintText: isAr
+                  ? 'رقم ترخيص الإعلان المكون من 10 أرقام'
+                  : '10-digit ad license number',
               counterText: '',
-              labelText:
-                  isAr ? 'رقم الرخصة (10 أرقام)' : 'License number (10 digits)',
-              hintText:
-                  isAr ? 'أدخل 10 أرقام أو الصقها' : 'Type or paste 10 digits',
             ),
           ),
           if (regaChecking) ...[
@@ -5185,80 +5969,229 @@ class _AdLicenseStepCard extends StatelessWidget {
                 fontSize: 12.5,
                 color: regaVerifyOk == true
                     ? const Color(0xFF0F766E)
-                    : Theme.of(context).colorScheme.error,
+                    : cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+          if (showVerifyBtn) ...[
+            const SizedBox(height: 12),
+            Center(
+              child: FilledButton(
+                onPressed: regaChecking ? null : onVerify,
+                child: Text(isAr ? 'تحقق' : 'Verify'),
               ),
             ),
           ],
           const SizedBox(height: 8),
-          FilledButton.icon(
+          TextButton.icon(
             onPressed: onOpenRegaImport,
-            icon: const Icon(Icons.link, size: 20),
+            icon: const Icon(Icons.link, size: 18),
             label: Text(
-              isAr ? 'ربط عبر صفحة الهيئة (ElanDetails)' : 'Link via REGA page',
+              isAr
+                  ? 'ربط من صفحة الهيئة إن توفرت'
+                  : 'Link from REGA page if available',
             ),
           ),
         ],
-        const SizedBox(height: 18),
-        Text(
-          isAr ? 'التزامات على العقار (إلزامي)' : 'Property obligations *',
-          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            StableSelectChip(
-              label: isAr ? 'نعم' : 'Yes',
-              exclusive: true,
-              selected: propertyHasObligations == true,
-              onSelected: (_) => onPropertyHasObligationsChanged(true),
+        if (hasRegaAdLicense == false) ...[
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: cs.errorContainer.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: cs.error.withOpacity(0.35)),
             ),
-            StableSelectChip(
-              label: isAr ? 'لا' : 'No',
-              exclusive: true,
-              selected: propertyHasObligations == false,
-              onSelected: (_) => onPropertyHasObligationsChanged(false),
+            child: Text(
+              isAr
+                  ? 'سيتم إرسال الإعلان العقاري إلى السوق العقاري للبحث عن مسوّق معتمد لعدم وجود ترخيص إعلان من الهيئة العامة للعقار.'
+                  : 'Your listing will be sent to the real-estate market to find a certified marketer because you do not have a REGA ad license.',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+                height: 1.35,
+              ),
             ),
-          ],
-        ),
-        if (propertyHasObligations == true) ...[
-          const SizedBox(height: 10),
-          AqarTextFormField(
-            controller: obligationsDetail,
-            minLines: 2,
-            maxLines: 4,
-            decoration: InputDecoration(
-              labelText: isAr
-                  ? 'وصف موجز للالتزامات *'
-                  : 'Brief description of obligations *',
+          ),
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            value: consentMarket,
+            onChanged: (v) => onConsentMarketChanged(v == true),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              isAr
+                  ? 'نعم، أوافق على طرح الإعلان العقاري في السوق العقاري لعدم وجود ترخيص إعلان من الهيئة العامة للعقار'
+                  : 'Yes, I agree to publish my listing on the market due to no REGA ad license',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+              ),
+            ),
+          ),
+          CheckboxListTile(
+            value: showPhoneOnMarket,
+            onChanged: (v) => onShowPhoneOnMarketChanged(v == true),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              isAr
+                  ? 'إظهار رقم جوالي للمسوّقين من بطاقة السوق قبل الموافقة على عرض (اختياري)'
+                  : 'Show my phone on market cards before offer acceptance (optional)',
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13.5,
+              ),
             ),
           ),
         ],
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          onPressed: onOpenExtendedUses,
-          icon: const Icon(Icons.open_in_new, size: 20),
-          label: Text(
-            isAr
-                ? 'استخدامات موسّعة وتفاصيل إضافية'
-                : 'Extended uses & extra detail',
-          ),
-        ),
-        if (extendedUsagePreview.trim().isNotEmpty) ...[
-          const SizedBox(height: 8),
+        if (fieldError != null && fieldError!.trim().isNotEmpty) ...[
+          const SizedBox(height: 12),
           Text(
-            isAr
-                ? 'تم حفظ ملاحظات إضافية (${extendedUsagePreview.length} حرفاً)'
-                : 'Saved extended notes (${extendedUsagePreview.length} chars)',
+            fieldError!,
             style: TextStyle(
-              color: cs.onSurfaceVariant,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+              color: cs.error,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
       ],
+    );
+  }
+}
+
+class _LicenseAnswerTile extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  const _LicenseAnswerTile({
+    required this.label,
+    required this.selected,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: selected
+          ? const Color(0xFF0F766E).withOpacity(0.12)
+          : cs.surfaceContainerHighest.withOpacity(0.5),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFF0F766E)
+                  : cs.outlineVariant.withOpacity(0.6),
+              width: selected ? 2 : 1,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+              color: selected ? const Color(0xFF0F766E) : cs.onSurface,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EjarOptionalFieldsCard extends StatelessWidget {
+  final bool isAr;
+  final bool saving;
+  final TextEditingController contractCtrl;
+  final TextEditingController unitCtrl;
+  final TextEditingController floorCtrl;
+
+  const _EjarOptionalFieldsCard({
+    required this.isAr,
+    required this.saving,
+    required this.contractCtrl,
+    required this.unitCtrl,
+    required this.floorCtrl,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      decoration: FieldGroupTheme.boxDecoration(context),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            isAr
+                ? 'عقد إيجار / عنوان وطني (اختياري)'
+                : 'Ejar contract / national address (optional)',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isAr
+                ? 'يُحفظ يدوياً الآن لربط مستقبلي مع خدمات إيجار والعنوان الوطني عند توفر الاعتماد.'
+                : 'Stored manually now for a future Ejar and national-address link when credentials are available.',
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+              fontSize: 12.5,
+            ),
+          ),
+          const SizedBox(height: 12),
+          AqarTextField(
+            controller: contractCtrl,
+            enabled: !saving,
+            keyboardType: TextInputType.number,
+            inputFormatters: latinDigitsOnlyFormatters(maxLength: 11),
+            decoration: InputDecoration(
+              labelText: isAr ? 'رقم عقد إيجار' : 'Ejar contract number',
+              hintText: isAr ? 'حتى 11 رقماً' : 'Up to 11 digits',
+              counterText: '',
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: AqarTextField(
+                  controller: unitCtrl,
+                  enabled: !saving,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: latinDigitsOnlyFormatters(maxLength: 12),
+                  decoration: InputDecoration(
+                    labelText: isAr ? 'رقم الوحدة' : 'Unit number',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: AqarTextField(
+                  controller: floorCtrl,
+                  enabled: !saving,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: latinDigitsOnlyFormatters(maxLength: 8),
+                  decoration: InputDecoration(
+                    labelText: isAr ? 'الدور' : 'Floor',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -6068,6 +7001,26 @@ class _ErrorBox extends StatelessWidget {
   }
 }
 
+class _PreparedListingMedia {
+  const _PreparedListingMedia({
+    required this.imagePaths,
+    required this.imageHashes,
+    this.videoPath,
+  });
+
+  final List<String> imagePaths;
+  final List<String> imageHashes;
+  final String? videoPath;
+
+  bool get hasRealMedia =>
+      imagePaths.isNotEmpty || (videoPath ?? '').trim().isNotEmpty;
+
+  Map<String, dynamic> get integrity => ListingMediaSeal.integrityPayload(
+        imageHashes: imageHashes,
+        videoPath: videoPath,
+      );
+}
+
 class _PickedImage {
   final String name;
   final Uint8List bytes;
@@ -6222,6 +7175,7 @@ class _FormCard extends StatelessWidget {
   final List<Map<String, String>> purposeTypes;
   final ValueChanged<String> onTypeChanged;
   final ValueChanged<String> onPurposeChanged;
+  final Widget? rentSchedule;
   final bool usageResidential;
   final bool usageCommercial;
   final ValueChanged<bool> onUsageResidentialChanged;
@@ -6237,7 +7191,7 @@ class _FormCard extends StatelessWidget {
 
   // ----- فوترة: ضريبة 5% + عمولة تسويق -----
   final bool? priceIncludesVat;
-  final ValueChanged<bool> onPriceIncludesVatChanged;
+  final ValueChanged<bool?> onPriceIncludesVatChanged;
   final String commissionKind; // none | percent | fixed
   final ValueChanged<String> onCommissionKindChanged;
   final TextEditingController commissionFixedCtrl;
@@ -6275,6 +7229,7 @@ class _FormCard extends StatelessWidget {
   final TextEditingController deedNumber;
   final TextEditingController deedIssuer;
   final DateTime? deedDate;
+  final String? deedDuplicateWarning;
   final VoidCallback onPickDeedDate;
   final VoidCallback onClearDeedDate;
   final TextEditingController buildingNumber;
@@ -6420,6 +7375,7 @@ class _FormCard extends StatelessWidget {
     required this.purposeTypes,
     required this.onTypeChanged,
     required this.onPurposeChanged,
+    this.rentSchedule,
     required this.usageResidential,
     required this.usageCommercial,
     required this.onUsageResidentialChanged,
@@ -6464,6 +7420,7 @@ class _FormCard extends StatelessWidget {
     required this.deedNumber,
     required this.deedIssuer,
     required this.deedDate,
+    this.deedDuplicateWarning,
     required this.onPickDeedDate,
     required this.onClearDeedDate,
     required this.buildingNumber,
@@ -6620,195 +7577,71 @@ class _FormCard extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             if (slice == AddPropertyFormSlice.classification) ...[
-              if (wizardPaneKind == 101) ...[
-                Text(
-                  isAr ? 'نوع الإعلان' : 'Listing type',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
+              Text(
+                isAr ? 'الغرض' : 'Purpose',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
                 ),
+              ),
+              const SizedBox(height: 10),
+              SegmentedButton<String>(
+                segments: [
+                  ButtonSegment(
+                    value: 'sale',
+                    label: Text(isAr ? 'بيع' : 'Sale'),
+                  ),
+                  ButtonSegment(
+                    value: 'rent',
+                    label: Text(isAr ? 'إيجار' : 'Rent'),
+                  ),
+                ],
+                selected: {
+                  primaryPurposeGroup == 'rent' ? 'rent' : 'sale',
+                },
+                onSelectionChanged: saving
+                    ? null
+                    : (s) => onPrimaryPurposeGroupChanged(s.first),
+              ),
+              if (primaryPurposeGroup == 'rent' && rentSchedule != null)
+                rentSchedule!,
+              if (primaryPurposeGroup != 'rent') ...[
                 const SizedBox(height: 10),
-                SegmentedButton<String>(
-                  segments: [
-                    ButtonSegment(
-                      value: 'sale',
-                      label: Text(isAr ? 'بيع' : 'Sale'),
-                    ),
-                    ButtonSegment(
-                      value: 'rent',
-                      label: Text(isAr ? 'إيجار' : 'Rent'),
-                    ),
-                    ButtonSegment(
-                      value: 'purchase',
-                      label: Text(isAr ? 'شراء' : 'Purchase'),
-                    ),
-                  ],
-                  selected: {primaryPurposeGroup},
-                  onSelectionChanged: saving
-                      ? null
-                      : (s) => onPrimaryPurposeGroupChanged(s.first),
-                ),
-              ] else if (wizardPaneKind == 102) ...[
                 Text(
-                  isAr ? 'نوع العقار' : 'Property type',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                PropertyTypeHierarchyPicker(
-                  value: type,
-                  isAr: isAr,
-                  saving: saving,
-                  onChanged: onTypeChanged,
-                ),
-              ] else if (marketingSimplifiedForm) ...[
-                DropdownButtonFormField<String>(
-                  value: propertyCategory,
-                  decoration: deco(isAr ? 'تصنيف العقار' : 'Property category'),
-                  items: MarketingAddPropertyFlowConfig.propertyCategoryOptions
-                      .map(
-                        (e) => DropdownMenuItem<String>(
-                          value: e['code'],
-                          child: Text(isAr ? e['ar']! : e['en']!),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: saving
-                      ? null
-                      : (v) {
-                          if (v != null) onPropertyCategoryChanged(v);
-                        },
-                ),
-                const SizedBox(height: 12),
-                PropertyTypeHierarchyPicker(
-                  value: type,
-                  isAr: isAr,
-                  saving: saving,
-                  onChanged: onTypeChanged,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  isAr ? 'الغرض' : 'Purpose',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<String>(
-                  segments: [
-                    ButtonSegment(
-                      value: 'sale',
-                      label: Text(isAr ? 'بيع' : 'Sale'),
-                    ),
-                    ButtonSegment(
-                      value: 'rent',
-                      label: Text(isAr ? 'إيجار' : 'Rent'),
-                    ),
-                  ],
-                  selected: {primaryPurposeGroup == 'rent' ? 'rent' : 'sale'},
-                  onSelectionChanged: saving
-                      ? null
-                      : (s) => onPrimaryPurposeGroupChanged(s.first),
-                ),
-                const SizedBox(height: 10),
-                if (primaryPurposeGroup == 'rent')
-                  DropdownButtonFormField<String>(
-                    value: subPurposeCode ??
-                        (purpose.startsWith('daily')
-                            ? 'daily_rent'
-                            : purpose.startsWith('yearly')
-                                ? 'yearly_rent'
-                                : 'monthly_rent'),
-                    decoration: deco(isAr ? 'مدة الإيجار' : 'Rent term'),
-                    items: [
-                      DropdownMenuItem(
-                        value: 'daily_rent',
-                        child: Text(isAr ? 'يومي' : 'Daily'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'monthly_rent',
-                        child: Text(isAr ? 'شهري' : 'Monthly'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'yearly_rent',
-                        child: Text(isAr ? 'سنوي' : 'Yearly'),
-                      ),
-                    ],
-                    onChanged: saving ? null : onSubPurposeCodeChanged,
-                  )
-                else
-                  DropdownButtonFormField<String>(
-                    value: subPurposeCode ??
-                        (purpose == 'auction'
-                            ? 'auction'
-                            : purpose == 'investment'
-                                ? 'investment'
-                                : 'sale'),
-                    decoration: deco(isAr ? 'نوع البيع' : 'Sale type'),
-                    items: [
-                      DropdownMenuItem(
-                        value: 'sale',
-                        child: Text(isAr ? 'بيع' : 'Sale'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'auction',
-                        child: Text(isAr ? 'مزاد' : 'Auction'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'investment',
-                        child: Text(isAr ? 'استثمار' : 'Investment'),
-                      ),
-                    ],
-                    onChanged: saving ? null : onSubPurposeCodeChanged,
-                  ),
-                const SizedBox(height: 14),
-                Text(
-                  isAr ? 'هل على العقار التزامات؟' : 'Property obligations?',
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
+                  isAr
+                      ? 'اختياري تحت البيع: مزاد أو استثمار'
+                      : 'Optional under sale: auction or investment',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: cs.onSurfaceVariant,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: [
                     StableSelectChip(
-                      label: isAr ? 'نعم' : 'Yes',
-                      exclusive: true,
-                      selected: propertyHasObligations == true,
+                      label: isAr ? 'مزاد' : 'Auction',
+                      selected: subPurposeCode == 'auction',
                       enabled: !saving,
-                      onSelected: (_) =>
-                          onPropertyHasObligationsChanged(true),
+                      onSelected: (on) => onSubPurposeCodeChanged(
+                        on ? 'auction' : 'sale',
+                      ),
                     ),
                     StableSelectChip(
-                      label: isAr ? 'لا' : 'No',
-                      exclusive: true,
-                      selected: propertyHasObligations == false,
+                      label: isAr ? 'استثمار' : 'Investment',
+                      selected: subPurposeCode == 'investment',
                       enabled: !saving,
-                      onSelected: (_) =>
-                          onPropertyHasObligationsChanged(false),
+                      onSelected: (on) => onSubPurposeCodeChanged(
+                        on ? 'investment' : 'sale',
+                      ),
                     ),
                   ],
                 ),
-                if (propertyHasObligations == true) ...[
-                  const SizedBox(height: 8),
-                  AqarTextFormField(
-                    controller: obligationsDetail,
-                    enabled: !saving,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: deco(
-                      isAr ? 'تفاصيل الالتزامات' : 'Obligation details',
-                    ),
-                  ),
-                ],
-              ] else ...[
-              // 1. نوع العقار (هرمي: مجموعة + فرعي)
+              ],
+              const SizedBox(height: 14),
               PropertyTypeHierarchyPicker(
                 value: type,
                 isAr: isAr,
@@ -6816,7 +7649,6 @@ class _FormCard extends StatelessWidget {
                 onChanged: onTypeChanged,
               ),
               const SizedBox(height: 12),
-
               Text(
                 isAr ? 'هل العقار مناسب لـ:' : 'Property is suitable for:',
                 style: const TextStyle(
@@ -6849,59 +7681,47 @@ class _FormCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-
-              // 2. الغرض
+              const SizedBox(height: 14),
               Text(
-                isAr ? 'الغرض (بيع / إيجار / …)' : 'Purpose (sale / rent / …)',
+                isAr ? 'هل على العقار التزامات؟' : 'Property obligations?',
                 style: const TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(height: 10),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: purposeTypes.map((e) {
-                    final code = e['code']!;
-                    final sel = purpose == code;
-                    final col = _purposeAccentColor(code);
-                    return Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 8),
-                      child: StableSelectChip(
-                        label: _label(e),
-                        exclusive: true,
-                        selected: sel,
-                        enabled: !saving,
-                        onSelected: (_) => onPurposeChanged(code),
-                        selectedColor: col.withOpacity(0.22),
-                        checkColor: col,
-                      ),
-                    );
-                  }).toList(),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  StableSelectChip(
+                    label: isAr ? 'نعم' : 'Yes',
+                    selected: propertyHasObligations == true,
+                    enabled: !saving,
+                    onSelected: (on) =>
+                        onPropertyHasObligationsChanged(on ? true : null),
+                  ),
+                  StableSelectChip(
+                    label: isAr ? 'لا' : 'No',
+                    selected: propertyHasObligations == false,
+                    enabled: !saving,
+                    onSelected: (on) =>
+                        onPropertyHasObligationsChanged(on ? false : null),
+                  ),
+                ],
+              ),
+              if (propertyHasObligations == true) ...[
+                const SizedBox(height: 8),
+                AqarTextFormField(
+                  controller: obligationsDetail,
+                  enabled: !saving,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: deco(
+                    isAr ? 'تفاصيل الالتزامات' : 'Obligation details',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: purpose,
-                items: purposeTypes
-                    .map(
-                      (e) => DropdownMenuItem<String>(
-                        value: e['code'],
-                        child: Text(_label(e)),
-                      ),
-                    )
-                    .toList(),
-                onChanged: saving
-                    ? null
-                    : (v) {
-                        if (v != null) onPurposeChanged(v);
-                      },
-                decoration: deco(isAr ? 'الغرض (قائمة)' : 'Purpose (list)'),
-              ),
-              const SizedBox(height: 12),
               ],
+              const SizedBox(height: 12),
             ],
             if (slice == AddPropertyFormSlice.location) ...[
               if (locationsLoading)
@@ -7484,6 +8304,8 @@ class _FormCard extends StatelessWidget {
                 AqarTextFormField(
                   controller: buildingNumber,
                   enabled: !saving,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: latinDigitsOnlyFormatters(maxLength: 12),
                   decoration: deco(isAr
                       ? 'رقم المبنى (اختياري)'
                       : 'Building number (optional)'),
@@ -7529,7 +8351,20 @@ class _FormCard extends StatelessWidget {
               AqarTextFormField(
                 controller: deedNumber,
                 enabled: !saving,
-                decoration: deco(isAr ? 'رقم الصك' : 'Deed number'),
+                keyboardType: TextInputType.number,
+                inputFormatters: latinDigitsOnlyFormatters(maxLength: 32),
+                decoration: deco(isAr ? 'رقم الصك' : 'Deed number').copyWith(
+                  suffixIcon: Tooltip(
+                    message: AppLocalizations.of(context)?.deedNumberGovHint ??
+                        (isAr
+                            ? 'يُفحص الرقم الآن داخل التطبيق. لاحقاً سيُربط بالتحقق الحكومي من بيانات الصك، ويُبلَّغ مكتب إدارة المشروع عند التعارض.'
+                            : 'The number is checked in-app during development. Later it will be verified with government deed data, and the project operations desk will be notified on conflicts.'),
+                    child: Icon(
+                      Icons.verified_user_outlined,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
                 validator: (v) {
                   if (!requiresDeed) return null;
                   if (_AddPropertyPageState.normalizeDeedNumber(v ?? '')
@@ -7539,17 +8374,18 @@ class _FormCard extends StatelessWidget {
                   return null;
                 },
               ),
-              const SizedBox(height: 6),
-              Text(
-                isAr
-                    ? 'مراقبة التكرار: لا يُسمح بأكثر من إعلان نشط للبيع/المزاد/الاستثمار بنفس رقم الصك.'
-                    : 'Duplicate guard: one active sale/auction/investment listing per deed number.',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: cs.onSurfaceVariant,
+              if ((deedDuplicateWarning ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  deedDuplicateWarning!.trim(),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.45,
+                    fontWeight: FontWeight.w800,
+                    color: cs.error,
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: 10),
               FormField<DateTime>(
                 key: ValueKey(
@@ -7564,16 +8400,6 @@ class _FormCard extends StatelessWidget {
                   return null;
                 },
                 builder: (field) {
-                  final formatted = deedDate == null
-                      ? null
-                      : ListingDateDisplay.formatCardDateTime(
-                          DateTime(
-                            deedDate!.year,
-                            deedDate!.month,
-                            deedDate!.day,
-                          ),
-                          isAr: isAr,
-                        );
                   return InkWell(
                     onTap: saving ? null : onPickDeedDate,
                     borderRadius: BorderRadius.circular(12),
@@ -7595,18 +8421,28 @@ class _FormCard extends StatelessWidget {
                       ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(
-                          formatted ??
-                              (isAr ? 'اختر التاريخ' : 'Select date'),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: formatted == null
-                                ? cs.onSurfaceVariant
-                                : (saving
-                                    ? cs.onSurfaceVariant
-                                    : cs.onSurface),
-                          ),
-                        ),
+                        child: deedDate == null
+                            ? Text(
+                                isAr ? 'اختر التاريخ' : 'Select date',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              )
+                            : DeedCivilHijriDateText(
+                                date: DateTime(
+                                  deedDate!.year,
+                                  deedDate!.month,
+                                  deedDate!.day,
+                                ),
+                                isAr: isAr,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: saving
+                                      ? cs.onSurfaceVariant
+                                      : cs.onSurface,
+                                ),
+                              ),
                       ),
                     ),
                   );
@@ -7739,17 +8575,17 @@ class _FormCard extends StatelessWidget {
                     },
                   );
 
-                  final priceField = AqarTextFormField(
+                  final priceField = BudgetTextField(
                     controller: price,
                     enabled: !saving && !priceOnSum,
+                    isAr: isAr,
+                    alignOpposite: true,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: latinDecimalNumberFormatters(),
-                    decoration: deco(
-                      priceOnSum
-                          ? (isAr ? 'السعر (على السوم)' : 'Price (on sum)')
-                          : (isAr ? 'السعر الإجمالي' : 'Total price'),
-                    ),
+                    label: priceOnSum
+                        ? (isAr ? 'السعر (على السوم)' : 'Price (on sum)')
+                        : (isAr ? 'السعر الإجمالي' : 'Total price'),
                     validator: (v) {
                       if (priceOnSum) return null;
                       final s = _AddPropertyPageState.normalizeNumbers(v ?? '')
@@ -7946,6 +8782,7 @@ class _FormCard extends StatelessWidget {
                   enabled: !saving,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: latinDecimalNumberFormatters(),
                   decoration:
                       deco(isAr ? 'السعر الحالي للمزاد' : 'Current bid'),
                   validator: (v) {
@@ -8067,11 +8904,15 @@ class _FormCard extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
 
-              // 16. الطوابق (حسب [PropertyTypeCatalog.showsFloorFields])
+              // 16. الطوابق — الوحدة: رقم الطابق؛ المبنى: العدد الكلي فقط (بدون تكرار).
               if (showFloorFieldsRow) ...[
                 LayoutBuilder(
                   builder: (context, c) {
                     final narrow = c.maxWidth < 700;
+                    final showUnitFloor =
+                        PropertyTypeCatalog.showsUnitFloorFieldEffective(type);
+                    final showTotal = PropertyTypeCatalog
+                        .showsTotalFloorsFieldEffective(type);
 
                     final floorField = DropdownButtonFormField<int>(
                       value: floor,
@@ -8088,21 +8929,28 @@ class _FormCard extends StatelessWidget {
                           deco(isAr ? 'عدد الطوابق الكلي' : 'Total floors'),
                     );
 
-                    if (narrow) {
+                    final fields = <Widget>[
+                      if (showUnitFloor) floorField,
+                      if (showTotal) totalFloorsField,
+                    ];
+                    if (fields.isEmpty) return const SizedBox.shrink();
+                    if (narrow || fields.length == 1) {
                       return Column(
                         children: [
-                          floorField,
-                          const SizedBox(height: 10),
-                          totalFloorsField,
+                          for (var i = 0; i < fields.length; i++) ...[
+                            if (i > 0) const SizedBox(height: 10),
+                            fields[i],
+                          ],
                         ],
                       );
                     }
 
                     return Row(
                       children: [
-                        Expanded(child: floorField),
-                        const SizedBox(width: 10),
-                        Expanded(child: totalFloorsField),
+                        for (var i = 0; i < fields.length; i++) ...[
+                          if (i > 0) const SizedBox(width: 10),
+                          Expanded(child: fields[i]),
+                        ],
                       ],
                     );
                   },
@@ -8120,43 +8968,23 @@ class _FormCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
 
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: amenities.entries
-                    .where((entry) =>
-                        !isLand ||
-                        PropertyTypeCatalog.amenityKeyRelevantForLand(
-                            entry.key))
-                    .map((entry) {
-                  final key = entry.key;
-                  final value = entry.value;
-                  final labels = <String, String>{
-                    'pool': isAr ? 'مسبح' : 'Pool',
-                    'gym': isAr ? 'نادي' : 'Gym',
-                    'elevator': isAr ? 'مصعد' : 'Elevator',
-                    'security': isAr ? 'أمن' : 'Security',
-                    'garden': isAr ? 'حديقة' : 'Garden',
-                    'balcony': isAr ? 'شرفة' : 'Balcony',
-                    'ac': isAr ? 'تكييف' : 'AC',
-                    'parking': isAr ? 'موقف' : 'Parking',
-                    'wifi': 'Wi-Fi',
-                    'maid_room': isAr ? 'غرفة خادمة' : 'Maid room',
-                    'driver_room': isAr ? 'غرفة سائق' : 'Driver room',
-                    'storage': isAr ? 'مستودع' : 'Storage',
-                    'roof': isAr ? 'سطح' : 'Roof',
-                    'kitchen': isAr ? 'مطبخ' : 'Kitchen',
-                    'majlis': isAr ? 'مجلس' : 'Majlis',
-                    'yard': isAr ? 'حوش' : 'Yard',
-                  };
-
-                  return StableSelectChip(
-                    label: labels[key] ?? key,
-                    selected: value,
-                    enabled: !saving,
-                    onSelected: (v) => onAmenityToggle(key, v),
-                  );
-                }).toList(),
+              Text(
+                isAr
+                    ? 'خيارات مناسبة لـ ${PropertyTypeCatalog.label(type, true)}'
+                    : 'Options for ${PropertyTypeCatalog.label(type, false)}',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              AmenityEqualSelectGrid(
+                typeCode: type,
+                values: amenities,
+                isAr: isAr,
+                enabled: !saving,
+                onToggle: onAmenityToggle,
               ),
               const SizedBox(height: 12),
 
@@ -8180,8 +9008,8 @@ class _FormCard extends StatelessWidget {
                               ? 'تاريخ التوفر: غير محدد'
                               : 'Availability date: not set')
                           : (isAr
-                              ? 'تاريخ التوفر: ${availabilityDate!.year}-${availabilityDate!.month.toString().padLeft(2, '0')}-${availabilityDate!.day.toString().padLeft(2, '0')}'
-                              : 'Availability date: ${availabilityDate!.year}-${availabilityDate!.month.toString().padLeft(2, '0')}-${availabilityDate!.day.toString().padLeft(2, '0')}'),
+                              ? 'تاريخ التوفر: ${DateHelper.fmtCivilDate(availabilityDate!, isAr: true)}'
+                              : 'Availability date: ${DateHelper.fmtCivilDate(availabilityDate!, isAr: false)}'),
                       style: TextStyle(
                         color: cs.onSurfaceVariant,
                         fontWeight: FontWeight.w700,
@@ -8223,7 +9051,7 @@ class _VatInclusionQuestion extends StatelessWidget {
   final bool isAr;
   final bool saving;
   final bool? value;
-  final ValueChanged<bool> onChanged;
+  final ValueChanged<bool?> onChanged;
 
   const _VatInclusionQuestion({
     required this.isAr,
@@ -8282,15 +9110,17 @@ class _VatInclusionQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == true,
                 enabled: !saving,
-                onSelected: (_) => onChanged(true),
+                onSelected: (_) =>
+                    onChanged(value == true ? null : true),
               ),
               StableSelectChip(
-                label: isAr ? 'لا — يضاف 5%' : 'No — add 5%',
+                label: isAr ? 'لا — بدون ضريبة' : 'No — without VAT',
                 exclusive: true,
                 showLeadingCheck: false,
                 selected: value == false,
                 enabled: !saving,
-                onSelected: (_) => onChanged(false),
+                onSelected: (_) =>
+                    onChanged(value == false ? null : false),
               ),
             ],
           ),
@@ -8376,7 +9206,8 @@ class _CommissionKindQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == 'none',
                 enabled: !saving,
-                onSelected: (_) => onChanged('none'),
+                onSelected: (_) =>
+                    onChanged(value == 'none' ? '' : 'none'),
               ),
               StableSelectChip(
                 label: isAr ? 'عمولة 2.5%' : '2.5% commission',
@@ -8384,7 +9215,8 @@ class _CommissionKindQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == 'percent',
                 enabled: !saving,
-                onSelected: (_) => onChanged('percent'),
+                onSelected: (_) =>
+                    onChanged(value == 'percent' ? '' : 'percent'),
               ),
               StableSelectChip(
                 label: isAr ? 'مبلغ مقطوع' : 'Fixed amount',
@@ -8392,7 +9224,8 @@ class _CommissionKindQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == 'fixed',
                 enabled: !saving,
-                onSelected: (_) => onChanged('fixed'),
+                onSelected: (_) =>
+                    onChanged(value == 'fixed' ? '' : 'fixed'),
               ),
             ],
           ),

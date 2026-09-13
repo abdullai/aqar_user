@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../l10n/app_localizations.dart';
@@ -14,7 +15,7 @@ class SubscriptionCancelFlow {
     required String endDateLabel,
     String? organizationId,
   }) async {
-    final step1 = await showDialog<bool>(
+    final step1 = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
@@ -53,7 +54,7 @@ class SubscriptionCancelFlow {
       // احتفظ بالتوافق مع منطق العميل القديم
       await svc.markRetentionOfferShown();
       if (!context.mounted) return false;
-      final stay = await showDialog<bool>(
+      final stay = await showAppDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
@@ -96,7 +97,7 @@ class SubscriptionCancelFlow {
     }
 
     if (!context.mounted) return false;
-    final churn = await showDialog<({String? reasonKey, String detail})>(
+    final churn = await showAppDialog<({String? reasonKey, String detail})>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => _ChurnSurveyDialog(t: t),

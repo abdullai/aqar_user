@@ -1,15 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/subscription/subscription_gate_helper.dart';
+import '../../core/payment/platform_fee_catalog.dart';
 import '../../core/utils/app_money.dart';
+import '../../core/utils/date_helper.dart';
 import '../../services/instant_market_request_payment_service.dart';
 import '../../widgets/app_logo_loading.dart';
 
-/// مدفوعات المالك/المستخدم العام — الطلب الفوري فقط (30 ر.س).
+/// مدفوعات المالك/المستخدم العام — الطلب الفوري (سعر الكتالوج).
 class OwnerInstantPaymentsHubScreen extends StatefulWidget {
   const OwnerInstantPaymentsHubScreen({
     super.key,
@@ -32,6 +34,7 @@ class _OwnerInstantPaymentsHubScreenState
   Map<String, dynamic>? _available;
   List<Map<String, dynamic>> _history = const [];
   bool _busy = false;
+  double _catalogPrice = 0;
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
@@ -50,11 +53,13 @@ class _OwnerInstantPaymentsHubScreenState
       final results = await Future.wait([
         _svc.getAvailableCredit(),
         _svc.listMyCredits(limit: 40),
+        _svc.catalogAmountSar(),
       ]);
       if (!mounted) return;
       setState(() {
         _available = results[0] as Map<String, dynamic>;
         _history = results[1] as List<Map<String, dynamic>>;
+        _catalogPrice = results[2] as double;
         _loading = false;
       });
     } catch (e) {
@@ -72,7 +77,7 @@ class _OwnerInstantPaymentsHubScreenState
         ? raw.toLocal()
         : DateTime.tryParse(raw.toString())?.toLocal();
     if (dt == null) return '—';
-    return DateFormat.yMMMd(_isAr ? 'ar' : 'en').add_jm().format(dt);
+    return DateHelper.fmtCivilDateTime(dt, isAr: _isAr);
   }
 
   String _statusLabel(String status) {
@@ -87,6 +92,21 @@ class _OwnerInstantPaymentsHubScreenState
 
   Future<void> _buyInstant() async {
     if (_busy) return;
+    final hasCredit = _available?['ok'] == true &&
+        (_available?['credit_id'] ?? '').toString().isNotEmpty;
+    if (hasCredit) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isAr
+                ? 'لديك رصيد فوري غير مستخدم. استخدمه عند النشر أو استردّه قبل شراء رصيد جديد.'
+                : 'You already have unused instant credit. Use it at publish or refund it before buying another.',
+          ),
+        ),
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       final paid = await SubscriptionGateHelper.payInstantMarketRequest(
@@ -114,14 +134,14 @@ class _OwnerInstantPaymentsHubScreenState
 
   Future<void> _refundCredit(String creditId) async {
     if (_busy) return;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'استرداد الرصيد' : 'Refund credit'),
         content: Text(
           _isAr
-              ? 'سيتم استرداد 30 ر.س إلى وسيلة الدفع الأصلية. يمكنك شراء رصيد جديد لاحقاً.'
-              : 'SAR 30 will be refunded to your original payment method. You can buy a new credit later.',
+              ? 'سيتم استرداد ${PlatformFeeCatalog.of(context).instantPhrase(isAr: true)} إلى وسيلة الدفع الأصلية. يمكنك شراء رصيد جديد لاحقاً.'
+              : '${PlatformFeeCatalog.of(context).instantPhrase(isAr: false)} will be refunded to your original payment method. You can buy a new credit later.',
         ),
         actions: [
           TextButton(
@@ -183,10 +203,10 @@ class _OwnerInstantPaymentsHubScreenState
             Text(
               _isAr
                   ? '• إعلان عقاري وطلب عقاري وإتمام صفقة على طلبات الآخرين — مجاني.\n'
-                    '• الطلب «فوري» فقط: 30 ر.س — أسبوع أولوية في منطقتك و72 ساعة في باقي المناطق.\n'
+                    '• الطلب «فوري» فقط: ${PlatformFeeCatalog.of(context, listen: true).instantPhrase(isAr: true)} — أسبوع أولوية في منطقتك و72 ساعة في باقي المناطق.\n'
                     '• الرصيد غير المستخدم يُسترد؛ المُلغى قبل النشر يعود للمحفظة.'
                   : '• Property listing, home request, and completing deals on others\' requests — free.\n'
-                    '• Instant priority only: SAR 30 — 1 week in your region, 72h elsewhere.\n'
+                    '• Instant priority only: ${PlatformFeeCatalog.of(context, listen: true).instantPhrase(isAr: false)} — 1 week in your region, 72h elsewhere.\n'
                     '• Unused credits can be refunded before publish.',
               style: TextStyle(
                 height: 1.45,
@@ -235,7 +255,7 @@ class _OwnerInstantPaymentsHubScreenState
               ),
             const SizedBox(height: 14),
             FilledButton.icon(
-              onPressed: _busy ? null : _buyInstant,
+              onPressed: (_busy || hasCredit) ? null : _buyInstant,
               icon: _busy
                   ? const SizedBox(
                       width: 18,
@@ -244,16 +264,40 @@ class _OwnerInstantPaymentsHubScreenState
                     )
                   : const Icon(Icons.bolt_rounded),
               label: Text(
-                _isAr
-                    ? 'شراء طلب فوري — ${AppMoney.formatWithCurrencyCode(InstantMarketRequestPaymentService.priceSar, isAr: true)}'
-                    : 'Buy instant request — ${AppMoney.formatWithCurrencyCode(InstantMarketRequestPaymentService.priceSar, isAr: false)}',
+                hasCredit
+                    ? (_isAr
+                        ? 'رصيد فوري جاهز — استخدمه عند النشر أو استردّه أدناه'
+                        : 'Instant credit ready — use it at publish or refund below')
+                    : (_isAr
+                    ? 'شراء طلب فوري — ${AppMoney.formatWithCurrencyCode(_catalogPrice, isAr: true)}'
+                    : 'Buy instant request — ${AppMoney.formatWithCurrencyCode(_catalogPrice, isAr: false)}'),
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
+            if (hasCredit) ...[
+              const SizedBox(height: 8),
+              Text(
+                _isAr
+                    ? 'ختم الرصيد: ${_creditSeal(_available)} — لا يُشترى رصيد ثانٍ قبل الاستخدام أو الاسترداد (عدالة للدفع).'
+                    : 'Credit seal: ${_creditSeal(_available)} — a second unused credit cannot be bought (fair billing).',
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.35,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  String _creditSeal(Map<String, dynamic>? row) {
+    final id = '${row?['credit_id'] ?? row?['id'] ?? ''}'.replaceAll('-', '');
+    if (id.length < 6) return '—';
+    return id.substring(id.length - 6).toUpperCase();
   }
 
   @override
@@ -305,8 +349,7 @@ class _OwnerInstantPaymentsHubScreenState
                   leading: const Icon(Icons.bolt_rounded, color: Color(0xFFDC2626)),
                   title: Text(
                     AppMoney.formatWithCurrencyCode(
-                      (r['amount_sar'] as num?)?.toDouble() ??
-                          InstantMarketRequestPaymentService.priceSar,
+                      (r['amount_sar'] as num?)?.toDouble() ?? _catalogPrice,
                       isAr: _isAr,
                     ),
                     style: const TextStyle(fontWeight: FontWeight.w900),
@@ -347,10 +390,13 @@ class _OwnerInstantPaymentsHubScreenState
                   ),
                   subtitle: Text(_fmtDate(r['created_at'])),
                   trailing: Text(
-                    AppMoney.formatWithCurrencyCode(
-                      (r['amount_sar'] as num?)?.toDouble() ?? 30,
-                      isAr: _isAr,
-                    ),
+                    () {
+                      final amt = (r['amount_sar'] as num?)?.toDouble();
+                      final show =
+                          (amt != null && amt > 0) ? amt : _catalogPrice;
+                      if (show <= 0) return '—';
+                      return AppMoney.formatWithCurrencyCode(show, isAr: _isAr);
+                    }(),
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),

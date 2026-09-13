@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import '../core/utils/date_helper.dart';
 
 import '../l10n/app_localizations.dart';
 
@@ -25,9 +25,9 @@ class PaymentTransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
     final cs = Theme.of(context).colorScheme;
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
     final dateStr = createdAt != null
-        ? DateFormat.yMMMMd(Localizations.localeOf(context).toString())
-            .format(createdAt!)
+        ? DateHelper.fmtCivilDate(createdAt!, isAr: isAr)
         : '—';
     return Card(
       margin: const EdgeInsets.only(bottom: 12),

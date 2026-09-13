@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +16,7 @@ import 'package:aqar_user/l10n/app_localizations.dart';
 
 import '../core/input/password_arabic_script_guard.dart';
 import '../core/input/saudi_input_formatters.dart';
+import '../widgets/caps_aware_password_field.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
   const ResetPasswordScreen({super.key});
@@ -58,7 +59,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   bool get _isLight => _currentTheme == ThemeMode.light;
 
   Color get _pageBg =>
-      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
   Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
@@ -882,15 +883,14 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     required TextInputAction textInputAction,
     required ValueChanged<String> onSubmitted,
   }) {
-    return AqarTextField(
+    return CapsAwarePasswordField(
       controller: controller,
       focusNode: focusNode,
       obscureText: obscure,
-      keyboardType: TextInputType.visiblePassword,
+      onToggleObscure: onToggle,
+      isAr: _isAr,
       textInputAction: textInputAction,
       onSubmitted: onSubmitted,
-      enableSuggestions: false,
-      autocorrect: false,
       inputFormatters: passwordArabicGuardFormatters(
         onArabicScriptBlocked: _schedulePasswordArabicDialog,
       ),
@@ -903,16 +903,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         context,
         hint: label,
         icon: Icons.lock_outline,
-        suffix: IconButton(
-          onPressed: onToggle,
-          icon: Icon(
-            obscure ? Icons.visibility : Icons.visibility_off,
-            color: _iconColor,
-            size: 22,
-          ),
-          tooltip:
-              obscure ? (_isAr ? 'إظهار' : 'Show') : (_isAr ? 'إخفاء' : 'Hide'),
-        ),
       ),
     );
   }

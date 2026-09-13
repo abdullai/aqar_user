@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/gestures/app_keyboard_popups.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/profile/publisher_identity_prefs.dart';
 import '../core/utils/compound_display_name.dart';
@@ -12,6 +13,7 @@ import '../services/profile_compliance_service.dart';
 import 'aqar_text_field.dart';
 import 'app_logo_loading.dart';
 import 'field_group_frame.dart';
+import 'app_page_close_button.dart';
 
 /// نافذة منبثقة لاستكمال النواقص وحفظها ثم إعادة الفحص.
 class ProfileCompletionSheet extends StatefulWidget {
@@ -31,7 +33,7 @@ class ProfileCompletionSheet extends StatefulWidget {
     Map<String, dynamic>? initialRow,
   }) {
     final isAr = lang.toLowerCase() != 'en';
-    return showModalBottomSheet<bool>(
+    return showAppModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -367,10 +369,8 @@ class _ProfileCompletionSheetState extends State<ProfileCompletionSheet> {
                     ),
                   ),
                 ),
-                IconButton(
-                  tooltip: _isAr ? 'إغلاق' : 'Close',
+                AppPageCloseButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  icon: const Icon(Icons.close_rounded),
                 ),
               ],
             ),

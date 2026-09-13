@@ -19,7 +19,9 @@ $SupabaseProjectRef = "czfvqhepsqkgsrfnknwm"
 $Functions = @(
     "moyasar-payment-health",
     "moyasar-webhook",
-    "moyasar-charge-saved-card"
+    "moyasar-charge-saved-card",
+    "moyasar-refund",
+    "subscription-renew-cron"
 )
 
 function Write-Step([string]$Message) {

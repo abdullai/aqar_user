@@ -7,7 +7,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/branding/app_branding.dart';
 import '../core/compliance/platform_compliance_config.dart';
+import '../core/gestures/app_keyboard_popups.dart';
+import '../core/navigation/safe_overlay_pop.dart';
+import '../l10n/app_localizations.dart';
 import '../services/compliance_audit_service.dart';
+import '../widgets/app_page_close_button.dart';
+import '../widgets/support/support_contact_actions.dart';
+import '../widgets/support/support_labeled_table.dart';
 
 /// شكوى داخل التطبيق → جدول [regc_user_complaints] + سجل تدقيق (ترحيل 20260515183000).
 Future<void> showInAppComplaintDialog(
@@ -17,27 +23,42 @@ Future<void> showInAppComplaintDialog(
   final subject = TextEditingController();
   final body = TextEditingController();
   try {
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
           title: Text(isAr ? 'شكوى داخل التطبيق' : 'In-app complaint'),
           content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AqarTextField(
-                  controller: subject,
-                  decoration: InputDecoration(
-                    labelText: isAr ? 'الموضوع' : 'Subject',
+            child: SupportLabeledTable(
+              rows: [
+                SupportLabeledRow(
+                  label: isAr ? 'الموضوع' : 'Subject',
+                  child: AqarTextField(
+                    controller: subject,
+                    minLines: 2,
+                    maxLines: 6,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: isAr ? 'موضوع واضح' : 'Clear subject',
+                      border: InputBorder.none,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 12),
-                AqarTextField(
-                  controller: body,
-                  maxLines: 5,
-                  decoration: InputDecoration(
-                    labelText: isAr ? 'التفاصيل' : 'Details',
+                SupportLabeledRow(
+                  label: isAr ? 'التفاصيل' : 'Details',
+                  child: AqarTextField(
+                    controller: body,
+                    minLines: 4,
+                    maxLines: 10,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: isAr
+                          ? 'اشرح المشكلة بالتفصيل'
+                          : 'Describe the issue',
+                      border: InputBorder.none,
+                    ),
                   ),
                 ),
               ],
@@ -121,49 +142,31 @@ class SupportPage extends StatelessWidget {
   /// إخفاء نموذج الشكوى القديم (يُعرض في [ComplaintSubmitForm]).
   final bool hideComplaintForm;
 
+  final ScrollController? scrollController;
+
   const SupportPage({
     super.key,
     required this.userId,
     required this.isAr,
     required this.bankColor,
     this.wrapInScaffold = true,
-    this.hideComplaintForm = false,
+    this.hideComplaintForm = true,
+    this.scrollController,
   });
 
-  Future<void> _openMail(
-    BuildContext context, {
-    required String email,
-    required String subject,
-  }) async {
-    final u = Uri(
-      scheme: 'mailto',
-      path: email,
-      queryParameters: <String, String>{'subject': subject},
-    );
-    try {
-      if (await canLaunchUrl(u)) {
-        await launchUrl(u);
-      }
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            isAr ? 'تعذر فتح تطبيق البريد' : 'Could not open mail app',
-          ),
-        ),
-      );
-    }
-  }
-
   Widget _body(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final support = PlatformComplianceConfig.supportEmail();
     final complaints = PlatformComplianceConfig.complaintsEmail();
     final web = PlatformComplianceConfig.complaintsWebUrl();
+    final mailSubject = isAr
+        ? 'دعم فني — ${AppBranding.brandNameAr}'
+        : 'Support — ${AppBranding.brandNameEn}';
 
     return Padding(
       padding: const EdgeInsets.all(16),
       child: ListView(
+        controller: scrollController,
         children: [
           Card(
             child: Padding(
@@ -172,7 +175,7 @@ class SupportPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    isAr ? 'مركز الدعم الفني' : 'Support Center',
+                    l10n.supportCenterTitle,
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
@@ -180,42 +183,25 @@ class SupportPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    isAr
-                        ? 'للاستفسارات التقنية والحساب. يُفضّل إرفاق لقطة شاشة ورقم الطلب عند الإنابة عن مشكلة في إعلان أو عقد.'
-                        : 'For technical and account issues. Please attach a screenshot and reference IDs when reporting listing or contract problems.',
+                    l10n.supportCenterIntro,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      height: 1.45,
+                    ),
                   ),
                   const SizedBox(height: 16),
-                  ListTile(
-                    leading: Icon(Icons.email_outlined, color: bankColor),
-                    title: Text(isAr ? 'البريد الإلكتروني' : 'Email'),
-                    subtitle: SelectableText(support),
-                    onTap: () => _openMail(
-                      context,
-                      email: support,
-                      subject: isAr
-                          ? 'دعم فني — ${AppBranding.brandNameAr}'
-                          : 'Support — ${AppBranding.brandNameEn}',
-                    ),
+                  SupportEmailTile(
+                    email: support,
+                    subject: mailSubject,
+                    accentColor: bankColor,
                   ),
+                  SupportPhoneLinesColumn(accentColor: bankColor),
                   ListTile(
-                    leading: Icon(Icons.phone_outlined, color: bankColor),
-                    title: Text(isAr ? 'الهاتف (يُحدَّث من المشغّل)' : 'Phone (operator)'),
-                    subtitle: Text(isAr ? '+966 500 000 000' : '+966 500 000 000'),
-                  ),
-                  ListTile(
+                    contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.schedule_outlined, color: bankColor),
-                    title: Text(isAr ? 'ساعات الاستجابة' : 'Response hours'),
-                    subtitle: Text(isAr ? 'أيام العمل — 9 ص إلى 5 م (توقيت السعودية)' : 'Business days — 9 AM to 5 PM (KSA)'),
+                    title: Text(l10n.supportHoursLabel),
+                    subtitle: Text(l10n.supportHoursValue),
                   ),
-                  if (userId.isNotEmpty)
-                    ListTile(
-                      leading: Icon(Icons.badge_outlined, color: bankColor),
-                      title: Text(isAr ? 'معرّف المستخدم' : 'User ID'),
-                      subtitle: SelectableText(
-                        userId,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -263,17 +249,12 @@ class SupportPage extends StatelessWidget {
                       trailing: Icon(Icons.chevron_right_rounded, color: bankColor),
                       onTap: () => showInAppComplaintDialog(context, isAr: isAr),
                     ),
-                  ListTile(
-                    leading: Icon(Icons.forward_to_inbox, color: bankColor),
-                    title: Text(isAr ? 'بريد الشكاوى' : 'Complaints mailbox'),
-                    subtitle: SelectableText(complaints),
-                    onTap: () => _openMail(
-                      context,
-                      email: complaints,
-                      subject: isAr
-                          ? 'شكوى — ${AppBranding.brandNameAr}'
-                          : 'Complaint — ${AppBranding.brandNameEn}',
-                    ),
+                  SupportEmailTile(
+                    email: complaints,
+                    subject: isAr
+                        ? 'شكوى — ${AppBranding.brandNameAr}'
+                        : 'Complaint — ${AppBranding.brandNameEn}',
+                    accentColor: bankColor,
                   ),
                   if (web != null && !hideComplaintForm)
                     ListTile(
@@ -353,8 +334,14 @@ class SupportPage extends StatelessWidget {
       return _body(context);
     }
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
-        title: Text(isAr ? 'الدعم والشكاوى' : 'Support & complaints'),
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(
+          isArabic: isAr,
+          onPressed: () => SafeOverlayPop.pop(context),
+        ),
+        title: Text(isAr ? 'الدعم الفني' : 'Technical support'),
       ),
       body: _body(context),
     );

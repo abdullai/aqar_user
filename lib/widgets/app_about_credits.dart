@@ -1,5 +1,7 @@
 import '../core/branding/app_branding.dart';
+import '../core/utils/phone_display.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// نافذة «عن التطبيق / المنصّة» الموحّدة مع أرقام للاتصال أو واتساب.
@@ -25,7 +27,7 @@ abstract final class AppAboutCredits {
   }) async {
     final raw = _digitsOnly(phoneDisplay);
     if (raw.isEmpty) return;
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -37,7 +39,8 @@ abstract final class AppAboutCredits {
                 leading: const Icon(Icons.call_outlined),
                 title: Text(isAr ? 'اتصال صوتي' : 'Voice call'),
                 subtitle: Text(
-                  phoneDisplay,
+                  PhoneDisplay.forUi(phoneDisplay, isAr: isAr),
+                  textDirection: TextDirection.ltr,
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 onTap: () async {
@@ -79,7 +82,7 @@ abstract final class AppAboutCredits {
     required bool isAr,
     String versionLine = '',
   }) {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (ctx) {
         final cs = Theme.of(ctx).colorScheme;
@@ -214,7 +217,8 @@ class _PhoneLink extends StatelessWidget {
             Icon(Icons.phone_in_talk_outlined, size: 18, color: cs.primary),
             const SizedBox(width: 8),
             Text(
-              phone,
+              PhoneDisplay.forUi(phone, isAr: isAr),
+              textDirection: TextDirection.ltr,
               style: TextStyle(
                 fontWeight: FontWeight.w900,
                 color: cs.primary,

@@ -1,3 +1,4 @@
+import '../utils/rpc_user_message.dart';
 import 'listing_workflow_stage.dart';
 import 'listing_workflow_ui_context.dart';
 
@@ -46,10 +47,22 @@ abstract final class ListingWorkflowCopy {
   // أزرار مشتركة
   // ---------------------------------------------------------------------------
   static String btnAcceptOffer(bool isAr) =>
-      t(isAr, 'قبول العرض', 'Accept offer');
+      t(isAr, 'موافق', 'Approve');
 
   static String btnDeclineOffer(bool isAr) =>
-      t(isAr, 'رفض هذا العرض', 'Decline this offer');
+      t(isAr, 'غير موافق', 'Decline');
+
+  static String btnIssuePermit(bool isAr) =>
+      t(isAr, 'إصدار تصريح', 'Issue permit');
+
+  static String declineReasonLabel(bool isAr) =>
+      t(isAr, 'سبب الرفض', 'Decline reason');
+
+  static String declineReasonRequired(bool isAr) => t(
+        isAr,
+        'أدخل سبب الرفض ليظهر للمسوّق.',
+        'Enter a decline reason so the marketer can see it.',
+      );
 
   static String btnRefresh(bool isAr) => t(isAr, 'تحديث', 'Refresh');
 
@@ -57,6 +70,15 @@ abstract final class ListingWorkflowCopy {
 
   static String btnSendOffer(bool isAr) =>
       t(isAr, 'إرسال عرض تسويقي', 'Send marketing offer');
+
+  static String offerNotesToOwnerLabel(bool isAr) =>
+      t(isAr, 'رسالة للمالك (اختياري)', 'Message to the owner (optional)');
+
+  static String offerNotesToOwnerHint(bool isAr) => t(
+        isAr,
+        'اكتب نصاً يظهر لصاحب الطلب مع عرضك.',
+        'Write a note the owner will see with your offer.',
+      );
 
   static String btnSubmit(bool isAr) => t(isAr, 'إرسال', 'Submit');
 
@@ -312,11 +334,19 @@ abstract final class ListingWorkflowCopy {
         'Check your connection and try again. If it persists, check permissions or server.',
       );
 
-  static String rpcFailed(bool isAr, Object error) => t(
-        isAr,
-        'تعذّر تنفيذ العملية: $error',
-        'Action failed: $error',
-      );
+  static String rpcFailed(bool isAr, Object error) {
+    final mapped = RpcUserMessage.of(error, isAr: isAr);
+    if (mapped.isNotEmpty &&
+        !mapped.contains('PostgrestException') &&
+        !mapped.contains('PostgresException')) {
+      return mapped;
+    }
+    return t(
+      isAr,
+      'تعذّر إكمال العملية. حدّث الصفحة ثم أعد المحاولة.',
+      'Could not complete the action. Refresh and try again.',
+    );
+  }
 
   static String listingBannedUnderReview(bool isAr) => t(
         isAr,
@@ -337,6 +367,44 @@ abstract final class ListingWorkflowCopy {
         isAr,
         'تحديث قاعدة البيانات مطلوب لإعادة الطلب للسوق. تواصل مع الدعم أو طبّق ترحيل round_no.',
         'A database update is required to return this request to market. Contact support or apply the round_no migration.',
+      );
+    }
+    if (s.contains('offers_marketer_fk') ||
+        s.contains('marketer_profile_required') ||
+        s.contains('not_a_marketer') ||
+        (s.contains('marketer_profiles') && s.contains('23503'))) {
+      return t(
+        isAr,
+        'حسابك التسويقي غير مكتمل في النظام. حدّث الصفحة ثم أعد إرسال العرض.',
+        'Your marketing profile is incomplete. Refresh, then submit the offer again.',
+      );
+    }
+    if (s.contains('offers_cap_reached')) {
+      return t(
+        isAr,
+        'اكتمل الحد الأعلى: 6 عروض على هذا الطلب. انتظر قرار المالك.',
+        'This listing already has 6 offers. Wait for the owner’s decision.',
+      );
+    }
+    if (s.contains('owner_cannot_offer')) {
+      return t(
+        isAr,
+        'لا يمكنك تقديم عرض على طلبك.',
+        'You cannot offer on your own listing request.',
+      );
+    }
+    if (s.contains('previous_marketer_blocked')) {
+      return t(
+        isAr,
+        'انتهت فرصتك على هذا الطلب. استخدم «إتاحة فرصة» من تبويب 72 ساعة ثم قدّم عرضاً جديداً.',
+        'Your turn on this listing ended. Use “Grant a chance” from the 72h tab, then submit a new offer.',
+      );
+    }
+    if (s.contains('duplicate_offer_same_round')) {
+      return t(
+        isAr,
+        'تم إرسال عرضك مسبقاً لهذه الجولة.',
+        'Your offer is already submitted for this round.',
       );
     }
     if (s.contains('no_owner_action_pending') ||
@@ -576,12 +644,6 @@ abstract final class ListingWorkflowCopy {
         isAr,
         'لا يمكن إصدار التصريح في هذه المرحلة',
         'Cannot issue permit in this stage',
-      );
-
-  static String btnIssuePermit(bool isAr) => t(
-        isAr,
-        'إصدار التصريح',
-        'Issue permit',
       );
 
   static String errPermitDataIncomplete(bool isAr) => t(

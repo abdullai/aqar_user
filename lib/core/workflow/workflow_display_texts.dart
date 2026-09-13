@@ -1,4 +1,4 @@
-import 'package:intl/intl.dart';
+import '../utils/date_helper.dart';
 
 /// نصوص واجهة فقط: تحويل قيم قاعدة البيانات إلى عبارات مفهومة (بدون عرض مفاتيح خام).
 class WorkflowDisplayTexts {
@@ -8,17 +8,9 @@ class WorkflowDisplayTexts {
   static String stage(String? stageCode, bool isAr) =>
       workflowStage(stageCode, isAr);
 
-  /// تنسيق تاريخ/وقت للواجهة (مثال: ١٠ مايو ٢٠٢٦ – ٣:٤٥ م).
+  /// yyyy/MM/dd ثم الوقت — دون قلب في RTL.
   static String formatDateTime(DateTime dt, bool isAr) {
-    final loc = isAr ? 'ar' : 'en';
-    try {
-      if (isAr) {
-        return DateFormat('d MMMM yyyy – h:mm a', loc).format(dt.toLocal());
-      }
-      return DateFormat('MMMM d, yyyy – h:mm a', loc).format(dt.toLocal());
-    } catch (_) {
-      return DateFormat('yyyy-MM-dd HH:mm').format(dt.toLocal());
-    }
+    return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: isAr);
   }
 
   static String workflowStage(String? stage, bool isAr) {

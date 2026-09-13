@@ -13,8 +13,13 @@ class BillingTransactionRepository {
   /// يُحوّل الحالة الخام إلى تبويب العرض (success / pending / failed).
   static String normalizedStatus(Map<String, dynamic> row) {
     final raw = '${row['status'] ?? ''}'.toLowerCase().trim();
+    if (raw == 'refunded' || raw == 'refund') {
+      return 'refunded';
+    }
+    if (raw == 'partially_refunded' || raw == 'partial_refund') {
+      return 'partially_refunded';
+    }
     if (raw == 'success' ||
-        raw == 'refunded' ||
         raw == 'paid' ||
         raw == 'completed' ||
         raw == 'succeeded' ||
@@ -26,8 +31,13 @@ class BillingTransactionRepository {
         raw == 'error' ||
         raw == 'declined' ||
         raw == 'canceled' ||
-        raw == 'cancelled') {
+        raw == 'cancelled' ||
+        raw == 'expired' ||
+        raw == 'voided') {
       return 'failed';
+    }
+    if (raw == 'authorized') {
+      return 'pending';
     }
 
     final gw = row['gateway_response'];
@@ -59,6 +69,7 @@ class BillingTransactionRepository {
   }
 
   static bool isArchived(Map<String, dynamic> row) {
+    if (row['hidden_from_user'] == true) return true;
     final gw = row['gateway_response'];
     if (gw is Map) {
       return gw['archived'] == true;
@@ -66,7 +77,7 @@ class BillingTransactionRepository {
     return false;
   }
 
-  /// رقم عملية لاتيني: YYYYMMDD + 3 أرقام من معرّف السجل.
+  /// رقم عملية لاتيني داخلي قديم — لا يُعرض للمستخدم.
   static String latinReference(Map<String, dynamic> row) {
     final created = DateTime.tryParse('${row['created_at']}') ?? DateTime.now();
     final ymd =
@@ -162,14 +173,10 @@ class BillingTransactionRepository {
       if (search != null && search.trim().isNotEmpty) {
         final s = search.trim().toLowerCase();
         list = list.where((r) {
-          final ref = latinReference(r).toLowerCase();
+          final inv = '${r['invoice_number'] ?? ''}'.toLowerCase();
           final ta = '${r['title_ar'] ?? ''}'.toLowerCase();
           final te = '${r['title_en'] ?? ''}'.toLowerCase();
-          final gw = '${r['gateway_transaction_id'] ?? ''}'.toLowerCase();
-          return ref.contains(s) ||
-              ta.contains(s) ||
-              te.contains(s) ||
-              gw.contains(s);
+          return inv.contains(s) || ta.contains(s) || te.contains(s);
         }).toList();
       }
 
@@ -185,42 +192,63 @@ class BillingTransactionRepository {
     }
   }
 
-  Future<Map<String, dynamic>> archive(String txId) async {
+  Future<Map<String, dynamic>?> getOwn(String txId) async {
     final uid = _uid;
-    if (uid == null) return {'ok': false, 'error': 'auth'};
+    if (uid == null) return null;
+    final id = txId.trim();
+    if (id.isEmpty) return null;
     try {
       final row = await _sb
           .from(_table)
-          .select('gateway_response')
-          .eq('id', txId)
+          .select()
+          .eq('id', id)
           .eq('user_id', uid)
           .maybeSingle();
-      if (row == null) return {'ok': false, 'error': 'not_found'};
-      final gw = row['gateway_response'];
-      final map = gw is Map
-          ? Map<String, dynamic>.from(gw)
-          : <String, dynamic>{};
-      map['archived'] = true;
-      map['archived_at'] = DateTime.now().toUtc().toIso8601String();
-      await _sb
+      if (row == null) return null;
+      return Map<String, dynamic>.from(row);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getOwnByInvoiceNumber(String invoiceNumber) async {
+    final uid = _uid;
+    if (uid == null) return null;
+    final inv = invoiceNumber.trim();
+    if (inv.isEmpty) return null;
+    try {
+      final row = await _sb
           .from(_table)
-          .update({'gateway_response': map})
-          .eq('id', txId)
-          .eq('user_id', uid);
-      return {'ok': true};
+          .select()
+          .eq('invoice_number', inv)
+          .eq('user_id', uid)
+          .maybeSingle();
+      if (row == null) return null;
+      return Map<String, dynamic>.from(row);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// إخفاء من السجل فقط — لا حذف مالي.
+  Future<Map<String, dynamic>> archive(String txId) => hideFromLedger(txId);
+
+  Future<Map<String, dynamic>> hideFromLedger(String txId) async {
+    final uid = _uid;
+    if (uid == null) return {'ok': false, 'error': 'auth'};
+    try {
+      final res = await _sb.rpc(
+        'billing_hide_own_invoice',
+        params: {'p_id': txId},
+      );
+      if (res is Map && res['ok'] == true) return {'ok': true};
+      if (res is Map) return Map<String, dynamic>.from(res);
+      return {'ok': false, 'error': 'hide_failed'};
     } catch (e) {
       return {'ok': false, 'error': '$e'};
     }
   }
 
-  Future<Map<String, dynamic>> delete(String txId) async {
-    final uid = _uid;
-    if (uid == null) return {'ok': false, 'error': 'auth'};
-    try {
-      await _sb.from(_table).delete().eq('id', txId).eq('user_id', uid);
-      return {'ok': true};
-    } catch (e) {
-      return {'ok': false, 'error': '$e'};
-    }
-  }
+  /// لا حذف صف مالي. يُخفي من السجل فقط.
+  Future<Map<String, dynamic>> delete(String txId) => hideFromLedger(txId);
 }

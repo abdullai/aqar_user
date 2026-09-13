@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
+import '../core/utils/date_helper.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config/app_config.dart';
@@ -33,10 +34,7 @@ Future<void> showMarketingSubscriptionPaywallDialog({
   final endLocal = endUtc?.toLocal();
   final formattedEnd = endLocal == null
       ? ''
-      : DateFormat(
-          'EEEE d MMM yyyy — HH:mm',
-          isAr ? 'ar' : 'en',
-        ).format(endLocal);
+      : DateHelper.fmtCivilDateTime(endLocal, isAr: isAr);
 
   // افحص هل استخدم المستخدم التجربة من قبل (يخفي زر التجربة).
   bool trialAlreadyUsed = false;
@@ -97,7 +95,7 @@ Future<void> showMarketingSubscriptionPaywallDialog({
   final showDevButton =
       AppConfig.allowDevTestSubscriptionGrant || kDebugMode;
 
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => AlertDialog(

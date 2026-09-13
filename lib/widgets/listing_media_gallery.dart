@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/branding/branding_logo_image.dart';
+import '../core/gestures/app_keyboard_popups.dart';
+import 'crystal_listing_media.dart';
+import 'app_page_close_button.dart';
 
 /// معرض صور إعلان: غلاف أولاً، إطار بنسبة مناسبة، أسهم تنقّل، مصغّرات أسفل الإطار،
 /// والضغط يفتح عرضاً قابلاً للتكبير.
@@ -87,7 +90,7 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
   Future<void> _openLightbox(int start) async {
     final urls = _urls;
     if (urls.isEmpty) return;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.92),
       builder: (ctx) => ListingImageLightbox(
@@ -139,23 +142,10 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
                 itemBuilder: (_, i) {
                   return GestureDetector(
                     onTap: () => _openLightbox(i),
-                    child: CachedNetworkImage(
-                      imageUrl: urls[i],
+                    child: CrystalListingMedia(
+                      url: urls[i],
                       fit: widget.fit,
-                      fadeInDuration: const Duration(milliseconds: 120),
-                      memCacheWidth: kIsWeb ? 900 : 1400,
-                      memCacheHeight: kIsWeb ? 650 : 1000,
-                      placeholder: (_, __) => ColoredBox(
-                        color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-                        child: const Center(
-                          child: SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                      ),
-                      errorWidget: (_, __, ___) => ColoredBox(
+                      error: ColoredBox(
                         color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
                         child: const BrandingLogoImage(
                           fillFrame: true,
@@ -366,14 +356,14 @@ class _ListingImageLightboxState extends State<ListingImageLightbox> {
               onPageChanged: (i) => setState(() => _index = i),
               itemBuilder: (_, i) {
                 return InteractiveViewer(
-                  minScale: 1,
-                  maxScale: 4,
+                  minScale: 0.85,
+                  maxScale: 8,
                   child: Center(
-                    child: CachedNetworkImage(
-                      imageUrl: widget.urls[i],
+                    child: CrystalListingMedia(
+                      url: widget.urls[i],
                       fit: BoxFit.contain,
-                      memCacheWidth: kIsWeb ? 1600 : 2200,
-                      errorWidget: (_, __, ___) => const Icon(
+                      enhanceClarity: true,
+                      error: const Icon(
                         Icons.broken_image_outlined,
                         color: Colors.white54,
                         size: 48,
@@ -389,9 +379,9 @@ class _ListingImageLightboxState extends State<ListingImageLightbox> {
               right: 8,
               child: Row(
                 children: [
-                  IconButton(
+                  AppPageCloseButton(
+                    color: Colors.white,
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white),
                   ),
                   const Spacer(),
                   Text(
@@ -404,6 +394,23 @@ class _ListingImageLightboxState extends State<ListingImageLightbox> {
                   const Spacer(),
                   const SizedBox(width: 48),
                 ],
+              ),
+            ),
+            Positioned(
+              bottom: 16,
+              left: 20,
+              right: 20,
+              child: Text(
+                widget.isAr
+                    ? 'قرّب بإصبعين لصورة بلورية — حتى 8× دون فقدان الصفاء'
+                    : 'Pinch to zoom up to 8× — crystal-clear, no extra compression',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Color(0xCCFFFFFF),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                  height: 1.3,
+                ),
               ),
             ),
             if (widget.urls.length > 1) ...[

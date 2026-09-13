@@ -1,4 +1,5 @@
 ﻿import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/foundation.dart'
     show kDebugMode, kIsWeb, defaultTargetPlatform, TargetPlatform;
@@ -11,6 +12,9 @@ import 'package:aqar_user/l10n/app_localizations.dart';
 
 import '../core/location/map_picker_geolocation.dart';
 import '../core/location/map_engine_hint.dart';
+import '../core/navigation/safe_overlay_pop.dart';
+import '../core/navigation/web_in_app_nav.dart';
+import '../widgets/app_page_close_button.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../services/saudi_districts_service.dart';
 import '../services/saudi_locations_service.dart';
@@ -49,7 +53,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
   static const LatLng _saudiCenter = LatLng(23.993165, 45.078064);
 
   GoogleMapController? _controller;
-  Marker? _marker;
+  final GlobalKey _mapLayerKey = GlobalKey();
+  late final CameraPosition _bootCamera;
 
   late LatLng _selected;
   late double _mapZoom;
@@ -99,8 +104,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
       return parts.take(3).join(' · ');
     }
     return widget.isAr
-        ? 'اسحب الدبوس أو اضغط الخريطة لتحديد الموقع بدقة'
-        : 'Drag the pin or tap the map to set the exact spot';
+        ? 'حرّك الخريطة حتى يثبت الدبوس في المنتصف على الموقع الدقيق'
+        : 'Move the map so the center pin sits on the exact spot';
   }
 
   @override
@@ -116,21 +121,15 @@ class _MapPickerPageState extends State<MapPickerPage> {
     final useKingdom = widget.kingdomOverview && widget.initial == null;
     _mapZoom = useKingdom ? 5.85 : 13.0;
     _selected = widget.initial ?? (useKingdom ? _saudiCenter : _riyadh);
+    _bootCamera = CameraPosition(target: _selected, zoom: _mapZoom);
     _latCtrl = TextEditingController(
       text: _selected.latitude.toStringAsFixed(6),
     );
     _lngCtrl = TextEditingController(
       text: _selected.longitude.toStringAsFixed(6),
     );
-    _marker = Marker(
-      markerId: const MarkerId('picked'),
-      position: _selected,
-      draggable: false,
-      consumeTapEvents: false,
-      infoWindow: InfoWindow(title: _pinTitle, snippet: _pinSubtitle),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-    );
     _init();
+    WebInAppNav.holdBack();
   }
 
   Future<void> _resolveMapEngineHint() async {
@@ -160,7 +159,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
   }
 
   Future<void> _init() async {
-    await _loadSaudiLocations();
+    // لا نُجمّد فتح الخريطة ببناء فهرس المدن/الأحياء — يُحمَّل في الخلفية.
+    unawaited(_loadSaudiLocations());
     // نقطة ممرَّرة مسبقاً: لا تستبدلها بـ GPS (يحرّك الدبوس بعيداً عن الاختيار).
     if (widget.initial != null) {
       if (mounted) {
@@ -182,7 +182,6 @@ class _MapPickerPageState extends State<MapPickerPage> {
               : 'Pick a point on the map of the Kingdom, or search by city.';
         });
       }
-      unawaited(_detectLocation(useFallbackIfFail: false));
       return;
     }
     await _detectLocation(useFallbackIfFail: true);
@@ -197,24 +196,17 @@ class _MapPickerPageState extends State<MapPickerPage> {
     // لا تستدعِ dispose على [GoogleMapController]: عنصر [GoogleMap] يتولى ذلك.
     // استدعاء مزدوج يسبب أعطالاً عند اللمس (خروج/انهيار) خصوصاً على أندرويد.
     _controller = null;
+    scheduleMicrotask(WebInAppNav.releaseBack);
     super.dispose();
   }
 
   /// تحريك برمجي للكاميرا — لا نُحدّث الحقول من onCameraIdle أثناءه مرتين بلا داعٍ.
   bool _programmaticCamera = false;
+  LatLng? _lastMoveTarget;
+  DateTime? _ignoreIdleUntil;
 
   void _setSelected(LatLng pos, {bool syncFields = true}) {
     _selected = pos;
-    // دبوس خفيف مزامَن مع المركز؛ الاعتماد البصري على صليب الوسط (أثبت على الويب).
-    _marker = Marker(
-      markerId: const MarkerId('picked'),
-      position: pos,
-      draggable: false,
-      consumeTapEvents: false,
-      infoWindow: InfoWindow(title: _pinTitle, snippet: _pinSubtitle),
-      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-    );
-
     if (!syncFields) return;
     _latCtrl.text = _selected.latitude.toStringAsFixed(6);
     _lngCtrl.text = _selected.longitude.toStringAsFixed(6);
@@ -245,7 +237,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
             districtsMap[c.cityAr] ??
             districtsMap[c.cityEn] ??
             const <String>[];
-        for (final d in districts.take(80)) {
+        for (final d in districts.take(24)) {
           out.add({
             'city': city,
             'region': region,
@@ -356,35 +348,43 @@ class _MapPickerPageState extends State<MapPickerPage> {
     }
   }
 
+  Future<void> _moveCamera(CameraUpdate update) async {
+    final c = _controller;
+    if (c == null || !_mapReady) return;
+    _programmaticCamera = true;
+    _ignoreIdleUntil = DateTime.now().add(const Duration(milliseconds: 900));
+    try {
+      if (kIsWeb) {
+        await c.moveCamera(update).timeout(const Duration(seconds: 4));
+      } else {
+        await c.animateCamera(update).timeout(const Duration(seconds: 8));
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('[DBG][MAP] camera move failed: $e');
+      }
+    } finally {
+      _programmaticCamera = false;
+    }
+  }
+
   Future<void> _moveToLocation(LatLng pos, {double zoom = 15}) async {
     if (!mounted) return;
 
     setState(() {
       _setSelected(pos);
+      _lastMoveTarget = pos;
     });
 
     if (_mapReady && _controller != null) {
-      _programmaticCamera = true;
-      try {
-        await _controller!.animateCamera(
-          CameraUpdate.newLatLngZoom(pos, zoom),
-        );
-      } catch (e) {
-        if (kDebugMode) {
-          print('[DBG][MAP] animateCamera failed: $e');
-        }
-      } finally {
-        _programmaticCamera = false;
-        if (mounted) {
-          setState(() => _setSelected(_selected, syncFields: true));
-        }
-      }
+      await _moveCamera(CameraUpdate.newLatLngZoom(pos, zoom));
     }
   }
 
   void _onTap(LatLng pos) {
     setState(() {
       _setSelected(pos);
+      _lastMoveTarget = pos;
       // النقر اليدوي يلغي بيانات البحث السابقة — يُملأ النموذج من أقرب مدينة.
       _pickedCity = null;
       _pickedRegion = null;
@@ -396,108 +396,48 @@ class _MapPickerPageState extends State<MapPickerPage> {
 
   Future<void> _focusSelectedMarker() async {
     if (_controller == null || !_mapReady) return;
-    _programmaticCamera = true;
-    try {
-      await _controller!.animateCamera(
-        CameraUpdate.newLatLngZoom(_selected, 17),
-      );
-    } catch (_) {
-    } finally {
-      _programmaticCamera = false;
+    // على الويب: لا تُحرّك الزوم إلى 17 عند كل نقرة — animateCamera يجمد Safari.
+    if (kIsWeb) {
+      await _moveCamera(CameraUpdate.newLatLng(_selected));
+      return;
     }
+    await _moveCamera(CameraUpdate.newLatLngZoom(_selected, 17));
+  }
+
+  void _onCameraMove(CameraPosition pos) {
+    _lastMoveTarget = pos.target;
+    _mapZoom = pos.zoom;
   }
 
   bool _approximateLocation = false;
 
+  bool _submitted = false;
+
   void _confirm() {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        var approx = _approximateLocation;
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      widget.isAr ? 'اختيار الموقع' : 'Choose location',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 18,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      widget.isAr
-                          ? 'بإمكانك اختيار موقع محدد أو تقريبي للعقار'
-                          : 'You can choose a specific or approximate location',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _PrecisionCard(
-                            selected: !approx,
-                            title: widget.isAr ? 'موقع محدد' : 'Exact',
-                            subtitle: widget.isAr
-                                ? 'يظهر على خريطة الإعلانات'
-                                : 'Shown on the ads map',
-                            onTap: () => setLocal(() => approx = false),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: _PrecisionCard(
-                            selected: approx,
-                            title: widget.isAr ? 'موقع تقريبي' : 'Approximate',
-                            subtitle: widget.isAr
-                                ? 'لا يظهر بدقة على خريطة الإعلانات'
-                                : 'Not shown precisely on the ads map',
-                            onTap: () => setLocal(() => approx = true),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton(
-                      onPressed: () {
-                        _approximateLocation = approx;
-                        Navigator.pop(ctx);
-                        Navigator.pop(context, <String, dynamic>{
-                          'lat': _selected.latitude,
-                          'lng': _selected.longitude,
-                          'approximate': approx,
-                          if ((_pickedCity ?? '').trim().isNotEmpty)
-                            'city': _pickedCity!.trim(),
-                          if ((_pickedRegion ?? '').trim().isNotEmpty)
-                            'region': _pickedRegion!.trim(),
-                          if ((_pickedGovernorate ?? '').trim().isNotEmpty)
-                            'governorate': _pickedGovernorate!.trim(),
-                          if ((_pickedDistrict ?? '').trim().isNotEmpty)
-                            'district': _pickedDistrict!.trim(),
-                        });
-                      },
-                      child: Text(widget.isAr ? 'تأكيد' : 'Confirm'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
+    _submitPickedLocation(approximate: _approximateLocation);
+  }
+
+  void _submitPickedLocation({required bool approximate}) {
+    if (_submitted || !mounted) return;
+    _submitted = true;
+    final result = <String, dynamic>{
+      'lat': _selected.latitude,
+      'lng': _selected.longitude,
+      'approximate': approximate,
+      if ((_pickedCity ?? '').trim().isNotEmpty) 'city': _pickedCity!.trim(),
+      if ((_pickedRegion ?? '').trim().isNotEmpty)
+        'region': _pickedRegion!.trim(),
+      if ((_pickedGovernorate ?? '').trim().isNotEmpty)
+        'governorate': _pickedGovernorate!.trim(),
+      if ((_pickedDistrict ?? '').trim().isNotEmpty)
+        'district': _pickedDistrict!.trim(),
+    };
+    final route = ModalRoute.of(context);
+    if (route == null || !route.isCurrent) {
+      _submitted = false;
+      return;
+    }
+    Navigator.of(context).pop(result);
   }
 
   /// بديل عند فشل الخريطة المضمّنة (هواوي/هونر بدون GMS أو تعطيل WebGL).
@@ -564,6 +504,71 @@ class _MapPickerPageState extends State<MapPickerPage> {
     await _moveToLocation(pos, zoom: district.isNotEmpty ? 14.5 : 15);
   }
 
+  Future<void> _onGoogleMapCreated(GoogleMapController controller) async {
+    _mapStallTimer?.cancel();
+    _mapStallTimer = null;
+    _controller = controller;
+    if (mounted) {
+      setState(() {
+        _mapReady = true;
+        _mapLoadStalled = false;
+      });
+    } else {
+      _mapReady = true;
+      _mapLoadStalled = false;
+    }
+    try {
+      await controller.moveCamera(
+        CameraUpdate.newLatLngZoom(_selected, _mapZoom),
+      );
+    } catch (_) {}
+  }
+
+  bool _shouldIgnoreCameraIdle() {
+    if (_programmaticCamera) return true;
+    final until = _ignoreIdleUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  void _onCameraIdle() {
+    if (!mounted || _shouldIgnoreCameraIdle()) return;
+    if (kIsWeb) {
+      final t = _lastMoveTarget;
+      if (t == null) return;
+      if ((t.latitude - _selected.latitude).abs() < 1e-7 &&
+          (t.longitude - _selected.longitude).abs() < 1e-7) {
+        return;
+      }
+      setState(() => _setSelected(t));
+      return;
+    }
+    unawaited(_captureMapCenter());
+  }
+
+  Future<void> _captureMapCenter() async {
+    if (!mounted || _shouldIgnoreCameraIdle() || !_mapReady) return;
+    final c = _controller;
+    if (c == null) return;
+    final box = _mapLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    try {
+      final ll = await c
+          .getLatLng(
+            ScreenCoordinate(
+              x: (box.size.width / 2).round(),
+              y: (box.size.height / 2).round(),
+            ),
+          )
+          .timeout(const Duration(seconds: 2));
+      if (!mounted || _shouldIgnoreCameraIdle()) return;
+      if ((ll.latitude - _selected.latitude).abs() < 1e-7 &&
+          (ll.longitude - _selected.longitude).abs() < 1e-7) {
+        return;
+      }
+      setState(() => _setSelected(ll));
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final isAr = widget.isAr;
@@ -573,6 +578,11 @@ class _MapPickerPageState extends State<MapPickerPage> {
       textDirection: isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(
+            isArabic: isAr,
+            onPressed: () => SafeOverlayPop.pop(context),
+          ),
           title: Text(isAr ? 'تحديد الموقع' : 'Select location'),
           actions: [
             IconButton(
@@ -606,75 +616,33 @@ class _MapPickerPageState extends State<MapPickerPage> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  GoogleMap(
-                    initialCameraPosition: CameraPosition(
-                      target: _selected,
-                      zoom: _mapZoom,
+                  KeyedSubtree(
+                    key: _mapLayerKey,
+                    child: _LockedGoogleMap(
+                      boot: _bootCamera,
+                      onCreated: _onGoogleMapCreated,
+                      onTap: _onTap,
+                      onCameraMove: _onCameraMove,
+                      onCameraIdle: _onCameraIdle,
                     ),
-                    onMapCreated: (controller) async {
-                      _mapStallTimer?.cancel();
-                      _mapStallTimer = null;
-                      _controller = controller;
-                      if (mounted) {
-                        setState(() {
-                          _mapReady = true;
-                          _mapLoadStalled = false;
-                        });
-                      } else {
-                        _mapReady = true;
-                        _mapLoadStalled = false;
-                      }
-
-                      try {
-                        await controller.moveCamera(
-                          CameraUpdate.newLatLngZoom(_selected, _mapZoom),
-                        );
-                        await controller.showMarkerInfoWindow(
-                          const MarkerId('picked'),
-                        );
-                      } catch (_) {}
-                    },
-                    markers: _marker != null ? <Marker>{_marker!} : <Marker>{},
-                    // الطبقة الزرقاء + شريط أدوات الخرائط قد تسبب تعارضاً أو فتح تطبيق خارجي
-                    // (يُشعر المستخدم بأن التطبيق «خرج»). التحديد يتم بالنقطة/السحب أو زر موقعي.
-                    myLocationEnabled: false,
-                    myLocationButtonEnabled: false,
-                    zoomControlsEnabled: true,
-                    mapToolbarEnabled: false,
-                    compassEnabled: true,
-                    rotateGesturesEnabled: true,
-                    scrollGesturesEnabled: true,
-                    zoomGesturesEnabled: true,
-                    tiltGesturesEnabled: true,
-                    onTap: _onTap,
-                    onCameraMove: (CameraPosition pos) {
-                      // مركز الكاميرا = الموقع الدقيق المختار.
-                      _selected = pos.target;
-                    },
-                    onCameraIdle: () {
-                      if (!mounted || _programmaticCamera) return;
-                      setState(
-                        () => _setSelected(_selected, syncFields: true),
-                      );
-                    },
                   ),
-                  // دبوس ثابت في وسط الشاشة — لا يختفي مثل Markers على الويب.
-                  const IgnorePointer(
+                  IgnorePointer(
                     child: Center(
                       child: Padding(
-                        // طرف الدبوس على مركز الخريطة.
-                        padding: EdgeInsets.only(bottom: 36),
-                        child: Icon(
-                          Icons.location_on_rounded,
-                          size: 44,
-                          color: Color(0xE00F766E),
-                          shadows: [
-                            Shadow(
-                              blurRadius: 6,
-                              color: Color(0x66000000),
-                              offset: Offset(0, 2),
-                            ),
-                          ],
+                        padding: const EdgeInsets.only(bottom: 36),
+                        child: Semantics(
+                          label: _pinSubtitle,
+                          child: Icon(
+                            Icons.location_on_rounded,
+                            size: 52,
+                            color: Theme.of(context).colorScheme.primary,
+                            shadows: const [
+                              Shadow(
+                                blurRadius: 8,
+                                color: Color(0x66000000),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -943,6 +911,36 @@ class _MapPickerPageState extends State<MapPickerPage> {
                           Row(
                             children: [
                               Expanded(
+                                child: _PrecisionCard(
+                                  selected: !_approximateLocation,
+                                  title: isAr ? 'موقع محدد' : 'Exact',
+                                  subtitle: isAr
+                                      ? 'يظهر على خريطة الإعلانات'
+                                      : 'Shown on the ads map',
+                                  onTap: () => setState(
+                                    () => _approximateLocation = false,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _PrecisionCard(
+                                  selected: _approximateLocation,
+                                  title: isAr ? 'موقع تقريبي' : 'Approximate',
+                                  subtitle: isAr
+                                      ? 'لا يظهر بدقة على الخريطة'
+                                      : 'Not shown precisely on the map',
+                                  onTap: () => setState(
+                                    () => _approximateLocation = true,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
                                 flex: 2,
                                 child: FilledButton.icon(
                                   icon: const Icon(Icons.check),
@@ -1035,6 +1033,51 @@ class _PrecisionCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// خريطة لا تُعاد تهيئة كاميرتها عند setState للأب — يمنع قفز الدبوس على الويب.
+class _LockedGoogleMap extends StatefulWidget {
+  const _LockedGoogleMap({
+    required this.boot,
+    required this.onCreated,
+    required this.onTap,
+    required this.onCameraMove,
+    required this.onCameraIdle,
+  });
+
+  final CameraPosition boot;
+  final Future<void> Function(GoogleMapController controller) onCreated;
+  final void Function(LatLng pos) onTap;
+  final void Function(CameraPosition pos) onCameraMove;
+  final VoidCallback onCameraIdle;
+
+  @override
+  State<_LockedGoogleMap> createState() => _LockedGoogleMapState();
+}
+
+class _LockedGoogleMapState extends State<_LockedGoogleMap> {
+  late final CameraPosition _boot = widget.boot;
+
+  @override
+  Widget build(BuildContext context) {
+    return GoogleMap(
+      initialCameraPosition: _boot,
+      onMapCreated: (c) => unawaited(widget.onCreated(c)),
+      markers: const <Marker>{},
+      myLocationEnabled: false,
+      myLocationButtonEnabled: false,
+      zoomControlsEnabled: true,
+      mapToolbarEnabled: false,
+      compassEnabled: true,
+      rotateGesturesEnabled: true,
+      scrollGesturesEnabled: true,
+      zoomGesturesEnabled: true,
+      tiltGesturesEnabled: true,
+      onTap: widget.onTap,
+      onCameraMove: widget.onCameraMove,
+      onCameraIdle: widget.onCameraIdle,
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/gestures/app_keyboard_popups.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../screens/rega_ad_license_import_page.dart';
@@ -17,7 +18,7 @@ Future<Map<String, dynamic>?> showRegaAdLicenseGate({
   required bool isAr,
   required SupabaseClient sb,
 }) async {
-  return showModalBottomSheet<Map<String, dynamic>?>(
+  return showAppModalBottomSheet<Map<String, dynamic>?>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -220,7 +221,7 @@ class _RegaAdLicenseGateBodyState extends State<_RegaAdLicenseGateBody> {
       if (!mounted) return;
       setState(() => _submitting = false);
 
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(

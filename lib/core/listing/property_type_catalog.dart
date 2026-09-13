@@ -299,6 +299,21 @@ class PropertyTypeCatalog {
 
   /// الطابق وعدد الطوابق — وحدات عمودية أو أبراج أو فنادق.
   static bool showsFloorFields(String? code) {
+    return showsUnitFloorField(code) || showsTotalFloorsField(code);
+  }
+
+  /// رقم الطابق للوحدة (شقة/مكتب/محل) — ليس للمبنى كاملاً.
+  static bool showsUnitFloorField(String? code) {
+    final c = normalize(code);
+    if (isLandLike(code)) return false;
+    return isApartmentLike(code) ||
+        c == 'office' ||
+        c == 'shop' ||
+        c == 'showroom';
+  }
+
+  /// العدد الكلي للطوابق — مبانٍ وأبراج وفنادق، ومع الشقق كمرجع للمبنى.
+  static bool showsTotalFloorsField(String? code) {
     final c = normalize(code);
     if (isLandLike(code)) return false;
     return isApartmentLike(code) ||
@@ -321,17 +336,154 @@ class PropertyTypeCatalog {
         c == 'apartment_building';
   }
 
-  /// مرافق منطقية للأرض (سوق سعودي: حوش، شوارع، استخدام أرض).
+  /// تسمية مرفق للواجهة (إضافة إعلان / طلب / تعديل).
+  static String amenityLabel(String key, bool isAr) {
+    switch (key.trim().toLowerCase()) {
+      case 'pool':
+        return isAr ? 'مسبح' : 'Pool';
+      case 'gym':
+        return isAr ? 'نادي' : 'Gym';
+      case 'elevator':
+        return isAr ? 'مصعد' : 'Elevator';
+      case 'security':
+        return isAr ? 'أمن' : 'Security';
+      case 'garden':
+        return isAr ? 'حديقة' : 'Garden';
+      case 'balcony':
+        return isAr ? 'شرفة' : 'Balcony';
+      case 'ac':
+        return isAr ? 'تكييف' : 'A/C';
+      case 'parking':
+        return isAr ? 'موقف' : 'Parking';
+      case 'wifi':
+        return isAr ? 'واي فاي' : 'Wi-Fi';
+      case 'maid_room':
+        return isAr ? 'غرفة خادمة' : 'Maid room';
+      case 'driver_room':
+        return isAr ? 'غرفة سائق' : 'Driver room';
+      case 'storage':
+        return isAr ? 'مستودع' : 'Storage';
+      case 'roof':
+        return isAr ? 'سطح' : 'Roof';
+      case 'kitchen':
+        return isAr ? 'مطبخ' : 'Kitchen';
+      case 'majlis':
+        return isAr ? 'مجلس' : 'Majlis';
+      case 'yard':
+        return isAr ? 'حوش' : 'Yard';
+      default:
+        return key;
+    }
+  }
+
+  /// مرافق منطقية للأرض (مسوّرة وغيرها): بدون مسبح/مصعد/واي فاي.
   static bool amenityKeyRelevantForLand(String amenityKey) {
     const k = {
       'yard',
       'storage',
       'security',
       'parking',
-      'wifi',
-      'roof',
+      'garden',
     };
     return k.contains(amenityKey);
+  }
+
+  /// مرافق ظاهرة حسب نوع العقار وصفته — لا تُعرض كل الشرائح لكل الأنواع.
+  static bool amenityKeyRelevantForType(String? code, String amenityKey) {
+    final key = amenityKey.trim().toLowerCase();
+    if (key.isEmpty) return false;
+    if (isLandLikeEffective(code)) return amenityKeyRelevantForLand(key);
+    final c = normalize(code);
+    const villaLike = {
+      'pool',
+      'gym',
+      'elevator',
+      'security',
+      'garden',
+      'balcony',
+      'ac',
+      'parking',
+      'wifi',
+      'maid_room',
+      'driver_room',
+      'storage',
+      'roof',
+      'kitchen',
+      'majlis',
+      'yard',
+    };
+    const apartmentLike = {
+      'pool',
+      'gym',
+      'elevator',
+      'security',
+      'garden',
+      'balcony',
+      'ac',
+      'parking',
+      'wifi',
+      'storage',
+      'roof',
+      'kitchen',
+      'majlis',
+    };
+    const buildingLike = {
+      'elevator',
+      'security',
+      'parking',
+      'gym',
+      'pool',
+      'wifi',
+      'ac',
+      'storage',
+      'garden',
+    };
+    const warehouseLike = {
+      'security',
+      'parking',
+      'storage',
+      'wifi',
+      'ac',
+    };
+    const officeShopLike = {
+      'elevator',
+      'security',
+      'parking',
+      'wifi',
+      'ac',
+      'kitchen',
+    };
+    const hotelLike = {
+      'pool',
+      'gym',
+      'elevator',
+      'security',
+      'parking',
+      'wifi',
+      'ac',
+      'kitchen',
+      'garden',
+    };
+    if (isVillaLike(c) || c == 'farm') return villaLike.contains(key);
+    if (isApartmentLike(c)) return apartmentLike.contains(key);
+    if (c == 'building' ||
+        c == 'commercial_building' ||
+        c == 'apartment_building' ||
+        c == 'office_tower' ||
+        c == 'residential_tower' ||
+        c == 'commercial_center' ||
+        c == 'commercial_market') {
+      return buildingLike.contains(key);
+    }
+    if (c == 'warehouse' || c == 'station') return warehouseLike.contains(key);
+    if (c == 'office' || c == 'shop' || c == 'showroom') {
+      return officeShopLike.contains(key);
+    }
+    if (c == 'hotel') return hotelLike.contains(key);
+    if (c == 'project' || c == 'other') {
+      return const {'security', 'parking', 'wifi', 'ac'}.contains(key);
+    }
+    return apartmentLike.contains(key);
   }
 
   // --- أنواع مخصصة (ut_*) تتبع [group] المحفوظ ---
@@ -364,13 +516,27 @@ class PropertyTypeCatalog {
   }
 
   static bool showsFloorFieldsEffective(String? code) {
+    return showsUnitFloorFieldEffective(code) ||
+        showsTotalFloorsFieldEffective(code);
+  }
+
+  static bool showsUnitFloorFieldEffective(String? code) {
+    final raw = (code ?? '').trim();
+    if (PropertyTypeCustomRegistry.isUserType(raw)) {
+      final g = PropertyTypeCustomRegistry.groupIdForCode(raw) ?? 'other';
+      return g == 'residential' || g == 'commercial';
+    }
+    return showsUnitFloorField(code);
+  }
+
+  static bool showsTotalFloorsFieldEffective(String? code) {
     final raw = (code ?? '').trim();
     if (PropertyTypeCustomRegistry.isUserType(raw)) {
       final g = PropertyTypeCustomRegistry.groupIdForCode(raw) ?? 'other';
       if (g == 'land' || g == 'project') return false;
       return g == 'residential' || g == 'commercial';
     }
-    return showsFloorFields(code);
+    return showsTotalFloorsField(code);
   }
 
   static bool showsParkingYearRowEffective(String? code) {

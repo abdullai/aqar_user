@@ -1,0 +1,24 @@
+---
+description: Idle timeout and other-device session notice must stay strict — never weaken, reset, or skip them.
+globs: lib/services/inactivity_service.dart,lib/services/user_session_coordination_service.dart,lib/core/security/inactivity_policy.dart,lib/core/session/web_session_ttl.dart,lib/main.dart
+alwaysApply: true
+---
+
+# Idle lock and other-device session (do not weaken)
+
+## Inactivity (`InactivityService`)
+
+- Wall-clock time is the source of truth. Last activity and lock deadline are persisted.
+- **Never** reset last-activity to “now” on boot, refresh, tab return, or dashboard warmup if a session still exists.
+- While the app, web tab, or screen is in the background, the countdown continues. On return: if the lock deadline has passed, **log out immediately** (no new countdown dialog).
+- After logout, land on the **enabled** auth screen (password `/login` or fast-login `/fastLogin`), never a blank home.
+- The inactivity dialog stays centered (root overlay). Do not let page scroll move it.
+- Do not remove, skip, or lengthen these timers in later copies or refactors unless the user explicitly asks.
+
+## Other-device session (`UserSessionCoordinationService`)
+
+- Show «تنبيه جلسة» **only** when the same account signed in from a **different install/device** (web browser profile, phone app, Windows app).
+- Same tab refresh, token refresh, and the same install_id must **not** bump-kick or show the dialog.
+- The notice must include login type, method, date/time, and location when known.
+- «الاستمرار على هذا الجهاز» keeps **this** device; «تسجيل الخروج من هنا» signs out only this device to the correct auth screen.
+---

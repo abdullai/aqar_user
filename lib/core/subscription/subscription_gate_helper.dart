@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/navigation/payment_overlay_route.dart';
+import '../../core/utils/app_money.dart';
 import '../../screens/payments/one_time_payment_checkout_screen.dart';
 import '../../services/instant_market_request_payment_service.dart';
 import '../../services/subscription_service.dart';
@@ -9,6 +11,7 @@ import '../../widgets/market_offer_paywall_dialog.dart';
 import '../../widgets/marketing_subscription_paywall_dialog.dart';
 import '../../widgets/subscription_gate_alert_chip.dart';
 import 'app_subscription_gate.dart';
+import '../gestures/app_keyboard_popups.dart';
 import 'marketing_subscription_resume_intent.dart';
 
 /// بوابة اشتراك/دفع قابلة للاستدعاء من أي شاشة (Provider + [AppSubscriptionGate]).
@@ -71,7 +74,7 @@ class SubscriptionGateHelper {
     }
 
     if (!context.mounted) return false;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         icon: const Icon(Icons.lock_outline),
@@ -115,7 +118,7 @@ class SubscriptionGateHelper {
     );
   }
 
-  /// دفع طلب فوري 30 ر.س — يُرجع [OneTimePaymentResult] أو null.
+  /// دفع طلب فوري — المبلغ من كتالوج الخادم.
   static Future<OneTimePaymentResult?> payInstantMarketRequest({
     required BuildContext context,
     required bool isAr,
@@ -147,22 +150,24 @@ class SubscriptionGateHelper {
     }
     final bid = checkout['billing_transaction_id']?.toString() ?? '';
     final cid = checkout['credit_id']?.toString();
+    final amount = InstantMarketRequestPaymentService.priceFromCheckout(checkout);
     if (bid.isEmpty) {
       return const OneTimePaymentResult(ok: false, error: 'no_billing_id');
     }
 
-    final result = await Navigator.of(context).push<OneTimePaymentResult>(
-      MaterialPageRoute<OneTimePaymentResult>(
-        fullscreenDialog: true,
-        builder: (_) => OneTimePaymentCheckoutScreen(
+    final result = await PaymentOverlay.push<OneTimePaymentResult>(
+      context,
+      name: '/payments/one-time-checkout',
+      page: OneTimePaymentCheckoutScreen(
           lang: lang,
-          amountSar: InstantMarketRequestPaymentService.priceSar,
+          amountSar: amount,
           billingTransactionId: bid,
           creditId: cid,
-          titleAr: 'طلب عقاري فوري — 30 ر.س',
-          titleEn: 'Instant property request — SAR 30',
+          titleAr:
+              'طلب عقاري فوري — ${AppMoney.formatWithCurrencyCode(amount, isAr: true, maxFractionDigits: amount == amount.roundToDouble() ? 0 : 2)}',
+          titleEn:
+              'Instant property request — ${AppMoney.formatWithCurrencyCode(amount, isAr: false, maxFractionDigits: amount == amount.roundToDouble() ? 0 : 2)}',
           purpose: 'instant_market_request',
-        ),
       ),
     );
     SubscriptionService.invalidateSubscriptionCache();

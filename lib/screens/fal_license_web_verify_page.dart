@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 
 /// صفحة WebView تفتح **تفاصيل رخصة الوساطة** على بوابة الهيئة (aqari) مباشرة.
 class FalLicenseWebVerifyPage extends StatefulWidget {
@@ -467,22 +468,20 @@ class _FalLicenseWebVerifyPageState extends State<FalLicenseWebVerifyPage> {
     final scaffold = Scaffold(
       appBar: AppBar(
         title: const Text('التحقق من رخصة فال — الهيئة العامة للعقار'),
-        actions: [
-          IconButton(
-            onPressed: () {
-              _finishWithResult({
-                'valid': false,
-                'owner_name': null,
-                'status': 'cancelled',
-                'status_text': 'cancelled',
-                'start_date': '',
-                'end_date': '',
-                'error': 'cancelled_by_user',
-              });
-            },
-            icon: const Icon(Icons.close),
-          ),
-        ],
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(
+          onPressed: () {
+            _finishWithResult({
+              'valid': false,
+              'owner_name': null,
+              'status': 'cancelled',
+              'status_text': 'cancelled',
+              'start_date': '',
+              'end_date': '',
+              'error': 'cancelled_by_user',
+            });
+          },
+        ),
       ),
       body: Column(
         children: [

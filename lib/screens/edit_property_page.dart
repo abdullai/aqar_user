@@ -1,13 +1,18 @@
-﻿// lib/screens/edit_property_page.dart
+// ignore_for_file: unused_element
+
+// lib/screens/edit_property_page.dart
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
 import '../core/branding/app_branding.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../l10n/app_localizations.dart';
@@ -16,6 +21,8 @@ import '../models/property.dart';
 import '../shared/core/supabase_schema_selects.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/saudi_input_formatters.dart';
+import '../core/listing/deed_number_integrity.dart';
+import '../core/listing/in_app_tour.dart';
 import '../core/listing/listing_area_unit.dart';
 import '../core/listing/property_type_catalog.dart';
 import '../core/workflow/listing_edit_permissions.dart';
@@ -24,11 +31,15 @@ import '../core/utils/app_money.dart';
 import '../services/watermark_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
+import '../widgets/deed_civil_hijri_date_text.dart';
 import '../widgets/deed_date_calendar_dialog.dart';
 import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/year_built_picker_field.dart';
+import '../widgets/in_app_tour_builder_sheet.dart';
 import '../widgets/property_type_hierarchy_picker.dart';
+import '../widgets/equal_option_tile_grid.dart';
 import '../widgets/stable_select_chip.dart';
+import 'photo_shoot_book_page.dart';
 
 /// مطابقة لأسماء `saudi_locations.json` (كما في إضافة إعلان).
 const List<String> _kEditQuickCityAr = ['الرياض', 'جدة', 'مكة المكرمة'];
@@ -103,6 +114,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
   ListingAreaUnit _areaUnit = ListingAreaUnit.m2;
   String _purpose = 'sale';
   DateTime? _deedDate;
+  Timer? _deedDupDebounce;
+  String? _deedDuplicateWarning;
   bool _negotiable = false;
   String _typeCode = 'villa';
 
@@ -149,6 +162,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
   final List<_EditImageItem> _items = [];
   final Set<String> _deletedExistingRowIds = {};
   final Set<String> _deletedExistingPaths = {};
+  InAppTour? _inAppTour;
 
   @override
   void initState() {
@@ -216,6 +230,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     _applyListingGuidance(p.listingGuidance);
 
     _wireNumericFieldListeners();
+    _deedNumber.addListener(_scheduleDeedDuplicateCheck);
     _price.addListener(_onPriceOrAreaChanged);
     _area.addListener(_onPriceOrAreaChanged);
     _commissionFixedCtrl.addListener(_onPriceOrAreaChanged);
@@ -283,6 +298,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     }
     final cp = (g['cover_primary'] ?? 'image').toString().trim().toLowerCase();
     _coverHeroIsVideo = cp == 'video';
+    _inAppTour = InAppTour.fromRaw(g['in_app_tour']);
   }
 
   void _wireNumericFieldListeners() {
@@ -325,6 +341,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
 
   @override
   void dispose() {
+    _deedDupDebounce?.cancel();
+    _deedNumber.removeListener(_scheduleDeedDuplicateCheck);
     _title.dispose();
     _desc.dispose();
     _city.dispose();
@@ -481,6 +499,11 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
       'marketing_commission_amount':
           _commissionKind == 'fixed' ? _editFixedCommissionValue() : 0,
     };
+    if (_inAppTour != null && _inAppTour!.isNotEmpty) {
+      merged['in_app_tour'] = _inAppTour!.toJson();
+    } else {
+      merged.remove('in_app_tour');
+    }
     return merged;
   }
 
@@ -490,7 +513,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
   bool get _showBuildingOnEdit =>
       PropertyTypeCatalog.showsBuildingNumber(_typeCode);
 
-  static String _normDeed(String s) => s.replaceAll(RegExp(r'\s+'), '').trim();
+  static String _normDeed(String s) => DeedNumberIntegrity.normalize(s);
 
   List<Map<String, String>> get _purposeOptions => [
         {'code': 'sale', 'ar': 'بيع', 'en': 'Sale'},
@@ -512,54 +535,49 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     setState(() => _deedDate = picked);
   }
 
-  Future<String?> _duplicateDeedBlockingMessage() async {
-    const saleP = {'sale', 'auction', 'investment'};
-    if (!saleP.contains(_purpose)) return null;
-    final d = _normDeed(_deedNumber.text);
-    if (d.isEmpty) return null;
-    try {
-      final res = await _sb
-          .from('properties')
-          .select('id,title,status,is_auction,deleted_by_user,delete_approved')
-          .eq('deed_number', d)
-          .neq('id', widget.property.id)
-          .limit(40);
-      for (final raw in (res as List)) {
-        final row = Map<String, dynamic>.from(raw as Map);
-        if (_rowStillListedForSaleLike(row)) {
-          final t = (row['title'] ?? '').toString().trim();
-          return _isAr
-              ? 'إعلان آخر بنفس رقم الصك ما زال نشطًا للبيع/المزاد/الاستثمار${t.isNotEmpty ? ': $t' : ''}.'
-              : 'Another active sale/auction/investment listing uses this deed${t.isNotEmpty ? ': $t' : ''}.';
-        }
-      }
-    } catch (_) {}
-    return null;
+  void _scheduleDeedDuplicateCheck() {
+    _deedDupDebounce?.cancel();
+    _deedDupDebounce = Timer(const Duration(milliseconds: 480), () {
+      unawaited(_refreshDeedDuplicateWarning());
+    });
   }
 
-  bool _rowStillListedForSaleLike(Map<String, dynamic> row) {
-    if (row['deleted_by_user'] == true || row['delete_approved'] == true) {
-      return false;
-    }
-    final st = (row['status'] ?? '').toString().toLowerCase();
-    const gone = {
-      'archived',
-      'deleted',
-      'inactive',
-      'closed',
-      'hidden',
-      'rejected',
-      'cancelled',
-      'sold',
-      'completed',
-      'withdrawn',
-    };
-    if (gone.contains(st)) return false;
-    var purp = (row['purpose'] ?? 'sale').toString().toLowerCase();
-    if (purp.isEmpty) purp = 'sale';
-    if (row['is_auction'] == true) purp = 'auction';
-    return const {'sale', 'auction', 'investment'}.contains(purp);
+  Future<void> _refreshDeedDuplicateWarning() async {
+    final msg = await _duplicateDeedBlockingMessage();
+    if (!mounted) return;
+    if (msg == _deedDuplicateWarning) return;
+    setState(() => _deedDuplicateWarning = msg);
   }
+
+  Future<String?> _duplicateDeedBlockingMessage() async {
+    if (!DeedNumberIntegrity.isSaleLikePurpose(_purpose)) return null;
+    final d = _normDeed(_deedNumber.text);
+    if (d.isEmpty) return null;
+    await DeedNumberIntegrity.verifyWithAuthority(deedNumber: d);
+    final hit = await DeedNumberIntegrity.findActiveSaleLikeDuplicate(
+      client: _sb,
+      deedNumber: d,
+      excludePropertyId: widget.property.id,
+    );
+    if (hit == null) return null;
+    unawaited(
+      DeedNumberIntegrity.notifyProjectOps(
+        deedNumber: d,
+        reason: 'active_sale_like_duplicate',
+      ),
+    );
+    final l10n = mounted ? AppLocalizations.of(context) : null;
+    final base = l10n?.deedDuplicateActive ??
+        (_isAr
+            ? 'رقم الصك هذا مستخدم في إعلان بيع أو مزاد أو استثمار ما زال قائماً ولم تُنهَ صفقته. لا يُسمح بإعلان ثانٍ بنفس الصك حتى إغلاق الصفقة السابقة.'
+            : 'This deed number is already on an active sale, auction, or investment listing whose deal is not finished. A second listing with the same deed is not allowed until that deal is closed.');
+    final t = hit.title;
+    if (t.isEmpty) return base;
+    return _isAr ? '$base\n($t)' : '$base\n($t)';
+  }
+
+  bool _rowStillListedForSaleLike(Map<String, dynamic> row) =>
+      DeedNumberIntegrity.stillListedForSaleLike(row);
 
   void _showSnack(String msg, {bool isError = false}) {
     if (!mounted) return;
@@ -984,7 +1002,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     if (dupMsg != null) {
       if (!mounted) return;
       _showSnack(dupMsg, isError: true);
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(_isAr ? 'تنبيه' : 'Notice'),
@@ -1069,6 +1087,32 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
               : _virtualTourUrl.text.trim(),
           'p_contact_phone': null,
           'p_reason': reason,
+          'p_governorate': _governorate.text.trim().isEmpty
+              ? null
+              : _governorate.text.trim(),
+          'p_deed_number': _normDeed(_deedNumber.text).isEmpty
+              ? null
+              : _normDeed(_deedNumber.text),
+          'p_deed_date': _deedDate == null
+              ? null
+              : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+                  .toIso8601String()
+                  .substring(0, 10),
+          'p_deed_issuer': _deedIssuer.text.trim().isEmpty
+              ? null
+              : _deedIssuer.text.trim(),
+          'p_building_number': _buildingNumber.text.trim().isEmpty
+              ? null
+              : _buildingNumber.text.trim(),
+          'p_owner_requests_public_name': _ownerRequestsPublicName,
+          'p_listing_guidance': _listingGuidancePayloadForSave(),
+          'p_price_includes_vat': _priceIncludesVat,
+          'p_vat_rate': _kEditVatRate,
+          'p_marketing_commission_kind': _commissionKind,
+          'p_marketing_commission_rate': _kEditCommissionRate,
+          'p_marketing_commission_amount': _commissionKind == 'fixed'
+              ? _editFixedCommissionValue()
+              : 0,
         },
       );
 
@@ -1235,6 +1279,23 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
             .update({'sort_order': i}).eq('id', it.rowId!);
       }
 
+      if (_inAppTour != null && _inAppTour!.isNotEmpty) {
+        final paths = [
+          for (final it in _items)
+            if ((it.path ?? '').trim().isNotEmpty) it.path!.trim(),
+        ];
+        _inAppTour = _inAppTour!.remapped(paths);
+        try {
+          await _sb
+              .from('properties')
+              .update({
+                'listing_guidance': _listingGuidancePayloadForSave(),
+              })
+              .eq('id', widget.property.id)
+              .eq('owner_id', _uid);
+        } catch (_) {}
+      }
+
       await _loadEditMeta();
       final updatedProperty = await _fetchUpdatedProperty();
 
@@ -1355,14 +1416,12 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: cs.surface,
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
           automaticallyImplyLeading: false,
           leading: !widget.embedAppBar
               ? AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           title: Text(
@@ -1386,7 +1445,9 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
             ),
           ],
         ),
-        body: _loading
+        body: AppKeyboardPad(
+          extra: 8,
+          child: _loading
             ? const Center(child: AppLogoLoading())
             : ListView(
                 padding: const EdgeInsets.all(16),
@@ -1550,7 +1611,10 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 .toList(),
                             onChanged: (_saving || exhausted)
                                 ? null
-                                : (v) => setState(() => _purpose = v ?? 'sale'),
+                                : (v) => setState(() {
+                                      _purpose = v ?? 'sale';
+                                      _scheduleDeedDuplicateCheck();
+                                    }),
                             decoration: InputDecoration(
                               labelText: _isAr ? 'الغرض' : 'Purpose',
                             ),
@@ -1704,6 +1768,9 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             AqarTextFormField(
                               controller: _buildingNumber,
                               enabled: !_saving && !exhausted,
+                              keyboardType: TextInputType.number,
+                              inputFormatters:
+                                  latinDigitsOnlyFormatters(maxLength: 12),
                               decoration: InputDecoration(
                                 labelText:
                                     _isAr ? 'رقم المبنى' : 'Building number',
@@ -1725,18 +1792,43 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           AqarTextFormField(
                             controller: _deedNumber,
                             enabled: !_saving && !exhausted,
+                            keyboardType: TextInputType.number,
+                            inputFormatters:
+                                latinDigitsOnlyFormatters(maxLength: 32),
                             decoration: InputDecoration(
                               labelText: _isAr ? 'رقم الصك' : 'Deed number',
+                              suffixIcon: Tooltip(
+                                message: AppLocalizations.of(context)
+                                        ?.deedNumberGovHint ??
+                                    (_isAr
+                                        ? 'يُفحص الرقم الآن داخل التطبيق. لاحقاً سيُربط بالتحقق الحكومي من بيانات الصك، ويُبلَّغ مكتب إدارة المشروع عند التعارض.'
+                                        : 'The number is checked in-app during development. Later it will be verified with government deed data, and the project operations desk will be notified on conflicts.'),
+                                child: Icon(
+                                  Icons.verified_user_outlined,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
                             ),
                           ),
+                          if ((_deedDuplicateWarning ?? '').trim().isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              _deedDuplicateWarning!.trim(),
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.45,
+                                fontWeight: FontWeight.w800,
+                                color: Theme.of(context).colorScheme.error,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 8),
                           Builder(
                             builder: (context) {
                               final cs = Theme.of(context).colorScheme;
                               final enabled = !_saving && !exhausted;
-                              final formatted = _deedDate == null
-                                  ? null
-                                  : '${_deedDate!.year}-${_deedDate!.month.toString().padLeft(2, '0')}-${_deedDate!.day.toString().padLeft(2, '0')}';
                               return InkWell(
                                 onTap: enabled ? _pickDeedDate : null,
                                 borderRadius: BorderRadius.circular(12),
@@ -1762,20 +1854,30 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
                                         vertical: 12),
-                                    child: Text(
-                                      formatted ??
-                                          (_isAr
-                                              ? 'اختر التاريخ'
-                                              : 'Select date'),
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                        color: formatted == null
-                                            ? cs.onSurfaceVariant
-                                            : (enabled
-                                                ? cs.onSurface
-                                                : cs.onSurfaceVariant),
-                                      ),
-                                    ),
+                                    child: _deedDate == null
+                                        ? Text(
+                                            _isAr
+                                                ? 'اختر التاريخ'
+                                                : 'Select date',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: cs.onSurfaceVariant,
+                                            ),
+                                          )
+                                        : DeedCivilHijriDateText(
+                                            date: DateTime(
+                                              _deedDate!.year,
+                                              _deedDate!.month,
+                                              _deedDate!.day,
+                                            ),
+                                            isAr: _isAr,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              color: enabled
+                                                  ? cs.onSurface
+                                                  : cs.onSurfaceVariant,
+                                            ),
+                                          ),
                                   ),
                                 ),
                               );
@@ -2004,8 +2106,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             ),
                             subtitle: Text(
                               _isAr
-                                  ? 'يُفضّل مع موافقة المسوق؛ يُستخدم إن اختار إخفاء اسم المالك.'
-                                  : 'Applies if the marketer hides the owner name.',
+                                  ? 'اختياري للسوق. الجوال والدردشة لا يظهران للعامة؛ يُكشفان للمسوّق المختار بعد موافقتك على عرضه.'
+                                  : 'Optional on the market. Phone and chat stay hidden from the public; they unlock for the selected marketer after you accept.',
                               style: TextStyle(
                                 color: Theme.of(context)
                                     .colorScheme
@@ -2096,26 +2198,13 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           const SizedBox(height: 16),
                           _secTitle(_isAr ? 'المرافق' : 'Amenities'),
                           const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _amenities.keys
-                                .where((k) =>
-                                    !PropertyTypeCatalog.isLandLikeEffective(
-                                        _typeCode) ||
-                                    PropertyTypeCatalog
-                                        .amenityKeyRelevantForLand(k))
-                                .map((k) {
-                              final label = _amenityLabel(k);
-                              final sel = _amenities[k] == true;
-                              return StableSelectChip(
-                                label: label,
-                                selected: sel,
-                                enabled: !_saving && !exhausted,
-                                onSelected: (v) =>
-                                    setState(() => _amenities[k] = v),
-                              );
-                            }).toList(),
+                          AmenityEqualSelectGrid(
+                            typeCode: _typeCode,
+                            values: _amenities,
+                            isAr: _isAr,
+                            enabled: !_saving && !exhausted,
+                            onToggle: (k, v) =>
+                                setState(() => _amenities[k] = v),
                           ),
                           const SizedBox(height: 16),
                           _secTitle(_isAr ? 'الإحداثيات' : 'Coordinates'),
@@ -2140,8 +2229,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 decimal: true,
                               ),
                               inputFormatters: latinDecimalNumberFormatters(),
-                              decoration: const InputDecoration(
-                                labelText: 'Lat',
+                              decoration: InputDecoration(
+                                labelText: _isAr ? 'خط العرض' : 'Latitude',
                               ),
                               onChanged: (v) =>
                                   _lat = double.tryParse(v.trim()),
@@ -2155,8 +2244,8 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 decimal: true,
                               ),
                               inputFormatters: latinDecimalNumberFormatters(),
-                              decoration: const InputDecoration(
-                                labelText: 'Lng',
+                              decoration: InputDecoration(
+                                labelText: _isAr ? 'خط الطول' : 'Longitude',
                               ),
                               onChanged: (v) =>
                                   _lng = double.tryParse(v.trim()),
@@ -2410,6 +2499,68 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                             fontSize: 12,
                           ),
                         ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: (_saving || _isGuest || exhausted)
+                              ? null
+                              : () async {
+                                  final refs = <String>[];
+                                  final bytes = <String, Uint8List>{};
+                                  for (var i = 0; i < _items.length; i++) {
+                                    final it = _items[i];
+                                    if (it.isExisting &&
+                                        (it.path ?? '').trim().isNotEmpty) {
+                                      refs.add(it.path!.trim());
+                                    } else {
+                                      refs.add('$i');
+                                      if (it.bytes != null) {
+                                        bytes['$i'] = it.bytes!;
+                                      }
+                                    }
+                                  }
+                                  final tour = await showInAppTourBuilderSheet(
+                                    context: context,
+                                    isAr: _isAr,
+                                    imageRefs: refs,
+                                    initial: _inAppTour,
+                                    previewBytes: bytes,
+                                  );
+                                  if (tour != null && mounted) {
+                                    setState(() => _inAppTour = tour);
+                                  }
+                                },
+                          icon: const Icon(Icons.threed_rotation_outlined),
+                          label: Text(
+                            AppLocalizations.of(context)!.inAppTourBuild,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        FilledButton.tonalIcon(
+                          onPressed: (_saving || _isGuest || exhausted)
+                              ? null
+                              : () async {
+                                  final loc = [
+                                    _city.text.trim(),
+                                    _location.text.trim(),
+                                  ].where((s) => s.isNotEmpty).join(' · ');
+                                  await Navigator.of(context).push<Object?>(
+                                    MaterialPageRoute<Object?>(
+                                      builder: (_) => PhotoShootBookPage(
+                                        lang: widget.lang,
+                                        propertyId: widget.property.id,
+                                        locationText: loc,
+                                        latitude: _useMapCoords ? _lat : null,
+                                        longitude: _useMapCoords ? _lng : null,
+                                      ),
+                                    ),
+                                  );
+                                },
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: Text(
+                            AppLocalizations.of(context)!
+                                .photographerRequestFromMedia,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -2445,6 +2596,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                   ),
                 ],
               ),
+        ),
       ),
     );
   }

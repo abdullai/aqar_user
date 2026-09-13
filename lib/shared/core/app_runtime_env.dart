@@ -16,6 +16,7 @@ class AppRuntimeEnv {
     put('MOYASAR_CALLBACK_URL');
     put('MOYASAR_APPLE_PAY_MERCHANT_ID');
     put('MOYASAR_SAMSUNG_PAY_SERVICE_ID');
+    put('GOOGLE_MAPS_WEB_KEY');
   }
 
   static bool get moyasarConfigured {

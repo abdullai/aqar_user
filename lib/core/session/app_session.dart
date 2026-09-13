@@ -12,6 +12,8 @@ import '../../services/properties_home_feed_service.dart';
 import '../../services/session_manager.dart';
 import '../auth/auth_local_sign_out.dart';
 import '../config/app_config.dart';
+import '../gestures/app_keyboard_popups.dart';
+import '../network/web_online.dart';
 
 class AppSession extends ChangeNotifier {
   // =========================
@@ -39,7 +41,14 @@ class AppSession extends ChangeNotifier {
 
   final Connectivity _connectivity = Connectivity();
   StreamSubscription<List<ConnectivityResult>>? _connSub;
+  StreamSubscription<bool>? _webOnlineSub;
   Timer? _offlinePollTimer;
+
+  /// يُستدعى عند الانتقال من متصل → منقطع (بعد تحديث [hasInternet]).
+  VoidCallback? onWentOffline;
+
+  /// يُستدعى عند العودة من منقطع → متصل.
+  VoidCallback? onWentOnline;
 
   // token لإبطال نتائج العمليات لو انقطع النت أثناء التنفيذ
   int _netGuardToken = 0;
@@ -236,52 +245,33 @@ class AppSession extends ChangeNotifier {
     } catch (_) {
       _scheduleOfflinePolling();
     }
+    _webOnlineSub?.cancel();
+    if (kIsWeb) {
+      _webOnlineSub = webOnlineStatusStream().listen((online) {
+        unawaited(_applyReachability(online));
+      });
+    }
   }
 
   Future<void> _onConnectivityPluginChanged(
     List<ConnectivityResult> results,
   ) async {
-    if (kIsWeb) {
-      // على الويب: connectivity_plus قد يُبلّغ none خطأً — لا نحجب اللوحة.
-      if (results.isNotEmpty && results.contains(ConnectivityResult.none)) {
-        return;
-      }
-      await _refreshReachabilityInternal();
-      return;
-    }
-    if (results.isNotEmpty && results.contains(ConnectivityResult.none)) {
-      if (hasInternet) {
-        hasInternet = false;
-        _netGuardToken++;
-        notifyListeners();
-      }
-      _scheduleOfflinePolling();
-      return;
-    }
-    // عاد الرابط — حدّث فوراً من المكوّن دون انتظار HTTP.
     await _refreshReachabilityInternal();
   }
 
   void _scheduleOfflinePolling() {
-    if (kIsWeb) return;
     if (_offlinePollTimer != null) return;
-    _offlinePollTimer = Timer.periodic(const Duration(seconds: 14), (_) {
+    _offlinePollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
       unawaited(_refreshReachabilityInternal());
     });
   }
 
   Future<void> _refreshReachabilityInternal() async {
-    // رابط الشبكة فقط — لا probeBackendReachable (كان يفشل تحت ضغط ما بعد الدخول).
     final ok = await ConnectivityGuard.hasPluginLink();
-    if (kIsWeb) {
-      if (ok && !hasInternet) {
-        hasInternet = true;
-        _offlinePollTimer?.cancel();
-        _offlinePollTimer = null;
-        notifyListeners();
-      }
-      return;
-    }
+    await _applyReachability(ok);
+  }
+
+  Future<void> _applyReachability(bool ok) async {
     final prev = hasInternet;
     hasInternet = ok;
     if (!ok) {
@@ -295,6 +285,11 @@ class AppSession extends ChangeNotifier {
     }
     if (prev != ok) {
       notifyListeners();
+      if (prev && !ok) {
+        onWentOffline?.call();
+      } else if (!prev && ok) {
+        onWentOnline?.call();
+      }
     }
   }
 
@@ -326,7 +321,7 @@ class AppSession extends ChangeNotifier {
     if (!hasInternet) {
       if (showDialogOnNoInternet && context.mounted) {
         final loc = Localizations.localeOf(context).languageCode != 'en';
-        showDialog<void>(
+        showAppDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: Text(loc ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection'),
@@ -378,6 +373,7 @@ class AppSession extends ChangeNotifier {
   void dispose() {
     _offlinePollTimer?.cancel();
     _connSub?.cancel();
+    _webOnlineSub?.cancel();
     super.dispose();
   }
 }

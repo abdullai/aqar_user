@@ -32,8 +32,31 @@ String arabicAndPersianDigitsToLatin(String input) {
   return buf.toString();
 }
 
+/// عرض مألوف للأرقام اللاتينية بالأرقام العربية المشرقية (فوق لوحة المفاتيح).
+String latinDigitsToEasternArabic(String input) {
+  const map = {
+    '0': '٠',
+    '1': '١',
+    '2': '٢',
+    '3': '٣',
+    '4': '٤',
+    '5': '٥',
+    '6': '٦',
+    '7': '٧',
+    '8': '٨',
+    '9': '٩',
+  };
+  final buf = StringBuffer();
+  for (final c in input.runes) {
+    final s = String.fromCharCode(c);
+    buf.write(map[s] ?? s);
+  }
+  return buf.toString();
+}
+
 /// Use on numeric fields (FAL, phone, CR, join code, etc.).
 class ArabicDigitsToLatinFormatter extends TextInputFormatter {
+  const ArabicDigitsToLatinFormatter();
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
@@ -54,7 +77,7 @@ class ArabicDigitsToLatinFormatter extends TextInputFormatter {
 /// أرقام إنجليزية فقط مع قبول لصق/كتابة الأرقام العربية والفارسية.
 List<TextInputFormatter> latinDigitsOnlyFormatters({int? maxLength}) {
   return [
-    ArabicDigitsToLatinFormatter(),
+    const ArabicDigitsToLatinFormatter(),
     FilteringTextInputFormatter.digitsOnly,
     if (maxLength != null) LengthLimitingTextInputFormatter(maxLength),
   ];
@@ -62,6 +85,7 @@ List<TextInputFormatter> latinDigitsOnlyFormatters({int? maxLength}) {
 
 /// رقم عشري إنجليزي؛ يقبل الفاصلة العربية/الإنجليزية ويحوّلها لنقطة عشرية للحفظ.
 class LatinDecimalNumberFormatter extends TextInputFormatter {
+  const LatinDecimalNumberFormatter();
   @override
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
@@ -86,7 +110,7 @@ class LatinDecimalNumberFormatter extends TextInputFormatter {
 
 List<TextInputFormatter> latinDecimalNumberFormatters({int? maxLength}) {
   return [
-    LatinDecimalNumberFormatter(),
+    const LatinDecimalNumberFormatter(),
     if (maxLength != null) LengthLimitingTextInputFormatter(maxLength),
   ];
 }

@@ -7,6 +7,7 @@ import '../../core/utils/app_money.dart';
 import '../../core/utils/display_ids.dart';
 import '../../core/haptics/app_haptics.dart';
 import '../../core/workflow/listing_workflow_copy.dart';
+import '../../widgets/app_page_close_button.dart';
 import '../../widgets/listing_media_gallery.dart';
 
 /// شاشة كاملة من «السوق العقاري»: معاينة + مقاييس + (اختياري) مراسلة واتساب + تقديم عرض.
@@ -22,7 +23,7 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
     required this.listingNoTenDigit,
     required this.priceSar,
     required this.areaM2,
-    required this.onSubmitOffer,
+    this.onSubmitOffer,
     this.onMessageOwner,
     this.hideOwnerContactActions = false,
     this.workflowStageLabel,
@@ -41,7 +42,7 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
   final double priceSar;
   final double areaM2;
   final Future<void> Function()? onMessageOwner;
-  final Future<void> Function() onSubmitOffer;
+  final Future<void> Function()? onSubmitOffer;
 
   /// في تبويب «السوق العقاري» (مرحلة جمع العروض): لا مراسلة/واتساب/اتصال.
   final bool hideOwnerContactActions;
@@ -129,9 +130,8 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
       backgroundColor: cs.surface,
       appBar: AppBar(
         title: Text(isAr ? 'إتمام الصفقة' : 'Complete deal'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
+        leading: AppPageCloseButton(
+          isArabic: isAr,
         ),
       ),
       body: Column(
@@ -310,17 +310,18 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
                     ),
                   if (!hideOwnerContactActions && onMessageOwner != null)
                     const SizedBox(height: 8),
-                  FilledButton.icon(
-                    onPressed: () async {
-                      AppHaptics.medium();
-                      await onSubmitOffer();
-                    },
-                    icon: const Icon(Icons.edit_note_outlined),
-                    label: Text(
-                      isAr ? 'إتمام الصفقة' : 'Complete deal',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+                  if (onSubmitOffer != null)
+                    FilledButton.icon(
+                      onPressed: () async {
+                        AppHaptics.medium();
+                        await onSubmitOffer!();
+                      },
+                      icon: const Icon(Icons.edit_note_outlined),
+                      label: Text(
+                        isAr ? 'إتمام الصفقة' : 'Complete deal',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),

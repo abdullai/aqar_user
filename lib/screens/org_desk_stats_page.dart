@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
+import '../core/utils/date_helper.dart';
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
 
@@ -139,7 +140,12 @@ class _OrgDeskStatsPageState extends State<OrgDeskStatsPage> {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                subtitle: Text('${r['created_at'] ?? ''}'),
+                subtitle: Text(
+                  DateHelper.fmtCivilDateTimeRaw(
+                    r['created_at'],
+                    isAr: _isAr,
+                  ),
+                ),
               ),
             ),
         ],

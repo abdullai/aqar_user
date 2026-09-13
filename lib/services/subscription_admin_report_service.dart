@@ -2,10 +2,11 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 import 'package:file_saver/file_saver.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../core/branding/app_branding.dart';
+import '../core/branding/branding_pdf.dart';
+import '../core/utils/date_helper.dart';
+import '../core/payment/invoice_copy.dart';
 
 /// تقارير اشتراكات ومدفوعات لموظفي المنصة (RLS: `*_staff_read`).
 class SubscriptionAdminReportService {
@@ -24,13 +25,17 @@ class SubscriptionAdminReportService {
 
   Future<List<Map<String, dynamic>>> fetchBillingSuccess({
     int limit = 500,
+  }) =>
+      fetchBilling(limit: limit);
+
+  Future<List<Map<String, dynamic>>> fetchBilling({
+    int limit = 500,
   }) async {
     try {
       final rows = await _sb
           .from('billing_transactions')
           .select()
-          .eq('status', 'success')
-          .order('completed_at', ascending: false)
+          .order('created_at', ascending: false)
           .limit(limit);
       return (rows as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
@@ -62,9 +67,15 @@ class SubscriptionAdminReportService {
     final s = v.toString();
     final d = DateTime.tryParse(s);
     if (d != null) {
-      return DateFormat('yyyy-MM-dd HH:mm').format(d.toLocal());
+      return DateHelper.fmtCivilDateTime(d.toLocal(), isAr: false);
     }
     return s;
+  }
+
+  double _amount(Map<String, dynamic> r) {
+    final raw = r['amount'];
+    if (raw is num) return raw.toDouble();
+    return double.tryParse('${raw ?? ''}') ?? 0.0;
   }
 
   Future<void> exportBillingSuccessExcel({
@@ -72,8 +83,13 @@ class SubscriptionAdminReportService {
     required bool isAr,
   }) async {
     final excel = Excel.createExcel();
-    final sheet = excel['billing_success'];
-    sheet.appendRow([TextCellValue(AppBranding.legalName(isAr: isAr))]);
+    final sheet = excel['billing'];
+    for (final line in excelLetterheadLines(
+      isAr: isAr,
+      title: isAr ? 'مدفوعات المنصة' : 'Platform billing',
+    )) {
+      sheet.appendRow([TextCellValue(line)]);
+    }
     final headers = isAr
         ? [
             'المعرف',
@@ -81,6 +97,8 @@ class SubscriptionAdminReportService {
             'المبلغ',
             'العملة',
             'طريقة الدفع',
+            'الحالة',
+            'الغرض',
             'معرف البوابة',
             'اشتراك',
             'أُكمل في',
@@ -91,6 +109,8 @@ class SubscriptionAdminReportService {
             'amount',
             'currency',
             'payment_method',
+            'status',
+            'purpose',
             'gateway_transaction_id',
             'subscription_id',
             'completed_at',
@@ -100,17 +120,23 @@ class SubscriptionAdminReportService {
       sheet.appendRow([
         TextCellValue('${r['id'] ?? ''}'),
         TextCellValue('${r['user_id'] ?? ''}'),
-        TextCellValue('${r['amount'] ?? ''}'),
-        TextCellValue('${r['currency'] ?? ''}'),
-        TextCellValue('${r['payment_method'] ?? ''}'),
+        TextCellValue(
+          excelAmountCell(_amount(r), isAr: isAr),
+        ),
+        TextCellValue('${r['currency'] ?? 'SAR'}'),
+        TextCellValue(
+          InvoiceCopy.methodLabel('${r['payment_method'] ?? ''}', isAr: isAr),
+        ),
+        TextCellValue('${r['status'] ?? ''}'),
+        TextCellValue(InvoiceCopy.purposeFromRow(r)),
         TextCellValue('${r['gateway_transaction_id'] ?? ''}'),
         TextCellValue('${r['subscription_id'] ?? ''}'),
-        TextCellValue(_fmt(r['completed_at'])),
+        TextCellValue(_fmt(r['completed_at'] ?? r['created_at'])),
       ]);
     }
     final bytes = Uint8List.fromList(excel.encode()!);
     await FileSaver.instance.saveFile(
-      name: 'billing_success_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'billing_${DateTime.now().millisecondsSinceEpoch}',
       bytes: bytes,
       fileExtension: 'xlsx',
       mimeType: MimeType.microsoftExcel,
@@ -123,10 +149,22 @@ class SubscriptionAdminReportService {
   }) async {
     final excel = Excel.createExcel();
     final sheet = excel['lifecycle'];
-    sheet.appendRow([TextCellValue(AppBranding.legalName(isAr: isAr))]);
+    for (final line in excelLetterheadLines(
+      isAr: isAr,
+      title: isAr ? 'أحداث دورة الاشتراك' : 'Subscription lifecycle',
+    )) {
+      sheet.appendRow([TextCellValue(line)]);
+    }
     final headers = isAr
         ? ['المعرف', 'المستخدم', 'الاشتراك', 'الحدث', 'الحمولة', 'الوقت']
-        : ['id', 'user_id', 'subscription_id', 'event_type', 'payload', 'created_at'];
+        : [
+            'id',
+            'user_id',
+            'subscription_id',
+            'event_type',
+            'payload',
+            'created_at',
+          ];
     sheet.appendRow(headers.map(TextCellValue.new).toList());
     for (final r in rows) {
       sheet.appendRow([

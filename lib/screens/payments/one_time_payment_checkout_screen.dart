@@ -6,12 +6,23 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/gestures/app_keyboard_inset.dart';
+import '../../core/gestures/app_keyboard_popups.dart';
+import '../../core/navigation/payment_overlay_route.dart';
 import '../../core/payment/moyasar_web_3ds.dart';
+import '../../core/payment/checkout_journey.dart';
+import '../../core/payment/invoice_document.dart';
 import '../../core/session/app_session.dart';
 import '../../core/utils/app_money.dart';
+import '../../l10n/app_localizations.dart';
+import '../../services/billing_transaction_repository.dart';
 import '../../services/instant_market_request_payment_service.dart';
 import '../../services/payment_service.dart';
+import '../../services/subscription_service.dart';
 import '../../widgets/app_logo_loading.dart';
+import '../../widgets/app_page_close_button.dart';
+import '../../widgets/aqar_primary_scroll_scope.dart';
+import '../../widgets/aqar_text_field.dart';
 import '../subscriptions/add_payment_card_screen.dart';
 import '../subscriptions/payment_receipt_screen.dart';
 
@@ -51,16 +62,28 @@ class _OneTimePaymentCheckoutScreenState
   final _instant = InstantMarketRequestPaymentService(
     Supabase.instance.client,
   );
+  final _sub = SubscriptionService(Supabase.instance.client);
+  final _promoCtrl = TextEditingController();
 
   bool _paying = false;
   bool _processingOverlay = false;
+  bool _promoBusy = false;
   List<Map<String, dynamic>> _cards = [];
   String? _selectedCardId;
+  String? _appliedPromoCode;
+  late double _chargeSar;
 
   @override
   void initState() {
     super.initState();
+    _chargeSar = widget.amountSar;
     unawaited(_loadCards());
+  }
+
+  @override
+  void dispose() {
+    _promoCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCards() async {
@@ -78,11 +101,66 @@ class _OneTimePaymentCheckoutScreenState
     });
   }
 
+  String _promoErrorText(AppLocalizations t, String? err) {
+    switch (err) {
+      case 'already_used':
+        return t.promoErrUsed;
+      case 'expired':
+        return t.promoErrExpired;
+      case 'sold_out':
+        return t.promoErrSoldOut;
+      case 'wrong_audience':
+        return t.promoErrAudience;
+      case 'not_started':
+        return t.promoErrNotStarted;
+      case 'has_active_subscription':
+        return t.promoErrActiveSub;
+      case 'other_campaign_active':
+        return t.promoErrOtherCampaign;
+      default:
+        return t.promoErrInvalid;
+    }
+  }
+
+  Future<void> _applyPromo() async {
+    final t = AppLocalizations.of(context)!;
+    final code = _promoCtrl.text.trim();
+    if (code.isEmpty || _appliedPromoCode != null) return;
+    setState(() => _promoBusy = true);
+    final q = await _sub.applyPromoToPendingBilling(
+      billingTransactionId: widget.billingTransactionId,
+      code: code,
+    );
+    if (!mounted) return;
+    setState(() => _promoBusy = false);
+    if (q['ok'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_promoErrorText(t, '${q['error'] ?? ''}'))),
+      );
+      return;
+    }
+    final after = q['amount_after'];
+    final afterN = after is num ? after.toDouble() : _chargeSar;
+    if (afterN <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.checkoutPromoZero)),
+      );
+      return;
+    }
+    setState(() {
+      _appliedPromoCode = code;
+      _chargeSar = afterN;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(t.checkoutPromoApplied)),
+    );
+  }
+
   Future<void> _openAddCard() async {
-    final added = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => AddPaymentCardScreen(lang: widget.lang),
-      ),
+    final added = await PaymentOverlay.push<bool>(
+      context,
+      name: '/subscriptions/add-card',
+      page: AddPaymentCardScreen(lang: widget.lang),
     );
     if (added == true) {
       await _loadCards();
@@ -93,7 +171,7 @@ class _OneTimePaymentCheckoutScreenState
     if (_processingOverlay || !mounted) return;
     _processingOverlay = true;
     unawaited(
-      showDialog<void>(
+      showAppDialog<void>(
         context: context,
         barrierDismissible: false,
         useRootNavigator: true,
@@ -137,10 +215,6 @@ class _OneTimePaymentCheckoutScreenState
             : 'Saved card is outdated — add a new card.';
       case 'card_expired':
         return widget.isAr ? 'انتهت صلاحية البطاقة.' : 'Card expired.';
-      case 'payment_gateway_not_configured':
-        return widget.isAr
-            ? 'بوابة الدفع غير مفعّلة. أضف مفتاح ميسّر ثم أعد البناء.'
-            : 'Payment gateway is not configured. Set Moyasar key and rebuild.';
       case 'billing_not_found':
         return widget.isAr
             ? 'لم يُعثر على فاتورة الدفع.'
@@ -154,15 +228,11 @@ class _OneTimePaymentCheckoutScreenState
             ? 'تأخر تأكيد الدفع — تحقق من سجل المدفوعات.'
             : 'Payment confirmation delayed — check payment history.';
       default:
-        if (c.startsWith('moyasar_api:')) {
-          final msg = c.substring('moyasar_api:'.length).trim();
-          if (msg.isNotEmpty) return msg;
-        }
         if ((detail ?? '').trim().isNotEmpty) return detail!.trim();
-        if (c.isEmpty) {
-          return widget.isAr ? 'تعذّر إتمام الدفع.' : 'Payment failed.';
-        }
-        return widget.isAr ? 'تعذّر إتمام الدفع: $c' : 'Payment failed: $c';
+        return PaymentService.userFacingError(
+          c.isEmpty ? 'payment_failed' : c,
+          isAr: widget.isAr,
+        );
     }
   }
 
@@ -208,7 +278,7 @@ class _OneTimePaymentCheckoutScreenState
     try {
       final res = await _pay.processPaymentAgainstExistingBilling(
         billingTransactionId: widget.billingTransactionId,
-        amount: widget.amountSar,
+        amount: _chargeSar,
         cardId: cardId,
         titleAr: widget.titleAr,
         titleEn: widget.titleEn,
@@ -240,7 +310,7 @@ class _OneTimePaymentCheckoutScreenState
           try {
             final poll = await _pay.pollUntilBillingTransactionPaid(
               billingTransactionId: widget.billingTransactionId,
-              expectedAmountSar: widget.amountSar,
+              expectedAmountSar: _chargeSar,
             );
             paid = poll['ok'] == true;
             if (!paid && mounted) {
@@ -276,23 +346,52 @@ class _OneTimePaymentCheckoutScreenState
       if (!paid) return;
 
       final bid = widget.billingTransactionId;
-      await _instant.activateCredit(bid);
+      final promo = _appliedPromoCode;
+      if (promo != null && promo.isNotEmpty) {
+        await _sub.redeemPromoCode(code: promo, billingTransactionId: bid);
+      }
+      await _sub.fulfillPaidBilling(
+        billingTransactionId: bid,
+        expectedAmountSar: _chargeSar,
+      );
       final credit = await _instant.getAvailableCredit();
       final creditId =
           widget.creditId ?? credit['credit_id']?.toString() ?? '';
 
       if (!mounted) return;
+      Map<String, dynamic>? bill;
+      if (bid.isNotEmpty) {
+        bill = await BillingTransactionRepository(Supabase.instance.client)
+            .getOwn(bid);
+      }
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
           builder: (_) => PaymentReceiptScreen(
             lang: widget.lang,
             planName: widget.isAr ? widget.titleAr : widget.titleEn,
             period: 'one_time',
-            amountSar: widget.amountSar,
+            amountSar: bill != null
+                ? InvoiceDocument.fromRow(bill, isAr: widget.isAr).amount
+                : _chargeSar,
             paymentMethodLabel: widget.isAr ? 'بطاقة محفوظة' : 'Saved card',
-            transactionId: bid,
-            completedAt: DateTime.now().toUtc(),
+            transactionId:
+                InvoiceDocument.fromRow(bill ?? const {}, isAr: widget.isAr)
+                    .invoiceNumber,
+            completedAt: InvoiceDocument.fromRow(
+                  bill ?? const {},
+                  isAr: widget.isAr,
+                ).occurredAt ??
+                DateTime.now().toUtc(),
             purpose: widget.purpose,
+            billingRow: bill,
+            invoiceNumber: InvoiceDocument.fromRow(
+              bill ?? const {},
+              isAr: widget.isAr,
+            ).invoiceNumber,
+            paymentReference: InvoiceDocument.fromRow(
+              bill ?? const {},
+              isAr: widget.isAr,
+            ).paymentReference,
           ),
         ),
       );
@@ -303,7 +402,7 @@ class _OneTimePaymentCheckoutScreenState
           ok: true,
           billingTransactionId: bid,
           creditId: creditId.isEmpty ? null : creditId,
-          amountSar: widget.amountSar,
+          amountSar: _chargeSar,
         ),
       );
     } finally {
@@ -314,16 +413,26 @@ class _OneTimePaymentCheckoutScreenState
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: widget.embedAppBar
-          ? AppBar(
+    return PaymentPopGuard(
+      busy: _paying,
+      child: Scaffold(
+      resizeToAvoidBottomInset: false,
+      appBar: AppBar(
+              automaticallyImplyLeading: false,
+              leading: AppPageCloseButton(isArabic: widget.isAr),
               title: Text(widget.isAr ? 'الدفع' : 'Payment'),
-            )
-          : null,
+            ),
       body: _paying
           ? const Center(child: AppLogoLoading())
-          : ListView(
-              padding: const EdgeInsets.all(16),
+          : AppKeyboardPad(
+              extra: 16,
+              child: AqarPrimaryScrollScope(
+              child: ListView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: AppKeyboardInset.scrollViewPadding(
+                context,
+                base: const EdgeInsets.all(16),
+              ),
               children: [
                 Card(
                   child: Padding(
@@ -344,7 +453,7 @@ class _OneTimePaymentCheckoutScreenState
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         AppMoneyLine(
-                          amount: widget.amountSar,
+                          amount: _chargeSar,
                           currencyCode: 'SAR',
                           isAr: widget.isAr,
                           style: Theme.of(context)
@@ -355,11 +464,50 @@ class _OneTimePaymentCheckoutScreenState
                                 fontWeight: FontWeight.w900,
                               ),
                         ),
+                        const SizedBox(height: 12),
+                        AqarTextField(
+                          controller: _promoCtrl,
+                          enabled: !_promoBusy &&
+                              !_paying &&
+                              _appliedPromoCode == null,
+                          keyboardType: TextInputType.text,
+                          textInputAction: TextInputAction.done,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          decoration: InputDecoration(
+                            labelText: AppLocalizations.of(context)!
+                                .checkoutPromoCode,
+                            suffixIcon: _appliedPromoCode == null
+                                ? TextButton(
+                                    onPressed: _promoBusy
+                                        ? null
+                                        : () => unawaited(_applyPromo()),
+                                    child: Text(
+                                      AppLocalizations.of(context)!
+                                          .checkoutPromoApply,
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.check_circle_outline,
+                                    color: cs.primary,
+                                  ),
+                          ),
+                          onSubmitted: (_) => unawaited(_applyPromo()),
+                        ),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
+                Text(
+                  CheckoutJourney.surfaceHint(isAr: widget.isAr),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                        color: cs.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
@@ -430,12 +578,15 @@ class _OneTimePaymentCheckoutScreenState
                   icon: const Icon(Icons.lock_outline),
                   label: Text(
                     widget.isAr
-                        ? 'ادفع ${AppMoney.formatWithCurrencyCode(widget.amountSar, isAr: true, maxFractionDigits: 0)}'
-                        : 'Pay ${AppMoney.formatWithCurrencyCode(widget.amountSar, isAr: false, maxFractionDigits: 0)}',
+                        ? 'ادفع ${AppMoney.formatWithCurrencyCode(_chargeSar, isAr: true, maxFractionDigits: 0)}'
+                        : 'Pay ${AppMoney.formatWithCurrencyCode(_chargeSar, isAr: false, maxFractionDigits: 0)}',
                   ),
                 ),
               ],
             ),
+          ),
+        ),
+    ),
     );
   }
 }

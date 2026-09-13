@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// تسميات عرض صديقة للغة لبيانات الجهاز/الجلسة (بدون رموز خام).
 abstract final class DeviceDisplayLabels {
   static String platform(String? raw, {required bool isAr}) {

@@ -8,10 +8,15 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/l10n/locale_content.dart';
 import '../core/market_insights_config.dart';
+import '../core/utils/date_helper.dart';
 import '../l10n/app_localizations.dart';
 import '../models/market_insights_snapshot.dart';
 import '../services/market_insights_service.dart';
+import '../services/rega_open_indicators_service.dart';
+import '../core/utils/app_money.dart';
+import '../widgets/app_page_close_button.dart';
 import 'market_insights_widgets.dart';
 
 enum _LeaderboardFilter { all, individuals, marketers }
@@ -63,8 +68,7 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
       NumberFormat.decimalPattern(_isAr ? 'ar' : 'en').format(n);
 
   String _timeLabel(DateTime utc) {
-    final loc = _isAr ? 'ar' : 'en';
-    return DateFormat.yMMMd(loc).add_Hm().format(utc.toLocal());
+    return DateHelper.fmtCivilDateTime(utc.toLocal(), isAr: _isAr);
   }
 
   @override
@@ -376,6 +380,8 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(isArabic: _isAr),
         title: titleRow,
         actions: actions,
         bottom: tabBar,
@@ -468,6 +474,8 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
                   ),
                 ),
               ),
+              const SizedBox(height: 12),
+              const _OfficialRegaInsightsCard(),
               if (_isGuest) ...[
                 const SizedBox(height: 12),
                 Card(
@@ -874,6 +882,94 @@ class _MarketInsightsCommunityTabState
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _OfficialRegaInsightsCard extends StatefulWidget {
+  const _OfficialRegaInsightsCard();
+
+  @override
+  State<_OfficialRegaInsightsCard> createState() =>
+      _OfficialRegaInsightsCardState();
+}
+
+class _OfficialRegaInsightsCardState extends State<_OfficialRegaInsightsCard> {
+  List<RegaOpenIndicatorHit> _rows = const [];
+  Map<String, int>? _period;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    await RegaOpenIndicatorsService.instance.ensureLoaded();
+    if (!mounted) return;
+    setState(() {
+      _rows = RegaOpenIndicatorsService.instance.topSalesCities();
+      _period = RegaOpenIndicatorsService.instance.salesPeriod();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_rows.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
+    final isAr = Localizations.localeOf(context).languageCode != 'en';
+    final y = _period?['year'];
+    final q = _period?['quarter'];
+    final period = (y != null && q != null) ? '$y · Q$q' : '';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              l10n.marketInsightsOfficialRegaTitle,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${l10n.marketInsightsOfficialRegaHint}${period.isEmpty ? '' : ' · $period'}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            for (final e in _rows)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        LocaleContent.forUi(e.cityAr, isAr: isAr),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    if (e.avgM2 == null)
+                      const Text(
+                        '—',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      )
+                    else
+                      AppMoneyLine(
+                        amount: e.avgM2!.round().toDouble(),
+                        currencyCode: 'SAR',
+                        isAr: isAr,
+                        maxFractionDigits: 0,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'core/platform/app_surface.dart';
 import 'core/platform/viewport_scroll_policy.dart';
 import 'widgets/aqar_desktop_scrollbar.dart';
 
@@ -17,12 +18,14 @@ class AqarScrollBehavior extends MaterialScrollBehavior {
   static const double compactScrollbarBreakpoint =
       ViewportScrollPolicy.compactBreakpoint;
 
-  static bool isCompactTouchLike(BuildContext context) =>
-      ViewportScrollPolicy.isCompactTouchLike(context);
+  static bool isCompactTouchLike(BuildContext context) {
+    final surface = AppSurfaceScope.maybeOf(context);
+    if (surface != null) return surface.isCompact;
+    return ViewportScrollPolicy.isCompactTouchLike(context);
+  }
 
   static bool isLargeScreenScrollbarVisible(BuildContext context) {
-    if (isCompactTouchLike(context)) return false;
-    return true;
+    return ViewportScrollPolicy.showPersistentScrollbar(context);
   }
 
   @override
@@ -31,8 +34,8 @@ class AqarScrollBehavior extends MaterialScrollBehavior {
     Widget child,
     ScrollableDetails details,
   ) {
-    // جوال (تطبيق أو ويب) — تمرير باللمس فقط بدون شريط يلتقط اللمس.
-    if (isCompactTouchLike(context)) {
+    // لمس فقط (جوال/متصفح هاتف): بلا شريط. ماوس/ويندوز: شريط ظاهر.
+    if (!ViewportScrollPolicy.showPersistentScrollbar(context)) {
       return child;
     }
     final controller = details.controller;
@@ -80,7 +83,7 @@ class AqarAuthScrollBehavior extends MaterialScrollBehavior {
     Widget child,
     ScrollableDetails details,
   ) {
-    if (AqarScrollBehavior.isCompactTouchLike(context)) {
+    if (!ViewportScrollPolicy.showPersistentScrollbar(context)) {
       return child;
     }
     final controller = details.controller;
@@ -175,8 +178,16 @@ class AppTheme {
       fillColor: fill,
       isDense: true,
       alignLabelWithHint: true,
-      // عمودي متوازن حتى لا تبدو النقاط/النص أعلى أو أسفل على ويب الجوال.
-      contentPadding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      contentPadding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+      hintStyle: _tajawal(
+        color: isDark
+            ? cs.onSurface.withValues(alpha: 0.72)
+            : cs.onSurfaceVariant,
+        fontSize: 14,
+      ),
+      labelStyle: _tajawal(color: cs.onSurface),
+      prefixIconColor: cs.onSurface,
+      suffixIconColor: cs.onSurface,
       border: ob(BorderSide(color: borderColor, width: 1.25)),
       enabledBorder: ob(BorderSide(color: borderColor, width: 1.25)),
       focusedBorder: ob(BorderSide(color: accent, width: 2)),
@@ -191,11 +202,13 @@ class AppTheme {
     final isLight = cs.brightness == Brightness.light;
     final readableText = isLight ? const Color(0xFF050505) : cs.onSurface;
     final readableMuted =
-        isLight ? const Color(0xFF111111) : cs.onSurfaceVariant;
-    final frameBlend = Color.alphaBlend(
-      accent.withValues(alpha: cs.brightness == Brightness.dark ? 0.32 : 0.24),
-      cs.outlineVariant.withValues(alpha: 0.55),
-    );
+        isLight ? const Color(0xFF111111) : const Color(0xFFE8EEEC);
+    final frameBlend = isLight
+        ? Color.alphaBlend(
+            accent.withValues(alpha: 0.24),
+            cs.outlineVariant.withValues(alpha: 0.55),
+          )
+        : cs.outlineVariant.withValues(alpha: 0.28);
     final base = ThemeData(
       colorScheme: cs,
       useMaterial3: true,
@@ -218,6 +231,7 @@ class AppTheme {
         ),
       ),
       cardTheme: CardThemeData(
+        color: isLight ? cs.surface : cs.surfaceContainerLow,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         clipBehavior: Clip.antiAlias,
@@ -239,6 +253,9 @@ class AppTheme {
         ),
       ),
       dialogTheme: DialogThemeData(
+        backgroundColor: cs.surface,
+        surfaceTintColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
           side: BorderSide(
@@ -246,6 +263,22 @@ class AppTheme {
             width: 1.2,
           ),
         ),
+      ),
+      dataTableTheme: DataTableThemeData(
+        headingTextStyle: _tajawal(
+          color: readableText,
+          fontWeight: FontWeight.w800,
+          fontSize: 13,
+        ),
+        dataTextStyle: _tajawal(
+          color: readableText,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+        headingRowColor: WidgetStatePropertyAll(
+          cs.primary.withValues(alpha: isLight ? 0.08 : 0.16),
+        ),
+        dividerThickness: 0.6,
       ),
       listTileTheme: ListTileThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -333,19 +366,44 @@ class AppTheme {
           ),
         ),
       ),
+      iconTheme: IconThemeData(color: readableText),
+      primaryIconTheme: IconThemeData(color: readableText),
+      dividerColor: isLight
+          ? cs.outlineVariant
+          : cs.outlineVariant.withValues(alpha: 0.45),
       inputDecorationTheme: _inputDecorationTheme(cs, accent: accent),
       textSelectionTheme: TextSelectionThemeData(
         cursorColor: accent,
-        selectionColor: accent.withValues(alpha: isLight ? 0.28 : 0.35),
+        // Highlight glyphs only — low alpha so empty field padding stays unpainted.
+        selectionColor: accent.withValues(alpha: isLight ? 0.16 : 0.26),
         selectionHandleColor: accent,
       ),
       scrollbarTheme: ScrollbarThemeData(
-        thickness: WidgetStateProperty.all(9),
-        radius: const Radius.circular(12),
-        crossAxisMargin: 2,
-        mainAxisMargin: 4,
+        thickness: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.hovered) ||
+              states.contains(WidgetState.dragged)) {
+            return 12.0;
+          }
+          return 8.0;
+        }),
+        radius: const Radius.circular(14),
+        crossAxisMargin: 3,
+        mainAxisMargin: 6,
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          final base = cs.onSurface.withValues(alpha: isLight ? 0.38 : 0.45);
+          if (states.contains(WidgetState.dragged)) {
+            return cs.primary.withValues(alpha: 0.85);
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return cs.onSurface.withValues(alpha: 0.55);
+          }
+          return base;
+        }),
         thumbVisibility: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.dragged)) return true;
+          if (states.contains(WidgetState.dragged) ||
+              states.contains(WidgetState.hovered)) {
+            return true;
+          }
           return null;
         }),
         trackVisibility: WidgetStateProperty.resolveWith((states) => null),
@@ -450,10 +508,16 @@ class AppTheme {
       onPrimary: fromAccent.onPrimary,
       primaryContainer: fromAccent.primaryContainer,
       onPrimaryContainer: fromAccent.onPrimaryContainer,
-      onSurface: const Color(0xFFF3F6F5),
-      onSurfaceVariant: const Color(0xFFD5DEDB),
-      outline: const Color(0xFF9BB0AA),
-      outlineVariant: const Color(0xFF5A6F69),
+      surface: const Color(0xFF071210),
+      surfaceContainerLowest: const Color(0xFF050C0A),
+      surfaceContainerLow: const Color(0xFF0A1614),
+      surfaceContainer: const Color(0xFF0F1C19),
+      surfaceContainerHigh: const Color(0xFF14221C),
+      surfaceContainerHighest: const Color(0xFF1A2C26),
+      onSurface: const Color(0xFFF7FAF8),
+      onSurfaceVariant: const Color(0xFFE8EEEC),
+      outline: const Color(0xFF8AA39C),
+      outlineVariant: const Color(0xFF3D4E4A),
     );
     return _themeFromScheme(cs, accent: accent);
   }

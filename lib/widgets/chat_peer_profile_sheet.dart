@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -30,7 +31,7 @@ Future<void> showChatPeerProfileSheet({
 
   final cs = Theme.of(context).colorScheme;
 
-  await showModalBottomSheet<void>(
+  await showAppModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,

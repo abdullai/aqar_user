@@ -1,14 +1,12 @@
-import 'dart:convert';
-
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier;
 import '../services/org_team_service.dart';
 import '../services/permission_service.dart';
+import '../services/report_service.dart';
 import '../widgets/app_logo_loading.dart';
 
 /// تقارير وإحصائيات الفريق — رسوم بيانية + جدول + تصدير CSV خفيف.
@@ -114,10 +112,7 @@ class _OrganizationAnalyticsScreenState
   Future<void> _exportCsv(AppLocalizations t) async {
     if (_orgId == null) return;
     final isAr = _isAr;
-    final buf = StringBuffer();
-    buf.writeln(
-      '\uFEFFuser_id,name,properties,ads,deals_est',
-    );
+    final rows = <List<String>>[];
     for (final m in _members) {
       final uid = '${m['user_id'] ?? ''}';
       if (uid.isEmpty) continue;
@@ -127,13 +122,27 @@ class _OrganizationAnalyticsScreenState
           ? '${prof['full_name_ar'] ?? prof['username'] ?? uid}'
           : '${prof['full_name_en'] ?? prof['username'] ?? uid}';
       final c = _contrib[uid] ?? {};
-      buf.writeln(
-        '$uid,${jsonEncode(name)},${c['properties'] ?? 0},${c['ads'] ?? 0},${_soldRentEstForUser(uid)}',
-      );
+      rows.add([
+        uid,
+        name,
+        '${c['properties'] ?? 0}',
+        '${c['ads'] ?? 0}',
+        '${_soldRentEstForUser(uid)}',
+      ]);
     }
-    await Share.share(
-      buf.toString(),
-      subject: isAr ? 'تقرير الفريق' : 'Team analytics export',
+    final cfg = ReportConfig(
+      id: 'org_team_$_orgId',
+      title: isAr ? 'تقرير الفريق' : 'Team analytics',
+      columns: isAr
+          ? const ['المستخدم', 'الاسم', 'عقارات', 'إعلانات', 'صفقات تقريبية']
+          : const ['user_id', 'name', 'properties', 'ads', 'deals_est'],
+      rows: rows,
+      filtersDescription: t.deskTabAnalyticsReports,
+    );
+    await ReportService(Supabase.instance.client).exportToCsv(
+      cfg,
+      'org_team_${DateTime.now().millisecondsSinceEpoch}',
+      isAr: isAr,
     );
   }
 

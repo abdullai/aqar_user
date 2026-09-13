@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier, themeModeNotifier;
+import '../core/utils/date_helper.dart';
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
 
@@ -326,10 +327,9 @@ class _OrgMonitorDashboardPageState extends State<OrgMonitorDashboardPage> {
                                             if (i < 0 || i >= dayKeys.length) {
                                               return const SizedBox.shrink();
                                             }
-                                            // عرض يوم/شهر فقط
                                             final parts = dayKeys[i].split('-');
                                             final label = parts.length >= 3
-                                                ? '${parts[2]}/${parts[1]}'
+                                                ? '${parts[0]}/${parts[1]}/${parts[2]}'
                                                 : dayKeys[i];
                                             return Padding(
                                               padding: const EdgeInsets.only(top: 8),
@@ -702,7 +702,7 @@ class _OrgMonitorDashboardPageState extends State<OrgMonitorDashboardPage> {
                                     ),
                                     subtitle: Text(
                                       '${_isOwner ? '${_nameForActor('${r['actor_user_id'] ?? ''}')} · ' : ''}'
-                                      '${r['created_at'] ?? ''}\n'
+                                      '${DateHelper.fmtCivilDateTimeRaw(r['created_at'], isAr: _isAr)}\n'
                                       '${r['entity_type'] ?? ''} ${r['entity_id'] ?? ''}',
                                     ),
                                     isThreeLine: true,

@@ -3,11 +3,13 @@ import 'dart:async' show unawaited;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/app_branding.dart';
 import '../core/navigation/web_bootstrap_diag.dart';
 import '../core/navigation/web_interaction_recovery.dart';
+import '../core/utils/app_money.dart';
 import '../l10n/app_localizations.dart';
 import '../services/properties_home_feed_service.dart';
 
@@ -161,7 +163,7 @@ class _WebGuestDashboardState extends State<WebGuestDashboard> {
   Future<void> _requireAuth(String featureAr, String featureEn) async {
     _onProbeTap();
     if (!mounted) return;
-    final go = await showModalBottomSheet<bool>(
+    final go = await showAppModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -230,7 +232,7 @@ class _WebGuestDashboardState extends State<WebGuestDashboard> {
     _onProbeTap();
     if (!mounted) return;
     final cs = Theme.of(context).colorScheme;
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showAppModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -584,10 +586,11 @@ class _GuestListingCard extends StatelessWidget {
                   ],
                   if (item.price > 0) ...[
                     const SizedBox(height: 8),
-                    Text(
-                      isAr
-                          ? '${item.price.toStringAsFixed(0)} ر.س'
-                          : '${item.price.toStringAsFixed(0)} SAR',
+                    AppMoneyLine(
+                      amount: item.price,
+                      currencyCode: 'SAR',
+                      isAr: isAr,
+                      maxFractionDigits: 0,
                       style: TextStyle(
                         color: cs.primary,
                         fontWeight: FontWeight.w900,

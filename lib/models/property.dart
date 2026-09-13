@@ -1,4 +1,5 @@
 import '../core/workflow/listing_workflow_stage.dart';
+import '../core/listing/in_app_tour.dart';
 import '../core/listing/property_type_catalog.dart';
 
 enum PropertyType { villa, apartment, land }
@@ -41,13 +42,8 @@ class Property {
   final double area;
 
   /// المبلغ الذي أدخله المعلن في حقل «السعر الإجمالي».
-  /// — قاعدة العرض الموحّدة لكل **بطاقات الإعلان العقاري** في التطبيق
-  ///   (الرئيسية، صفحتي، إعلاناتي/طلباتي للمسوّق، السلة، صفقاتي، نتائج البحث،
-  ///   وأي مكان آخر فيه بطاقة): تُعرض قيمة `price` كما أدخلها المعلن **دون**
-  ///   إضافة أو خصم أي ضريبة أو عمولة تسويق.
-  /// — تفصيل الفاتورة (الأساسي/الضريبة/العمولة/المجموع النهائي) يُعرض **فقط**
-  ///   داخل صفحة تفاصيل الإعلان عند الضغط على البطاقة، وفي صفحات الفوترة
-  ///   والإيصالات. لاستخراج المبلغ النهائي استخدم `finalTotalPrice`.
+  /// بطاقات الإعلان: [displayTotalPrice] (يشمل تفصيل الفاتورة إن وُجد).
+  /// الفاتورة/التفاصيل: [finalTotalPrice].
   final double price;
 
   /// هل `price` يحوي ضريبة القيمة المضافة 5%؟
@@ -87,11 +83,20 @@ class Property {
   /// تاريخ النشر الفعلي إن وجد
   final DateTime? publishedAt;
 
-  /// هل يسمح المعلن بإظهار اسمه
+  /// هل يسمح المعلن بإظهار اسمه في السوق (اختياري عند الإضافة).
   final bool showAdvertiserName;
 
   /// طلب المالك إظهار اسمه حتى لو عطّل المسوق [showAdvertiserName].
   final bool ownerRequestsPublicName;
+
+  /// الاسم المعتمد أو المستعار المختار للسوق (إن وُجد).
+  final String? advertiserPublicName;
+
+  /// `official` أو `display` — مصدر [advertiserPublicName].
+  final String? publisherPublicNameSource;
+
+  /// إظهار «متصل الآن / آخر ظهور» على بطاقة السوق.
+  final bool publisherPublishPresence;
 
   final double? latitude;
   final double? longitude;
@@ -163,6 +168,7 @@ class Property {
   final DateTime? inactive72hAt;
   final DateTime? cancelledAt;
   final DateTime? terminatedAt;
+  final DateTime? soldAt;
 
   /// الغرض من الإعلان (بيع، إيجار، مزاد، استثمار...)
   final String? purpose;
@@ -221,6 +227,34 @@ class Property {
       (videoUrl ?? '').trim().isNotEmpty &&
       (images.isEmpty || coverPrimaryPrefersVideo);
 
+  bool get hasInAppVirtualTour =>
+      InAppTour.fromGuidance(listingGuidance)?.isNotEmpty == true;
+
+  bool get showsVirtualTourBadge =>
+      hasInAppVirtualTour || (virtualTourUrl ?? '').trim().isNotEmpty;
+
+  bool get needsPhotographerShoot {
+    final st = (listingGuidance?['photo_shoot_status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    return st == 'pending' || st == 'accepted' || st == 'in_progress';
+  }
+
+  String photographerShootBadge({required bool isAr}) {
+    final st = (listingGuidance?['photo_shoot_status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    if (st == 'accepted' || st == 'in_progress') {
+      return isAr ? 'جاري التصوير' : 'Shoot in progress';
+    }
+    return isAr ? 'بانتظار قبول المصور' : 'Awaiting photographer';
+  }
+
+  DateTime get completedDealAt =>
+      soldAt ?? terminatedAt ?? publishedAt ?? createdAt;
+
   /// أوّل صورة مُخزَّنة كرابط شبكة مباشر (`http/https`) في [images] إن وُجدت.
   /// للمسارات النسبية في التخزين: حوّلها إلى رابط عام عبر دلو `property-images` في Supabase.
   String? get primaryNetworkImageUrl {
@@ -259,8 +293,11 @@ class Property {
     this.province,
     this.location,
     this.publishedAt,
-    this.showAdvertiserName = true,
+    this.showAdvertiserName = false,
     this.ownerRequestsPublicName = false,
+    this.advertiserPublicName,
+    this.publisherPublicNameSource,
+    this.publisherPublishPresence = false,
     this.latitude,
     this.longitude,
     this.currentBid,
@@ -314,6 +351,7 @@ class Property {
     this.inactive72hAt,
     this.cancelledAt,
     this.terminatedAt,
+    this.soldAt,
     this.purpose,
     this.deedNumber,
     this.deedDate,
@@ -328,9 +366,11 @@ class Property {
   bool get canShowAdvertiserName =>
       showAdvertiserName || ownerRequestsPublicName;
 
-  /// اسم المعلن الظاهر
+  /// اسم المعلن الظاهر في السوق (المستعار أو المعتمد المختار) — لا يُستخدم للجوال.
   String get visibleAdvertiserName {
     if (!canShowAdvertiserName) return '';
+    final pub = (advertiserPublicName ?? '').trim();
+    if (pub.isNotEmpty) return pub;
     return (ownerDisplayName ?? '').trim();
   }
 
@@ -342,6 +382,10 @@ class Property {
     if (snap == null || snap.isEmpty) return null;
 
     const nameKeys = <String>[
+      'marketer_quad_name_ar',
+      'marketer_quad_name_en',
+      'marketer_full_name_ar',
+      'marketer_full_name_en',
       'marketer_entity_display_name',
       'marketer_display_name',
       'marketer_office_name',
@@ -357,6 +401,37 @@ class Property {
       'fal_entity_name',
       'entity_name',
     ];
+
+    String quadFromParts(List<String> keys) {
+      final parts = <String>[];
+      for (final k in keys) {
+        final s = snap[k]?.toString().trim() ?? '';
+        if (s.isNotEmpty) parts.add(s);
+      }
+      return parts.join(' ').trim();
+    }
+
+    if (isAr) {
+      final arQuad = quadFromParts(const [
+        'first_name_ar',
+        'second_name_ar',
+        'third_name_ar',
+        'fourth_name_ar',
+        'marketer_first_name_ar',
+        'marketer_second_name_ar',
+        'marketer_third_name_ar',
+        'marketer_fourth_name_ar',
+      ]);
+      if (arQuad.isNotEmpty) return arQuad;
+    } else {
+      final enQuad = quadFromParts(const [
+        'first_name_en',
+        'second_name_en',
+        'third_name_en',
+        'fourth_name_en',
+      ]);
+      if (enQuad.isNotEmpty) return enQuad;
+    }
 
     for (final k in nameKeys) {
       final s = snap[k]?.toString().trim();
@@ -429,12 +504,11 @@ class Property {
   ///   والإيصالات فقط حسب القاعدة الموحَّدة لعرض الأسعار.
   double get finalTotalPrice => _round2(totalWithVat + marketingCommissionTotal);
 
-  /// السعر المعروض على **كل** بطاقات الإعلان في التطبيق (الرئيسية، صفحتي،
-  /// إعلاناتي/طلباتي للمسوّق، السلة، صفقاتي، نتائج البحث، …).
-  /// — قيمة `price` نفسها (المبلغ الذي أدخله المعلن في حقل «السعر الإجمالي»)،
-  ///   دون أي إضافة أو خصم لضريبة أو عمولة. تفصيل الفاتورة يظهر فقط داخل
-  ///   صفحة تفاصيل الإعلان وفي الإيصالات.
-  double get displayTotalPrice => price.toDouble();
+  /// السعر المعروض على بطاقات الإعلان عندما يكون للعقار تفصيل فاتورة محفوظ.
+  /// يطابق [finalTotalPrice] حتى لا تبدو البطاقة أرخص من صفحة التفاصيل.
+  /// إن لم تُحفظ ضريبة/عمولة على الصف، يبقى [price] كما أدخله المعلن.
+  double get displayTotalPrice =>
+      hasInvoiceDetails ? finalTotalPrice : price.toDouble();
 
   /// المرادف الواضح لقاعدة عرض البطاقات (نفس `displayTotalPrice`).
   /// — يُترك للأماكن التي تحتاج تسمية صريحة («سعر بطاقة الرئيسية»).
@@ -527,18 +601,27 @@ class Property {
   /// هل الإعلان مؤرشف
   bool get isArchived => isDeletedLike;
 
-  /// عرض الموقع: المنطقة - المحافظة - المدينة - الحي
+  /// عرض الموقع: المنطقة - المدينة - الحي (حسب المتوفر؛ المحافظة إن غابت المدينة).
   String get locationText {
     final reg = (region ?? '').trim();
     final prov = (province ?? '').trim();
     final cityValue = city.trim();
     final loc = (location ?? '').trim();
 
+    final seen = <String>{};
     final parts = <String>[];
-    if (reg.isNotEmpty) parts.add(reg);
-    if (prov.isNotEmpty) parts.add(prov);
-    if (cityValue.isNotEmpty) parts.add(cityValue);
-    if (loc.isNotEmpty) parts.add(loc);
+    void add(String? raw) {
+      final t = (raw ?? '').trim();
+      if (t.isEmpty) return;
+      final key = t.toLowerCase();
+      if (!seen.add(key)) return;
+      parts.add(t);
+    }
+
+    add(reg);
+    if (cityValue.isEmpty) add(prov);
+    add(cityValue);
+    add(loc);
 
     return parts.join(' - ');
   }
@@ -703,6 +786,7 @@ class Property {
     dynamic images,
     dynamic imageUrls, {
     dynamic legacyImageUrl,
+    dynamic listingGuidance,
   }) {
     final out = <String>[];
 
@@ -765,6 +849,27 @@ class Property {
       if (u.isNotEmpty) out.add(u);
     }
 
+    if (out.isEmpty) {
+      final g = _objectMap(listingGuidance);
+      if (g != null) {
+        for (final k in const [
+          'image_paths',
+          'request_image_paths',
+          'images',
+          'image_urls',
+        ]) {
+          final raw = g[k];
+          if (raw is List) {
+            for (final e in raw) {
+              final s = e.toString().trim();
+              if (s.isNotEmpty) out.add(s);
+            }
+            if (out.isNotEmpty) break;
+          }
+        }
+      }
+    }
+
     return out;
   }
 
@@ -808,6 +913,7 @@ class Property {
       json['images'],
       json['image_urls'],
       legacyImageUrl: json['image_url'],
+      listingGuidance: json['listing_guidance'],
     );
     if (imgs.isEmpty) {
       final primary = (json['primary_image'] ?? json['primaryImage'] ?? '')
@@ -858,9 +964,14 @@ class Property {
       publishedAt: _tryParseDt(json['published_at']),
       showAdvertiserName: _toBool(json['show_advertiser_name']) ??
           _toBool(json['show_owner_name']) ??
-          true,
+          false,
       ownerRequestsPublicName:
           _toBool(json['owner_requests_public_name']) ?? false,
+      advertiserPublicName: _trimOrNull(json['advertiser_public_name']),
+      publisherPublicNameSource:
+          _trimOrNull(json['publisher_public_name_source']),
+      publisherPublishPresence:
+          _toBool(json['publisher_publish_presence']) ?? false,
       latitude: _toDouble(json['latitude']),
       longitude: _toDouble(json['longitude']),
       bedrooms: _toInt(json['bedrooms']),
@@ -872,8 +983,12 @@ class Property {
       totalFloors: _toInt(json['total_floors']),
       amenities: _toBoolMap(json['amenities']),
       videoUrl: _trimOrNull(json['video_url']) ??
-          _firstVideoFromPropertyImages(json['property_images']),
-      virtualTourUrl: _trimOrNull(json['virtual_tour_url']),
+          _firstVideoFromPropertyImages(json['property_images']) ??
+          _trimOrNull(_objectMap(json['listing_guidance'])?['video_path']) ??
+          _trimOrNull(_objectMap(json['listing_guidance'])?['video_url']),
+      virtualTourUrl: _trimOrNull(json['virtual_tour_url']) ??
+          _trimOrNull(
+              _objectMap(json['listing_guidance'])?['virtual_tour_url']),
       contactPhone: _trimOrNull(json['contact_phone']),
       availabilityDate: _tryParseDt(json['availability_date']),
       purpose: _trimOrNull(json['purpose']),
@@ -935,6 +1050,7 @@ class Property {
       inactive72hAt: _tryParseDt(json['inactive_72h_at']),
       cancelledAt: _tryParseDt(json['cancelled_at']),
       terminatedAt: _tryParseDt(json['terminated_at']),
+      soldAt: _tryParseDt(json['sold_at']),
     );
   }
 
@@ -970,6 +1086,7 @@ class Property {
             map['images'],
             map['image_urls'],
             legacyImageUrl: map['image_url'],
+            listingGuidance: map['listing_guidance'],
           );
 
     return Property(
@@ -1008,9 +1125,14 @@ class Property {
       publishedAt: _tryParseDt(map['published_at']),
       showAdvertiserName: _toBool(map['show_advertiser_name']) ??
           _toBool(map['show_owner_name']) ??
-          true,
+          false,
       ownerRequestsPublicName:
           _toBool(map['owner_requests_public_name']) ?? false,
+      advertiserPublicName: _trimOrNull(map['advertiser_public_name']),
+      publisherPublicNameSource:
+          _trimOrNull(map['publisher_public_name_source']),
+      publisherPublishPresence:
+          _toBool(map['publisher_publish_presence']) ?? false,
       latitude: _toDouble(map['latitude']),
       longitude: _toDouble(map['longitude']),
       bedrooms: _toInt(map['bedrooms']),
@@ -1022,8 +1144,11 @@ class Property {
       totalFloors: _toInt(map['total_floors']),
       amenities: _toBoolMap(map['amenities']),
       videoUrl: _trimOrNull(map['video_url']) ??
-          _firstVideoFromPropertyImages(map['property_images']),
-      virtualTourUrl: _trimOrNull(map['virtual_tour_url']),
+          _firstVideoFromPropertyImages(map['property_images']) ??
+          _trimOrNull(_objectMap(map['listing_guidance'])?['video_path']) ??
+          _trimOrNull(_objectMap(map['listing_guidance'])?['video_url']),
+      virtualTourUrl: _trimOrNull(map['virtual_tour_url']) ??
+          _trimOrNull(_objectMap(map['listing_guidance'])?['virtual_tour_url']),
       contactPhone: _trimOrNull(map['contact_phone']),
       availabilityDate: _tryParseDt(map['availability_date']),
       purpose: _trimOrNull(map['purpose']),
@@ -1085,6 +1210,7 @@ class Property {
       inactive72hAt: _tryParseDt(map['inactive_72h_at']),
       cancelledAt: _tryParseDt(map['cancelled_at']),
       terminatedAt: _tryParseDt(map['terminated_at']),
+      soldAt: _tryParseDt(map['sold_at']),
     );
   }
 
@@ -1122,6 +1248,9 @@ class Property {
     DateTime? publishedAt,
     bool? showAdvertiserName,
     bool? ownerRequestsPublicName,
+    String? advertiserPublicName,
+    String? publisherPublicNameSource,
+    bool? publisherPublishPresence,
     double? latitude,
     double? longitude,
     String? addressLine,
@@ -1170,6 +1299,7 @@ class Property {
     DateTime? inactive72hAt,
     DateTime? cancelledAt,
     DateTime? terminatedAt,
+    DateTime? soldAt,
     String? purpose,
     String? deedNumber,
     DateTime? deedDate,
@@ -1217,6 +1347,11 @@ class Property {
       showAdvertiserName: showAdvertiserName ?? this.showAdvertiserName,
       ownerRequestsPublicName:
           ownerRequestsPublicName ?? this.ownerRequestsPublicName,
+      advertiserPublicName: advertiserPublicName ?? this.advertiserPublicName,
+      publisherPublicNameSource:
+          publisherPublicNameSource ?? this.publisherPublicNameSource,
+      publisherPublishPresence:
+          publisherPublishPresence ?? this.publisherPublishPresence,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       addressLine: addressLine ?? this.addressLine,
@@ -1269,6 +1404,7 @@ class Property {
       inactive72hAt: inactive72hAt ?? this.inactive72hAt,
       cancelledAt: cancelledAt ?? this.cancelledAt,
       terminatedAt: terminatedAt ?? this.terminatedAt,
+      soldAt: soldAt ?? this.soldAt,
       purpose: purpose ?? this.purpose,
       deedNumber: deedNumber ?? this.deedNumber,
       deedDate: deedDate ?? this.deedDate,

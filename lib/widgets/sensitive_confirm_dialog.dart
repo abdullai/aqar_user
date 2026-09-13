@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 
 /// حوار موحّد لخطوات لا رجعة فيها أو حساسة — النصوص من الترجمة.
 Future<bool?> showSensitiveConfirmDialog({
@@ -11,7 +12,7 @@ Future<bool?> showSensitiveConfirmDialog({
   String? cancelLabel,
 }) {
   final t = AppLocalizations.of(context);
-  return showDialog<bool>(
+  return showAppDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) {

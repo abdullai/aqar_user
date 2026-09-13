@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../main.dart' show langNotifier;
@@ -9,7 +10,7 @@ Future<bool?> showTeamInviteMemberDialog(
   BuildContext context, {
   required OrgTeamService svc,
 }) {
-  return showDialog<bool>(
+  return showAppDialog<bool>(
     context: context,
     builder: (ctx) => _TeamInviteMemberDialog(svc: svc),
   );

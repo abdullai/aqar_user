@@ -7,14 +7,14 @@ import 'package:flutter/material.dart';
 @immutable
 abstract final class InactivityPolicy {
   /// مدة بدون تفاعل قبل إظهار التنبيه.
-  static const Duration idleBeforePrompt = Duration(minutes: 5);
+  static const Duration idleBeforePrompt = Duration(minutes: 3);
 
   /// عدّ تنازلي بالثواني ثم قفل أو تسجيل خروج إن لم يُجب المستخدم.
   static const Duration promptCountdown = Duration(minutes: 1);
 
-  /// ويب وسطح المكتب: عدّاد أوضح قبل الخروج التلقائي.
+  /// ويب وسطح المكتب: نفس مهلة الخمول ثم نافذة العدّ.
   static const Duration webDesktopAutoLogoutCountdown = Duration(seconds: 60);
 
-  /// ويب/سطح مكتب: مدة خمول قبل تنبيه القفل (أقصر حتى تظهر النافذة فعلياً).
-  static const Duration webDesktopIdleBeforeLock = Duration(minutes: 10);
+  /// ويب/سطح مكتب: ثلاث دقائق بدون تفاعل ثم تظهر نافذة العدّاد.
+  static const Duration webDesktopIdleBeforeLock = Duration(minutes: 3);
 }

@@ -1,16 +1,21 @@
+// ignore_for_file: unused_element
+
 import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/branding_logo_image.dart';
-import '../core/listing/listing_media_urls.dart';
+import '../core/gestures/app_keyboard_inset.dart';
 import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/marketing_subscription_access.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../core/marketing/listing_request_marketing_price.dart';
+import '../core/listing/offer_identity_tag.dart';
+import '../core/profile/publisher_identity_prefs.dart';
 import '../core/utils/app_money.dart';
 import '../core/marketing/marketing_offer_fee.dart';
 import '../core/workflow/listing_workflow_copy.dart';
@@ -26,6 +31,8 @@ import '../screens/settings_page.dart';
 import '../screens/subscriptions/subscriptions_root_screen.dart';
 import 'app_shimmer.dart';
 import 'listing_pricing_breakdown.dart';
+import 'aqar_text_field.dart';
+import 'app_page_close_button.dart';
 
 /// نموذج موحّد: أتعاب التسويق من [MarketingOfferFee] على (قيمة العقار + ضريبة 5٪ على العقار).
 /// يُستخدم داخل حوار منبثق أو [SubmitOfferPage].
@@ -82,6 +89,9 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
   /// زر «إشعار آخر للمالك» بعد 48 ساعة بحسب RPC الخادم.
   Map<String, dynamic>? _liveOffer;
   String? _loadError;
+  PublicNameSource _offerNameSource = PublicNameSource.official;
+  String _offerOfficialName = '';
+  String _offerAliasName = '';
 
   static const Color _brandTeal = Color(0xFF0F766E);
 
@@ -127,10 +137,16 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
       final prop = _svc.linkedPropertyForListingRequest(widget.requestId);
       final results = await Future.wait<Object?>([req, live, prop]);
       if (!mounted) return;
+      await PublisherIdentityPrefs.instance.ensureLoaded();
+      if (!mounted) return;
+      final id = PublisherIdentityPrefs.instance;
       setState(() {
         _request = results[0] as Map<String, dynamic>?;
         _liveOffer = results[1] as Map<String, dynamic>?;
         _linkedProperty = results[2] as Map<String, dynamic>?;
+        _offerNameSource = id.nameSource;
+        _offerOfficialName = id.officialName(isAr: widget.isAr);
+        _offerAliasName = id.aliasName(isAr: widget.isAr);
         _loading = false;
       });
     } catch (e) {
@@ -427,10 +443,21 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
 
     setState(() => _submitting = true);
     try {
+      final resolvedName = _offerNameSource == PublicNameSource.display
+          ? (_offerAliasName.trim().isNotEmpty
+              ? _offerAliasName.trim()
+              : _offerOfficialName.trim())
+          : (_offerOfficialName.trim().isNotEmpty
+              ? _offerOfficialName.trim()
+              : _offerAliasName.trim());
       await _svc.marketerSubmitOffer(
         requestId: widget.requestId,
         price: total,
-        notes: _notes.text.trim(),
+        notes: OfferIdentityTag.wrap(
+          source: _offerNameSource,
+          displayName: resolvedName,
+          notes: _notes.text.trim(),
+        ),
       );
       final iid = (widget.inviteId ?? '').trim();
       if (iid.isNotEmpty) {
@@ -872,14 +899,6 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
     final wf = _wfCtx;
     final blocked = _blockedExplanation();
     final autoBase = _basePropertySar;
-    final base = _effectiveBaseSar;
-    final propVat = base > 0 ? MarketingOfferFee.propertyVatAmount(base) : 0.0;
-    final subtotal =
-        base > 0 ? MarketingOfferFee.propertySubtotalWithVat(base) : 0.0;
-    final fee = base > 0 ? MarketingOfferFee.marketingFeeAmount(base) : 0.0;
-    final total = base > 0 ? MarketingOfferFee.totalDue(base) : 0.0;
-    final feePctLabel =
-        MarketingOfferFee.commissionPercentLabel(isAr: widget.isAr);
 
     Widget body;
     if (_loading) {
@@ -956,8 +975,7 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
                 ),
                 const SizedBox(height: 10),
               ],
-              _buildPropertySnapshot(cs),
-              const SizedBox(height: 14),
+              const SizedBox(height: 8),
 
               // ---------------------------------------------------------------
               // مسارات العرض الثلاثة:
@@ -1009,51 +1027,89 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
                       'Property price is missing on this request. The owner must set it first, then you can submit the offer automatically.',
                     ),
                   ),
-                if (base > 0) ...[
-                  Text(
-                    ListingWorkflowCopy.t(
-                      widget.isAr,
-                      'تفصيل الفاتورة (مطابق لإعدادات المعلن)',
-                      'Invoice breakdown (matches advertiser settings)',
-                    ),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  // — لوحة الفاتورة المركزية تتكيّف مع الشاشات الصغيرة (بدون
-                  //   التفاف للنصوص) وتعكس فعلياً اختيار المعلن (شامل/غير شامل
-                  //   الضريبة، عمولة نسبة 2.5% أو مبلغ مقطوع، أو بدون عمولة).
-                  Builder(builder: (ctx) {
-                    final inv = _listingInvoice;
-                    if (inv == null) {
-                      // إعلان قديم بدون أعمدة فوترة — نعرض النموذج القديم
-                      // (2.5% من المجموع شامل ضريبة) كاحتياطي.
-                      return _legacyFeeBox(
-                        cs: cs,
-                        base: base,
-                        propVat: propVat,
-                        subtotal: subtotal,
-                        fee: fee,
-                        total: total,
-                        feePctLabel: feePctLabel,
-                      );
-                    }
-                    return ListingPricingBreakdown(
-                      invoice: inv,
-                      isAr: widget.isAr,
-                      showTitle: false,
-                    );
-                  }),
-                ],
                 const SizedBox(height: 18),
-                // — زر «إرسال العرض» وحده — الحقل النصّي وتفاصيل «الإجمالي
-                //   المستحق» حُذفت بناءً على طلب المستخدم: الفاتورة كافية
-                //   لإيصال المبلغ، ولا حاجة لملاحظات نصّية على المالك في هذه
-                //   المرحلة (يبقى الزرّ نفسه ليُرسل العرض بقيمة العمولة
-                //   المحسوبة تلقائياً من إعدادات الإعلان).
+                Text(
+                  ListingWorkflowCopy.t(
+                    widget.isAr,
+                    'كيف يظهر اسمك للمالك عند تقديم العرض',
+                    'How your name appears to the owner on this offer',
+                  ),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  ListingWorkflowCopy.t(
+                    widget.isAr,
+                    'الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة، أو الاسم المستعار. رقم الجوال والدردشة لا يظهران إلا بعد موافقة المالك في تبويب التعاقد وتبويب التصريح.',
+                    'Official quad / office / institution / company name, or an alias. Phone and chat stay hidden until the owner accepts — then in contracting and permit tabs.',
+                  ),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SegmentedButton<PublicNameSource>(
+                  segments: [
+                    ButtonSegment(
+                      value: PublicNameSource.official,
+                      label: Text(
+                        widget.isAr ? 'المعتمد' : 'Official',
+                        maxLines: 1,
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: PublicNameSource.display,
+                      label: Text(
+                        widget.isAr ? 'المستعار' : 'Alias',
+                        maxLines: 1,
+                      ),
+                    ),
+                  ],
+                  selected: {_offerNameSource},
+                  onSelectionChanged: (s) {
+                    if (s.isEmpty) return;
+                    setState(() => _offerNameSource = s.first);
+                  },
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _offerNameSource == PublicNameSource.official
+                      ? (widget.isAr
+                          ? 'سيظهر: ${_offerOfficialName.trim().isEmpty ? '—' : _offerOfficialName}'
+                          : 'Shows: ${_offerOfficialName.trim().isEmpty ? '—' : _offerOfficialName}')
+                      : (widget.isAr
+                          ? 'سيظهر: ${_offerAliasName.trim().isEmpty ? '—' : _offerAliasName}'
+                          : 'Shows: ${_offerAliasName.trim().isEmpty ? '—' : _offerAliasName}'),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: cs.primary,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                AqarTextField(
+                  controller: _notes,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  minLines: 3,
+                  maxLines: 8,
+                  decoration: InputDecoration(
+                    labelText: ListingWorkflowCopy.offerNotesToOwnerLabel(
+                      widget.isAr,
+                    ),
+                    hintText: ListingWorkflowCopy.offerNotesToOwnerHint(
+                      widget.isAr,
+                    ),
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 18),
                 FilledButton(
                   onPressed: (_submitting || _effectiveBaseSar <= 0)
                       ? null
@@ -1322,7 +1378,7 @@ Future<void> showMarketingOfferSubmitSheet(
       ProfileComplianceService.needsSignature(profile)) {
     if (!context.mounted) return;
     final lang = isAr ? 'ar' : 'en';
-    final choice = await showDialog<String>(
+    final choice = await showAppDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
@@ -1382,18 +1438,18 @@ Future<void> showMarketingOfferSubmitSheet(
   }
 
   if (!context.mounted) return;
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: true,
     builder: (ctx) {
       final mq = MediaQuery.of(ctx);
       final w = mq.size.width;
       final h = mq.size.height;
-      final viewInsets = MediaQuery.viewInsetsOf(ctx);
+      final kb = AppKeyboardInset.bottomOf(ctx);
       final padding = MediaQuery.paddingOf(ctx);
       // مساحة فعلية مع لوحة المفاتيح (جوال/ويب) حتى لا يُقصّ زر الإرسال.
       final availableH =
-          (h - viewInsets.vertical - padding.vertical).clamp(240.0, 2000.0);
+          (h - kb - padding.vertical).clamp(240.0, 2000.0);
       final sidePad = w < 400 ? 10.0 : 20.0;
       final maxW = math.min(560.0, w - sidePad * 2);
       final maxH = math.min(availableH * 0.94, 820.0);
@@ -1402,7 +1458,7 @@ Future<void> showMarketingOfferSubmitSheet(
           sidePad,
           10,
           sidePad,
-          10 + viewInsets.bottom,
+          10 + kb,
         ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         clipBehavior: Clip.antiAlias,
@@ -1436,10 +1492,9 @@ Future<void> showMarketingOfferSubmitSheet(
                           textAlign: isAr ? TextAlign.right : TextAlign.left,
                         ),
                       ),
-                      IconButton(
+                      AppPageCloseButton(
                         tooltip: ListingWorkflowCopy.t(isAr, 'إغلاق', 'Close'),
                         onPressed: () => Navigator.of(ctx).pop(),
-                        icon: const Icon(Icons.close),
                       ),
                     ],
                   ),

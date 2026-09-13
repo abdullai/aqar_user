@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 
 import '../core/presence/presence_display_prefs.dart';
 import '../screens/settings_page.dart';
@@ -19,7 +20,7 @@ class PresenceFeatureInfoButton extends StatelessWidget {
     await prefs.ensureLoaded();
     if (!context.mounted) return;
 
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,

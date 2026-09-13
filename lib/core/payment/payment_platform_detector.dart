@@ -5,14 +5,18 @@ import '../../services/payment_service.dart';
 import '../platform/viewport_scroll_policy.dart';
 import '../security/web_user_agent.dart';
 
+/// الاسم المطلوب في مواصفات الدفع — نفس كاشف المنصة الحالي (لا نسخة ثانية).
+typedef PaymentCapabilityDetector = PaymentPlatformDetector;
+
 /// طرق الدفع الذكية — مصدر واحد للحقيقة.
 enum SmartPaymentMethod {
   savedCard,
-  googlePay,
   applePay,
-  stcPay,
+  samsungPay,
   mada,
   newCardMoyasar,
+  googlePay,
+  stcPay,
   tabby,
   tamara,
 }
@@ -46,7 +50,7 @@ class PaymentPlatformDetector {
 
   static bool get moyasarEnabled => PaymentService.useMoyasarLiveFlow;
 
-  /// واجهة دفع متاحة: ميسّر الحي، أو الوضع التجريبي المحلي.
+  /// واجهة دفع متاحة عند تفعيل ميسّر أو بوابة الجهاز.
   static bool get paymentsUiEnabled =>
       moyasarEnabled || PaymentService.allowMockGateway;
 
@@ -127,42 +131,36 @@ class PaymentPlatformDetector {
   static bool isChromiumBrowser() =>
       browser == BrowserType.chrome || browser == BrowserType.edge;
 
-  /// Google Pay — تطبيق Android، أو Chrome/Edge على الويب (سطح مكتب/جوال).
-  static bool supportsGooglePay() {
-    if (!paymentsUiEnabled) return false;
-    if (isAndroidApp) return true;
-    if (kIsWeb && isChromiumBrowser()) return true;
-    return false;
-  }
+  /// Google Pay — غير مفعّل حتى يوجد مصدر Moyasar حقيقي (لا خلط مع Samsung Pay).
+  static bool supportsGooglePay() => false;
 
-  /// Apple Pay — تطبيق iOS/iPad، أو Safari على الويب (iPhone/iPad/macOS).
+  /// Apple Pay — تطبيق iOS/iPad، أو Safari، مع Merchant ID مضبوط.
   static bool supportsApplePay() {
     if (!paymentsUiEnabled) return false;
+    final merchant = PaymentService.moyasarApplePayMerchantId;
+    if (merchant == null || merchant.isEmpty) return false;
     if (isIosApp) return true;
     if (kIsWeb && browser == BrowserType.safari) return true;
     return false;
   }
 
-  /// STC Pay — تطبيق Android فقط، أو Chrome/Edge على ويب جوال Android (ليس iOS).
-  static bool supportsStcPay() {
-    if (!paymentsUiEnabled) return false;
-    if (isAndroidApp) return true;
-    if (kIsWeb && isMobileWeb()) {
-      final ua = _ua();
-      return ua.contains('android') && isChromiumBrowser();
-    }
-    return false;
+  /// Samsung Pay — أندرويد أصلي فقط مع Service ID من Moyasar.
+  static bool supportsSamsungPay() {
+    if (!moyasarEnabled) return false;
+    if (!isAndroidApp) return false;
+    final sid = PaymentService.moyasarSamsungPayServiceId;
+    return sid != null && sid.isNotEmpty;
   }
 
-  /// مدى — متاحة في كل البيئات عند تفعيل الدفع (ميسّر أو تجريبي).
+  /// STC Pay — لا يُعرض بدون مسار مصدر حقيقي.
+  static bool supportsStcPay() => false;
+
+  /// مدى — شبكة داخل نموذج البطاقة، وليست محفظة منفصلة.
   static bool supportsMada() => paymentsUiEnabled;
 
-  /// Tabby / Tamara — تطبيقات أصلية فقط مع ميسّر الحي (شركاء BNPL لاحقاً).
-  static bool supportsTabby() =>
-      moyasarEnabled && (isAndroidApp || isIosApp);
+  static bool supportsTabby() => false;
 
-  static bool supportsTamara() =>
-      moyasarEnabled && (isAndroidApp || isIosApp);
+  static bool supportsTamara() => false;
 
   /// ترتيب طرق الدفع بدون تكرار — لا Apple Pay مرتين على Safari iOS.
   static List<SmartPaymentMethod> prioritizedMethods({
@@ -179,13 +177,9 @@ class PaymentPlatformDetector {
     if (moyasarEnabled && hasSavedCard && savedCardReady) {
       out.add(SmartPaymentMethod.savedCard);
     }
-    if (supportsGooglePay()) out.add(SmartPaymentMethod.googlePay);
     if (supportsApplePay()) out.add(SmartPaymentMethod.applePay);
-    if (supportsStcPay()) out.add(SmartPaymentMethod.stcPay);
-    if (supportsMada()) out.add(SmartPaymentMethod.mada);
+    if (supportsSamsungPay()) out.add(SmartPaymentMethod.samsungPay);
     out.add(SmartPaymentMethod.newCardMoyasar);
-    if (supportsTabby()) out.add(SmartPaymentMethod.tabby);
-    if (supportsTamara()) out.add(SmartPaymentMethod.tamara);
 
     return out.toSet().toList();
   }
@@ -198,6 +192,8 @@ class PaymentPlatformDetector {
         return 'google_pay';
       case SmartPaymentMethod.applePay:
         return 'apple_pay';
+      case SmartPaymentMethod.samsungPay:
+        return 'samsung_pay';
       case SmartPaymentMethod.stcPay:
         return 'stc_pay';
       case SmartPaymentMethod.mada:
@@ -219,12 +215,14 @@ class PaymentPlatformDetector {
         return 'Google Pay';
       case SmartPaymentMethod.applePay:
         return 'Apple Pay';
+      case SmartPaymentMethod.samsungPay:
+        return 'Samsung Pay';
       case SmartPaymentMethod.stcPay:
         return 'STC Pay';
       case SmartPaymentMethod.mada:
-        return isAr ? 'مدى' : 'mada';
+        return isAr ? 'مدى (داخل البطاقة)' : 'mada (on card)';
       case SmartPaymentMethod.newCardMoyasar:
-        return isAr ? 'بطاقة جديدة' : 'New card';
+        return isAr ? 'بطاقة ائتمان / مدى' : 'Credit / mada card';
       case SmartPaymentMethod.tabby:
         return 'Tabby';
       case SmartPaymentMethod.tamara:
@@ -240,6 +238,8 @@ class PaymentPlatformDetector {
         return Icons.add_card_outlined;
       case SmartPaymentMethod.applePay:
         return Icons.apple;
+      case SmartPaymentMethod.samsungPay:
+        return Icons.phone_android_outlined;
       case SmartPaymentMethod.googlePay:
         return Icons.account_balance_wallet_outlined;
       case SmartPaymentMethod.mada:

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/branding/aqar_brand_colors.dart';
@@ -43,7 +44,7 @@ class _LegalTermsAcceptanceScreenState extends State<LegalTermsAcceptanceScreen>
   Future<void> _openPolicy(PlatformPolicyDoc doc) async {
     final size = MediaQuery.sizeOf(context);
     final narrow = size.width < 520;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       barrierDismissible: true,
       builder: (ctx) {
@@ -221,7 +222,9 @@ class _LegalTermsAcceptanceScreenState extends State<LegalTermsAcceptanceScreen>
                                       width: 56,
                                       height: 56,
                                       decoration: BoxDecoration(
-                                        color: AqarBrandColors.accent,
+                                        color: AqarBrandColors.wash(
+                                          Theme.of(context).colorScheme,
+                                        ),
                                         shape: BoxShape.circle,
                                       ),
                                       child: const Icon(

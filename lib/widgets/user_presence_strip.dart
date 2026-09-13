@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/branding/aqar_brand_colors.dart';
 import '../core/presence/presence_display_prefs.dart';
 import '../services/chat_peer_service.dart';
+import 'aqar_marquee_text.dart';
 import 'presence_feature_info_button.dart';
 
 /// سطر صغير: متصل الآن / آخر ظهور — يحدّث عبر Realtime عند توفره.
@@ -22,6 +23,7 @@ class UserPresenceStrip extends StatefulWidget {
     this.fallbackTimestamp,
     this.surface = PresenceDisplaySurface.listingCards,
     this.showInfoButton = true,
+    this.photoOverlay = false,
   });
 
   final String userId;
@@ -30,6 +32,7 @@ class UserPresenceStrip extends StatefulWidget {
   final DateTime? fallbackTimestamp;
   final PresenceDisplaySurface surface;
   final bool showInfoButton;
+  final bool photoOverlay;
 
   @override
   State<UserPresenceStrip> createState() => _UserPresenceStripState();
@@ -87,7 +90,7 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
     }
     _poll?.cancel();
     _poll = Timer.periodic(
-      Duration(seconds: kIsWeb ? 12 : 15),
+      Duration(seconds: widget.surface == PresenceDisplaySurface.chat ? 5 : (kIsWeb ? 12 : 15)),
       (_) => _pull(),
     );
   }
@@ -218,12 +221,16 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
                 vertical: widget.compact ? 4 : 5,
               ),
               decoration: BoxDecoration(
-                color: online
-                    ? const Color(0xFF16A34A)
-                        .withValues(alpha: isDark ? 0.22 : 0.12)
-                    : (isDark
-                        ? cs.surfaceContainerHighest.withValues(alpha: 0.55)
-                        : cs.surfaceContainerHighest.withValues(alpha: 0.4)),
+                color: widget.photoOverlay
+                    ? (online
+                        ? const Color(0xE616A34A)
+                        : Colors.black.withValues(alpha: 0.62))
+                    : online
+                        ? const Color(0xFF16A34A)
+                            .withValues(alpha: isDark ? 0.22 : 0.12)
+                        : (isDark
+                            ? cs.surfaceContainerHighest.withValues(alpha: 0.55)
+                            : cs.surfaceContainerHighest.withValues(alpha: 0.4)),
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
                   color: online
@@ -238,8 +245,11 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
                     width: widget.compact ? 7 : 8,
                     height: widget.compact ? 7 : 8,
                     decoration: BoxDecoration(
-                      color:
-                          online ? const Color(0xFF16A34A) : cs.outlineVariant,
+                      color: widget.photoOverlay
+                          ? Colors.white
+                          : online
+                              ? const Color(0xFF16A34A)
+                              : cs.outlineVariant,
                       shape: BoxShape.circle,
                       boxShadow: online
                           ? [
@@ -254,22 +264,28 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
                   ),
                   const SizedBox(width: 5),
                   Flexible(
-                    child: Text(
-                      line,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: widget.compact ? 11 : 12,
-                        fontWeight: FontWeight.w900,
-                        fontFamily: 'Cairo',
-                        color: online
-                            ? (isDark
-                                ? const Color(0xFF86EFAC)
-                                : const Color(0xFF15803D))
-                            : (isDark
-                                ? cs.onSurface
-                                : const Color(0xFF0A1F1A)),
-                        height: 1.1,
+                    child: Directionality(
+                      textDirection: widget.isAr
+                          ? TextDirection.rtl
+                          : TextDirection.ltr,
+                      child: AqarMarqueeText(
+                        text: line,
+                        height: widget.compact ? 14 : 16,
+                        style: TextStyle(
+                          fontSize: widget.compact ? 11 : 12,
+                          fontWeight: FontWeight.w900,
+                          fontFamily: 'Cairo',
+                          color: widget.photoOverlay
+                              ? Colors.white
+                              : online
+                                  ? (isDark
+                                      ? const Color(0xFF86EFAC)
+                                      : const Color(0xFF15803D))
+                                  : (isDark
+                                      ? cs.onSurface
+                                      : const Color(0xFF0A1F1A)),
+                          height: 1.1,
+                        ),
                       ),
                     ),
                   ),
@@ -277,7 +293,7 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
               ),
             ),
           ),
-          if (widget.showInfoButton)
+          if (widget.showInfoButton && !widget.photoOverlay)
             PresenceFeatureInfoButton(
               isAr: widget.isAr,
               compact: widget.compact,

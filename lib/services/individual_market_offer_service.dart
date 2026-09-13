@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/payment/platform_fee_catalog.dart';
 import '../core/workflow/app_role_helper.dart';
 
 /// حصة تقديم عروض على طلبات السوق من الرئيسية (فردي أو تسويق).
@@ -106,7 +107,7 @@ class IndividualMarketOfferAllowance {
     }
     if (!hasSubscription) {
       if (audience != 'marketing') {
-        return 'إتمام الصفقة على طلبات الآخرين مجاني — ادفع 30 ر.س فقط عند اختيار «فوري» لطلبك.';
+        return 'إتمام الصفقة على طلبات الآخرين مجاني — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: true) ?? 'ادفع فقط عند اختيار «فوري»'} لطلبك.';
       }
       return 'يلزم اشتراك الباقة المناسبة لنوع حسابك لإتمام الصفقات.';
     }
@@ -123,7 +124,7 @@ class IndividualMarketOfferAllowance {
     }
     if (!hasSubscription) {
       if (audience != 'marketing') {
-        return 'Completing deals on others\' requests is free — pay SAR 30 only when you choose Instant for your request.';
+        return 'Completing deals on others\' requests is free — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: false) ?? 'pay only when you choose Instant'} for your request.';
       }
       return 'Subscribe to the plan for your account type to complete deals.';
     }

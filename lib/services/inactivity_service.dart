@@ -3,26 +3,31 @@ import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
+import 'package:flutter/services.dart';
 
 import '../core/auth/safe_sign_out_service.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
-import '../main.dart' show recoveryFlowNotifier, suspendAutoLock;
+import '../main.dart' show langNotifier, recoveryFlowNotifier, suspendAutoLock;
 import '../core/session/return_after_auth.dart';
+import '../core/auth/auth_local_sign_out.dart';
+import '../core/auth/inactivity_auth_landing.dart';
 import '../core/config/app_config.dart';
+import '../core/utils/date_helper.dart';
 import '../core/navigation/root_overlay_guard.dart';
 import '../core/session/web_session_ttl.dart';
+import '../core/session/web_visibility.dart';
 import '../services/fast_login_service.dart';
+import '../services/notification_service.dart';
 import '../routes.dart';
 
 class InactivityService {
   InactivityService({
     required this.navigatorKey,
-    this.idleBeforePrompt = const Duration(minutes: 5),
+    this.idleBeforePrompt = const Duration(minutes: 3),
     this.promptCountdown = const Duration(minutes: 1),
     this.useIdleBlurOverlay = false,
   });
@@ -36,10 +41,13 @@ class InactivityService {
 
   static const String kPrefLastActivityAtMs = 'inactivity_last_activity_ms';
   static const String kPrefPromptDeadlineMs = 'inactivity_prompt_deadline_ms';
+  static const String kPrefIdleUntilMs = 'inactivity_idle_until_ms';
+  static const String kPrefLockUntilMs = 'inactivity_lock_until_ms';
 
   Timer? _idleTimer;
   Timer? _countdownTimer;
   Timer? _deadlineFireTimer;
+  Timer? _wallClockTimer;
   ValueNotifier<int>? _promptSecVN;
   bool _promptContinueIntent = false;
   bool _dialogOpen = false;
@@ -49,102 +57,128 @@ class InactivityService {
   int _lastPersistWallMs = 0;
   final DateTime _serviceStartedAt = DateTime.now();
 
-  /// لا نعرض حوار الخمول فور فتح التبويب/العودة من الخلفية.
-  static const Duration _resumePromptGrace = Duration(seconds: 2);
+  /// يمنع لمسة/لوحة مفاتيح من تصفير العدّاد أثناء إغلاق الشاشة أو تصغير المتصفح.
+  bool _backgroundHold = false;
+  bool _resumeAuditBusy = false;
 
-  /// بعد دخول اللوحة على الويب: مهلة قصيرة فقط حتى يظهر عدّاد الجلسة فعلياً.
-  static const Duration _webDashboardWarmupGrace = Duration(seconds: 5);
-  static int? _webDashboardWarmupUntilMs;
+  /// لا نعرض حوار الخمول في أجزاء الثانية الأولى من إقلاع الخدمة فقط.
+  static const Duration _resumePromptGrace = Duration(milliseconds: 400);
 
   bool _locking = false;
   bool _signOutRunning = false;
+  bool _hardwareKeysArmed = false;
+
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is KeyDownEvent || event is KeyRepeatEvent) {
+      userActivity();
+    }
+    return false;
+  }
+
+  int get _idleUntilMs =>
+      _lastActivityMs + idleBeforePrompt.inMilliseconds;
+
+  int get _lockUntilMs {
+    if (_promptDeadlineMs != null && _promptDeadlineMs! > 0) {
+      return _promptDeadlineMs!;
+    }
+    return _lastActivityMs +
+        idleBeforePrompt.inMilliseconds +
+        promptCountdown.inMilliseconds;
+  }
 
   void start() {
-    _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
-    unawaited(_persistLastActivityMs());
+    _backgroundHold = false;
+    _resumeAuditBusy = false;
+    if (!_hardwareKeysArmed) {
+      HardwareKeyboard.instance.addHandler(_onHardwareKey);
+      _hardwareKeysArmed = true;
+    }
+    unawaited(_bootFromPersistedClock());
+  }
+
+  Future<void> _bootFromPersistedClock() async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getInt(kPrefLastActivityAtMs);
+      if (stored != null && stored > 0 && stored <= now) {
+        _lastActivityMs = stored;
+      } else {
+        _lastActivityMs = now;
+      }
+      final storedPrompt = prefs.getInt(kPrefPromptDeadlineMs);
+      if (storedPrompt != null && storedPrompt > 0) {
+        _promptDeadlineMs = storedPrompt;
+      }
+    } catch (_) {
+      _lastActivityMs = now;
+    }
+    await _persistDeadlines();
     _resetIdleTimer();
+    _armWallClockWatch();
+    await _applyWallClockLockState();
   }
 
   /// استدعِها عند إخفاء التطبيق/التبويب لتثبيت آخر نشاط + جدولة الخروج حسب الموعد.
   void onAppPaused() {
-    unawaited(_persistLastActivityMs());
-    // إن تجاوز الخمول دون حوار ظاهر: ابدأ عدّاد الخروج الآن ليظهر عند العودة.
+    _backgroundHold = true;
     if (!_dialogOpen && !_locking) {
-      final last = DateTime.fromMillisecondsSinceEpoch(_lastActivityMs);
-      final elapsed = DateTime.now().difference(last);
-      if (elapsed >= idleBeforePrompt) {
-        final remaining = (idleBeforePrompt + promptCountdown) - elapsed;
-        final sec = remaining.inSeconds.clamp(5, promptCountdown.inSeconds);
-        _promptDeadlineMs =
-            DateTime.now().millisecondsSinceEpoch + (sec * 1000);
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now >= _idleUntilMs && _promptDeadlineMs == null) {
+        final remaining = _lockUntilMs - now;
+        final sec = remaining <= 0
+            ? 0
+            : (remaining / 1000).ceil().clamp(1, promptCountdown.inSeconds);
+        if (sec > 0) {
+          _promptDeadlineMs = now + (sec * 1000);
+        }
       }
     }
-    unawaited(_persistPromptDeadlineIfActive());
+    unawaited(_persistDeadlines());
+    unawaited(_notifyBackgroundSecurityCountdown());
     _armDeadlineFireTimer();
+    _armWallClockWatch();
   }
 
-  /// عند العودة من الخلفية: إن تجاوز المستخدم المدة يُقفل/يُخرج فوراً حسب ساعة الجدار.
+  /// عند العودة من الخلفية: ساعة الجدار هي المرجع — العدّ لا يُصفَّر ولا يُعاد من الصفر.
   Future<void> onAppResumedAfterBackground() async {
     if (DateTime.now().difference(_serviceStartedAt) < _resumePromptGrace) {
+      _backgroundHold = false;
+      await _applyWallClockLockState();
       return;
     }
-    if (_isOnLoginOrFastLoginOrReset()) return;
-    if (recoveryFlowNotifier.value == true) return;
-
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) return;
-
-    _idleTimer?.cancel();
-    _idleTimer = null;
-
+    _resumeAuditBusy = true;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final stored = prefs.getInt(kPrefLastActivityAtMs);
-      if (stored != null && stored > 0) {
-        _lastActivityMs = stored;
-      }
+      if (_isOnLoginOrFastLoginOrReset()) return;
+      if (recoveryFlowNotifier.value == true) return;
 
-      final deadline = prefs.getInt(kPrefPromptDeadlineMs);
-      if (deadline != null && deadline > 0) {
-        _promptDeadlineMs = deadline;
-        final now = DateTime.now().millisecondsSinceEpoch;
-        if (now >= deadline) {
-          await prefs.remove(kPrefPromptDeadlineMs);
-          _promptDeadlineMs = null;
-          // لا خروج صامت بعد الخلفية — نافذة قصيرة ظاهرة أولاً.
-          await _showPrompt(remainingSeconds: 12);
-          return;
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) return;
+
+      _idleTimer?.cancel();
+      _idleTimer = null;
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final stored = prefs.getInt(kPrefLastActivityAtMs);
+        if (stored != null && stored > 0) {
+          _lastActivityMs = stored;
         }
-        // أعد عرض الحوار بالمتبقي الحقيقي (لا تعيد العد من الصفر).
-        if (!_dialogOpen) {
-          final sec = ((deadline - now) / 1000).ceil().clamp(1, 3600);
-          await _showPrompt(remainingSeconds: sec);
-        } else {
-          _armDeadlineFireTimer();
-          _syncPromptSecondsFromDeadline();
+        final storedLock = prefs.getInt(kPrefLockUntilMs);
+        final storedPrompt = prefs.getInt(kPrefPromptDeadlineMs);
+        if (storedPrompt != null && storedPrompt > 0) {
+          _promptDeadlineMs = storedPrompt;
+        } else if (storedLock != null && storedLock > 0) {
+          _promptDeadlineMs = storedLock;
         }
-        return;
-      }
-    } catch (_) {}
+      } catch (_) {}
 
-    final last = DateTime.fromMillisecondsSinceEpoch(_lastActivityMs);
-    final elapsed = DateTime.now().difference(last);
-    final totalIdle = idleBeforePrompt + promptCountdown;
-
-    // تجاوز الخمول + العدّاد بالكامل في الخلفية → أعرض حواراً قصيراً ظاهراً
-    // (لا خروج صامت بدون أن يرى المستخدم العدّاد).
-    if (elapsed >= totalIdle) {
-      await _showPrompt(remainingSeconds: 8);
-      return;
+      await _applyWallClockLockState();
+    } finally {
+      _resumeAuditBusy = false;
+      _backgroundHold = false;
     }
-
-    if (elapsed >= idleBeforePrompt) {
-      final remaining = totalIdle - elapsed;
-      final sec = remaining.inSeconds.clamp(1, promptCountdown.inSeconds);
-      await _showPrompt(remainingSeconds: sec);
-      return;
-    }
-    _resetIdleTimer();
   }
 
   void stop() {
@@ -153,14 +187,22 @@ class InactivityService {
     _countdownTimer = null;
     _deadlineFireTimer?.cancel();
     _deadlineFireTimer = null;
+    _wallClockTimer?.cancel();
+    _wallClockTimer = null;
     _promptSecVN?.dispose();
     _promptSecVN = null;
     _promptDeadlineMs = null;
+    _backgroundHold = false;
+    _resumeAuditBusy = false;
     unawaited(_clearPromptDeadlinePref());
     _closeDialogIfAny();
     _dialogOpen = false;
     _locking = false;
     _signOutRunning = false;
+    if (_hardwareKeysArmed) {
+      HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+      _hardwareKeysArmed = false;
+    }
   }
 
   void dismissBlockingPrompt() {
@@ -191,6 +233,7 @@ class InactivityService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(kPrefLastActivityAtMs, now);
+      await prefs.remove(kPrefPromptDeadlineMs);
     } catch (_) {}
   }
 
@@ -200,18 +243,18 @@ class InactivityService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(kPrefPromptDeadlineMs);
     } catch (_) {}
-    if (kIsWeb) {
-      _webDashboardWarmupUntilMs = DateTime.now().millisecondsSinceEpoch +
-          _webDashboardWarmupGrace.inMilliseconds;
-    }
     await stampFreshActivity();
   }
 
   void userActivity() {
+    if (_backgroundHold || _resumeAuditBusy || _dialogOpen) return;
     _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
+    if (_promptDeadlineMs != null) {
+      _promptDeadlineMs = null;
+      unawaited(_clearPromptDeadlinePref());
+    }
     _maybeThrottlePersistActivity();
 
-    if (_dialogOpen) return;
     if (kIsWeb) {
       final now = DateTime.now().millisecondsSinceEpoch;
       if (now - _lastWebTouchMs >= 3000) {
@@ -227,7 +270,7 @@ class InactivityService {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastPersistWallMs < 5000) return;
     _lastPersistWallMs = now;
-    unawaited(_persistLastActivityMs());
+    unawaited(_persistDeadlines());
   }
 
   Future<void> _touchWebGuestActivityIfGuest() async {
@@ -242,19 +285,22 @@ class InactivityService {
     } catch (_) {}
   }
 
-  Future<void> _persistLastActivityMs() async {
+  Future<void> _persistDeadlines() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(kPrefLastActivityAtMs, _lastActivityMs);
+      await prefs.setInt(kPrefIdleUntilMs, _idleUntilMs);
+      await prefs.setInt(kPrefLockUntilMs, _lockUntilMs);
+      if (_promptDeadlineMs != null && _promptDeadlineMs! > 0) {
+        await prefs.setInt(kPrefPromptDeadlineMs, _promptDeadlineMs!);
+      } else {
+        await prefs.remove(kPrefPromptDeadlineMs);
+      }
     } catch (_) {}
   }
 
-  Future<void> _persistPromptDeadlineIfActive() async {
-    if (!_dialogOpen || _promptDeadlineMs == null) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(kPrefPromptDeadlineMs, _promptDeadlineMs!);
-    } catch (_) {}
+  Future<void> _persistLastActivityMs() async {
+    await _persistDeadlines();
   }
 
   Future<void> _clearPromptDeadlinePref() async {
@@ -262,6 +308,95 @@ class InactivityService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(kPrefPromptDeadlineMs);
     } catch (_) {}
+  }
+
+  Future<void> _notifyBackgroundSecurityCountdown() async {
+    if (kIsWeb) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now < _idleUntilMs) return;
+    final remainingMs = _lockUntilMs - now;
+    final isAr = langNotifier.value != 'en';
+    final title = isAr
+        ? 'تنبيه أمني — عدم نشاط'
+        : 'Security alert — inactivity';
+    final body = remainingMs <= 0
+        ? (isAr
+            ? 'انتهت مهلة الجلسة. أعد الدخول للمتابعة.'
+            : 'Session timed out. Sign in again to continue.')
+        : (isAr
+            ? 'العدّاد مستمر حتى مع إغلاق الشاشة. ستُقفل الجلسة خلال ${(remainingMs / 1000).ceil()} ثانية إن لم تُكمل.'
+            : 'The countdown continues while the screen is off. Session locks in ${(remainingMs / 1000).ceil()}s unless you continue.');
+    try {
+      await NotificationService.showWorkflowLocalNotification(
+        title: title,
+        body: body,
+        dedupeKey: 'inactivity_wall_clock',
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _applyWallClockLockState() async {
+    if (_locking) return;
+    if (_isOnLoginOrFastLoginOrReset()) return;
+    if (recoveryFlowNotifier.value == true) return;
+    if (suspendAutoLock.value == true) {
+      return;
+    }
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) return;
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now >= _lockUntilMs) {
+      await _lockOrGoLogin();
+      return;
+    }
+    if (now >= _idleUntilMs) {
+      final sec = ((_lockUntilMs - now) / 1000).ceil().clamp(1, 3600);
+      if (_dialogOpen) {
+        _armDeadlineFireTimer();
+        _syncPromptSecondsFromDeadline();
+        return;
+      }
+      await _showPrompt(remainingSeconds: sec);
+      return;
+    }
+    _resetIdleTimer();
+  }
+
+  void _armWallClockWatch() {
+    _wallClockTimer?.cancel();
+    _wallClockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(_tickWallClock());
+    });
+  }
+
+  Future<void> _tickWallClock() async {
+    if (_locking || _signOutRunning) return;
+    if (_isOnLoginOrFastLoginOrReset()) return;
+    if (recoveryFlowNotifier.value == true) return;
+    if (suspendAutoLock.value == true) return;
+    if (Supabase.instance.client.auth.currentSession == null) return;
+
+    if (_backgroundHold) {
+      unawaited(_persistDeadlines());
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now >= _lockUntilMs) {
+      await _lockOrGoLogin();
+      return;
+    }
+    if (_dialogOpen) {
+      _syncPromptSecondsFromDeadline();
+      if (_promptDeadlineMs != null && now >= _promptDeadlineMs!) {
+        await _lockOrGoLogin();
+      }
+      return;
+    }
+    if (now >= _idleUntilMs) {
+      final sec = ((_lockUntilMs - now) / 1000).ceil().clamp(1, 3600);
+      await _showPrompt(remainingSeconds: sec);
+    }
   }
 
   int _remainingPromptSeconds() {
@@ -322,13 +457,7 @@ class InactivityService {
         return;
       }
 
-      // قفل ناعم دائماً عند وجود جلسة + سياق/قفل — بدل الخروج الكامل العشوائي.
-      if (await FastLoginService.canSoftLockSession()) {
-        await _forceToFastLogin();
-        return;
-      }
-
-      await _logoutThenLogin();
+      await _routeToRememberedAuthSurface();
     } finally {
       _locking = false;
     }
@@ -336,13 +465,36 @@ class InactivityService {
 
   void _resetIdleTimer() {
     _idleTimer?.cancel();
-    _idleTimer = Timer(idleBeforePrompt, () => _showPrompt());
+    if (_locking || _dialogOpen) return;
+    if (_isOnLoginOrFastLoginOrReset()) return;
+    final remaining = _idleUntilMs - DateTime.now().millisecondsSinceEpoch;
+    if (remaining <= 0) {
+      unawaited(_applyWallClockLockState());
+      return;
+    }
+    _idleTimer = Timer(Duration(milliseconds: remaining + 30), () {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now >= _lockUntilMs) {
+        unawaited(_lockOrGoLogin());
+      } else if (now >= _idleUntilMs) {
+        final sec = ((_lockUntilMs - now) / 1000).ceil().clamp(1, 3600);
+        unawaited(_showPrompt(remainingSeconds: sec));
+      } else {
+        _resetIdleTimer();
+      }
+    });
   }
 
   String _routeName() {
-    final ctx = navigatorKey.currentContext;
-    final stateCtx = navigatorKey.currentState?.context;
-    return ModalRoute.of(ctx ?? stateCtx!)?.settings.name ?? '';
+    try {
+      final ctx = navigatorKey.currentContext;
+      final stateCtx = navigatorKey.currentState?.context;
+      final c = ctx ?? stateCtx;
+      if (c == null) return '';
+      return ModalRoute.of(c)?.settings.name ?? '';
+    } catch (_) {
+      return '';
+    }
   }
 
   bool _isOnLoginOrFastLoginOrReset() {
@@ -359,10 +511,8 @@ class InactivityService {
   }
 
   String _formatNowLine(BuildContext context) {
-    final loc = Localizations.localeOf(context);
-    return DateFormat.yMMMd(loc.toLanguageTag())
-        .add_Hms()
-        .format(DateTime.now());
+    final isAr = Localizations.localeOf(context).languageCode == 'ar';
+    return DateHelper.fmtCivilDateTime(DateTime.now(), isAr: isAr, withSeconds: true);
   }
 
   Future<void> _showPrompt({int? remainingSeconds}) async {
@@ -370,35 +520,27 @@ class InactivityService {
     if (nav == null) return;
     if (_dialogOpen) return;
 
-    if (kIsWeb) {
-      final until = _webDashboardWarmupUntilMs;
-      if (until != null &&
-          DateTime.now().millisecondsSinceEpoch < until) {
-        _resetIdleTimer();
-        return;
-      }
-    }
-
     if (_isOnLoginOrFastLoginOrReset()) {
-      _resetIdleTimer();
       return;
     }
 
     if (recoveryFlowNotifier.value == true) {
-      _resetIdleTimer();
       return;
     }
 
-    // أثناء شاشات حسّاسة (تحقق / إعدادات PIN / نشر…) لا تُظهر الحوار.
     if (suspendAutoLock.value == true) {
-      _resetIdleTimer();
       return;
     }
 
     final session = Supabase.instance.client.auth.currentSession;
 
     if (session == null) {
-      _resetIdleTimer();
+      return;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now >= _lockUntilMs) {
+      await _lockOrGoLogin();
       return;
     }
 
@@ -406,18 +548,21 @@ class InactivityService {
 
     final dialogContext = navigatorKey.currentContext;
     if (dialogContext == null || !dialogContext.mounted) {
-      _resetIdleTimer();
       return;
     }
 
-    final initialSec =
-        (remainingSeconds ?? promptCountdown.inSeconds).clamp(1, 3600);
+    var initialSec =
+        (remainingSeconds ?? _remainingPromptSeconds()).clamp(0, 3600);
+    if (initialSec <= 0) {
+      await _lockOrGoLogin();
+      return;
+    }
 
     _dialogOpen = true;
     _promptContinueIntent = false;
     _promptDeadlineMs =
         DateTime.now().millisecondsSinceEpoch + (initialSec * 1000);
-    unawaited(_persistPromptDeadlineIfActive());
+    unawaited(_persistDeadlines());
     _promptSecVN?.dispose();
     _promptSecVN = ValueNotifier<int>(initialSec);
     final vn = _promptSecVN!;
@@ -437,30 +582,21 @@ class InactivityService {
       }
     });
     _armDeadlineFireTimer();
+    if (kIsWeb) setWebDocumentScrollLocked(true);
 
     final timeLine = _formatNowLine(dialogContext);
 
     Future<void> present(Widget Function(BuildContext dialogCtx) page) {
-      if (useIdleBlurOverlay) {
-        return showGeneralDialog<void>(
-          context: dialogContext,
-          barrierDismissible: false,
-          barrierLabel: 'inactivity',
-          // حاجز واضح — الشفاف كان يخفي الحوار خلف طبقات الويب.
-          barrierColor: Colors.black.withValues(alpha: 0.55),
-          useRootNavigator: true,
-          transitionDuration: const Duration(milliseconds: 180),
-          pageBuilder: (dialogCtx, _, __) {
-            return page(dialogCtx);
-          },
-        );
-      }
-      return showDialog<void>(
+      return showGeneralDialog<void>(
         context: dialogContext,
         barrierDismissible: false,
+        barrierLabel: 'inactivity',
         barrierColor: Colors.black.withValues(alpha: 0.55),
         useRootNavigator: true,
-        builder: page,
+        transitionDuration: const Duration(milliseconds: 160),
+        pageBuilder: (dialogCtx, _, __) {
+          return page(dialogCtx);
+        },
       );
     }
 
@@ -650,17 +786,16 @@ class InactivityService {
             );
           }
 
-          if (!useIdleBlurOverlay) {
-            return dialogBody();
-          }
-
           return SafeArea(
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
               child: Material(
                 color: Colors.black.withValues(alpha: 0.42),
                 child: Center(
-                  child: dialogBody(),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    child: dialogBody(),
+                  ),
                 ),
               ),
             ),
@@ -670,6 +805,7 @@ class InactivityService {
     } catch (_) {
       _closeDialogIfAny();
     } finally {
+      if (kIsWeb) setWebDocumentScrollLocked(false);
       _countdownTimer?.cancel();
       _countdownTimer = null;
       _deadlineFireTimer?.cancel();
@@ -717,46 +853,36 @@ class InactivityService {
         return;
       }
 
-      if (await FastLoginService.canSoftLockSession()) {
-        await _forceToFastLogin();
-        return;
-      }
-
-      await _logoutThenLogin();
+      await _routeToRememberedAuthSurface();
     } finally {
       _locking = false;
     }
   }
 
-  Future<void> _logoutThenLogin() async {
+  Future<void> _routeToRememberedAuthSurface() async {
+    FastLoginService.clearRuntimeUnlock();
+    final dest = await FastLoginService.resolveInactivityLockRoute();
+    InactivityAuthLanding.begin(route: dest);
     await ReturnAfterAuth.saveFromNavigatorKey(navigatorKey);
 
     if (_signOutRunning) return;
     _signOutRunning = true;
     try {
       final current = _routeName();
-      if (current == '/login' || current == '/') return;
+      if (current == dest) {
+        await AuthLocalSignOut.signOutLocal(
+          Supabase.instance.client,
+          tryRemoteRevoke: true,
+        );
+        return;
+      }
       await SafeSignOutService.signOutAndNavigateToLoginFromNavigator(
         navigatorKey,
         logoutReason: 'inactivity_logout',
       );
     } catch (_) {
-      // ignore
     } finally {
       _signOutRunning = false;
     }
-  }
-
-  Future<void> _forceToFastLogin() async {
-    await ReturnAfterAuth.saveFromNavigatorKey(navigatorKey);
-
-    final nav = navigatorKey.currentState;
-    if (nav == null) return;
-
-    final current = _routeName();
-    if (current == '/fastLogin') return;
-
-    FastLoginService.clearRuntimeUnlock();
-    nav.pushNamedAndRemoveUntil('/fastLogin', (r) => false);
   }
 }

@@ -9,10 +9,15 @@ import 'web_bootstrap_diag.dart';
 void syncWebDashboardHashInAddressBar() {
   try {
     final loc = html.window.location;
-    final hash = (loc.hash ?? '').replaceFirst('#', '').trim().toLowerCase();
+    final hash = loc.hash.replaceFirst('#', '').trim().toLowerCase();
     if (hash == '/userdashboard' || hash == 'userdashboard') return;
     final next = '${loc.pathname}${loc.search}#/userDashboard';
-    html.window.history.replaceState(null, '', next);
+    // أبقِ حالة aqar — مسحها يجعل رجوع المتصفح يُفسَّر كمغادرة فيُغلق الجلسة.
+    dynamic st;
+    try {
+      st = html.window.history.state;
+    } catch (_) {}
+    html.window.history.replaceState(st, '', next);
     WebBootstrapDiag.log('url.hash', 'synced #/userDashboard (replaceState)');
   } catch (e) {
     WebBootstrapDiag.warn('url.hash', '$e');

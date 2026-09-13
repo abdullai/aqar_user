@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config/app_config.dart';
@@ -39,8 +38,6 @@ class SubscriptionService {
   /// قناة Realtime لاشتراكات هذا المستخدم.
   static void ensureRealtimeChannelFor(SupabaseClient client, String uid) {
     if (uid.isEmpty) return;
-    // الويب: Realtime للاشتراكات كان يُشبّع main thread ويُجمّد التبويب بعد الدخول.
-    if (kIsWeb) return;
     if (_subscriptionsRealtimeUid == uid &&
         _subscriptionsRealtimeChannel != null) {
       return;
@@ -202,6 +199,9 @@ class SubscriptionService {
 
   /// يطابق أعمدة `subscription_plans.user_type` في قاعدة البيانات.
   static String planUserTypeForAccountType(String? accountType) {
+    if (AppRoleHelper.isPhotographerAccount(accountType)) {
+      return 'photographer';
+    }
     final k = AppRoleHelper.fromAccountType(accountType);
     switch (k) {
       case AppRoleKind.marketer:
@@ -221,6 +221,9 @@ class SubscriptionService {
 
   /// تسمية نوع الحساب في شاشة الباقات.
   static String planAudienceLabel({required bool isAr, String? accountType}) {
+    if (AppRoleHelper.isPhotographerAccount(accountType)) {
+      return isAr ? 'مصور عقاري' : 'Property photographer';
+    }
     switch (AppRoleHelper.fromAccountType(accountType)) {
       case AppRoleKind.marketer:
         return isAr ? 'مسوّق عقاري فردي' : 'Independent marketer';
@@ -245,8 +248,11 @@ class SubscriptionService {
   ///   • المكتب / الوكالة   → الاحترافية (2) + الشامل (4) + توب-أب طلبات (21/22/23)
   ///   • المؤسسة            → الاحترافية (2) + الشامل (4) + توب-أب طلبات (21/22/23)
   ///   • الشركة             → المميّزة (3) + الشامل (4)
-  ///   • المالك الفردي / المستخدم العام → لا باقات (مجاني + طلب فوري 30 ر.س)
+  ///   • المالك الفردي / المستخدم العام → لا باقات (مجاني + طلب فوري من الكتالوج)
   static List<int> allowedSortOrdersForAccountType(String? accountType) {
+    if (AppRoleHelper.isPhotographerAccount(accountType)) {
+      return const [1];
+    }
     final k = AppRoleHelper.fromAccountType(accountType);
     switch (k) {
       case AppRoleKind.marketer:
@@ -316,83 +322,35 @@ class SubscriptionService {
     return keys.map((k) => bySort[k]!).toList();
   }
 
-  Future<List<Map<String, dynamic>>> fetchPlansByUserType(
+  /// يُبقي باقات [accountType] فقط — لا تُعرض باقة دور آخر حتى لو رجعها RPC.
+  static List<Map<String, dynamic>> filterCatalogPlansForAccountType(
+    List<Map<String, dynamic>> rows,
     String? accountType,
-  ) async {
+  ) {
     final t = planUserTypeForAccountType(accountType);
     final allowed = allowedSortOrdersForAccountType(accountType);
     if (allowed.isEmpty) return const [];
+    final filtered = <Map<String, dynamic>>[];
+    for (final p in rows) {
+      if (p['is_trial_plan'] == true) continue;
+      final ut = '${p['user_type'] ?? ''}'.trim().toLowerCase();
+      if (ut.isNotEmpty && ut != t) continue;
+      final n = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
+      if (!allowed.contains(n)) continue;
+      filtered.add(p);
+    }
+    return _dedupePlansBySortOrder(filtered);
+  }
 
-    // مصدر الحقيقة من الخادم — يتجاوز تعارضات RLS/فلتر العميل.
+  Future<List<Map<String, dynamic>>> fetchPlansByUserType(
+    String? accountType,
+  ) async {
     try {
       final rpc = await _sb.rpc('list_subscription_catalog_plans');
-      final fromRpc = _plansFromCatalogRpc(rpc);
-      if (fromRpc.isNotEmpty) return _dedupePlansBySortOrder(fromRpc);
-    } catch (_) {}
-
-    try {
-      final rows = await _sb
-          .from(_plans)
-          .select()
-          .eq('user_type', t)
-          .eq('is_active', true)
-          .order('sort_order', ascending: true);
-      final list = (rows as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      // التجريبية تُعرض عبر بانر منفصل (`_showTrialBanner` في الشاشة) — لا
-      // نُدرجها في قائمة الباقات حتى لا تتكرر.
-      var filtered = list.where((p) {
-        if (p['is_trial_plan'] == true) return false;
-        final n = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
-        return allowed.contains(n);
-      }).toList();
-      if (filtered.isEmpty && list.isNotEmpty) {
-        filtered = list
-            .where((p) => p['is_trial_plan'] != true)
-            .where((p) {
-              final n = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
-              return allowed.isNotEmpty && n == allowed.first;
-            })
-            .toList();
-      }
-      if (filtered.isNotEmpty) return _dedupePlansBySortOrder(filtered);
-      // احتياط: كل الباقات النشطة غير التجريبية لهذا الدور.
-      final anyActive = list.where((p) => p['is_trial_plan'] != true).toList();
-      if (anyActive.isNotEmpty) return _dedupePlansBySortOrder(anyActive);
-    } catch (_) {}
-    // Fallback A — جلب صفوف الدور حتى المعطّلة (إن كانت is_active=false بالخطأ)
-    try {
-      final rows = await _sb
-          .from(_plans)
-          .select()
-          .eq('user_type', t)
-          .order('sort_order', ascending: true);
-      final list = (rows as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .where((p) => p['is_trial_plan'] != true)
-          .toList();
-      final allowedRows = list.where((p) {
-        final n = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
-        return allowed.contains(n);
-      }).toList();
-      if (allowedRows.isNotEmpty) return allowedRows;
-      if (list.isNotEmpty) return list;
-    } catch (_) {}
-    // Fallback B — جلب أي باقة أساسية متاحة لأي دور حتى لا تكون الشاشة فارغة
-    try {
-      final rows = await _sb
-          .from(_plans)
-          .select()
-          .eq('is_active', true)
-          .eq('sort_order', allowed.isNotEmpty ? allowed.first : 1)
-          .order('sort_order', ascending: true);
-      return (rows as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .where((p) => p['is_trial_plan'] != true)
-          .toList();
-    } catch (_) {}
-    return [];
+      return _dedupePlansBySortOrder(_plansFromCatalogRpc(rpc));
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// هل استخدم المستخدم التجربة المجانية من قبل؟ (RPC has_user_used_trial)
@@ -621,19 +579,10 @@ class SubscriptionService {
     return null;
   }
 
-  /// 1 إذا منتهٍ أو يُنذر خلال 7 أيام.
+  /// شارة قائمة الاشتراك: لا نعرض رقماً غامضاً عند قرب الانتهاء.
   Future<int> subscriptionMenuBadge({
     String? organizationId,
   }) async {
-    final row = await getCurrentSubscription(organizationId: organizationId);
-    if (row == null) return 0;
-    final status = '${row['status'] ?? ''}';
-    final end = subscriptionExclusiveEndUtc(row) ??
-        DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
-    final now = DateTime.now().toUtc();
-    if (status == 'cancelled' && !now.isBefore(end)) return 1;
-    if (!now.isBefore(end)) return 1;
-    if (status == 'active' && end.difference(now).inDays <= 7) return 1;
     return 0;
   }
 
@@ -843,6 +792,7 @@ class SubscriptionService {
     bool withAutoPay = false,
     String? upgradeSubscriptionId,
     String? idempotencyKey,
+    String? promoCode,
   }) async {
     try {
       final res = await _sb.rpc(
@@ -854,6 +804,8 @@ class SubscriptionService {
           'p_with_auto_pay': withAutoPay,
           'p_upgrade_subscription_id': upgradeSubscriptionId,
           'p_idempotency_key': idempotencyKey,
+          if (promoCode != null && promoCode.trim().isNotEmpty)
+            'p_promo_code': promoCode.trim(),
         },
       );
       if (res is Map) return Map<String, dynamic>.from(res);
@@ -863,7 +815,133 @@ class SubscriptionService {
     return const {'ok': false, 'error': 'unexpected'};
   }
 
-  /// تسجيل نتيجة الدفع في سجل المراجعة (subscribe_ok / subscribe_failed / etc).
+  /// عرض السعر النهائي المعتمد من الخادم — لا يُحجز الكود ولا يُستهلك.
+  Future<Map<String, dynamic>> quoteCheckoutOffer({
+    required String planId,
+    required String period,
+    bool withAutoPay = false,
+    String? promoCode,
+    String? upgradeSubscriptionId,
+    String? purpose,
+  }) async {
+    try {
+      final res = await _sb.rpc(
+        'quote_checkout_offer',
+        params: {
+          'p_plan_id': planId,
+          'p_period': period,
+          'p_with_auto_pay': withAutoPay,
+          if ((promoCode ?? '').trim().isNotEmpty)
+            'p_promo_code': promoCode!.trim(),
+          'p_upgrade_subscription_id': upgradeSubscriptionId,
+          if ((purpose ?? '').trim().isNotEmpty) 'p_purpose': purpose!.trim(),
+        },
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e'};
+    }
+    return const {'ok': false, 'error': 'unexpected'};
+  }
+
+  Future<Map<String, dynamic>> listEligiblePromoCodes({
+    required String planId,
+    required String period,
+    String sort = 'highest',
+    String? upgradeSubscriptionId,
+  }) async {
+    try {
+      final res = await _sb.rpc(
+        'list_eligible_promo_codes',
+        params: {
+          'p_plan_id': planId,
+          'p_period': period,
+          'p_sort': sort,
+          'p_upgrade_subscription_id': upgradeSubscriptionId,
+        },
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e', 'codes': const []};
+    }
+    return const {'ok': false, 'error': 'unexpected', 'codes': []};
+  }
+
+  Future<Map<String, dynamic>> quotePromoCode({
+    required String code,
+    required double amountSar,
+    String? planId,
+    String? period,
+  }) async {
+    try {
+      final res = await _sb.rpc(
+        'quote_promo_code',
+        params: {
+          'p_code': code.trim(),
+          'p_amount_sar': amountSar,
+          if ((planId ?? '').trim().isNotEmpty) 'p_plan_id': planId!.trim(),
+          if ((period ?? '').trim().isNotEmpty) 'p_period': period!.trim(),
+        },
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e'};
+    }
+    return const {'ok': false, 'error': 'unexpected'};
+  }
+
+  Future<Map<String, dynamic>> redeemPromoCode({
+    required String code,
+    required String billingTransactionId,
+  }) async {
+    final bid = billingTransactionId.trim();
+    if (code.trim().isEmpty || bid.isEmpty) {
+      return const {'ok': false, 'error': 'bad_args'};
+    }
+    try {
+      final res = await _sb.rpc(
+        'redeem_promo_code',
+        params: {
+          'p_code': code.trim(),
+          'p_billing_transaction_id': bid,
+        },
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e'};
+    }
+    return const {'ok': false, 'error': 'unexpected'};
+  }
+
+  Future<Map<String, dynamic>> applyPromoToPendingBilling({
+    required String billingTransactionId,
+    required String code,
+  }) async {
+    try {
+      final res = await _sb.rpc(
+        'apply_promo_to_pending_billing',
+        params: {
+          'p_billing_id': billingTransactionId,
+          'p_code': code.trim(),
+        },
+      );
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e'};
+    }
+    return const {'ok': false, 'error': 'unexpected'};
+  }
+
+  Future<Map<String, dynamic>> promoCheckoutEligibility() async {
+    try {
+      final res = await _sb.rpc('promo_checkout_eligibility');
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e'};
+    }
+    return const {'ok': false, 'error': 'unexpected'};
+  }
+
   Future<void> recordPaymentOutcome({
     required String event,
     String? planId,
@@ -932,55 +1010,12 @@ class SubscriptionService {
     if (v['ok'] != true) {
       return {'ok': false, 'error': v['error'] ?? 'billing_not_paid'};
     }
-    final now = DateTime.now().toUtc();
-    final prevEnd = subscriptionExclusiveEndUtc(row) ?? now;
-    final base = prevEnd.isAfter(now) ? prevEnd : now;
-    final newEnd = _periodExclusiveEndUtc(base, 'yearly');
-    try {
-      await _sb.from(_subs).update({
-        'period': 'yearly',
-        'starts_at': subscriptionStartsAtUtc(row)?.toIso8601String(),
-        'ends_at': newEnd.toIso8601String(),
-        'end_date': _dateOnly(
-          newEnd.subtract(const Duration(microseconds: 1)),
-        ),
-        'status': 'active',
-        'auto_renew': autoRenew,
-      }).eq('id', subscriptionId).eq('user_id', uid);
-      await _payments.linkBillingToSubscription(
-        billingTransactionId: billingId,
-        subscriptionId: subscriptionId,
-      );
-      await logLifecycleEvent(
-        eventType: 'subscription_upgraded',
-        organizationId: organizationId,
-        subscriptionId: subscriptionId,
-        payload: {
-          'kind': 'period_to_yearly',
-          'plan_id': '${row['plan_id']}',
-          'end_date': _dateOnly(
-            newEnd.subtract(const Duration(microseconds: 1)),
-          ),
-          'ends_at': newEnd.toIso8601String(),
-          'charged_sar': expectedChargeSar,
-        },
-      );
-      await _payments.notifyBillingSuccessForTransaction(
-        billingTransactionId: billingId,
-        amount: expectedChargeSar,
-        titleAr: 'تحويل إلى سنوي',
-        titleEn: 'Switched to yearly billing',
-      );
-      invalidateSubscriptionCache();
-      return {
-        'ok': true,
-        'end_date': _dateOnly(
-          newEnd.subtract(const Duration(microseconds: 1)),
-        ),
-      };
-    } catch (e) {
-      return {'ok': false, 'error': e.toString()};
-    }
+    return fulfillPaidBilling(
+      billingTransactionId: billingId,
+      expectedAmountSar: expectedChargeSar,
+      titleAr: 'تحويل إلى سنوي',
+      titleEn: 'Switched to yearly billing',
+    );
   }
 
   Future<Map<String, dynamic>> subscribeToPlan({
@@ -1086,80 +1121,63 @@ class SubscriptionService {
         billingId.isNotEmpty
             ? billingId
             : '${payRes['transaction_id'] ?? ''}'.trim();
-    final startUtc = DateTime.now().toUtc();
-    final endUtc = _periodExclusiveEndUtc(startUtc, period);
+    if (paidBillingId.isEmpty) {
+      return {'ok': false, 'error': 'billing_required'};
+    }
+    return fulfillPaidBilling(
+      billingTransactionId: paidBillingId,
+      expectedAmountSar: verifyAmount,
+      titleAr: titleAr,
+      titleEn: titleEn,
+    );
+  }
+
+  /// تفعيل خادمي بعد نجاح الفاتورة — لا يُنشئ الاشتراك من العميل.
+  Future<Map<String, dynamic>> fulfillPaidBilling({
+    required String billingTransactionId,
+    double? expectedAmountSar,
+    String? titleAr,
+    String? titleEn,
+  }) async {
     try {
-      final ins = await _sb
-          .from(_subs)
-          .insert({
-            'user_id': uid,
-            'organization_id': organizationId,
-            'plan_id': planId,
-            'status': 'active',
-            'period': period,
-            'start_date': _dateOnly(startUtc),
-            'end_date': _dateOnly(
-              endUtc.subtract(const Duration(microseconds: 1)),
-            ),
-            'starts_at': startUtc.toIso8601String(),
-            'ends_at': endUtc.toIso8601String(),
-            'auto_renew': applyAutoPay,
-            'auto_pay_discount_applied': applyAutoPay,
-          })
-          .select('id')
-          .single();
-      final sid = '${ins['id'] ?? ''}'.trim();
-      if (paidBillingId.isNotEmpty && sid.isNotEmpty) {
-        await _payments.linkBillingToSubscription(
-          billingTransactionId: paidBillingId,
-          subscriptionId: sid,
+      if (expectedAmountSar != null && expectedAmountSar > 0) {
+        final v = await _payments.verifyBillingTransactionPaid(
+          billingTransactionId: billingTransactionId,
+          expectedAmountSar: expectedAmountSar,
         );
-        if (billingId.isNotEmpty) {
-          await _payments.notifyBillingSuccessForTransaction(
-            billingTransactionId: paidBillingId,
-            amount: verifyAmount,
-            titleAr: titleAr,
-            titleEn: titleEn,
-          );
+        if (v['ok'] != true) {
+          return {'ok': false, 'error': v['error'] ?? 'billing_not_paid'};
         }
       }
-      await logLifecycleEvent(
-        eventType: 'subscription_started',
-        organizationId: organizationId,
-        subscriptionId: sid.isEmpty ? null : sid,
-        payload: {
-          'plan_id': planId,
-          'period': period,
-          'start_date': _dateOnly(startUtc),
-          'end_date': _dateOnly(
-            endUtc.subtract(const Duration(microseconds: 1)),
-          ),
-          'starts_at': startUtc.toIso8601String(),
-          'ends_at': endUtc.toIso8601String(),
-        },
+      final res = await _sb.rpc(
+        'fulfill_paid_billing',
+        params: {'p_billing_transaction_id': billingTransactionId},
       );
+      final map = res is Map
+          ? Map<String, dynamic>.from(res)
+          : <String, dynamic>{};
+      if (map['ok'] != true) {
+        return {
+          'ok': false,
+          'error': '${map['error'] ?? 'fulfill_failed'}',
+          'detail': map,
+        };
+      }
+      if (expectedAmountSar != null) {
+        await _payments.notifyBillingSuccessForTransaction(
+          billingTransactionId: billingTransactionId,
+          amount: expectedAmountSar,
+          titleAr: titleAr,
+          titleEn: titleEn,
+        );
+      }
       invalidateSubscriptionCache();
-      // سجِّل نجاح الاشتراك في سجل المراجعة الأمني.
-      await recordPaymentOutcome(
-        event: 'subscribe_ok',
-        planId: planId,
-        period: period,
-        amountSar: verifyAmount,
-        payload: {
-          'subscription_id': sid,
-          'auto_renew': applyAutoPay,
-          'auto_pay_discount_applied': applyAutoPay,
-        },
-      );
-      return {'ok': true, 'subscription_id': sid};
+      return {
+        'ok': true,
+        'subscription_id': map['subscription_id'],
+        'duplicate': map['duplicate'] == true,
+      };
     } catch (e) {
-      await recordPaymentOutcome(
-        event: 'subscribe_failed',
-        planId: planId,
-        period: period,
-        amountSar: verifyAmount,
-        payload: {'error': e.toString()},
-      );
       return {'ok': false, 'error': e.toString()};
     }
   }
@@ -1173,29 +1191,21 @@ class SubscriptionService {
     final uid = _user?.id;
     if (uid == null) return {'ok': false, 'error': 'auth'};
     try {
-      await _sb.from(_subs).update({
-        'status': 'cancelled',
-        'auto_renew': false,
-        'cancelled_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', subscriptionId).eq('user_id', uid);
-      await logLifecycleEvent(
-        eventType: 'subscription_cancel_finalized',
-        organizationId: organizationId,
-        subscriptionId: subscriptionId,
-        payload: const {},
+      final res = await _sb.rpc(
+        'cancel_subscription',
+        params: {
+          'p_subscription_id': subscriptionId,
+          'p_churn_reason_key': churnReasonKey,
+          'p_churn_detail': churnDetail,
+        },
       );
-      final rk = churnReasonKey?.trim() ?? '';
-      if (rk.isNotEmpty) {
-        await logLifecycleEvent(
-          eventType: 'churn_feedback',
-          organizationId: organizationId,
-          subscriptionId: subscriptionId,
-          payload: {
-            'reason_key': rk,
-            'detail': churnDetail?.trim() ?? '',
-          },
-        );
+      final map = res is Map
+          ? Map<String, dynamic>.from(res)
+          : <String, dynamic>{};
+      if (map['ok'] != true) {
+        return {'ok': false, 'error': '${map['error'] ?? 'cancel_failed'}'};
       }
+      invalidateSubscriptionCache();
       return {'ok': true};
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
@@ -1270,51 +1280,13 @@ class SubscriptionService {
     if (payRes['ok'] != true) {
       return {'ok': false, 'error': payRes['error'] ?? 'payment_failed'};
     }
-    final nowUtc = DateTime.now().toUtc();
-    final prevEnd = subscriptionExclusiveEndUtc(row) ?? nowUtc;
-    final baseUtc = prevEnd.isAfter(nowUtc) ? prevEnd : nowUtc;
-    final newEnd = _periodExclusiveEndUtc(baseUtc, period);
-    try {
-      await _sb.from(_subs).update({
-        'status': 'active',
-        'ends_at': newEnd.toIso8601String(),
-        'end_date': _dateOnly(
-          newEnd.subtract(const Duration(microseconds: 1)),
-        ),
-        'cancelled_at': null,
-        'auto_renew': autoRenewAfterPayment,
-        'auto_renew_last_failure_at': null,
-        'auto_renew_last_failure_reason': null,
-      }).eq('id', subscriptionId).eq('user_id', uid);
-      await logLifecycleEvent(
-        eventType: 'subscription_renewed',
-        organizationId: '${row['organization_id'] ?? ''}'.trim().isEmpty
-            ? null
-            : '${row['organization_id']}',
-        subscriptionId: subscriptionId,
-        payload: {
-          'end_date': _dateOnly(
-            newEnd.subtract(const Duration(microseconds: 1)),
-          ),
-          'ends_at': newEnd.toIso8601String(),
-        },
-      );
-      if (billingId.isNotEmpty) {
-        await _payments.notifyBillingSuccessForTransaction(
-          billingTransactionId: billingId,
-          amount: amount,
-        );
-      }
-      invalidateSubscriptionCache();
-      return {
-        'ok': true,
-        'end_date': _dateOnly(
-          newEnd.subtract(const Duration(microseconds: 1)),
-        ),
-      };
-    } catch (e) {
-      return {'ok': false, 'error': e.toString()};
-    }
+    final paidId =
+        billingId.isNotEmpty ? billingId : '${payRes['transaction_id'] ?? ''}'.trim();
+    if (paidId.isEmpty) return {'ok': false, 'error': 'billing_required'};
+    return fulfillPaidBilling(
+      billingTransactionId: paidId,
+      expectedAmountSar: amount,
+    );
   }
 
   Future<Map<String, dynamic>> upgradePlan({
@@ -1405,34 +1377,15 @@ class SubscriptionService {
     if (payRes['ok'] != true) {
       return {'ok': false, 'error': payRes['error'] ?? 'payment_failed'};
     }
-    try {
-      await _sb
-          .from(_subs)
-          .update({'plan_id': newPlanId})
-          .eq('id', subscriptionId)
-          .eq('user_id', uid);
-      await logLifecycleEvent(
-        eventType: 'subscription_upgraded',
-        subscriptionId: subscriptionId,
-        payload: {
-          'new_plan_id': newPlanId,
-          'charged_sar': diff,
-          'proration': true,
-        },
-      );
-      if (billingId.isNotEmpty) {
-        await _payments.notifyBillingSuccessForTransaction(
-          billingTransactionId: billingId,
-          amount: diff,
-          titleAr: 'ترقية باقة',
-          titleEn: 'Plan upgrade',
-        );
-      }
-      invalidateSubscriptionCache();
-      return {'ok': true};
-    } catch (e) {
-      return {'ok': false, 'error': e.toString()};
-    }
+    final paidId =
+        billingId.isNotEmpty ? billingId : '${payRes['transaction_id'] ?? ''}'.trim();
+    if (paidId.isEmpty) return {'ok': false, 'error': 'billing_required'};
+    return fulfillPaidBilling(
+      billingTransactionId: paidId,
+      expectedAmountSar: diff,
+      titleAr: 'ترقية باقة',
+      titleEn: 'Plan upgrade',
+    );
   }
 
   Future<Map<String, dynamic>> purchaseExtraSeats({
@@ -1483,6 +1436,17 @@ class SubscriptionService {
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
     }
+  }
+
+  /// صلاحيات الباقة الحالية من الخادم.
+  Future<Map<String, dynamic>> myEntitlements() async {
+    try {
+      final res = await _sb.rpc('subscription_my_entitlements');
+      if (res is Map) return Map<String, dynamic>.from(res);
+    } catch (e) {
+      return {'ok': false, 'error': '$e'};
+    }
+    return const {'ok': false};
   }
 
   /// فحص فوري واحد: فردي/فريق/منشأة + أهلية التجربة + فال + خصم العضو.
@@ -1549,47 +1513,5 @@ class SubscriptionService {
     if (v == null) return 0;
     if (v is num) return v.toDouble();
     return double.tryParse(v.toString()) ?? 0;
-  }
-
-  static String _dateOnly(DateTime d) =>
-      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  /// أول لحظة **بعد** انتهاء الفترة المدفوعة (حدّ علوي حصري لـ [ends_at]).
-  static DateTime _periodExclusiveEndUtc(DateTime startUtc, String period) {
-    final s = startUtc.toUtc();
-    if (period == 'lifetime_one_time') {
-      return DateTime.utc(s.year + 100, s.month, s.day, s.hour, s.minute, s.second,
-          s.millisecond, s.microsecond);
-    }
-    if (period == 'yearly') {
-      return DateTime.utc(
-        s.year + 1,
-        s.month,
-        s.day,
-        s.hour,
-        s.minute,
-        s.second,
-        s.millisecond,
-        s.microsecond,
-      );
-    }
-    var y = s.year;
-    var m = s.month + 1;
-    while (m > 12) {
-      m -= 12;
-      y++;
-    }
-    final dim = DateTime.utc(y, m + 1, 0).day;
-    final day = s.day > dim ? dim : s.day;
-    return DateTime.utc(
-      y,
-      m,
-      day,
-      s.hour,
-      s.minute,
-      s.second,
-      s.millisecond,
-      s.microsecond,
-    );
   }
 }

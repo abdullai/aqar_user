@@ -3,13 +3,15 @@ import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:intl/intl.dart';
+import '../core/utils/date_helper.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/listing/property_listing_display.dart';
+import '../core/listing/listing_media_urls.dart';
 import '../core/branding/branding_logo_image.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/workflow/listing_workflow_copy.dart';
@@ -27,8 +29,12 @@ import 'listing_contract_chat_page.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/app_confirm_dialog.dart';
+import '../widgets/listing/listing_data_fingerprint_strip.dart';
 import '../widgets/listing/request_summary_table.dart';
+import '../widgets/listing_pricing_breakdown.dart';
+import '../core/marketing/marketing_workflow_ui_config.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
+import '../widgets/my_page_cover_gallery.dart';
 import '../shared/core/supabase_schema_selects.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/owner_display_lookup.dart';
@@ -72,7 +78,12 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
   /// أحدث صف تصريح مرتبط بالطلب (للتحقق من حزمة REGA قبل النشر في الواجهة).
   Map<String, dynamic>? _latestPermit;
 
+  /// العرض المقبول/المحدد لهذا الطلب فقط (مبلغ عمولة التسويق المعروض للمالك).
+  Map<String, dynamic>? _selectedOffer;
+
   List<String> _heroImageUrls = const [];
+  String? _heroVideoUrl;
+  bool _coverPrefersVideo = false;
 
   /// اسم المعلن للعرض الداخلي (لوحة المسوق/المالك).
   String _ownerDisplayName = '';
@@ -229,6 +240,55 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         }
       } catch (_) {}
 
+      Map<String, dynamic>? selectedOffer;
+      try {
+        final soid = (rowMap['selected_offer_id'] ?? '').toString().trim();
+        if (soid.isNotEmpty) {
+          final o = await _sb
+              .from('listing_offers')
+              .select('id,request_id,offer_amount,price,status')
+              .eq('id', soid)
+              .eq('request_id', widget.requestId)
+              .maybeSingle();
+          if (o != null) selectedOffer = Map<String, dynamic>.from(o);
+        }
+        if (selectedOffer == null) {
+          final o = await _sb
+              .from('listing_offers')
+              .select('id,request_id,offer_amount,price,status')
+              .eq('request_id', widget.requestId)
+              .inFilter('status', const [
+                'owner_accepted',
+                'accepted',
+                'selected',
+              ])
+              .order('updated_at', ascending: false)
+              .limit(1)
+              .maybeSingle();
+          if (o != null) selectedOffer = Map<String, dynamic>.from(o);
+        }
+      } catch (_) {}
+
+      String? heroVideo;
+      var coverVid = false;
+      if (propPreview != null) {
+        try {
+          final p = Property.fromJson(Map<String, dynamic>.from(propPreview));
+          heroVideo = ListingMediaUrls.videoPlayableUrl(_sb, p.videoUrl);
+          coverVid = p.coverPrimaryPrefersVideo;
+        } catch (_) {}
+      }
+      heroVideo ??= ListingMediaUrls.videoPlayableUrl(
+        _sb,
+        (payload['request_video_path'] ?? payload['video_url'] ?? '').toString(),
+      );
+      final lg = payload['listing_guidance'];
+      if (lg is Map) {
+        coverVid = (lg['cover_primary'] ?? '').toString().toLowerCase() ==
+                'video' ||
+            coverVid;
+      }
+
       if (!mounted) return;
       setState(() {
         _row = rowMap;
@@ -237,8 +297,11 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         _payloadDetail = payload;
         _propPreview = propPreview;
         _heroImageUrls = urls;
+        _heroVideoUrl = heroVideo;
+        _coverPrefersVideo = coverVid;
         _ownerDisplayName = ownerName;
         _latestPermit = permitRow;
+        _selectedOffer = selectedOffer;
         _loading = false;
       });
     } catch (e) {
@@ -262,9 +325,6 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
           leading: Navigator.canPop(context)
               ? AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           title: Text(_isAr ? 'حالة طلب التسويق' : 'Request Status'),
@@ -315,7 +375,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
 
   Future<void> _relistForMarketing() async {
     final opts = <String, dynamic>{'allow': false};
-    final confirm = await showDialog<bool>(
+    final confirm = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setLocal) {
@@ -566,7 +626,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
   }
 
   Future<void> _showReviewContractDialog(Map<String, dynamic> c) async {
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ListingWorkflowCopy.btnReviewContract(_isAr)),
@@ -599,7 +659,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     if (!go || !mounted) return;
 
     final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ListingWorkflowCopy.btnReturnContract(_isAr)),
@@ -696,7 +756,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     if (!go || !mounted) return;
 
     final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ListingWorkflowCopy.btnCancelContract(_isAr)),
@@ -1044,7 +1104,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
 
   Future<void> _promptMarketingAdminEscalation() async {
     final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
@@ -1441,25 +1501,114 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     return 0;
   }
 
-  String _formatMoney(double value, String currency) {
-    final f = NumberFormat('#,###', 'en');
-    final cur = currency.trim().isEmpty ? 'SAR' : currency.trim();
-    final sym = cur.toUpperCase() == 'SAR'
-        ? AppMoney.saudiRiyalSignUnicode
-        : cur.toUpperCase();
-    if (value <= 0) return '';
-    return '${normalizeAsciiDigits(f.format(value))} $sym';
+  double _dynNum(dynamic v) {
+    if (v is num) return v.toDouble();
+    return double.tryParse('${v ?? ''}'.trim()) ?? 0;
   }
 
-  String _fmtDeedDate(dynamic raw) {
-    if (raw == null) return '';
-    final s = raw.toString().trim();
-    if (s.isEmpty) return '';
-    final dt = DateTime.tryParse(s);
-    if (dt != null) {
-      return DateFormat('yyyy-MM-dd').format(dt.toLocal());
+  String _commissionKindOf() {
+    String from(dynamic v) {
+      final raw = (v ?? '').toString().trim().toLowerCase();
+      if (const {'none', 'percent', 'fixed'}.contains(raw)) return raw;
+      return '';
     }
-    return normalizeAsciiDigits(s);
+
+    for (final src in [
+      from(_propPreview?['marketing_commission_kind']),
+      from(_row?['marketing_commission_kind']),
+      from(_payloadDetail['marketing_commission_kind']),
+    ]) {
+      if (src.isNotEmpty) return src;
+    }
+    final lg = _payloadDetail['listing_guidance'];
+    if (lg is Map) {
+      final pricing = lg['pricing'];
+      if (pricing is Map) {
+        final k = from(pricing['marketing_commission_kind']);
+        if (k.isNotEmpty) return k;
+      }
+    }
+    return 'none';
+  }
+
+  ListingInvoiceModel _statusInvoice(double enteredPrice, String currency) {
+    double rate() {
+      for (final v in [
+        _propPreview?['marketing_commission_rate'],
+        _row?['marketing_commission_rate'],
+        _payloadDetail['marketing_commission_rate'],
+      ]) {
+        final n = _dynNum(v);
+        if (n > 0) return n > 1 ? n / 100.0 : n;
+      }
+      return 0.025;
+    }
+
+    double fixedAmt() {
+      for (final v in [
+        _propPreview?['marketing_commission_amount'],
+        _row?['marketing_commission_amount'],
+        _payloadDetail['marketing_commission_amount'],
+      ]) {
+        final n = _dynNum(v);
+        if (n > 0) return n;
+      }
+      return 0;
+    }
+
+    bool inclVat() {
+      for (final v in [
+        _propPreview?['price_includes_vat'],
+        _row?['price_includes_vat'],
+        _payloadDetail['price_includes_vat'],
+      ]) {
+        if (v is bool) return v;
+        if (v is num) return v != 0;
+        final s = (v ?? '').toString().trim().toLowerCase();
+        if (s == 'true' || s == '1') return true;
+        if (s == 'false' || s == '0') return false;
+      }
+      return true;
+    }
+
+    double vat() {
+      for (final v in [
+        _propPreview?['vat_rate'],
+        _row?['vat_rate'],
+        _payloadDetail['vat_rate'],
+      ]) {
+        final n = _dynNum(v);
+        if (n > 0) return n > 1 ? n / 100.0 : n;
+      }
+      return 0.05;
+    }
+
+    return ListingInvoiceModel(
+      enteredPrice: enteredPrice,
+      priceIncludesVat: inclVat(),
+      vatRate: vat(),
+      commissionKind: _commissionKindOf(),
+      commissionRate: rate(),
+      commissionAmount: fixedAmt(),
+      currencyCode: currency.trim().isEmpty ? 'SAR' : currency,
+    );
+  }
+
+  DateTime? _tryDeedDateTime(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is DateTime) return raw;
+    final s = raw.toString().trim();
+    if (s.isEmpty) return null;
+    return DateTime.tryParse(s);
+  }
+
+  String _fmtDeedGregorian(DateTime dt) {
+    final local = dt.toLocal();
+    return DateHelper.fmtCivilDate(local, isAr: _isAr);
+  }
+
+  String _fmtDeedHijri(DateTime dt) {
+    return DateHelper.fmtHijriDate(dt.toLocal(), isAr: _isAr);
   }
 
   String _pickDeedNumber(Map<String, dynamic> syn) {
@@ -1476,7 +1625,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     return '';
   }
 
-  String _pickDeedDate(Map<String, dynamic> syn) {
+  DateTime? _pickDeedDateTime(Map<String, dynamic> syn) {
     for (final src in <dynamic>[
       _propPreview?['deed_date'],
       syn['deed_date'],
@@ -1484,18 +1633,34 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       _payloadDetail['preview_deed_date'],
       _row?['deed_date'],
     ]) {
-      final v = _fmtDeedDate(src);
-      if (v.isNotEmpty) return v;
+      final dt = _tryDeedDateTime(src);
+      if (dt != null) return dt;
+    }
+    return null;
+  }
+
+  String _pickHijriStored() {
+    for (final src in <dynamic>[
+      _propPreview?['deed_date_hijri'],
+      _payloadDetail['deed_date_hijri'],
+      _payloadDetail['hijri_deed_date'],
+      _row?['deed_date_hijri'],
+    ]) {
+      final v = normalizeAsciiDigits((src ?? '').toString().trim());
+      if (v.isNotEmpty && DateTime.tryParse(v) == null) return v;
     }
     return '';
   }
 
   Widget _heroImageBlock(ColorScheme cs) {
     final urls = _heroImageUrls;
-    final screenW = MediaQuery.sizeOf(context).width;
-    final heroH = (screenW * 0.52).clamp(180.0, 300.0);
-
-    Widget fallback() => Container(
+    final video = (_heroVideoUrl ?? '').trim();
+    if (urls.isEmpty && video.isEmpty) {
+      final screenW = MediaQuery.sizeOf(context).width;
+      final heroH = (screenW * 0.52).clamp(180.0, 300.0);
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
           height: heroH,
           width: double.infinity,
           color: cs.primary.withValues(alpha: 0.08),
@@ -1505,58 +1670,14 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
             fit: BoxFit.contain,
             errorIcon: Icons.apartment_rounded,
           ),
-        );
-
-    if (urls.isEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: fallback(),
+        ),
       );
     }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: SizedBox(
-        height: heroH,
-        width: double.infinity,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              urls.first,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: heroH,
-              errorBuilder: (_, __, ___) => fallback(),
-            ),
-            if (urls.length > 1)
-              PositionedDirectional(
-                bottom: 10,
-                end: 10,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    child: Text(
-                      _isAr
-                          ? '+${urls.length - 1} صور'
-                          : '+${urls.length - 1} photos',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
+    return MyPageCoverGallery(
+      imageUrls: urls,
+      videoUrl: video.isEmpty ? null : video,
+      coverPrefersVideo: _coverPrefersVideo,
+      isAr: _isAr,
     );
   }
 
@@ -1573,11 +1694,6 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         uiDecision.kind == ListingUiEntityKind.publishedProperty;
     final previewPropertyId = (_publishedPropertyId ?? '').trim();
 
-    final title = (syn['title'] ?? row['title'] ?? '').toString().trim();
-    final displayTitle =
-        title.isEmpty ? (_isAr ? 'طلب تسويق' : 'Marketing request') : title;
-
-    final city = (syn['city'] ?? row['city'] ?? '').toString().trim();
     final currency = (() {
       final c1 = (_propPreview?['currency'] ?? '').toString().trim();
       if (c1.isNotEmpty) return c1;
@@ -1586,12 +1702,14 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       return 'SAR';
     })();
 
-    final priceVal = _pickNumeric(
+    var priceVal = _pickNumeric(
       _propPreview?['price'],
-      row['price'],
-      _payloadDetail['price'],
+      _payloadDetail['preview_price'],
+      _payloadDetail['listing_price'],
     );
-    final priceLine = _formatMoney(priceVal, currency);
+    if (priceVal <= 0) {
+      priceVal = _pickNumeric(_payloadDetail['price'], row['price'], null);
+    }
 
     final areaVal = _pickNumeric(
       _propPreview?['area'],
@@ -1601,7 +1719,7 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
     final areaLine = areaVal > 0
         ? (_isAr
             ? '${normalizeAsciiDigits(areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2))} م²'
-            : '${normalizeAsciiDigits(areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2))} m²')
+            : '${normalizeAsciiDigits(areaVal.toStringAsFixed(areaVal == areaVal.roundToDouble() ? 0 : 2))} sqm')
         : '';
 
     final typeLabel = PropertyListingDisplay.typeLabelForRequestRow(syn, _isAr);
@@ -1609,21 +1727,102 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         PropertyListingDisplay.purposeLabelForRequestRow(syn, _isAr);
     final usageTuples =
         PropertyListingDisplay.usageTuplesFromPayload(_payloadDetail, _isAr);
+    final typeCore = typeLabel.toLowerCase();
+    final extraUse = usageTuples
+        .map((t) => t.$2.trim())
+        .where(
+          (s) =>
+              s.isNotEmpty &&
+              !typeCore.contains(s.toLowerCase()) &&
+              !purposeLabel.toLowerCase().contains(s.toLowerCase()),
+        )
+        .join(' · ');
+    final loc = PropertyListingDisplay.locationSlotsFromMaps(
+      property: _propPreview,
+      payload: _payloadDetail,
+      request: row,
+    );
+    final typeForHeadline = [
+      typeLabel,
+      extraUse,
+    ].where((s) => s.trim().isNotEmpty).join(' ');
+    final headline = PropertyListingDisplay.composeListingHeadline(
+      typeLabel: typeForHeadline.isNotEmpty ? typeForHeadline : typeLabel,
+      purposeBit: purposeLabel,
+      city: loc.city,
+      isAr: _isAr,
+    ).trim();
+    final locJoined = [
+      loc.region,
+      loc.governorate,
+      loc.city,
+      loc.district,
+    ].where((s) => s.trim().isNotEmpty).join(' — ');
 
-    final address =
-        (_propPreview?['address_line'] ??
-                _payloadDetail['address_line'] ??
-                row['address_line'] ??
-                row['location'] ??
-                '')
-            .toString()
-            .trim();
+    var address = (_propPreview?['address_line'] ??
+            _payloadDetail['address_line'] ??
+            row['address_line'] ??
+            '')
+        .toString()
+        .trim();
+    if (address.isNotEmpty) {
+      final folded = locJoined.replaceAll(' — ', ' ').toLowerCase();
+      if (folded.contains(address.toLowerCase()) ||
+          address.toLowerCase() == loc.city.toLowerCase() ||
+          address.toLowerCase() == loc.district.toLowerCase()) {
+        address = '';
+      }
+    }
 
     final description =
         (syn['description'] ?? row['description'] ?? '').toString().trim();
+    final descShow = description.isNotEmpty &&
+        description.trim() != headline.trim();
+
+    final invoice = _statusInvoice(priceVal > 0 ? priceVal : 0, currency);
+    final kind = invoice.commissionKind;
+    final fromOffer = _pickNumeric(
+      _selectedOffer?['offer_amount'],
+      _selectedOffer?['price'],
+      null,
+    );
+    var marketingAmt = 0.0;
+    var marketingIsFixed = kind == 'fixed';
+    if (marketingIsFixed) {
+      marketingAmt = invoice.commissionTotal > 0
+          ? invoice.commissionTotal
+          : invoice.commissionAmount;
+    } else if (fromOffer > 0) {
+      marketingAmt = fromOffer;
+    } else if (kind == 'percent' && invoice.commissionTotal > 0) {
+      final mid = (row['selected_marketer_id'] ?? row['marketer_id'] ?? '')
+          .toString()
+          .trim();
+      if (mid.isNotEmpty || (_selectedOffer != null)) {
+        marketingAmt = invoice.commissionTotal;
+      }
+    }
+    if (marketingAmt > 0 &&
+        priceVal > 0 &&
+        (marketingAmt - priceVal).abs() < 0.5 &&
+        !marketingIsFixed) {
+      // لا نخلط سعر العقار مع مبلغ العرض إن تطابقا بالخطأ من عمود السعر.
+      marketingAmt = kind == 'percent' ? invoice.commissionTotal : 0;
+      if (marketingAmt > 0 && (marketingAmt - priceVal).abs() < 0.5) {
+        marketingAmt = 0;
+      }
+    }
+    final marketingLabel = marketingIsFixed
+        ? (_isAr ? 'المبلغ المقطوع' : 'Fixed amount')
+        : (_isAr ? 'العرض المقدم لك' : 'Offer presented to you');
 
     final deedNo = _pickDeedNumber(syn);
-    final deedDate = _pickDeedDate(syn);
+    final deedDt = _pickDeedDateTime(syn);
+    final deedGregorian = deedDt != null ? _fmtDeedGregorian(deedDt) : '';
+    var deedHijri = _pickHijriStored();
+    if (deedHijri.isEmpty && deedDt != null) {
+      deedHijri = _fmtDeedHijri(deedDt);
+    }
     final publicCode = (row['listing_request_public_code'] ??
             _propPreview?['listing_public_code'] ??
             '')
@@ -1633,89 +1832,86 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
       _isAr,
       row['marketing_round'],
     );
-    final titleFs = MediaQuery.sizeOf(context).width < 360 ? 18.0 : 22.0;
-
-    final chips = <Widget>[];
-    if (typeLabel.trim().isNotEmpty) {
-      chips.add(
-        Chip(
-          label: Text(typeLabel),
-          visualDensity: VisualDensity.compact,
-          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
-        ),
-      );
-    }
-    if (purposeLabel.trim().isNotEmpty) {
-      chips.add(
-        Chip(
-          label: Text(purposeLabel),
-          visualDensity: VisualDensity.compact,
-          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
-        ),
-      );
-    }
-    for (final t in usageTuples) {
-      chips.add(
-        Chip(
-          avatar: Icon(t.$1, size: 18, color: cs.primary),
-          label: Text(t.$2),
-          visualDensity: VisualDensity.compact,
-          side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.4)),
-        ),
-      );
-    }
+    final propertyId =
+        (_propPreview?['id'] ?? previewPropertyId).toString().trim();
 
     final summaryRows = <RequestSummaryRow>[
       if (publicCode.isNotEmpty)
         RequestSummaryRow(
-          label: _isAr ? 'رقم الطلب' : 'Request no.',
+          label: _isAr ? 'رقم الإعلان' : 'Listing no.',
           value: normalizeAsciiDigits(publicCode),
+          emphasize: true,
         ),
-      if (city.isNotEmpty)
+      if (loc.region.isNotEmpty &&
+          !PropertyListingDisplay.headlineContainsFact(headline, loc.region) &&
+          loc.region.trim() != loc.city.trim())
+        RequestSummaryRow(
+          label: _isAr ? 'المنطقة' : 'Region',
+          value: loc.region,
+        ),
+      if (loc.governorate.isNotEmpty &&
+          !PropertyListingDisplay.headlineContainsFact(
+              headline, loc.governorate) &&
+          loc.governorate.trim() != loc.city.trim())
+        RequestSummaryRow(
+          label: _isAr ? 'المحافظة' : 'Governorate',
+          value: loc.governorate,
+        ),
+      if (loc.city.isNotEmpty &&
+          !PropertyListingDisplay.headlineContainsFact(headline, loc.city))
         RequestSummaryRow(
           label: _isAr ? 'المدينة' : 'City',
-          value: city,
+          value: loc.city,
         ),
-      if (priceLine.isNotEmpty)
+      if (loc.district.isNotEmpty)
         RequestSummaryRow(
-          label: _isAr ? 'السعر' : 'Price',
-          value: priceLine,
+          label: _isAr ? 'الحي' : 'District',
+          value: loc.district,
+        ),
+      if (priceVal > 0)
+        RequestSummaryRow(
+          label: _isAr ? 'السعر الأساسي' : 'Base price',
           emphasize: true,
+          valueWidget: RequestSummaryMoneyValue(
+            amount: priceVal,
+            isAr: _isAr,
+            currencyCode: currency,
+          ),
+        ),
+      if (marketingAmt > 0)
+        RequestSummaryRow(
+          label: marketingLabel,
+          emphasize: true,
+          valueWidget: RequestSummaryMoneyValue(
+            amount: marketingAmt,
+            isAr: _isAr,
+            currencyCode: currency,
+          ),
         ),
       if (areaLine.isNotEmpty)
         RequestSummaryRow(
           label: _isAr ? 'المساحة' : 'Area',
           value: areaLine,
         ),
-      if (typeLabel.isNotEmpty)
-        RequestSummaryRow(
-          label: _isAr ? 'نوع العقار' : 'Property type',
-          value: typeLabel,
-        ),
-      if (purposeLabel.isNotEmpty)
-        RequestSummaryRow(
-          label: _isAr ? 'الغرض' : 'Purpose',
-          value: purposeLabel,
-        ),
       if (address.isNotEmpty)
         RequestSummaryRow(
-          label: _isAr ? 'العنوان' : 'Address',
+          label: _isAr ? 'العنوان التفصيلي' : 'Street address',
           value: address,
-        ),
-      if (_ownerDisplayName.trim().isNotEmpty)
-        RequestSummaryRow(
-          label: _isAr ? 'الشريك المعلن' : 'Listing partner',
-          value: _ownerDisplayName.trim(),
         ),
       if (deedNo.isNotEmpty)
         RequestSummaryRow(
           label: _isAr ? 'رقم الصك' : 'Deed number',
           value: deedNo,
         ),
-      if (deedDate.isNotEmpty)
+      if (deedGregorian.isNotEmpty)
         RequestSummaryRow(
-          label: _isAr ? 'تاريخ الصك' : 'Deed date',
-          value: deedDate,
+          label: _isAr ? 'تاريخ الصك الميلادي' : 'Deed date (Gregorian)',
+          value: deedGregorian,
+        ),
+      if (deedHijri.isNotEmpty)
+        RequestSummaryRow(
+          label: _isAr ? 'تاريخ الصك الهجري' : 'Deed date (Hijri)',
+          value: deedHijri,
         ),
       RequestSummaryRow(
         label: _isAr ? 'جولة التسويق' : 'Marketing round',
@@ -1725,57 +1921,74 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
         label: _isAr ? 'حالة الطلب' : 'Request status',
         value: _isAr ? wfCtx.statusLabelAr : wfCtx.statusLabelEn,
       ),
+      if (descShow)
+        RequestSummaryRow(
+          label: _isAr ? 'الوصف' : 'Description',
+          value: description,
+          maxLines: null,
+        ),
     ];
+
+    final priceShare = priceVal > 0
+        ? AppMoney.formatWithCurrencyCode(
+            priceVal,
+            isAr: _isAr,
+            currencyCode: currency,
+            maxFractionDigits: 0,
+          )
+        : '';
+    final marketingShare = marketingAmt > 0
+        ? AppMoney.formatWithCurrencyCode(
+            marketingAmt,
+            isAr: _isAr,
+            currencyCode: currency,
+            maxFractionDigits: 0,
+          )
+        : '';
+    final identityCard = [
+      headline,
+      locJoined,
+      if (priceShare.isNotEmpty) priceShare,
+      if (marketingShare.isNotEmpty) marketingShare,
+      if (publicCode.isNotEmpty) publicCode,
+    ].where((s) => s.trim().isNotEmpty).join('\n');
+    final fingerprintSeed = [
+      widget.requestId,
+      propertyId,
+      publicCode,
+      priceVal.toStringAsFixed(0),
+      marketingAmt.toStringAsFixed(0),
+      deedNo,
+      deedGregorian,
+      locJoined,
+    ].join('|');
 
     final topSection = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _heroImageBlock(cs),
-        const SizedBox(height: 14),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: AlignmentDirectional.centerStart,
-          child: Text(
-            displayTitle,
-            maxLines: 2,
-            style: TextStyle(
-              fontSize: titleFs,
+        if (headline.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(
+            headline,
+            style: const TextStyle(
+              fontSize: 18,
               fontWeight: FontWeight.w900,
-              height: 1.2,
+              height: 1.25,
             ),
           ),
-        ),
-        if (chips.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: chips,
-          ),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         RequestSummaryTable(
-          title: _isAr ? 'ملخص الطلب' : 'Request summary',
+          title: _isAr ? 'بيانات هذا العقار' : 'This listing’s details',
           rows: summaryRows,
         ),
-        if (description.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            _isAr ? 'الوصف' : 'Description',
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              color: cs.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            description,
-            style: TextStyle(
-              height: 1.4,
-              color: cs.onSurface.withValues(alpha: 0.92),
-            ),
-          ),
-        ],
+        const SizedBox(height: 12),
+        ListingDataFingerprintStrip(
+          isAr: _isAr,
+          seed: fingerprintSeed,
+          identityCard: identityCard,
+        ),
       ],
     );
 
@@ -1794,28 +2007,8 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
                   .surfaceContainerHighest
                   .withValues(alpha: 0.4),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  isPublished
-                      ? ListingWorkflowCopy.publishedBannerTitle(_isAr)
-                      : (_isAr
-                          ? 'الحالة: ${wfCtx.statusLabelAr}'
-                          : 'Status: ${wfCtx.statusLabelEn}'),
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 8),
-                if (isPublished) ...[
-                  Text(
-                    ListingWorkflowCopy.publishedBannerSubtitle(_isAr),
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  FilledButton.icon(
+            child: isPublished
+                ? FilledButton.icon(
                     onPressed: previewPropertyId.isEmpty
                         ? null
                         : () =>
@@ -1827,18 +2020,14 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                  ),
-                ] else ...[
-                  ListingWorkflowProgressStrip(
+                  )
+                : ListingWorkflowProgressStrip(
                     stage: wfCtx.stage,
                     compact: false,
                     dense: true,
                     deadline: wfCtx.primaryDeadline,
                     permitSoundContextId: widget.requestId,
                   ),
-                ],
-              ],
-            ),
           ),
           if (_hasMarketingEscalationRequest(row)) ...[
             const SizedBox(height: 12),
@@ -1848,7 +2037,8 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
             const SizedBox(height: 12),
             _buildComplianceReviewBanner(row, cs),
           ],
-          if (_contract != null) ...[
+          if (MarketingWorkflowUiConfig.contractsSigningEnabled &&
+              _contract != null) ...[
             const SizedBox(height: 14),
             _buildOwnerContractSection(row, _contract!),
           ],

@@ -93,8 +93,8 @@ class BrandingLogoImage extends StatelessWidget {
       ),
       child: SizedBox.expand(
         child: Padding(
-          // هامش خفيف حتى يظهر الشعار كاملاً ومنسّقاً داخل إطار البطاقة.
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          // هامش ضئيل حتى يملأ الشعار مربعه بوضوح دون قصّ.
+          padding: const EdgeInsets.all(3),
           child: image,
         ),
       ),

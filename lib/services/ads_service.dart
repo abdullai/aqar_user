@@ -21,13 +21,17 @@ class AdsService {
   /// تحميل إعلانات نشطة حسب اللغة والمنصة.
   /// ملاحظة: القراءة لا تحتاج Session لأن عندك policy:
   /// (is_active=true and deleted_at is null)
-  static Future<List<AdItem>> loadAds({String? lang}) async {
+  static Future<List<AdItem>> loadAds({
+    String? lang,
+    bool fallbackDemo = true,
+    bool ignorePlatform = false,
+  }) async {
     final isAr = (lang ?? 'ar').toLowerCase().startsWith('ar');
 
     try {
-      final isWeb = kIsWeb;
+      const isWeb = kIsWeb;
 
-      final rows = await _sb
+      var query = _sb
           .from('ads')
           .select(
             'id,title,image_url,link_url,show_on_web,show_on_app,is_active,deleted_at,'
@@ -36,8 +40,11 @@ class AdsService {
           )
           .eq('is_active', true)
           // ✅ FIX: postgrest 2.6.0: لا eq(null) ولا is_()
-          .filter('deleted_at', 'is', 'null') // ✅ deleted_at IS NULL
-          .eq(isWeb ? 'show_on_web' : 'show_on_app', true)
+          .filter('deleted_at', 'is', 'null'); // ✅ deleted_at IS NULL
+      if (!ignorePlatform) {
+        query = query.eq(isWeb ? 'show_on_web' : 'show_on_app', true);
+      }
+      final rows = await query
           .order('created_at', ascending: false)
           .limit(50);
 
@@ -78,11 +85,11 @@ class AdsService {
         );
       }
 
-      // إذا لا يوجد إعلانات في DB، ارجع Demo بدل شاشة فاضية
-      return list.isEmpty ? demoAds() : list;
+      // إذا لا يوجد إعلانات في DB، ارجع Demo بدل شاشة فاضية (شاشة الدخول فقط)
+      return list.isEmpty && fallbackDemo ? demoAds() : list;
     } catch (_) {
-      // أي مشكلة (شبكة/صلاحيات/...) => fallback demo
-      return demoAds();
+      // أي مشكلة (شبكة/صلاحيات/...) => fallback demo (شاشة الدخول فقط)
+      return fallbackDemo ? demoAds() : const [];
     }
   }
 

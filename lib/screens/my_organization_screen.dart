@@ -18,6 +18,7 @@ import 'organization_analytics_screen.dart';
 import 'organization_chat_screen.dart';
 import 'organization_settings_screen.dart';
 import 'org_member_activity_desk_page.dart';
+import 'org_team_inventory_desk_page.dart';
 import '../widgets/team_membership_gate.dart';
 import '../widgets/team_invite_member_dialog.dart';
 import 'reports_dashboard_screen.dart';
@@ -26,6 +27,7 @@ import 'subscriptions/subscription_org_desk_tab.dart';
 /// يطابق ترتيب التبويبات عند فتح الشاشة من الخارج (عداد AppBar).
 enum MyOrganizationTabKey {
   teamDashboard,
+  teamInventory,
   manageMembers,
   joinRequests,
   rolesPermissions,
@@ -156,6 +158,16 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
           orgId: oid,
           isOwner: owner,
         ),
+      );
+    }
+    if (ps.showDeskTabTeamInventory) {
+      add(
+        MyOrganizationTabKey.teamInventory,
+        Tab(
+          icon: const Icon(Icons.list_alt_outlined),
+          text: l10n.deskTabTeamInventory,
+        ),
+        OrgTeamInventoryDeskPage(lang: widget.lang),
       );
     }
     if (ps.showDeskTabManageMembers) {
@@ -308,11 +320,6 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
                 leading: !widget.suppressImpliedLeading
                     ? AppPageCloseButton(
                         isArabic: widget.lang.toLowerCase() != 'en',
-                        onPressed: () {
-                          if (Navigator.canPop(context)) {
-                            Navigator.pop(context);
-                          }
-                        },
                       )
                     : null,
                 title: Text(l10n.orgTeamDeskTitle),
@@ -351,9 +358,6 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
         leading: !widget.suppressImpliedLeading
             ? AppPageCloseButton(
                 isArabic: widget.lang.toLowerCase() != 'en',
-                onPressed: () {
-                  if (Navigator.canPop(context)) Navigator.pop(context);
-                },
               )
             : null,
         title: Text(l10n.orgTeamDeskTitle),

@@ -404,3 +404,18 @@ entrypoint = "./functions/nafath_session/index.ts"
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/moyasar-webhook/index.ts"
+
+[functions.moyasar-charge-saved-card]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/moyasar-charge-saved-card/index.ts"
+
+[functions.moyasar-refund]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/moyasar-refund/index.ts"
+
+[functions.subscription-renew-cron]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/subscription-renew-cron/index.ts"

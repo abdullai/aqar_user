@@ -1,9 +1,12 @@
-﻿import 'dart:async' show Timer, unawaited;
+﻿// ignore_for_file: unused_element, unused_element_parameter
+
+import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
@@ -15,21 +18,24 @@ import '../core/branding/app_branding.dart';
 import '../core/branding/aqar_brand_colors.dart';
 import '../l10n/app_localizations.dart';
 import '../core/branding/branding_logo_image.dart';
+import '../widgets/in_app_tour_viewer.dart';
+import '../core/listing/in_app_tour.dart';
 import '../core/listing/listing_media_urls.dart';
+import '../services/photographer_service.dart';
+import 'photo_shoot_book_page.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/listing/property_type_catalog.dart';
 import '../core/session/app_session.dart';
 import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
 import '../core/utils/display_ids.dart';
 import '../core/share/app_listing_links.dart';
 import '../core/share/listing_share_helper.dart';
 import '../core/subscription/app_subscription_gate.dart';
-import '../core/subscription/marketing_subscription_access.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../models/property.dart';
 import '../services/marketing_flow_service.dart';
 import '../services/marketing_workflow_hub.dart';
-import '../services/subscription_service.dart';
 import '../services/property_view_service.dart';
 import '../services/property_auction_service.dart';
 import '../services/listing_payment_service.dart';
@@ -37,19 +43,22 @@ import '../services/reservations_service.dart';
 import '../core/workflow/listing_edit_permissions.dart';
 import '../core/workflow/listing_permissions_helper.dart';
 import '../core/workflow/listing_workflow_stage.dart';
+import '../core/workflow/workflow_display_texts.dart';
 import '../services/user_listing_preferences_service.dart';
 import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/listing_public_actions_menu.dart';
 import '../widgets/listing_report_sheet.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
+import '../core/navigation/safe_overlay_pop.dart';
 import '../widgets/marketing_offer_submit_sheet.dart';
 import '../widgets/marketer_policy_notice_card.dart';
 import '../widgets/inline_property_video.dart';
 import '../widgets/listing_watermark_overlay.dart';
 import '../widgets/listing_media_gallery.dart';
+import '../widgets/crystal_listing_media.dart';
 import '../widgets/property_video_sheet.dart';
-import '../widgets/listing_formatted_spec_panel.dart';
+import '../widgets/shorts_tour_pane.dart';
 import '../widgets/listing_marketing_tracking_sheet.dart';
 import '../widgets/guest_participation_gate.dart';
 import '../services/guest_session_bridge.dart';
@@ -80,6 +89,8 @@ class PropertyDetailsPage extends StatefulWidget {
   /// قبل النشر: للمسوّق فقط — إظهار الاسم الرباعي للمعلن تحت «هذا الإعلان بواسطة».
   /// بعد النشر يُخفى تلقائياً من الرابط العام؛ يُفضّل تمرير false عندما تكون `published`.
   final bool showOwnerLegalNameToViewer;
+  /// عند `true` فُتح من الرئيسية أو طلباتي/إعلاناتي (كتالوج) وليس من مسار التسويق.
+  final bool openedFromCatalog;
   final Future<Property?> Function(Property property)? onEditProperty;
 
   /// تعديل المسوّق لمطابقة بيانات الهيئة بعد إصدار التصريح وقبل النشر.
@@ -113,6 +124,7 @@ class PropertyDetailsPage extends StatefulWidget {
     this.allowMarketingOffer = false,
     this.marketerHubPhase,
     this.showOwnerLegalNameToViewer = false,
+    this.openedFromCatalog = false,
     this.onEditProperty,
     this.onMarketerRegaAlignEdit,
     this.onRequestDelete,
@@ -177,6 +189,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   String? _deleteRequestReason;
 
   bool _viewerInCartForListing = false;
+  bool _viewerOwnerAcceptedDeal = false;
   bool _buyerDealSubscriptionOk = false;
   bool _loadingBuyerDealAccess = false;
 
@@ -203,6 +216,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       _effectiveMarketingRequestId.isNotEmpty;
 
   bool get _marketerWorkflowBlocksNewOffer {
+    final phase = (widget.marketerHubPhase ?? '').trim().toLowerCase();
+    if (const {
+      'inactive72h',
+      'inactive_72h',
+      'cancelled',
+      'published',
+      'permit',
+    }.contains(phase)) {
+      return true;
+    }
     final s = _property.effectiveWorkflowStage;
     switch (s) {
       case ListingWorkflowStage.marketerSelected:
@@ -218,6 +241,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       case ListingWorkflowStage.cancelled:
       case ListingWorkflowStage.terminated:
       case ListingWorkflowStage.archived:
+      case ListingWorkflowStage.inactive72h:
         return true;
       default:
         return false;
@@ -262,7 +286,10 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       return false; // مستخدم عادي/ضيف لا يرى رقم المالك (يبقى التواصل عبر المسوّق)
     }
     final phase = _effectiveMarketerHubPhase;
-    return phase == 'signed' || phase == 'permit';
+    return phase == 'accepted' ||
+        phase == 'contract' ||
+        phase == 'signed' ||
+        phase == 'permit';
   }
 
   bool get _showMarketerHubShortcuts =>
@@ -292,6 +319,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   /// زر/بطاقة «تتبع التسويق» — للمالك أو المسوّق المرتبط بالإعلان عند وجود طلب.
   bool get _showMarketingTrackingEntry =>
+      !widget.openedFromCatalog &&
+      !_isPublishedLikeListing &&
       !_isGuest &&
       widget.currentUserId.trim().isNotEmpty &&
       _effectiveMarketingRequestId.isNotEmpty &&
@@ -396,9 +425,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   /// مراسلة المالك: بعد قبول العرض وفي مراحل التعاقد/التصاريح فقط — ليست من السوق العقاري.
   bool get _canOpenListingOwnerChat {
-    if (_isGuest || _isPublishedLikeListing) return false;
+    if (_isGuest) return false;
     if (widget.currentUserId.trim() == _property.ownerId) return false;
-    if (!_isSelectedMarketerForListing) return false;
+    if (!_isSelectedMarketerForListing && !_isPublishingMarketer) {
+      return false;
+    }
+    if (_includeOwnerInChat) return true;
+    if (_isPublishedLikeListing) return false;
     final s = _property.effectiveWorkflowStage;
     return const {
       ListingWorkflowStage.marketerSelected,
@@ -433,17 +466,49 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       !_allowMarketingOfferEffective;
 
   bool get _publicBuyerMayChatMarketer =>
-      _viewerInCartForListing && _buyerDealSubscriptionOk;
+      _viewerOwnerAcceptedDeal && _buyerDealSubscriptionOk;
+
+  /// إعلان مُغلق للسوق: لا مراسلة عامة بعد البيع/الإغلاق أو الحذف.
+  bool get _listingClosedForPublicContact {
+    if (_property.isDeletedLike) return true;
+    const closed = <String>{
+      'sold',
+      'sold_out',
+      'completed',
+      'closed',
+      'expired',
+      'unavailable',
+      'gone',
+    };
+    return closed.contains(_property.normalizedStatus);
+  }
 
   bool get _showMarketerChatButton {
     if (!_canOpenMarketerChat) return false;
-    if (_isPublicBuyerOnPublishedListing) {
+    if (_listingClosedForPublicContact &&
+        !_isListingOwner &&
+        !_isPublishingMarketer &&
+        !_isSelectedMarketerForListing &&
+        !_platformStaff) {
+      return false;
+    }
+    if (_isListingOwner) return _ownerOffersCount > 0;
+    final marketViewer = !_isPublishingMarketer &&
+        !_isSelectedMarketerForListing &&
+        !_isPartyMarketerOnListing &&
+        !_platformStaff;
+    if (_isPublishedLikeListing && marketViewer) {
       return _publicBuyerMayChatMarketer;
     }
-    return _isPublishedLikeListing ||
-        _isListingOwner ||
-        !_isPartyMarketerOnListing;
+    if (_platformStaff) return true;
+    if (!_isPublishedLikeListing) return true;
+    return false;
   }
+
+  bool get _showIdentityChatActions =>
+      (_showMarketerChatButton &&
+          (!_isListingOwner || _ownerOffersCount > 0)) ||
+      _canOpenListingOwnerChat;
 
   bool get _showGuestCompleteDealBar =>
       _isGuest &&
@@ -473,11 +538,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         userId: uid,
         propertyId: _property.id,
       );
+      final accepted =
+          await ReservationsService.userHasOwnerAcceptedReservationForProperty(
+        userId: uid,
+        propertyId: _property.id,
+      );
       final gate = context.read<AppSubscriptionGate>();
       await gate.refresh(force: false);
       if (!mounted) return;
       setState(() {
         _viewerInCartForListing = inCart;
+        _viewerOwnerAcceptedDeal = accepted;
         _buyerDealSubscriptionOk = gate.canCompleteMarketDeal;
         _loadingBuyerDealAccess = false;
       });
@@ -513,10 +584,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   String get _deedDateDisplay {
     if (_property.deedDate != null) {
-      final d = _property.deedDate!;
-      return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      return DateHelper.fmtCivilDate(_property.deedDate!, isAr: widget.isAr);
     }
-    return _licenseField('deed_date');
+    return DateHelper.fmtCivilDateRaw(
+      _licenseField('deed_date'),
+      isAr: widget.isAr,
+      fallback: _licenseField('deed_date'),
+    );
   }
 
   String get _deedIssuerDisplay {
@@ -525,11 +599,107 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     return _licenseField('deed_issuer');
   }
 
-  String _maskDeedNumber(String raw) {
-    final s = raw.trim();
-    if (s.length <= 4) return s;
-    final tail = s.substring(s.length - 4);
-    return '${'*' * (s.length - 4)}$tail';
+  String get _deedCombinedValue {
+    final lines = <String>[];
+    if (_deedNumberDisplay.isNotEmpty) {
+      lines.add(
+        widget.isAr
+            ? 'رقم الصك: $_deedNumberDisplay'
+            : 'Deed no.: $_deedNumberDisplay',
+      );
+    }
+    final g = _property.listingGuidance ?? const <String, dynamic>{};
+    String pick(dynamic v) => (v ?? '').toString().trim();
+    final plan = pick(g['plan_number']);
+    final parcel = pick(g['parcel_number']);
+    if (plan.isNotEmpty || parcel.isNotEmpty) {
+      lines.add(
+        widget.isAr
+            ? 'المخطط / القطعة: ${[
+                if (plan.isNotEmpty) plan,
+                if (parcel.isNotEmpty) parcel,
+              ].join(' — ')}'
+            : 'Plan / parcel: ${[
+                if (plan.isNotEmpty) plan,
+                if (parcel.isNotEmpty) parcel,
+              ].join(' — ')}',
+      );
+    }
+    final b = g['parcel_boundaries'];
+    if (b is Map) {
+      final n = pick(b['north']);
+      final s = pick(b['south']);
+      final e = pick(b['east']);
+      final w = pick(b['west']);
+      final split = [
+        if (n.isNotEmpty) (widget.isAr ? 'شمال $n' : 'N $n'),
+        if (s.isNotEmpty) (widget.isAr ? 'جنوب $s' : 'S $s'),
+        if (e.isNotEmpty) (widget.isAr ? 'شرق $e' : 'E $e'),
+        if (w.isNotEmpty) (widget.isAr ? 'غرب $w' : 'W $w'),
+      ];
+      if (split.isNotEmpty) {
+        lines.add(
+          widget.isAr
+              ? 'الإحداثي المقسم: ${split.join(' · ')}'
+              : 'Split coordinates: ${split.join(' · ')}',
+        );
+      }
+    }
+    final la = lat ?? _property.latitude;
+    final lo = lng ?? _property.longitude;
+    if (la != null && lo != null) {
+      lines.add(
+        widget.isAr
+            ? 'المجموع: ${la.toStringAsFixed(6)}, ${lo.toStringAsFixed(6)}'
+            : 'Total: ${la.toStringAsFixed(6)}, ${lo.toStringAsFixed(6)}',
+      );
+    }
+    return lines.join('\n');
+  }
+
+  bool get _includeOwnerInChat {
+    final g = _property.listingGuidance;
+    final v = g?['include_owner_in_chat'];
+    return v == true || v == 'true' || v == 1 || v == '1';
+  }
+
+  String get _cleanDescription {
+    var t = _property.description.trim();
+    t = t.replaceAll(RegExp(r'تتبع\s*مسار\s*التسويق[^\n]*'), '');
+    t = t.replaceAll(RegExp(r'Track marketing[^\n]*', caseSensitive: false), '');
+    return t.trim();
+  }
+
+  String get _publisherRoleHeading {
+    final snap = _property.marketingLicenseSnapshot ?? const <String, dynamic>{};
+    final raw = (snap['marketer_entity_type'] ??
+            snap['entity_type'] ??
+            snap['organization_type'] ??
+            snap['broker_entity_type'] ??
+            '')
+        .toString()
+        .toLowerCase()
+        .trim();
+    if (raw.contains('office') ||
+        raw.contains('مكتب') ||
+        raw == 'broker_office') {
+      return widget.isAr ? 'مكتب عقاري' : 'Real estate office';
+    }
+    if (raw.contains('company') ||
+        raw.contains('شركة') ||
+        raw == 'broker_company') {
+      return widget.isAr ? 'شركة عقارية' : 'Real estate company';
+    }
+    if (raw.contains('institution') ||
+        raw.contains('establishment') ||
+        raw.contains('مؤسسة') ||
+        raw == 'broker_institution') {
+      return widget.isAr ? 'مؤسسة عقارية' : 'Real estate establishment';
+    }
+    if ((_property.publishedByMarketerId ?? '').trim().isNotEmpty) {
+      return widget.isAr ? 'مسوق فرد' : 'Individual marketer';
+    }
+    return widget.isAr ? 'المعلن' : 'Advertiser';
   }
 
   Map<String, dynamic>? get _licenseSnap => _property.marketingLicenseSnapshot;
@@ -597,13 +767,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   bool get _isPublishedLikeListing {
     final reqWf = (_resolvedListingRequestWorkflow ?? '').trim().toLowerCase();
-    if (reqWf == 'waiting_marketers') return false;
+    if (const {
+      'waiting_marketers',
+      'inactive_72h',
+      'inactive72h',
+      'owner_action_required',
+    }.contains(reqWf)) {
+      return false;
+    }
     final st = (_property.status ?? '').trim().toLowerCase();
     final wf = (_property.workflowStage ?? '').trim().toLowerCase();
-    if (wf == 'waiting_marketers') return false;
-    return st == 'published' ||
+    if (const {
+      'waiting_marketers',
+      'inactive_72h',
+      'inactive72h',
+      'owner_action_required',
+    }.contains(wf)) {
+      return false;
+    }
+    if (_property.effectiveWorkflowStage == ListingWorkflowStage.inactive72h) {
+      return false;
+    }
+    return ListingPermissionsHelper.shouldShowInPublicHome(_property) ||
+        st == 'published' ||
         st == 'live' ||
-        st == 'active' ||
         wf == 'published';
   }
 
@@ -697,7 +884,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
               builder: (_) => SubscriptionsRootScreen(
                 lang: lang,
                 accountType: '',
-                embedAppBar: true,
+                embedAppBar: false,
               ),
             ),
           ),
@@ -720,6 +907,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       isAr: widget.isAr,
       propertyBaseSarHint: hint,
       onAfterSubmit: () async {
+        MarketingWorkflowHub.requestMarketerHubTab(1);
         MarketingWorkflowHub.notifyBucketsChanged();
         if (!mounted) return;
         await _loadMarketingOfferAvailability();
@@ -970,6 +1158,9 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   }
 
   String _localizedListingStatusLine() {
+    if (widget.openedFromCatalog) {
+      return widget.isAr ? 'منشور' : 'Published';
+    }
     final st = (_property.status ?? '').trim().toLowerCase();
     final wf = (_property.workflowStage ?? '').trim().toLowerCase();
     String mapOne(String s) {
@@ -1241,6 +1432,29 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     );
   }
 
+  Future<void> _setIncludeOwnerInChat(bool enabled) async {
+    final g = Map<String, dynamic>.from(_property.listingGuidance ?? {});
+    g['include_owner_in_chat'] = enabled;
+    try {
+      await _sb
+          .from('properties')
+          .update({'listing_guidance': g})
+          .eq('id', _property.id);
+      if (!mounted) return;
+      setState(() {
+        _property = _property.copyWith(listingGuidance: g);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      _snack(
+        widget.isAr
+            ? 'تعذر حفظ خيار إشراك المالك.'
+            : 'Could not save owner-in-chat option.',
+        isError: true,
+      );
+    }
+  }
+
   Future<void> _openChatWithMarketer() async {
     if (_isGuest) {
       _snackLoginRequired();
@@ -1259,8 +1473,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       if (!_viewerInCartForListing) {
         _snack(
           widget.isAr
-              ? 'أكمل الصفقة أولاً (أضف الإعلان إلى صفقاتك) ثم يمكنك مراسلة المسوّق.'
-              : 'Complete the deal first (add to My deals), then you can message the marketer.',
+              ? 'أكمل الصفقة أولاً (أضف الإعلان إلى صفقاتك) ثم يمكنك مراسلة المسوّق بعد موافقة المالك.'
+              : 'Add the listing to My deals first. Messaging appears after the owner accepts your deal.',
           isError: true,
         );
         return;
@@ -1281,7 +1495,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                 builder: (_) => SubscriptionsRootScreen(
                   lang: lang,
                   accountType: '',
-                  embedAppBar: true,
+                  embedAppBar: false,
                   marketOfferPlansOnly: true,
                 ),
               ),
@@ -1293,7 +1507,17 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
       }
       if (!mounted) return;
       await _loadBuyerDealAccess();
-      if (!mounted || !_publicBuyerMayChatMarketer) return;
+      if (!mounted) return;
+      if (!_publicBuyerMayChatMarketer) {
+        _snack(
+          AppLocalizations.of(context)?.dealWaitingOwnerAccept ??
+              (widget.isAr
+                  ? 'بانتظار موافقة المالك على إتمام الصفقة. المراسلة تظهر بعد الموافقة.'
+                  : 'Waiting for the owner to approve this deal. Messaging appears after approval.'),
+          isError: false,
+        );
+        return;
+      }
     }
     if (_openingChat) return;
 
@@ -1481,12 +1705,13 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
   String get _currencyCode =>
       _property.currency.trim().isEmpty ? 'SAR' : _property.currency.trim();
 
-  /// للنصوص المشتركة (مثل المشاركة) — رمز يونيكود للعربية عند SAR.
-  String get _currencySymbol {
-    final c = _currencyCode;
-    if (!widget.isAr) return c;
-    if (c.toUpperCase() == 'SAR') return AppMoney.saudiRiyalSignUnicode;
-    return c;
+  String _moneyLabel(num n) {
+    return AppMoney.formatWithCurrencyCode(
+      n.toDouble(),
+      isAr: widget.isAr,
+      currencyCode: _currencyCode,
+      maxFractionDigits: 2,
+    );
   }
 
   /// السعر المُدخل من المعلن (أو المزايدة الحالية في المزاد) قبل أي حساب.
@@ -1521,7 +1746,8 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final coordsText = (lat != null && lng != null)
         ? '\n📍 ${widget.isAr ? 'الإحداثيات:' : 'Coordinates:'} ${lat!.toStringAsFixed(6)}, ${lng!.toStringAsFixed(6)}'
         : '';
-    final licPh = _licensedMarketerPhone;
+    final licPh =
+        _marketerCanSeeOwnerContact ? _licensedMarketerPhone : '';
     final licLine = licPh.isNotEmpty
         ? '\n📞 ${widget.isAr ? 'تواصل المسوّق (بيانات ترخيص الهيئة):' : 'Marketer (REGA license):'} $licPh'
         : '';
@@ -1530,16 +1756,16 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         ? (widget.isAr ? 'محتسبة ضمن المبلغ' : 'included in total')
         : (widget.isAr ? 'مضافة على المبلغ' : 'added on top');
     final commissionLine = _platformFee > 0
-        ? '\n🌐 ${widget.isAr ? 'عمولة التسويق:' : 'Marketing commission:'} ${_formatNumber(_platformFee)} $_currencySymbol'
+        ? '\n🌐 ${widget.isAr ? 'عمولة التسويق:' : 'Marketing commission:'} ${_moneyLabel(_platformFee)}'
         : '';
     return '''
 🏡 ${_property.title}
-📍 ${widget.isAr ? 'الموقع:' : 'Location:'} ${_property.locationText}
+📍 ${widget.isAr ? 'الموقع:' : 'Location:'} ${PropertyListingDisplay.addressLine(_property, isAr: widget.isAr)}
 $licLine
-💰 ${widget.isAr ? 'السعر الأساسي:' : 'Base price:'} ${_formatNumber(_basePrice)} $_currencySymbol
-🧾 ${widget.isAr ? 'الضريبة (5%) — $vatNote:' : 'VAT (5%) — $vatNote:'} ${_formatNumber(_vatAmount)} $_currencySymbol
-✅ ${widget.isAr ? 'الإجمالي مع الضريبة:' : 'Total with VAT:'} ${_formatNumber(_totalAfterVat)} $_currencySymbol$commissionLine
-🏁 ${widget.isAr ? 'المجموع النهائي:' : 'Final total:'} ${_formatNumber(_finalTotal)} $_currencySymbol$coordsText
+💰 ${widget.isAr ? 'السعر الأساسي:' : 'Base price:'} ${_moneyLabel(_basePrice)}
+🧾 ${widget.isAr ? 'الضريبة (5%) — $vatNote:' : 'VAT (5%) — $vatNote:'} ${_moneyLabel(_vatAmount)}
+✅ ${widget.isAr ? 'الإجمالي مع الضريبة:' : 'Total with VAT:'} ${_moneyLabel(_totalAfterVat)}$commissionLine
+🏁 ${widget.isAr ? 'المجموع النهائي:' : 'Final total:'} ${_moneyLabel(_finalTotal)}$coordsText
 
 #Aqar #${widget.isAr ? 'عقار' : 'RealEstate'}
 ''';
@@ -1668,7 +1894,7 @@ $licLine
 
     bool? ok;
     try {
-      ok = await showDialog<bool>(
+      ok = await showAppDialog<bool>(
         context: context,
         builder: (ctx) {
           return StatefulBuilder(
@@ -1731,8 +1957,8 @@ $licLine
                             decimal: true),
                         decoration: InputDecoration(
                           labelText: widget.isAr
-                              ? 'الحد الأدنى للزيادة (${AppMoney.saudiRiyalSignUnicode}) — اختياري'
-                              : 'Min increment (SAR) — optional',
+                              ? 'الحد الأدنى للزيادة (${AppMoney.sarUiSuffix(isAr: true)}) — اختياري'
+                              : 'Min increment (${AppMoney.sarUiSuffix(isAr: false)}) — optional',
                           border: const OutlineInputBorder(),
                           helperText: widget.isAr
                               ? 'اتركه 100 للافتراضي من الخادم'
@@ -1805,7 +2031,7 @@ $licLine
 
   Future<void> _closeAuctionSessionConfirmed() async {
     if (!_canManageAuctionSession) return;
-    final go = await showDialog<bool>(
+    final go = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
@@ -1972,8 +2198,8 @@ $licLine
           const SizedBox(height: 6),
           Text(
             widget.isAr
-                ? 'الحد الأدنى للزيادة المسجّل للجلسة: ${_formatNumber(minInc)} $_currencySymbol (الخادم يحدّد خطوة المزايدة الفعلية حسب السياسة الحالية).'
-                : 'Session min. increment on file: ${_formatNumber(minInc)} $_currencySymbol (server applies its bid-step rules).',
+                ? 'الحد الأدنى للزيادة المسجّل للجلسة: ${_moneyLabel(minInc)} (الخادم يحدّد خطوة المزايدة الفعلية حسب السياسة الحالية).'
+                : 'Session min. increment on file: ${_moneyLabel(minInc)} (server applies its bid-step rules).',
             style: TextStyle(
                 fontSize: 12, color: cs.onSurfaceVariant, height: 1.35),
           ),
@@ -2034,7 +2260,7 @@ $licLine
     var capturedAmount = '';
     var capturedNotes = '';
     try {
-      ok = await showDialog<bool>(
+      ok = await showAppDialog<bool>(
         context: context,
         builder: (ctx) {
           return StatefulBuilder(
@@ -2108,8 +2334,8 @@ $licLine
                             decimal: true),
                         decoration: InputDecoration(
                           labelText: widget.isAr
-                              ? 'المبلغ (${AppMoney.saudiRiyalSignUnicode})'
-                              : 'Amount (SAR)',
+                              ? 'المبلغ (${AppMoney.sarUiSuffix(isAr: true)})'
+                              : 'Amount (${AppMoney.sarUiSuffix(isAr: false)})',
                           border: const OutlineInputBorder(),
                         ),
                       ),
@@ -2182,7 +2408,7 @@ $licLine
       await _loadPaymentEvents();
       _snack(widget.isAr ? 'تم تسجيل الحدث' : 'Event recorded');
       if (provider == 'stripe' && mounted) {
-        final go = await showDialog<bool>(
+        final go = await showAppDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: Text(widget.isAr ? 'متابعة الدفع؟' : 'Open checkout?'),
@@ -2358,7 +2584,7 @@ $licLine
                             ),
                           ),
                           Text(
-                            '${_formatNumber(amt)} $_currencySymbol',
+                            _moneyLabel(amt),
                             style: TextStyle(
                               fontWeight: FontWeight.w900,
                               color: cs.primary,
@@ -2715,7 +2941,15 @@ $licLine
     }
   }
 
-  bool get _hasVideo => (_property.videoUrl ?? '').trim().isNotEmpty;
+  bool get _hasVideo {
+    final raw = (_property.videoUrl ?? '').trim();
+    if (!ListingMediaUrls.looksLikePlayableVideoRef(raw)) return false;
+    return ListingMediaUrls.isPlayableHttpUrl(_resolveVideoPlayableUrl(raw));
+  }
+
+  bool get _hasVirtualTour =>
+      _property.hasInAppVirtualTour ||
+      ListingMediaUrls.looksLikePlayableTourUrl(_property.virtualTourUrl);
 
   Future<void> _openVideoSheet() async {
     if (!_hasVideo || _openingVideo) return;
@@ -2724,7 +2958,7 @@ $licLine
     try {
       final raw = _property.videoUrl!.trim();
       final url = _resolveVideoPlayableUrl(raw);
-      if (url.isEmpty) return;
+      if (!ListingMediaUrls.isPlayableHttpUrl(url)) return;
 
       await PropertyVideoSheet.open(
         context,
@@ -2736,6 +2970,146 @@ $licLine
       if (mounted) {
         setState(() => _openingVideo = false);
       }
+    }
+  }
+
+  Future<void> _openVirtualTourOverlay() async {
+    final inApp = InAppTour.fromGuidance(_property.listingGuidance);
+    if (inApp != null && inApp.isNotEmpty && mounted) {
+      await openInAppTourViewer(
+        context: context,
+        tour: inApp,
+        isAr: widget.isAr,
+      );
+      return;
+    }
+    final url = (_property.virtualTourUrl ?? '').trim();
+    if (!ListingMediaUrls.isPlayableHttpUrl(url) || !mounted) return;
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: widget.isAr ? 'إغلاق' : 'Close',
+      barrierColor: Colors.black.withValues(alpha: 0.78),
+      useRootNavigator: true,
+      pageBuilder: (ctx, _, __) {
+        return Material(
+          color: Colors.black,
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ShortsTourPane(
+                    url: url,
+                    isAr: widget.isAr,
+                    active: true,
+                  ),
+                ),
+                PositionedDirectional(
+                  top: 4,
+                  start: 4,
+                  child: AppPageCloseButton(
+                    isArabic: widget.isAr,
+                    color: Colors.white,
+                    onPressed: () => Navigator.of(ctx).pop(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _rateDeliveredPhotographer() async {
+    final l10n = AppLocalizations.of(context)!;
+    try {
+      final shots = await PhotographerService(Supabase.instance.client)
+          .myShootsAsRequester();
+      final mine = shots.where(
+        (s) => s.propertyId == _property.id && s.status == 'delivered',
+      );
+      if (mine.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              widget.isAr
+                  ? 'لا توجد جلسة تصوير مسلَّمة لهذا الإعلان.'
+                  : 'No delivered shoot for this listing.',
+            ),
+          ),
+        );
+        return;
+      }
+      var stars = 5;
+      final comment = TextEditingController();
+      final ok = await showAppDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (ctx, setLocal) {
+              return AlertDialog(
+                title: Text(
+                  widget.isAr ? 'تقييم المصور' : 'Rate photographer',
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        for (var i = 1; i <= 5; i++)
+                          IconButton(
+                            onPressed: () => setLocal(() => stars = i),
+                            icon: Icon(
+                              i <= stars ? Icons.star : Icons.star_border,
+                              color: const Color(0xFFDFB230),
+                            ),
+                          ),
+                      ],
+                    ),
+                    AqarTextField(
+                      controller: comment,
+                      maxLines: 3,
+                      decoration: InputDecoration(
+                        labelText: widget.isAr ? 'تعليق' : 'Comment',
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: Text(l10n.photographerDialogCancel),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: Text(l10n.photographerDialogSave),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+      if (ok != true) return;
+      await PhotographerService(Supabase.instance.client).rate(
+        requestId: mine.first.id,
+        stars: stars,
+        comment: comment.text.trim(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.isAr ? 'تم حفظ التقييم' : 'Rating saved'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
     }
   }
 
@@ -2891,6 +3265,38 @@ $licLine
               ),
             ],
           ),
+          const SizedBox(height: 10),
+          FilledButton.tonalIcon(
+            onPressed: busy
+                ? null
+                : () async {
+                    final loc = [
+                      _property.city,
+                      _property.location ?? '',
+                    ].where((s) => s.trim().isNotEmpty).join(' · ');
+                    await Navigator.of(context).push<Object?>(
+                      MaterialPageRoute<Object?>(
+                        builder: (_) => PhotoShootBookPage(
+                          lang: widget.isAr ? 'ar' : 'en',
+                          propertyId: _property.id,
+                          locationText: loc,
+                          latitude: _property.latitude,
+                          longitude: _property.longitude,
+                        ),
+                      ),
+                    );
+                  },
+            icon: const Icon(Icons.photo_camera_outlined),
+            label: Text(
+              _property.needsPhotographerShoot
+                  ? (widget.isAr
+                      ? 'طلب التصوير قائم — بانتظار الطرفين'
+                      : 'Shoot request is open — waiting on both sides')
+                  : (widget.isAr
+                      ? 'طلب تصوير عقاري (سعر ثم موافقة المصور)'
+                      : 'Request a property shoot (quote then photographer accept)'),
+            ),
+          ),
         ],
       ),
     );
@@ -3045,7 +3451,7 @@ $licLine
             child: const AspectRatio(
               aspectRatio: 16 / 9,
               child: BrandingLogoImage(
-                fit: BoxFit.contain,
+                fillFrame: true,
                 errorIcon: Icons.image_not_supported_outlined,
               ),
             ),
@@ -3133,7 +3539,7 @@ $licLine
                     return GestureDetector(
                       onTap: () {
                         // فتح معرض الصور فقط (تخطي شريحة الفيديو).
-                        showDialog<void>(
+                        showAppDialog<void>(
                           context: context,
                           barrierColor: Colors.black.withValues(alpha: 0.92),
                           builder: (_) => ListingImageLightbox(
@@ -3143,29 +3549,19 @@ $licLine
                           ),
                         );
                       },
-                      child: CachedNetworkImage(
-                        imageUrl: imageUrl,
+                      child: CrystalListingMedia(
+                        url: imageUrl,
                         fit: BoxFit.cover,
-                        memCacheWidth: kIsWeb ? 900 : 1400,
-                        memCacheHeight: kIsWeb ? 650 : 1000,
-                        placeholder: (_, __) => const Center(
-                          child: AppLogoLoading(compact: true, size: 40),
-                        ),
-                        errorWidget: (_, __, error) {
-                          debugPrint(
-                            'PropertyDetails image load error: $error | url=$imageUrl',
-                          );
-                          return ColoredBox(
-                            color: cs.surfaceContainerHighest
-                                .withValues(alpha: 0.6),
-                            child: const Center(
-                              child: BrandingLogoImage(
-                                fit: BoxFit.contain,
-                                errorIcon: Icons.broken_image_outlined,
-                              ),
+                        error: ColoredBox(
+                          color: cs.surfaceContainerHighest
+                              .withValues(alpha: 0.6),
+                          child: const Center(
+                            child: BrandingLogoImage(
+                              fit: BoxFit.contain,
+                              errorIcon: Icons.broken_image_outlined,
                             ),
-                          );
-                        },
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -3365,7 +3761,6 @@ $licLine
     final lat0 = lat!;
     final lng0 = lng!;
     final staticUrl = staticMapUrlForPosition(lat: lat0, lng: lng0);
-    final priceLabel = '${_formatNumber(_property.price)} $_currencySymbol';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3449,19 +3844,21 @@ $licLine
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            priceLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          AppMoneyLine(
+                            amount: _property.price.toDouble(),
+                            currencyCode: _currencyCode,
+                            isAr: widget.isAr,
+                            maxFractionDigits: 0,
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
                               fontSize: 14,
                             ),
+                            symbolColor: Colors.white,
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            PropertyListingDisplay.displayListingTitle(
+                            PropertyListingDisplay.detailsHeadline(
                               _property,
                               widget.isAr,
                             ),
@@ -3473,27 +3870,16 @@ $licLine
                               fontSize: 12.5,
                             ),
                           ),
-                          if ([
-                            if ((_property.location ?? '').trim().isNotEmpty)
-                              _property.location!.trim(),
-                            if (_property.city.trim().isNotEmpty &&
-                                !PropertyListingDisplay.displayListingTitle(
-                                      _property,
-                                      widget.isAr,
-                                    )
-                                    .contains(_property.city.trim()))
-                              _property.city.trim(),
-                          ].isNotEmpty) ...[
+                          if (PropertyListingDisplay.addressLine(
+                            _property,
+                            isAr: widget.isAr,
+                          ).trim().isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
-                              [
-                                if ((_property.location ?? '')
-                                    .trim()
-                                    .isNotEmpty)
-                                  _property.location!.trim(),
-                                if (_property.city.trim().isNotEmpty)
-                                  _property.city.trim(),
-                              ].join(' · '),
+                              PropertyListingDisplay.addressLine(
+                                _property,
+                                isAr: widget.isAr,
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -3636,12 +4022,7 @@ $licLine
   }
 
   String _fmtDateTime(DateTime dt) {
-    final y = dt.year.toString().padLeft(4, '0');
-    final m = dt.month.toString().padLeft(2, '0');
-    final d = dt.day.toString().padLeft(2, '0');
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
-    return '$y-$m-$d $hh:$mm';
+    return WorkflowDisplayTexts.formatDateTime(dt, widget.isAr);
   }
 
   bool get _hasEffectiveMapPin {
@@ -3694,26 +4075,527 @@ $licLine
     );
   }
 
+  Future<void> _openPublisherHelpSheet() async {
+    final cs = Theme.of(context).colorScheme;
+    final published = _isPublishedLikeListing;
+    final lines = <String>[
+      if (published)
+        widget.isAr
+            ? 'المراسلة داخل التطبيق تكون مع ناشر الإعلان (المسوّق المعتمد). لا يُعرض رقم المالك على الإعلان العلني.'
+            : 'In-app chat is with the listing publisher (the licensed marketer). The owner\'s phone is not shown on the public listing.',
+      if (published)
+        widget.isAr
+            ? 'يمكن للمسوّق إشراك المالك في المحادثة إن رغب. تظهر «مراسلة المسوّق» بعد موافقة المالك على صفقتك في «صفقاتي»، ما دام الإعلان غير مباع أو مغلق.'
+            : 'The marketer may include the owner in chat. «Message marketer» appears after the owner accepts your deal in My deals, unless the listing is sold or closed.',
+      if (!published)
+        widget.isAr
+            ? 'قبل النشر: يمكن للمسوّقين المعنيين مراسلة المالك من هذه الصفحة. بعد النشر يقتصر التواصل الظاهر للجميع على المسوّق المرخّص.'
+            : 'Before publishing, involved marketers can message the owner from this page. After publishing, public-facing contact is through the licensed marketer.',
+    ];
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          alignment: Alignment.center,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+          contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          title: Row(
+            children: [
+              Icon(Icons.info_outline_rounded, color: cs.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  widget.isAr ? 'عن الناشر والمراسلة' : 'Publisher & chat',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: widget.isAr ? 'إغلاق' : 'Close',
+                onPressed: () => Navigator.of(ctx).maybePop(),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < lines.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 10),
+                    Text(
+                      lines[i],
+                      style: TextStyle(
+                        height: 1.45,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurface,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).maybePop(),
+              child: Text(widget.isAr ? 'حسناً' : 'OK'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _openRegaListingVerify() async {
+    final src = _licenseField('rega_source_url').trim();
+    final license = _licenseField('rega_ad_license_number').trim();
+    Uri? u;
+    if (src.isNotEmpty) u = Uri.tryParse(src);
+    u ??= Uri.tryParse(
+      license.isNotEmpty
+          ? 'https://eservicesredp.rega.gov.sa/public/OfficesBroker/ElanDetails/$license'
+          : 'https://rega.gov.sa',
+    );
+    if (u == null || !mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => GovernmentInAppWebViewPage(
+          uri: u!,
+          title: widget.isAr ? 'الهيئة العامة للعقار' : 'REGA',
+        ),
+      ),
+    );
+  }
+
+  Widget _detailsActionButton({
+    required VoidCallback? onPressed,
+    required IconData icon,
+    required String label,
+    Widget? leading,
+    bool filled = false,
+    bool tonal = false,
+    Color? background,
+    Color? foreground,
+  }) {
+    final Color? labelColor = tonal
+        ? null
+        : (foreground ??
+            (filled ? Colors.white : const Color(0xFF0F766E)));
+    final Color iconColor = labelColor ?? const Color(0xFF0F766E);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+    );
+    final pad = const EdgeInsets.symmetric(horizontal: 12, vertical: 12);
+    const min = Size(0, 48);
+    final child = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        leading ?? Icon(icon, size: 18, color: tonal ? null : iconColor),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            softWrap: true,
+            overflow: TextOverflow.fade,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontFamily: 'Cairo',
+              height: 1.25,
+              fontSize: 13,
+              color: labelColor,
+            ),
+          ),
+        ),
+      ],
+    );
+    if (tonal) {
+      return FilledButton.tonal(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          minimumSize: min,
+          padding: pad,
+          shape: shape,
+          visualDensity: VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
+        child: child,
+      );
+    }
+    if (filled) {
+      return FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          minimumSize: min,
+          padding: pad,
+          backgroundColor: background ?? const Color(0xFF0F766E),
+          foregroundColor: labelColor ?? Colors.white,
+          shape: shape,
+          visualDensity: VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
+        child: child,
+      );
+    }
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        minimumSize: min,
+        padding: pad,
+        foregroundColor: labelColor ?? const Color(0xFF0F766E),
+        side: BorderSide(color: labelColor ?? const Color(0xFF0F766E)),
+        shape: shape,
+        visualDensity: VisualDensity.standard,
+        tapTargetSize: MaterialTapTargetSize.padded,
+      ),
+      child: child,
+    );
+  }
+
+  Widget _identityField({
+    required String label,
+    required String value,
+    IconData? icon,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.28),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (icon != null) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Icon(icon, size: 18, color: const Color(0xFF0F766E)),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPublisherIdentityCard({
+    required ColorScheme cs,
+    required bool showOwnerIdentity,
+    required String ownerName,
+    required String marketerLine,
+    required bool publishedLike,
+    required bool showQuadToMarketerPrePublish,
+    required bool showAdvertiserByLine,
+    required String marketerBrandUrl,
+  }) {
+    final publisherName = marketerLine.isNotEmpty
+        ? marketerLine
+        : (widget.isAr ? 'مسوّق معتمد' : 'Licensed marketer');
+    final hasMap = lat != null || _property.latitude != null;
+    final chatBusy = _openingChat
+        ? const SizedBox(
+            width: 18,
+            height: 18,
+            child: AppLogoLoading(compact: true, size: 16),
+          )
+        : null;
+
+    Widget actionsPair(Widget a, Widget b, bool stack) {
+      if (stack) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            a,
+            const SizedBox(height: 8),
+            b,
+          ],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: a),
+          const SizedBox(width: 8),
+          Expanded(child: b),
+        ],
+      );
+    }
+
+    return _Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  publishedLike
+                      ? _publisherRoleHeading
+                      : (widget.isAr ? 'الناشر' : 'Publisher'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: widget.isAr ? 'معلومات' : 'Info',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => unawaited(_openPublisherHelpSheet()),
+                icon: Icon(
+                  Icons.info_outline_rounded,
+                  color: cs.primary,
+                ),
+              ),
+            ],
+          ),
+          Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.55)),
+          const SizedBox(height: 10),
+          if (publishedLike) ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor:
+                      const Color(0xFF0F766E).withValues(alpha: 0.12),
+                  backgroundImage: marketerBrandUrl.isNotEmpty
+                      ? NetworkImage(marketerBrandUrl)
+                      : null,
+                  child: marketerBrandUrl.isEmpty
+                      ? const Icon(
+                          Icons.apartment_outlined,
+                          color: Color(0xFF0F766E),
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    publisherName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, c) {
+                final stack = c.maxWidth < 520;
+                final verifyBtn = _detailsActionButton(
+                  onPressed: () => unawaited(_openRegaListingVerify()),
+                  icon: Icons.verified_outlined,
+                  label: widget.isAr
+                      ? 'التحقق من الإعلان في الهيئة'
+                      : 'Verify listing on REGA',
+                  tonal: true,
+                );
+                final mapBtn = _detailsActionButton(
+                  onPressed: hasMap
+                      ? () => unawaited(_openExternalPropertyMap())
+                      : null,
+                  icon: Icons.map_outlined,
+                  label: widget.isAr
+                      ? 'الموقع على الخريطة'
+                      : 'Open on map',
+                );
+                return actionsPair(verifyBtn, mapBtn, stack);
+              },
+            ),
+          ],
+          if (_showIdentityChatActions) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.55)),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, c) {
+                final stack = c.maxWidth < 520 ||
+                    (_showMarketerChatButton &&
+                        (!_isListingOwner || _ownerOffersCount > 0) &&
+                        _canOpenListingOwnerChat);
+                final marketerChat = _showMarketerChatButton &&
+                        (!_isListingOwner || _ownerOffersCount > 0)
+                    ? _detailsActionButton(
+                        onPressed: _openingChat
+                            ? null
+                            : () async {
+                                if (!_canOpenMarketerChat) {
+                                  _snack(
+                                    widget.isAr
+                                        ? 'لا يوجد مسوّق مسؤول عن هذا الإعلان للمراسلة بعد.'
+                                        : 'No marketer is assigned for chat yet.',
+                                    isError: true,
+                                  );
+                                  return;
+                                }
+                                await _openChatWithMarketer();
+                              },
+                        icon: Icons.chat_bubble_outline,
+                        label: widget.isAr
+                            ? 'مراسلة المسوّق'
+                            : 'Message marketer',
+                        filled: true,
+                        leading: chatBusy,
+                      )
+                    : null;
+                final ownerChat = _canOpenListingOwnerChat
+                    ? _detailsActionButton(
+                        onPressed:
+                            _openingChat ? null : _openChatWithListingOwner,
+                        icon: Icons.person_outline,
+                        label: widget.isAr
+                            ? 'مراسلة المالك'
+                            : 'Message owner',
+                        leading: chatBusy,
+                      )
+                    : null;
+                if (marketerChat != null && ownerChat != null) {
+                  return actionsPair(marketerChat, ownerChat, stack);
+                }
+                return marketerChat ?? ownerChat ?? const SizedBox.shrink();
+              },
+            ),
+          ],
+          if (showOwnerIdentity ||
+              showQuadToMarketerPrePublish ||
+              (showAdvertiserByLine &&
+                  ownerName.trim() != publisherName.trim())) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.55)),
+            const SizedBox(height: 12),
+            _identityField(
+              icon: Icons.person_outline,
+              label: showOwnerIdentity
+                  ? (widget.isAr ? 'المعلن (أنت) · المالك' : 'Advertiser (you) · Owner')
+                  : (widget.isAr ? 'المالك' : 'Owner'),
+              value: ownerName,
+            ),
+          ] else if (!publishedLike && !showQuadToMarketerPrePublish) ...[
+            const SizedBox(height: 12),
+            Text(
+              widget.isAr
+                  ? 'بعد اعتماد المسوّق يظهر ناشر الإعلان هنا.'
+                  : 'The publishing marketer will appear here once assigned.',
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (publishedLike &&
+              !showOwnerIdentity &&
+              _isPublishingMarketer) ...[
+            const SizedBox(height: 4),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              value: _includeOwnerInChat,
+              onChanged: (v) {
+                unawaited(_setIncludeOwnerInChat(v));
+              },
+              title: Text(
+                widget.isAr
+                    ? 'إشراك المالك في محادثة هذا الإعلان'
+                    : 'Include the owner in this listing chat',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final ownerNameRaw = (((widget.ownerUsername?.trim().isNotEmpty ?? false)
-                ? widget.ownerUsername
-                : _property.ownerDisplayName)
-            ?.trim() ??
-        '');
+    final showOwnerIdentity = widget.canManageProperty;
+    final publicShown = _property.visibleAdvertiserName;
+    final ownerNameRaw = (showOwnerIdentity
+            ? (((widget.ownerUsername?.trim().isNotEmpty ?? false)
+                    ? widget.ownerUsername
+                    : _property.ownerDisplayName)
+                ?.trim() ??
+                '')
+            : publicShown)
+        .trim();
     final ownerName = ownerNameRaw.isNotEmpty
         ? ownerNameRaw
         : (widget.isAr ? 'معلن' : 'Owner');
     final marketerLine = (_marketerPublicLine ?? '').trim();
-    final showOwnerIdentity = widget.canManageProperty;
     final publishedLike = _isPublishedLikeListing;
     final showQuadToMarketerPrePublish =
         widget.showOwnerLegalNameToViewer && !publishedLike;
-    // لا تُعرض هوية المعلن من السوق قبل الموافقة؛ بعد النشر تظهر العلامة التجارية/المسوّق.
-    final showAdvertiserByLine =
-        !showOwnerIdentity && ownerNameRaw.isNotEmpty && publishedLike;
+    final hideOwnerForMarketerHub = !showOwnerIdentity &&
+        !widget.showOwnerLegalNameToViewer &&
+        (widget.allowMarketingOffer ||
+            (widget.marketerHubPhase ?? '').trim().isNotEmpty);
+    // لا تُعرض هوية المعلن من السوق إلا إذا اختار الناشر إظهار الاسم.
+    final showAdvertiserByLine = !showOwnerIdentity &&
+        !hideOwnerForMarketerHub &&
+        ownerNameRaw.isNotEmpty &&
+        publishedLike &&
+        _property.canShowAdvertiserName;
     final marketerBrandUrl =
         (_property.marketerBrandImagePublicUrl ?? '').trim();
 
@@ -3729,12 +4611,7 @@ $licLine
               ? null
               : AppPageCloseButton(
                   isArabic: widget.isAr,
-                  onPressed: () {
-                    final nav = Navigator.of(context);
-                    if (nav.canPop()) {
-                      nav.pop();
-                    }
-                  },
+                  onPressed: () => SafeOverlayPop.pop(context),
                 ),
           title: Text(
             widget.isAr ? 'تفاصيل العقار' : 'Property details',
@@ -3803,23 +4680,35 @@ $licLine
                       ],
                       _Card(
                         child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
                               child: Text(
-                                PropertyListingDisplay.displayListingTitle(
+                                PropertyListingDisplay.detailsHeadline(
                                   _property,
                                   widget.isAr,
                                 ),
-                                style: const TextStyle(
-                                  fontSize: 18,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize:
+                                      MediaQuery.sizeOf(context).width < 400
+                                          ? 16
+                                          : 18,
                                   fontWeight: FontWeight.w900,
+                                  height: 1.35,
                                 ),
                               ),
                             ),
                             if (_property.isAuction)
-                              _Tag(
-                                text: widget.isAr ? 'مزاد' : 'Auction',
-                                color: Colors.orange,
+                              Padding(
+                                padding: const EdgeInsetsDirectional.only(
+                                  start: 8,
+                                ),
+                                child: _Tag(
+                                  text: widget.isAr ? 'مزاد' : 'Auction',
+                                  color: Colors.orange,
+                                ),
                               ),
                           ],
                         ),
@@ -3839,17 +4728,17 @@ $licLine
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              if (_deedNumberDisplay.isNotEmpty)
+                              if (_deedCombinedValue.isNotEmpty)
                                 _InfoRow(
                                   icon: Icons.numbers_outlined,
-                                  title:
-                                      widget.isAr ? 'رقم الصك' : 'Deed number',
-                                  value: _maskDeedNumber(_deedNumberDisplay),
-                                  copyValue:
-                                      _maskDeedNumber(_deedNumberDisplay),
+                                  title: widget.isAr
+                                      ? 'الصك والإحداثي'
+                                      : 'Deed & coordinates',
+                                  value: _deedCombinedValue,
+                                  copyValue: _deedCombinedValue,
                                   copiedMessage: widget.isAr
-                                      ? 'تم نسخ رقم الصك (كما يظهر)'
-                                      : 'Deed number copied (as shown)',
+                                      ? 'تم نسخ الصك والإحداثيات'
+                                      : 'Deed and coordinates copied',
                                 ),
                               if (_deedDateDisplay.isNotEmpty) ...[
                                 const SizedBox(height: 8),
@@ -3858,10 +4747,6 @@ $licLine
                                   title:
                                       widget.isAr ? 'تاريخ الصك' : 'Deed date',
                                   value: _deedDateDisplay,
-                                  copyValue: _deedDateDisplay,
-                                  copiedMessage: widget.isAr
-                                      ? 'تم نسخ تاريخ الصك'
-                                      : 'Deed date copied',
                                 ),
                               ],
                               if (_deedIssuerDisplay.isNotEmpty) ...[
@@ -3872,10 +4757,6 @@ $licLine
                                       ? 'الجهة المصدرة'
                                       : 'Issuing authority',
                                   value: _deedIssuerDisplay,
-                                  copyValue: _deedIssuerDisplay,
-                                  copiedMessage: widget.isAr
-                                      ? 'تم نسخ اسم الجهة'
-                                      : 'Issuer copied',
                                 ),
                               ],
                             ],
@@ -3884,391 +4765,19 @@ $licLine
                       ],
                       ..._buildListingGuidanceSection(cs),
                       const SizedBox(height: 12),
-                      _Card(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (publishedLike) ...[
-                                    Text(
-                                      widget.isAr
-                                          ? 'نشر بواسطة'
-                                          : 'Published by',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        color: cs.onSurfaceVariant,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 22,
-                                          backgroundColor:
-                                              const Color(0xFF0F766E)
-                                                  .withValues(alpha: 0.12),
-                                          backgroundImage: marketerBrandUrl
-                                                  .isNotEmpty
-                                              ? NetworkImage(marketerBrandUrl)
-                                              : null,
-                                          child: marketerBrandUrl.isEmpty
-                                              ? const Icon(
-                                                  Icons.apartment_outlined,
-                                                  color: Color(0xFF0F766E),
-                                                )
-                                              : null,
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Text(
-                                            marketerLine.isNotEmpty
-                                                ? marketerLine
-                                                : (widget.isAr
-                                                    ? 'مسوّق معتمد'
-                                                    : 'Licensed marketer'),
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w900,
-                                              fontSize: 15,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Theme(
-                                      data: Theme.of(context).copyWith(
-                                        dividerColor: Colors.transparent,
-                                      ),
-                                      child: ExpansionTile(
-                                        initiallyExpanded: true,
-                                        maintainState: true,
-                                        tilePadding: EdgeInsets.zero,
-                                        expandedAlignment: widget.isAr
-                                            ? Alignment.centerRight
-                                            : Alignment.centerLeft,
-                                        childrenPadding: const EdgeInsets.only(
-                                          top: 6,
-                                          bottom: 2,
-                                        ),
-                                        leading: Icon(
-                                          Icons.article_outlined,
-                                          size: 22,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                        ),
-                                        title: Text(
-                                          widget.isAr
-                                              ? 'البيانات التنظيمية للإعلان'
-                                              : 'Structured listing data',
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 15,
-                                            fontFamily: 'Cairo',
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurface,
-                                          ),
-                                        ),
-                                        children: [
-                                          ListingFormattedSpecPanel(
-                                            property: _property,
-                                            isAr: widget.isAr,
-                                            omitDeedSection: _hasDeedInfo,
-                                          ),
-                                          const SizedBox(height: 10),
-                                          LayoutBuilder(
-                                            builder: (context, c) {
-                                              final narrow = c.maxWidth < 420;
-                                              final verifyBtn = FilledButton.tonalIcon(
-                                                onPressed: () async {
-                                                  final src =
-                                                      _licenseField('rega_source_url')
-                                                          .trim();
-                                                  final license =
-                                                      _licenseField(
-                                                              'rega_ad_license_number')
-                                                          .trim();
-                                                  Uri? u;
-                                                  if (src.isNotEmpty) {
-                                                    u = Uri.tryParse(src);
-                                                  }
-                                                  u ??= Uri.tryParse(
-                                                    license.isNotEmpty
-                                                        ? 'https://eservicesredp.rega.gov.sa/public/OfficesBroker/ElanDetails/$license'
-                                                        : 'https://rega.gov.sa',
-                                                  );
-                                                  if (u == null) return;
-                                                  if (!context.mounted) return;
-                                                  await Navigator.of(context)
-                                                      .push<void>(
-                                                    MaterialPageRoute<void>(
-                                                      builder: (_) =>
-                                                          GovernmentInAppWebViewPage(
-                                                        uri: u!,
-                                                        title: widget.isAr
-                                                            ? 'الهيئة العامة للعقار'
-                                                            : 'REGA',
-                                                      ),
-                                                    ),
-                                                  );
-                                                },
-                                                icon: const Icon(
-                                                  Icons.verified_outlined,
-                                                  size: 18,
-                                                ),
-                                                label: Text(
-                                                  widget.isAr
-                                                      ? 'التحقق من الإعلان في الهيئة'
-                                                      : 'Verify listing on REGA',
-                                                  maxLines: 1,
-                                                  softWrap: false,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w900,
-                                                    fontFamily: 'Cairo',
-                                                  ),
-                                                ),
-                                              );
-                                              final mapBtn = OutlinedButton.icon(
-                                                onPressed: (lat != null ||
-                                                        _property.latitude !=
-                                                            null)
-                                                    ? () => unawaited(
-                                                          _openExternalPropertyMap(),
-                                                        )
-                                                    : null,
-                                                icon: const Icon(
-                                                  Icons.map_outlined,
-                                                  size: 18,
-                                                ),
-                                                label: Text(
-                                                  widget.isAr
-                                                      ? 'الموقع على الخريطة'
-                                                      : 'Open on map',
-                                                  maxLines: 1,
-                                                  softWrap: false,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    fontWeight: FontWeight.w900,
-                                                    fontFamily: 'Cairo',
-                                                  ),
-                                                ),
-                                              );
-                                              if (narrow) {
-                                                return Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.stretch,
-                                                  children: [
-                                                    verifyBtn,
-                                                    const SizedBox(height: 8),
-                                                    mapBtn,
-                                                  ],
-                                                );
-                                              }
-                                              return Row(
-                                                children: [
-                                                  Expanded(child: verifyBtn),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(child: mapBtn),
-                                                ],
-                                              );
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    if (!showOwnerIdentity) ...[
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        widget.isAr
-                                            ? 'التواصل والدردشة مع المسوّق المعتمد'
-                                            : 'Contact and chat are with the licensed marketer',
-                                        style: TextStyle(
-                                          color: cs.onSurfaceVariant,
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ] else
-                                      const SizedBox(height: 12),
-                                  ],
-                                  if (showQuadToMarketerPrePublish ||
-                                      showAdvertiserByLine) ...[
-                                    Text(
-                                      widget.isAr
-                                          ? 'هذا الإعلان بواسطة'
-                                          : 'This listing is by',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                        color: cs.onSurfaceVariant,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      ownerName,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w900,
-                                        fontSize: 16,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                  ],
-                                  if (showOwnerIdentity) ...[
-                                    if (publishedLike) ...[
-                                      Text(
-                                        widget.isAr
-                                            ? 'المعلن (أنت)'
-                                            : 'Advertiser (you)',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: cs.onSurfaceVariant,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                    ],
-                                    Text(
-                                      ownerName,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      widget.isAr ? 'المالك' : 'Owner',
-                                      style: TextStyle(
-                                        color: cs.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ] else if (!publishedLike &&
-                                      !showQuadToMarketerPrePublish) ...[
-                                    Text(
-                                      widget.isAr
-                                          ? 'بعد اعتماد المسوّق يظهر ناشر الإعلان هنا.'
-                                          : 'The publishing marketer will appear here once assigned.',
-                                      style: TextStyle(
-                                        color: cs.onSurfaceVariant,
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            if ((_showMarketerChatButton &&
-                                    (!_isListingOwner ||
-                                        _ownerOffersCount > 0)) ||
-                                _canOpenListingOwnerChat) ...[
-                              const SizedBox(width: 8),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_showMarketerChatButton &&
-                                      (!_isListingOwner ||
-                                          _ownerOffersCount > 0))
-                                    SizedBox(
-                                      height: 42,
-                                      child: ElevatedButton.icon(
-                                        onPressed: _openingChat
-                                            ? null
-                                            : () async {
-                                                if (!_canOpenMarketerChat) {
-                                                  _snack(
-                                                    widget.isAr
-                                                        ? 'لا يوجد مسوّق مسؤول عن هذا الإعلان للمراسلة بعد.'
-                                                        : 'No marketer is assigned for chat yet.',
-                                                    isError: true,
-                                                  );
-                                                  return;
-                                                }
-                                                await _openChatWithMarketer();
-                                              },
-                                        icon: _openingChat
-                                            ? SizedBox(
-                                                width: 22,
-                                                height: 22,
-                                                child: AppLogoLoading(
-                                                  compact: true,
-                                                  size: 20,
-                                                ),
-                                              )
-                                            : const Icon(
-                                                Icons.chat_bubble_outline),
-                                        label: Text(widget.isAr
-                                            ? 'مراسلة المسوّق'
-                                            : 'Message marketer'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor:
-                                              const Color(0xFF0F766E),
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  if (_showMarketerChatButton &&
-                                      (!_isListingOwner ||
-                                          _ownerOffersCount > 0) &&
-                                      _canOpenListingOwnerChat)
-                                    const SizedBox(height: 8),
-                                  if (_canOpenListingOwnerChat)
-                                    SizedBox(
-                                      height: 42,
-                                      child: OutlinedButton.icon(
-                                        onPressed: _openingChat
-                                            ? null
-                                            : _openChatWithListingOwner,
-                                        icon: _openingChat
-                                            ? SizedBox(
-                                                width: 22,
-                                                height: 22,
-                                                child: AppLogoLoading(
-                                                  compact: true,
-                                                  size: 20,
-                                                ),
-                                              )
-                                            : const Icon(Icons.person_outline),
-                                        label: Text(widget.isAr
-                                            ? 'مراسلة المالك'
-                                            : 'Message owner'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor:
-                                              const Color(0xFF0F766E),
-                                          side: const BorderSide(
-                                            color: Color(0xFF0F766E),
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ],
-                        ),
+                      _buildPublisherIdentityCard(
+                        cs: cs,
+                        showOwnerIdentity: showOwnerIdentity,
+                        ownerName: ownerName,
+                        marketerLine: marketerLine,
+                        publishedLike: publishedLike,
+                        showQuadToMarketerPrePublish:
+                            showQuadToMarketerPrePublish,
+                        showAdvertiserByLine: showAdvertiserByLine,
+                        marketerBrandUrl: marketerBrandUrl,
                       ),
                       const SizedBox(height: 12),
-                      if (_hasVideo ||
-                          (_property.virtualTourUrl ?? '')
-                              .trim()
-                              .isNotEmpty) ...[
+                      if (_hasVideo || _hasVirtualTour) ...[
                         _Card(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4307,22 +4816,25 @@ $licLine
                                     ),
                                   ),
                                 ),
-                              if ((_property.virtualTourUrl ?? '')
-                                  .trim()
-                                  .isNotEmpty) ...[
+                              if (_hasVirtualTour) ...[
+                                const SizedBox(height: 10),
+                                FilledButton.tonalIcon(
+                                  onPressed: _openVirtualTourOverlay,
+                                  icon: const Icon(Icons.threed_rotation_outlined),
+                                  label: Text(
+                                    AppLocalizations.of(context)!.inAppTourOpen,
+                                  ),
+                                ),
+                              ],
+                              if (_isOwnerManager) ...[
                                 const SizedBox(height: 10),
                                 OutlinedButton.icon(
-                                  onPressed: () => _copyToClipboard(
-                                    _property.virtualTourUrl!.trim(),
-                                    successMessage: widget.isAr
-                                        ? 'تم نسخ رابط الجولة'
-                                        : 'Virtual tour link copied',
-                                  ),
-                                  icon: const Icon(Icons.public_outlined),
+                                  onPressed: _rateDeliveredPhotographer,
+                                  icon: const Icon(Icons.star_outline),
                                   label: Text(
                                     widget.isAr
-                                        ? 'نسخ رابط الجولة الافتراضية'
-                                        : 'Copy virtual tour link',
+                                        ? 'تقييم المصور'
+                                        : 'Rate photographer',
                                   ),
                                 ),
                               ],
@@ -4345,10 +4857,17 @@ $licLine
                             _InfoRow(
                               icon: Icons.location_on_outlined,
                               title: widget.isAr ? 'العنوان' : 'Address',
-                              value: _property.locationText,
-                              copyValue: _property.locationText.trim().isEmpty
-                                  ? null
-                                  : _property.locationText.trim(),
+                              value: PropertyListingDisplay.addressLine(
+                                _property,
+                                isAr: widget.isAr,
+                              ),
+                              copyValue: () {
+                                final v = PropertyListingDisplay.addressLine(
+                                  _property,
+                                  isAr: widget.isAr,
+                                ).trim();
+                                return v.isEmpty ? null : v;
+                              }(),
                               copiedMessage: widget.isAr
                                   ? 'تم نسخ العنوان'
                                   : 'Address copied',
@@ -4438,9 +4957,16 @@ $licLine
                                   title: widget.isAr
                                       ? 'تاريخ الإصدار'
                                       : 'Issue date',
-                                  value: _licenseField('rega_issue_date'),
-                                  copyValue:
-                                      _licenseField('rega_issue_date'),
+                                  value: DateHelper.fmtCivilDateRaw(
+                                    _licenseField('rega_issue_date'),
+                                    isAr: widget.isAr,
+                                    fallback: _licenseField('rega_issue_date'),
+                                  ),
+                                  copyValue: DateHelper.fmtCivilDateRaw(
+                                    _licenseField('rega_issue_date'),
+                                    isAr: widget.isAr,
+                                    fallback: _licenseField('rega_issue_date'),
+                                  ),
                                   copiedMessage: widget.isAr
                                       ? 'تم النسخ'
                                       : 'Copied',
@@ -4454,9 +4980,16 @@ $licLine
                                   title: widget.isAr
                                       ? 'تاريخ الانتهاء'
                                       : 'Expiry date',
-                                  value: _licenseField('rega_expiry_date'),
-                                  copyValue:
-                                      _licenseField('rega_expiry_date'),
+                                  value: DateHelper.fmtCivilDateRaw(
+                                    _licenseField('rega_expiry_date'),
+                                    isAr: widget.isAr,
+                                    fallback: _licenseField('rega_expiry_date'),
+                                  ),
+                                  copyValue: DateHelper.fmtCivilDateRaw(
+                                    _licenseField('rega_expiry_date'),
+                                    isAr: widget.isAr,
+                                    fallback: _licenseField('rega_expiry_date'),
+                                  ),
                                   copiedMessage: widget.isAr
                                       ? 'تم النسخ'
                                       : 'Copied',
@@ -4480,7 +5013,9 @@ $licLine
                                 ),
                               ],
                               if (_licenseField('deed_or_benefit_doc_number')
-                                  .isNotEmpty) ...[
+                                      .isNotEmpty &&
+                                  _licenseField('deed_or_benefit_doc_number') !=
+                                      _deedNumberDisplay) ...[
                                 const SizedBox(height: 8),
                                 _InfoRow(
                                   icon: Icons.description_outlined,
@@ -4714,15 +5249,16 @@ $licLine
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              _property.description.trim().isEmpty
+                              _cleanDescription.isEmpty
                                   ? (widget.isAr
                                       ? 'لا يوجد وصف'
                                       : 'No description')
-                                  : _property.description,
+                                  : _cleanDescription,
                               style: TextStyle(
                                 fontSize: 15,
-                                color: cs.onSurfaceVariant,
-                                height: 1.4,
+                                color: cs.onSurface,
+                                fontWeight: FontWeight.w600,
+                                height: 1.45,
                               ),
                             ),
                           ],
@@ -4865,8 +5401,8 @@ $licLine
                                     icon: const Icon(Icons.edit_note_outlined),
                                     label: Text(
                                       widget.isAr
-                                          ? 'إرسال عرض تسويقي'
-                                          : 'Submit marketing offer',
+                                          ? 'تقديم عرض'
+                                          : 'Submit offer',
                                     ),
                                   ),
                                 if (_offerSentThisRound &&
@@ -5090,62 +5626,7 @@ $licLine
                                     ? 'تم نسخ رقم الإعلان'
                                     : 'Listing code copied',
                               ),
-                            if (_property.city.trim().isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              _InfoRow(
-                                icon: Icons.location_city_outlined,
-                                title: widget.isAr ? 'المدينة' : 'City',
-                                value: _property.city.trim(),
-                                copyValue: _property.city.trim(),
-                                copiedMessage: widget.isAr
-                                    ? 'تم نسخ المدينة'
-                                    : 'City copied',
-                              ),
-                            ],
-                            if ((_property.province ?? '').trim().isNotEmpty ||
-                                (_property.region ?? '').trim().isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              _InfoRow(
-                                icon: Icons.map_outlined,
-                                title: widget.isAr ? 'النطاق الجغرافي' : 'Area',
-                                value: [
-                                  (_property.province ?? '').trim(),
-                                  (_property.region ?? '').trim(),
-                                ].where((e) => e.isNotEmpty).join(' - '),
-                                copyValue: [
-                                  (_property.province ?? '').trim(),
-                                  (_property.region ?? '').trim(),
-                                ].where((e) => e.isNotEmpty).join(' - '),
-                                copiedMessage: widget.isAr
-                                    ? 'تم النسخ'
-                                    : 'Copied',
-                              ),
-                            ],
-                            if ((_property.location ?? '').trim().isNotEmpty ||
-                                (_property.addressLine ?? '')
-                                    .trim()
-                                    .isNotEmpty) ...[
-                              const SizedBox(height: 10),
-                              _InfoRow(
-                                icon: Icons.place_outlined,
-                                title: widget.isAr ? 'الموقع' : 'Location',
-                                value: [
-                                  (_property.location ?? '').trim(),
-                                  (_property.addressLine ?? '').trim(),
-                                ].where((e) => e.isNotEmpty).join(' - '),
-                                copyValue: [
-                                  (_property.location ?? '').trim(),
-                                  (_property.addressLine ?? '').trim(),
-                                ].where((e) => e.isNotEmpty).join(' - '),
-                                copiedMessage: widget.isAr
-                                    ? 'تم نسخ الموقع'
-                                    : 'Location copied',
-                              ),
-                            ],
-                            if ((_property.status ?? '').trim().isNotEmpty ||
-                                (_property.workflowStage ?? '')
-                                    .trim()
-                                    .isNotEmpty) ...[
+                            if (_localizedListingStatusLine().isNotEmpty) ...[
                               const SizedBox(height: 10),
                               _InfoRow(
                                 icon: Icons.verified_outlined,
@@ -5153,10 +5634,47 @@ $licLine
                                     ? 'حالة الإعلان'
                                     : 'Listing status',
                                 value: _localizedListingStatusLine(),
-                                copyValue: _localizedListingStatusLine(),
+                              ),
+                            ],
+                            ...[
+                              const SizedBox(height: 10),
+                              _InfoRow(
+                                icon: Icons.schedule_outlined,
+                                title: widget.isAr
+                                    ? 'تاريخ الإنشاء'
+                                    : 'Created at',
+                                value: _fmtDateTime(_property.createdAt),
+                              ),
+                            ],
+                            if (PropertyListingDisplay.mainCityLabel(_property)
+                                .isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              _InfoRow(
+                                icon: Icons.location_city_outlined,
+                                title: widget.isAr ? 'المدينة' : 'City',
+                                value: PropertyListingDisplay.mainCityLabel(
+                                  _property,
+                                ),
+                              ),
+                            ],
+                            if (PropertyListingDisplay.locationLineForDetails(
+                              _property,
+                            ).isNotEmpty) ...[
+                              const SizedBox(height: 10),
+                              _InfoRow(
+                                icon: Icons.place_outlined,
+                                title: widget.isAr ? 'الموقع' : 'Location',
+                                value:
+                                    PropertyListingDisplay.locationLineForDetails(
+                                  _property,
+                                ),
+                                copyValue:
+                                    PropertyListingDisplay.locationLineForDetails(
+                                  _property,
+                                ),
                                 copiedMessage: widget.isAr
-                                    ? 'تم النسخ'
-                                    : 'Copied',
+                                    ? 'تم نسخ الموقع'
+                                    : 'Location copied',
                               ),
                             ],
                             if (_property.availabilityDate != null) ...[
@@ -5167,14 +5685,8 @@ $licLine
                                     ? 'تاريخ الإتاحة'
                                     : 'Available from',
                                 value: _fmtDateTime(
-                                  _property.availabilityDate!.toLocal(),
+                                  _property.availabilityDate!,
                                 ),
-                                copyValue: _fmtDateTime(
-                                  _property.availabilityDate!.toLocal(),
-                                ),
-                                copiedMessage: widget.isAr
-                                    ? 'تم النسخ'
-                                    : 'Copied',
                               ),
                             ],
                           ],
@@ -5209,7 +5721,8 @@ $licLine
                         _buildAuctionBidsCard(cs),
                         const SizedBox(height: 12),
                       ],
-                      if (_licensedMarketerPhone.isNotEmpty) ...[
+                      if (_licensedMarketerPhone.isNotEmpty &&
+                          _marketerCanSeeOwnerContact) ...[
                         _Card(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5319,27 +5832,41 @@ $licLine
                         const SizedBox(height: 12),
                       ],
                       _Card(
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline,
-                              color: Theme.of(context).colorScheme.primary,
+                        child: InkWell(
+                          onTap: () => unawaited(_openPublisherHelpSheet()),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.info_outline_rounded,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    widget.isAr
+                                        ? 'عن الناشر والمراسلة داخل التطبيق'
+                                        : 'About the publisher and in-app chat',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  size: 14,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                _isPublishedLikeListing
-                                    ? (widget.isAr
-                                        ? 'الدردشة داخل التطبيق تكون مع المسوّق المعتمد فقط؛ لا يُعرض رقم المالك على الإعلان العلني.'
-                                        : 'In-app chat is with the licensed marketer only; the owner\'s phone is not shown on the public listing.')
-                                    : (widget.isAr
-                                        ? 'قبل النشر: يمكن للمسوّقين المعنيين مراسلة المالك من هذه الصفحة. بعد النشر يقتصر التواصل الظاهر للجميع على المسوّق المرخّص.'
-                                        : 'Before publishing, involved marketers can message the owner from this page. After publishing, public-facing contact is through the licensed marketer.'),
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -5438,34 +5965,71 @@ class _DetailsFlow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!mosaic) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
-      );
-    }
-    final out = <Widget>[];
-    for (final w in children) {
-      if (w is SizedBox &&
-          w.child == null &&
-          w.height != null &&
-          w.height! >= 8 &&
-          w.height! <= 16) {
-        continue;
-      }
-      out.add(
-        SizedBox(
-          width: tileWidth,
-          child: w,
-        ),
-      );
-    }
-    return Wrap(
-      spacing: 16,
-      runSpacing: 16,
-      alignment: WrapAlignment.start,
-      crossAxisAlignment: WrapCrossAlignment.start,
-      children: out,
+    return LayoutBuilder(
+      builder: (context, c) {
+        if (!mosaic || c.maxWidth < 720) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          );
+        }
+        final cards = <Widget>[];
+        for (final w in children) {
+          if (w is SizedBox &&
+              w.child == null &&
+              w.height != null &&
+              w.height! >= 8 &&
+              w.height! <= 16) {
+            continue;
+          }
+          cards.add(w);
+        }
+        if (cards.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        // أول بطاقة بعرض كامل (العنوان)، ثم عمودان مستقلان بلا فراغ صفّ الشبكة.
+        final lead = cards.first;
+        final rest = cards.length > 1 ? cards.sublist(1) : const <Widget>[];
+        final left = <Widget>[];
+        final right = <Widget>[];
+        for (var i = 0; i < rest.length; i++) {
+          final tile = Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: rest[i],
+          );
+          if (i.isEven) {
+            left.add(tile);
+          } else {
+            right.add(tile);
+          }
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            lead,
+            if (rest.isNotEmpty) const SizedBox(height: 16),
+            if (rest.isNotEmpty)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: left,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: right,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        );
+      },
     );
   }
 }
@@ -5477,24 +6041,26 @@ class _Card extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final wideWeb = kIsWeb && MediaQuery.sizeOf(context).width >= 1040;
+    final w = MediaQuery.sizeOf(context).width;
+    final wideWeb = kIsWeb && w >= 1040;
+    final compact = w < 720;
     final accent = const Color(0xFF0F766E);
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: EdgeInsets.all(compact ? 12 : (wideWeb ? 16 : 14)),
       decoration: BoxDecoration(
         color: cs.surface,
-        borderRadius: BorderRadius.circular(wideWeb ? 20 : 18),
+        borderRadius: BorderRadius.circular(wideWeb ? 20 : 16),
         border: Border.all(
           color: wideWeb
-              ? accent.withOpacity(0.28)
-              : cs.outlineVariant.withOpacity(0.35),
+              ? accent.withValues(alpha: 0.28)
+              : cs.outlineVariant.withValues(alpha: 0.4),
           width: wideWeb ? 1.5 : 1,
         ),
         boxShadow: [
           BoxShadow(
             color: wideWeb
-                ? accent.withOpacity(0.07)
-                : cs.shadow.withOpacity(0.06),
+                ? accent.withValues(alpha: 0.07)
+                : cs.shadow.withValues(alpha: 0.06),
             blurRadius: wideWeb ? 14 : 10,
             offset: const Offset(0, 6),
           ),
@@ -5524,50 +6090,66 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final rtl = Directionality.of(context) == TextDirection.rtl;
+    final narrow = MediaQuery.sizeOf(context).width < 720;
     final showCopy = (copyValue ?? '').trim().isNotEmpty;
+    final valueColor = cs.onSurface;
+    final titleColor = cs.onSurface;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Icon(icon, size: 20, color: const Color(0xFF0F766E)),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.5),
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                flex: 4,
-                child: Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                flex: 7,
-                child: Text(
-                  value,
-                  textAlign: rtl ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                    color: cs.onSurfaceVariant,
-                    height: 1.35,
-                    fontWeight: FontWeight.w700,
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.22),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(icon, size: 20, color: const Color(0xFF0F766E)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: titleColor,
+                      fontSize: narrow ? 13 : 14,
+                      height: 1.25,
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 4),
+                  Text(
+                    value,
+                    textAlign: rtl ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                      color: valueColor,
+                      height: 1.4,
+                      fontWeight: FontWeight.w700,
+                      fontSize: narrow ? 14.5 : 14,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-        if (showCopy) ...[
-          const SizedBox(width: 4),
-          IconButton(
-            tooltip: rtl ? 'نسخ' : 'Copy',
-            visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
-            padding: EdgeInsets.zero,
+            ),
+            if (showCopy) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: rtl ? 'نسخ' : 'Copy',
+                visualDensity: VisualDensity.compact,
+                constraints:
+                    const BoxConstraints.tightFor(width: 36, height: 36),
+                padding: EdgeInsets.zero,
             iconSize: 16,
             icon: Icon(Icons.copy_rounded, color: cs.primary),
             onPressed: () async {
@@ -5583,7 +6165,9 @@ class _InfoRow extends StatelessWidget {
             },
           ),
         ],
-      ],
+          ],
+        ),
+      ),
     );
   }
 }

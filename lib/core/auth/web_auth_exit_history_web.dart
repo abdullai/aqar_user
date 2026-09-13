@@ -1,14 +1,10 @@
 // ignore_for_file: avoid_web_libraries_in_flutter
 
-import 'dart:html' as html;
+import '../navigation/web_in_app_history.dart';
 
-/// بعد تسجيل الخروج: استبدال عنوان المتصفح حتى لا يعيد زر الرجوع لوحة التحكم.
+/// بعد تسجيل الخروج: استبدال عنوان المتصفح حتى لا يعيد زر الرجوع/التقدّم لوحة التحكم.
 abstract final class WebAuthExitHistory {
   static void replaceLoginUrl() {
-    try {
-      final loc = html.window.location;
-      final next = '${loc.pathname}${loc.search}#/login';
-      html.window.history.replaceState(null, '', next);
-    } catch (_) {}
+    webInAppHistorySealAuth();
   }
 }

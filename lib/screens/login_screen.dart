@@ -1,4 +1,6 @@
-﻿// lib/screens/login_screen.dart
+// ignore_for_file: unused_element, unused_field
+
+// lib/screens/login_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -19,6 +21,8 @@ import 'package:aqar_user/services/ads_service.dart';
 import 'package:aqar_user/services/auth_service.dart';
 import 'package:aqar_user/theme.dart';
 import '../core/auth/login_success_banner.dart';
+import '../core/auth/inactivity_auth_landing.dart';
+import '../core/auth/in_app_otp_handoff.dart';
 import 'package:aqar_user/widgets/app_busy_indicator.dart';
 import 'package:aqar_user/widgets/app_logo_loading.dart';
 import 'package:aqar_user/widgets/inline_property_video.dart';
@@ -27,16 +31,14 @@ import 'package:aqar_user/widgets/app_about_credits.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../core/branding/app_branding.dart';
-import '../core/branding/branding_logo_image.dart';
-import '../core/input/caps_lock_probe.dart';
-import '../core/input/smart_keyboard_formatter.dart';
+import '../core/branding/aqar_brand_colors.dart';
 import '../core/config/app_config.dart';
 import '../core/input/password_arabic_script_guard.dart';
 import '../core/input/password_field_input_guard.dart';
-import '../core/input/locale_text_input_guard.dart';
-import '../core/gestures/app_keyboard_inset.dart';
-import '../core/gestures/soft_keyboard_ensure_visible.dart';
+import '../core/input/smart_keyboard_formatter.dart';
+import '../core/gestures/app_keyboard_stable.dart';
 import '../core/session/app_session.dart';
+import '../core/session/user_appearance_session.dart';
 import '../core/session/web_session_ttl.dart';
 import '../core/theme/app_appearance_bridge.dart';
 import '../core/session/return_after_auth.dart';
@@ -46,15 +48,18 @@ import '../services/connectivity_guard.dart';
 import '../services/session_manager.dart';
 import '../services/fast_login_service.dart';
 import '../services/profile_compliance_service.dart';
-import '../services/user_install_session_service.dart';
 import '../core/navigation/post_auth_navigation.dart';
-import '../core/government/saudi_identity_validator.dart';
 import '../core/haptics/app_haptics.dart';
 import '../widgets/nafath_login_sheet.dart';
 import '../widgets/auth_top_chrome.dart';
 import '../widgets/login_known_user_hero.dart';
+import '../widgets/caps_aware_password_field.dart';
+import '../core/auth/auth_challenge_service.dart';
+import '../core/auth/auth_completion_policy.dart';
 import '../core/auth/login_method_policy.dart';
+import '../core/platform/app_surface.dart';
 import '../core/auth/auth_local_sign_out.dart';
+import '../shared/core/app_flags.dart';
 import 'verify_screen.dart';
 
 /// تمرير داخل بطاقة الدخول — بدون شريط (حتى على الويب/سطح المكتب).
@@ -70,7 +75,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen>
-    with TickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
+    with TickerProviderStateMixin, RouteAware {
   static const Color _bankColor = Color(0xFF0F766E);
 
   // ✅ سياسة محاولات الدخول (محليًا)
@@ -160,31 +165,11 @@ class _LoginScreenState extends State<LoginScreen>
 
   String? _usernameError;
   String? _passwordError;
-  bool _capsLockPassword = false;
-  bool _pendingCapsUi = false;
-  Timer? _capsUiDebounce;
-
-  /// آخر استدلال Caps من حدث مفتاح حي (جوال/لوحة ناعمة) — ليس من محتوى الحقل.
-  bool? _liveUppercaseMode;
-
-  /// عند فشل lockModes على ويب الجوال: حالة يدوية بعد ضغط Caps Lock.
-  bool? _capsLockLatched;
   bool _didAutoAdvanceToPassword = false;
-  Timer? _capsResyncTimer;
   Timer? _passwordBleedGuardTimer;
-
-  /// لتتبع الحرف المُدرج لاستدلال سهم الأحرف الكبيرة على لوحات الجوال.
-  String _lastPasswordForCapsInfer = '';
 
   /// يمنع تسرّب الرقم الحادي عشر إلى كلمة المرور بعد الانتقال التلقائي.
   bool _passwordBleedGuardActive = false;
-
-  /// ويب سطح المكتب (ويندوز/ماك/لينكس) وليس متصفح جوال.
-  bool get _desktopWebCapsTextMode => SmartKeyboardFormatter.isDesktopWebPlatform;
-
-  /// ويب سطح المكتب: نص Caps تحت الحقل. الجوال/التطبيق: سهم بجانب القفل.
-  bool _useCapsTextUnderField(BuildContext context) =>
-      SmartKeyboardFormatter.useCapsTextUnderField(context);
 
   DateTime? _lastPasswordArabicDialogAt;
 
@@ -193,10 +178,10 @@ class _LoginScreenState extends State<LoginScreen>
   bool get _isAr => langNotifier.value != 'en';
 
   ThemeMode get _currentTheme => themeModeNotifier.value;
-  bool get _isLight => _currentTheme == ThemeMode.light;
+  bool get _isLight => UserAppearanceSession.resolvesLight(_currentTheme);
 
   Color get _pageBg =>
-      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      _isLight ? const Color(0xFFF5F7FA) : AqarBrandColors.nightSurface;
   Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
@@ -259,197 +244,6 @@ class _LoginScreenState extends State<LoginScreen>
       }
       _passwordFocus.requestFocus();
     });
-  }
-
-  bool? _readHardwareCaps() {
-    try {
-      return HardwareKeyboard.instance.lockModesEnabled
-          .contains(KeyboardLockMode.capsLock);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// يستنتج Caps/وضع الأحرف الكبيرة من حرف + Shift (موثوق على الويب بعد أول ضغطة).
-  bool? _capsFromKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return null;
-    final ch = event.character;
-    if (ch == null || ch.length != 1) return null;
-    final cu = ch.codeUnitAt(0);
-    final isUpper = cu >= 65 && cu <= 90;
-    final isLower = cu >= 97 && cu <= 122;
-    if (!isUpper && !isLower) return null;
-    final shift = HardwareKeyboard.instance.isShiftPressed;
-    // بدون Shift: حرف كبير ⇒ Caps/Uppercase ON، صغير ⇒ OFF.
-    // مع Shift: العكس (Shift+Caps يعطي صغيراً).
-    if (!shift) return isUpper;
-    return isLower;
-  }
-
-  void _applyCapsLockState(bool caps, {bool clearLatch = false}) {
-    if (clearLatch) _capsLockLatched = null;
-    if (!mounted || caps == _capsLockPassword) return;
-    // ويب ويندوز/سطح المكتب: ثبّت النص تحت الحقل (تجنّب وميض probe/resync).
-    if (_desktopWebCapsTextMode) {
-      _pendingCapsUi = caps;
-      _capsUiDebounce?.cancel();
-      _capsUiDebounce = Timer(const Duration(milliseconds: 180), () {
-        if (!mounted) return;
-        if (_pendingCapsUi == _capsLockPassword) return;
-        setState(() => _capsLockPassword = _pendingCapsUi);
-      });
-      return;
-    }
-    setState(() => _capsLockPassword = caps);
-  }
-
-  /// يستنتج وضع الأحرف الكبيرة من آخر حرف لاتيني أُدرج (لوحة جوال ناعمة).
-  bool? _capsFromInsertedLatin(String previous, String next) {
-    if (next.isEmpty) return null;
-    if (next.length == previous.length + 1) {
-      // إدراج شائع في النهاية أو الوسط: ابحث عن الحرف الجديد.
-      if (next.startsWith(previous)) {
-        return _capsFromSingleChar(next.substring(previous.length));
-      }
-      if (next.endsWith(previous)) {
-        return _capsFromSingleChar(next.substring(0, next.length - previous.length));
-      }
-      for (var i = 0; i < next.length; i++) {
-        if (i >= previous.length || next[i] != previous[i]) {
-          return _capsFromSingleChar(next[i]);
-        }
-      }
-    }
-    // لصق/تعبئة: آخر حرف لاتيني في النص.
-    for (var i = next.length - 1; i >= 0; i--) {
-      final r = _capsFromSingleChar(next[i]);
-      if (r != null) return r;
-    }
-    return null;
-  }
-
-  bool? _capsFromSingleChar(String ch) {
-    if (ch.length != 1) return null;
-    final cu = ch.codeUnitAt(0);
-    if (cu >= 65 && cu <= 90) return true;
-    if (cu >= 97 && cu <= 122) return false;
-    return null;
-  }
-
-  void _syncCapsLockFromHardware() {
-    final browser = probeBrowserCapsLock();
-    final hardware = _readHardwareCaps();
-
-    // ويب سطح المكتب: DOM فقط — hardware==false على ويندوز غالباً خاطئ ويُومض النص.
-    if (_desktopWebCapsTextMode) {
-      if (browser == true) {
-        _applyCapsLockState(true);
-        return;
-      }
-      if (browser == false) {
-        _applyCapsLockState(false);
-        return;
-      }
-      if (_liveUppercaseMode != null) {
-        _applyCapsLockState(_liveUppercaseMode!);
-      }
-      return;
-    }
-
-    // جوال / ويب جوال / التطبيق:
-    // لوحات ناعمة تُرجع CapsLock=false دائماً تقريباً — لا تمسح الاستدلال الحي.
-    if (browser == true || hardware == true) {
-      _applyCapsLockState(true);
-      return;
-    }
-    if (_liveUppercaseMode != null) {
-      _applyCapsLockState(_liveUppercaseMode!);
-      return;
-    }
-    if (_capsLockLatched != null) {
-      _applyCapsLockState(_capsLockLatched!);
-      return;
-    }
-    // بلا إشارة حيّة: أخفِ السهم فقط عند تأكيد DOM.
-    if (browser == false) {
-      _applyCapsLockState(false);
-    }
-  }
-
-  void _scheduleCapsResync() {
-    _capsResyncTimer?.cancel();
-    if (_desktopWebCapsTextMode) {
-      _capsResyncTimer = Timer(const Duration(milliseconds: 180), () {
-        if (mounted) _syncCapsLockFromHardware();
-      });
-      return;
-    }
-    final delays = <int>[0, 40, 120, 280];
-    var i = 0;
-    void tick() {
-      if (!mounted) return;
-      _syncCapsLockFromHardware();
-      i++;
-      if (i >= delays.length) return;
-      _capsResyncTimer = Timer(Duration(milliseconds: delays[i]), tick);
-    }
-
-    tick();
-  }
-
-  bool _loginHardwareCapsKeyHandler(KeyEvent event) {
-    if (!_passwordFocus.hasFocus &&
-        event.logicalKey != LogicalKeyboardKey.capsLock) {
-      // حدّث كاش DOM حتى لو الحقل غير مركّز (مهم عند دخول الحقل وCaps شغال مسبقاً).
-      if (kIsWeb && (event is KeyDownEvent || event is KeyUpEvent)) {
-        probeBrowserCapsLock();
-      }
-    }
-
-    if (event.logicalKey == LogicalKeyboardKey.capsLock) {
-      if (event is KeyDownEvent) {
-        final hardwareOn = _readHardwareCaps() ?? false;
-        final browserOn = probeBrowserCapsLock();
-        if (!_desktopWebCapsTextMode &&
-            browserOn == null &&
-            _readHardwareCaps() == null) {
-          _capsLockLatched = !(_capsLockPassword || hardwareOn);
-        } else {
-          _capsLockLatched = null;
-        }
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _syncCapsLockFromHardware();
-        _scheduleCapsResync();
-      });
-      return false;
-    }
-
-    // سطح المكتب: لا تعتمد استدلال الحرف وحده لعرض النص — DOM/عتاد فقط.
-    if (_desktopWebCapsTextMode) {
-      if (event is KeyDownEvent || event is KeyUpEvent) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _syncCapsLockFromHardware();
-        });
-      }
-      return false;
-    }
-
-    final inferred = _capsFromKeyEvent(event);
-    if (inferred != null && _passwordFocus.hasFocus) {
-      _liveUppercaseMode = inferred;
-      _capsLockLatched = null;
-      _applyCapsLockState(inferred);
-      return false;
-    }
-
-    if (event is KeyDownEvent || event is KeyUpEvent) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncCapsLockFromHardware();
-      });
-    }
-    return false;
   }
 
   Future<void> _shakeCredentialsGroup() async {
@@ -646,10 +440,16 @@ class _LoginScreenState extends State<LoginScreen>
       begin: const Offset(0, 0.035),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _enterCtrl, curve: Curves.easeOutCubic));
-    _enterCtrl.forward();
+    if (InactivityAuthLanding.suppressEnterMotion) {
+      _enterCtrl.value = 1;
+    } else {
+      _enterCtrl.forward();
+    }
 
     _generateCaptcha();
-    unawaited(_loadAds());
+    if (!InactivityAuthLanding.suppressEnterMotion) {
+      unawaited(_loadAds());
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -697,49 +497,6 @@ class _LoginScreenState extends State<LoginScreen>
         setState(() => _passwordError = null);
       }
     });
-
-    _passwordFocus.addListener(() {
-      if (_passwordFocus.hasFocus) {
-        _scrollLoginFieldIntoView(_passwordFieldKey);
-        // لا تمسح الـ latch قبل قراءة حقيقية — Caps قد يكون شغال مسبقاً.
-        refreshBrowserCapsLockCache();
-        probeBrowserCapsLock();
-        _syncCapsLockFromHardware();
-        _scheduleCapsResync();
-      } else {
-        _liveUppercaseMode = null;
-        _lastPasswordForCapsInfer = _passwordController.text;
-        // سطح المكتب: أخفِ التنبيه عند مغادرة الحقل إن لم يعد Caps مؤكداً.
-        if (_desktopWebCapsTextMode) {
-          _syncCapsLockFromHardware();
-        } else {
-          _applyCapsLockState(false);
-        }
-      }
-      if (mounted) setState(() {});
-    });
-    // يفعّل مستمع DOM مبكراً على الويب.
-    refreshBrowserCapsLockCache();
-    probeBrowserCapsLock();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncCapsLockFromHardware();
-    });
-
-    _usernameFocus.addListener(() {
-      if (_usernameFocus.hasFocus) {
-        _scrollLoginFieldIntoView(_usernameFieldKey);
-      }
-    });
-
-    HardwareKeyboard.instance.addHandler(_loginHardwareCapsKeyHandler);
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void didChangeMetrics() {
-    super.didChangeMetrics();
-    if (!_usernameFocus.hasFocus && !_passwordFocus.hasFocus) return;
-    AppSoftKeyboardEnsureVisible.scheduleEnsureVisible(fromMetrics: true);
   }
 
   @override
@@ -759,10 +516,6 @@ class _LoginScreenState extends State<LoginScreen>
     unawaited(_loadPreferences());
   }
 
-  void _scrollLoginFieldIntoView(GlobalKey key) {
-    AppSoftKeyboardEnsureVisible.scheduleEnsureVisible();
-  }
-
   @override
   void dispose() {
     if (_routeAwareSubscribed) {
@@ -770,8 +523,6 @@ class _LoginScreenState extends State<LoginScreen>
       _routeAwareSubscribed = false;
     }
     _userCheckDebounce?.cancel();
-    _capsResyncTimer?.cancel();
-    _capsUiDebounce?.cancel();
     _passwordBleedGuardTimer?.cancel();
     _shakeCtrl.dispose();
     _enterCtrl.dispose();
@@ -781,8 +532,6 @@ class _LoginScreenState extends State<LoginScreen>
     _autofillUsernameMirror.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
-    HardwareKeyboard.instance.removeHandler(_loginHardwareCapsKeyHandler);
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -961,13 +710,10 @@ class _LoginScreenState extends State<LoginScreen>
       if (resumeName.isEmpty) resumeName = null;
     } catch (_) {}
 
-    final savedLang =
-        prefs.getString(AppConfig.prefLangKey) ?? langNotifier.value;
-    langNotifier.value = (savedLang == 'en') ? 'en' : 'ar';
-
-    final savedTheme = prefs.getString(AppConfig.prefThemeKey) ?? 'light';
-    themeModeNotifier.value =
-        (savedTheme == 'dark') ? ThemeMode.dark : ThemeMode.light;
+    await UserAppearanceSession.applyNotifiersToMatchStoredSession(
+      langNotifier: langNotifier,
+      themeModeNotifier: themeModeNotifier,
+    );
 
     final attemptsJson = prefs.getString('failedAttempts') ?? '{}';
     final lockoutJson = prefs.getString('lockoutUntil') ?? '{}';
@@ -1009,7 +755,13 @@ class _LoginScreenState extends State<LoginScreen>
           await LoginMethodPolicy.resolve(hasKnownUser: hasIdentity);
     } catch (_) {}
 
-    if (_methodSnapshot.autoOpenFastLogin &&
+    var forcePasswordLogin = false;
+    try {
+      forcePasswordLogin = await FastLoginService.consumeForcePasswordLoginOnce();
+    } catch (_) {}
+
+    if (!forcePasswordLogin &&
+        _methodSnapshot.autoOpenFastLogin &&
         !FastLoginService.hasUnlockedThisRuntimeSession) {
       if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1326,7 +1078,7 @@ class _LoginScreenState extends State<LoginScreen>
     ScaffoldMessenger.of(context).clearSnackBars();
     setState(() => isBusy = true);
     // نافذة منبثقة فوق شاشة الدخول — بلا صفحة بيضاء وسيطة.
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.38),
@@ -1378,7 +1130,10 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
 
+    var loginOverlayOpen = true;
     void dismissLoginOverlay() {
+      if (!loginOverlayOpen) return;
+      loginOverlayOpen = false;
       final nav = Navigator.of(context, rootNavigator: true);
       if (nav.canPop()) nav.pop();
     }
@@ -1429,18 +1184,29 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     TextInput.finishAutofillContext(shouldSave: rememberMe);
-    await _clearOtpVerifiedForCurrentSession();
 
-    final known = await UserInstallSessionService.isCurrentInstallRegistered();
+    final challenge = await AuthChallengeService.start(
+      username: u,
+      loginMethod: 'password',
+    );
     if (!mounted) return;
 
-    if (!kIsWeb && fastLogin && known) {
+    final skipOtp = challenge.fullyAuthenticated &&
+        AuthCompletionPolicy.allowFastLogin(
+          isWeb: kIsWeb,
+          platform: defaultTargetPlatform,
+        ) &&
+        !AuthCompletionPolicy.localFlagCanBypassOtp();
+
+    if (skipOtp) {
+      dismissLoginOverlay();
       try {
         await FastLoginService.saveUserContext(
           uid: uid,
           usernameNationalId: u,
           displayName: _rememberDisplayName,
         );
+        await FastLoginService.markTrustedInstall(uid: uid);
       } catch (_) {}
       try {
         final prefs = await SharedPreferences.getInstance();
@@ -1509,26 +1275,62 @@ class _LoginScreenState extends State<LoginScreen>
       'nextArgs': <String, dynamic>{},
       'username': u,
       'deviceId': deviceId,
-      'registerDeviceOnSuccess': !known,
+      'registerDeviceOnSuccess': !challenge.trusted,
       'backToLogin': true,
+      if ((challenge.challengeId ?? '').isNotEmpty)
+        'challengeId': challenge.challengeId,
     };
     if (prefetchFullName != null && prefetchFullName.trim().isNotEmpty) {
       args['fullName'] = prefetchFullName.trim();
     }
 
-    // إرسال الرمز داخل التطبيق (ليس SMS/بريد) مع انتظار قصير لضمان الملف.
-    final otpRes = await AuthService.requestOtpDetailed(u);
-    if (otpRes.error != null && kDebugMode) {
-      debugPrint('[login] OTP request hint: ${otpRes.error}');
+    // إرسال الرمز وجلبه + آخر دخول أثناء نافذة التحميل حتى تكون الشاشة فورية.
+    final requestedAt = DateTime.now().toUtc();
+    var otpRes = challenge.needsOtp && challenge.ok
+        ? InAppOtpRequestResult(
+            expiresAt: challenge.expiresAt,
+            username: u,
+            challengeId: challenge.challengeId,
+            devCode: challenge.devCode,
+          )
+        : await AuthService.requestOtpDetailed(u);
+    if (otpRes.error == 'not_authenticated') {
+      await _waitForSession();
+      if (!mounted) return;
+      otpRes = await AuthService.requestOtpDetailed(u);
     }
+    if ((challenge.error ?? otpRes.error) != null && kDebugMode) {
+      debugPrint('[login] OTP request hint: ${challenge.error ?? otpRes.error}');
+    }
+
+    final greetFuture = InAppOtpHandoff.fetchGreeting(isAr: _isAr);
+    final codeFuture = otpRes.ok
+        ? InAppOtpHandoff.pollLatestCode(requestedAtUtc: requestedAt)
+        : Future<String?>.value(null);
+    final greet = await greetFuture;
+    final prefetchedCode = await codeFuture;
 
     if (!mounted) return;
 
-    // أغلق نافذة التحميل ثم انتقل لرمز التحقق مباشرة (بلا شاشة بيضاء).
-    final rootNav = Navigator.of(context, rootNavigator: true);
-    if (rootNav.canPop()) rootNav.pop();
+    // أغلق نافذة التحميل فقط — لا تُسقط شاشة الدخول/الجلسة بـ canPop إضافي.
+    dismissLoginOverlay();
 
-    // أبقِ نافذة «جاري تسجيل الدخول» فوق شاشة الدخول — بلا شاشة بيضاء وسيطة.
+    final handoffName = (greet.displayName ?? prefetchFullName ?? '').trim();
+    if (handoffName.isNotEmpty) {
+      args['fullName'] = handoffName;
+    }
+    if (greet.lastLogin != null) {
+      args['lastLogin'] = greet.lastLogin!.toUtc().toIso8601String();
+    }
+    if ((greet.avatarUrl ?? '').isNotEmpty) {
+      args['avatarUrl'] = greet.avatarUrl;
+    }
+    final code = (prefetchedCode ?? otpRes.devCode ?? challenge.devCode ?? '')
+        .trim();
+    if (code.length >= InAppOtpHandoff.otpLen) {
+      args['code'] = code.substring(0, InAppOtpHandoff.otpLen);
+    }
+
     Navigator.of(context).pushReplacement(
       PageRouteBuilder<void>(
         settings: RouteSettings(
@@ -1666,12 +1468,11 @@ class _LoginScreenState extends State<LoginScreen>
           return Scaffold(
             backgroundColor: _pageBg,
             resizeToAvoidBottomInset: false,
-            body: SafeArea(
+            body: AppKeyboardStableScope(
+              child: SafeArea(
               child: LayoutBuilder(
                 builder: (context, c) {
                   final w = c.maxWidth;
-                  final kb = AppKeyboardInset.bottomOf(context);
-                  final kbOpen = kb > 48;
 
                   // تمرير عمودي دائماً يحسّن الجوال + الويب مع لوحة المفاتيح.
                   const allowVerticalScroll = true;
@@ -1721,43 +1522,59 @@ class _LoginScreenState extends State<LoginScreen>
                     );
                   }
 
-                  final tightWeb = kIsWeb && w < 560;
-                  final padH = tightWeb ? 8.0 : 18.0;
-                  final padV = kbOpen
-                      ? 4.0
-                      : (tightWeb ? 6.0 : 18.0);
-                  final cardMax =
-                      tightWeb ? (w - padH * 2).clamp(260.0, 900.0) : 600.0;
+                  final surface = AppSurfaceScope.maybeOf(context);
+                  final host = LoginMethodPolicy.detectHost();
+                  final fillScreen = surface?.isPhone ??
+                      (host == LoginHostKind.nativeMobile ||
+                          host == LoginHostKind.webMobile);
+                  final padH = fillScreen ? 8.0 : (w < 560 ? 8.0 : 18.0);
+                  final padV = fillScreen ? 8.0 : 18.0;
+                  final cardMax = fillScreen
+                      ? (w - padH * 2).clamp(260.0, w)
+                      : (surface?.formMaxWidth ??
+                              (w < 560
+                                  ? (w - padH * 2).clamp(260.0, 900.0)
+                                  : 600.0))
+                          .clamp(260.0, 720.0);
 
-                  return ScrollConfiguration(
-                    behavior: const _LoginScrollBehavior(),
-                    child: SingleChildScrollView(
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      physics: const ClampingScrollPhysics(),
-                      padding: EdgeInsets.fromLTRB(
-                        padH,
-                        padV,
-                        padH,
-                        padV + 24 + kb,
-                      ),
-                      child: Align(
-                        alignment: Alignment.topCenter,
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(padH, padV, padH, 6),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(maxWidth: cardMax),
-                          child: _loginCard(
-                            maxWidth: cardMax,
-                            borderRadius: 18,
-                            t: t,
-                            // التمرير الخارجي يرفع الحقول فوق لوحة المفاتيح.
-                            allowVerticalScroll: false,
+                          child: _topBarUnified(),
+                        ),
+                      ),
+                      Expanded(
+                        child: ScrollConfiguration(
+                          behavior: const _LoginScrollBehavior(),
+                          child: SingleChildScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            physics: const ClampingScrollPhysics(),
+                            padding: EdgeInsets.fromLTRB(padH, 0, padH, padV + 16),
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(maxWidth: cardMax),
+                                child: _loginCard(
+                                  maxWidth: cardMax,
+                                  borderRadius: fillScreen ? 14 : 18,
+                                  t: t,
+                                  allowVerticalScroll: false,
+                                  includeTopBar: false,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   );
                 },
               ),
+            ),
             ),
           );
         },
@@ -1771,10 +1588,8 @@ class _LoginScreenState extends State<LoginScreen>
     required double borderRadius,
     required AppLocalizations t,
     required bool allowVerticalScroll,
+    bool includeTopBar = true,
   }) {
-    final kb = AppKeyboardInset.bottomOf(context);
-    final kbOpen = kb > 48;
-    final cardPad = kbOpen ? 12.0 : 18.0;
     final cardColor = _isLight
         ? Colors.white.withValues(alpha: 0.95)
         : const Color(0xFF171A22).withValues(alpha: 0.95);
@@ -1794,40 +1609,40 @@ class _LoginScreenState extends State<LoginScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _topBarUnified(),
-          SizedBox(height: kbOpen ? 6 : 10),
-          if (!kbOpen)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.verified_user, size: 16, color: _successColor),
-                const SizedBox(width: 6),
-                Text(
-                  _isAr ? 'تسجيل دخول آمن' : 'Secure Login',
-                  style: TextStyle(
-                    fontSize: _font(context, 12, 11),
-                    color: _successColor,
-                    fontWeight: FontWeight.w900,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          if (includeTopBar) ...[
+            _topBarUnified(),
+            const SizedBox(height: 10),
+          ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.verified_user, size: 16, color: _successColor),
+              const SizedBox(width: 6),
+              Text(
+                _isAr ? 'تسجيل دخول آمن' : 'Secure Login',
+                style: TextStyle(
+                  fontSize: _font(context, 12, 11),
+                  color: _successColor,
+                  fontWeight: FontWeight.w900,
                 ),
-              ],
-            ),
-          if (!kbOpen) const SizedBox(height: 4),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
           const LoginBrandHero(),
           if (_knownUserReady) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             LoginKnownUserHero(
               isAr: _isAr,
               displayName: _rememberDisplayName!,
               accent: _bankColor,
-              compact: _isSmallUi(context) || kbOpen,
-              onChangeUser: _busy ? null : _switchToAnotherUser,
+              compact: _isSmallUi(context),
             ),
-            SizedBox(height: kbOpen ? 8 : 14),
+            const SizedBox(height: 14),
           ] else ...[
-            if (!kbOpen && AppBranding.prefersAppVisuals(context)) ...[
+            if (AppBranding.prefersAppVisuals(context)) ...[
               const SizedBox(height: 6),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1849,28 +1664,41 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
               ),
             ],
-            if (!kbOpen) ...[
-              const SizedBox(height: 6),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  t.signInToContinue,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _textSecondary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  softWrap: false,
+                ),
+              ),
+            ),
+            if (kIsOpsDesktopSurface) ...[
+              const SizedBox(height: 8),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    t.signInToContinue,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: _textSecondary,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    softWrap: false,
+                child: Text(
+                  t.opsDeskLoginHint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _textSecondary,
+                    height: 1.35,
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-            ] else
-              const SizedBox(height: 8),
+            ],
+            const SizedBox(height: 12),
           ],
           AnimatedBuilder(
             animation: _shakeAnim,
@@ -1952,6 +1780,7 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+          if (!kIsOpsDesktopSurface) ...[
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
@@ -2000,7 +1829,7 @@ class _LoginScreenState extends State<LoginScreen>
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
                 foregroundColor: _bankColor,
-                backgroundColor: Colors.white,
+                backgroundColor: _fieldFill,
                 side: BorderSide(color: _fieldOutline, width: 1.8),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -2042,6 +1871,7 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+          ],
           const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -2051,8 +1881,8 @@ class _LoginScreenState extends State<LoginScreen>
                     ? const SizedBox.shrink()
                     : SelectableText(
                         _isAr
-                            ? '${kIsWeb ? 'منصّة ويب' : 'تطبيق جوّال'} — الإصدار: $_packageVersionLine'
-                            : '${kIsWeb ? 'Web' : 'Mobile app'} — Version: $_packageVersionLine',
+                            ? '${kIsWeb ? 'منصّة ويب' : kIsOpsDesktopSurface ? 'تطبيق سطح المكتب' : 'تطبيق جوّال'} — الإصدار: $_packageVersionLine'
+                            : '${kIsWeb ? 'Web' : kIsOpsDesktopSurface ? 'Desktop app' : 'Mobile app'} — Version: $_packageVersionLine',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
@@ -2088,7 +1918,7 @@ class _LoginScreenState extends State<LoginScreen>
     );
 
     final child = Padding(
-      padding: EdgeInsets.all(cardPad),
+      padding: const EdgeInsets.all(18),
       child: allowVerticalScroll
           ? ScrollConfiguration(
               behavior: const _LoginScrollBehavior(),
@@ -2098,7 +1928,7 @@ class _LoginScreenState extends State<LoginScreen>
                     ScrollViewKeyboardDismissBehavior.onDrag,
                 physics: const ClampingScrollPhysics(),
                 clipBehavior: Clip.hardEdge,
-                padding: EdgeInsets.only(bottom: 20 + kb),
+                padding: const EdgeInsets.only(bottom: 20),
                 child: content,
               ),
             )
@@ -2134,99 +1964,104 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Widget _buildForgotRememberRow({required AppLocalizations t}) {
+    Future<void> onRememberChanged(bool? v) async {
+      final newVal = v ?? false;
+      setState(() => rememberMe = newVal);
+
+      if (!newVal) {
+        await _savePreferences();
+        return;
+      }
+
+      final curU = (_getRealUsername() ?? '').trim();
+      _storedUsername = curU.isEmpty ? null : curU;
+      _syncAutofillUsernameMirror();
+
+      if ((_storedUsername ?? '').isNotEmpty) {
+        if ((_rememberDisplayName ?? '').isNotEmpty) {
+          _showRememberedIdentityChip = true;
+          _maskedPrefillActive = true;
+          _usernameController.clear();
+        } else {
+          _applyMaskedUsernamePrefill();
+        }
+      }
+      await _savePreferences();
+      _checkUsernameExistsDebounced();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _passwordFocus.requestFocus();
+      });
+    }
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
           child: Align(
             alignment: AlignmentDirectional.centerStart,
-            child: TextButton(
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: _busy
-                  ? null
-                  : () async {
-                      final okNet = await _ensureInternetOrAlert();
-                      if (!mounted) return;
-                      ConnectivityGuard.showOfflineSnackIfNeeded(
-                          context, okNet);
-                      if (!okNet) return;
-                      Navigator.pushNamed(context, '/resetPassword');
-                    },
-              child: Text(
-                t.forgotUsernameOrPassword,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                softWrap: false,
-                textAlign: TextAlign.start,
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: _font(context, 13.5, 12),
-                  color: _bankColor,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        final okNet = await _ensureInternetOrAlert();
+                        if (!mounted) return;
+                        ConnectivityGuard.showOfflineSnackIfNeeded(
+                            context, okNet);
+                        if (!okNet) return;
+                        Navigator.pushNamed(context, '/resetPassword');
+                      },
+                child: Text(
+                  t.forgotUsernameOrPassword,
+                  maxLines: 1,
+                  overflow: TextOverflow.visible,
+                  softWrap: false,
+                  textAlign: TextAlign.start,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: _font(context, 13.5, 12),
+                    color: _bankColor,
+                    height: 1.1,
+                  ),
                 ),
               ),
             ),
           ),
         ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Checkbox(
-              value: rememberMe,
-              onChanged: _busy
-                  ? null
-                  : (v) async {
-                      final newVal = v ?? false;
-                      setState(() => rememberMe = newVal);
-
-                      if (!newVal) {
-                        await _savePreferences();
-                        return;
-                      }
-
-                      final curU = (_getRealUsername() ?? '').trim();
-                      _storedUsername = curU.isEmpty ? null : curU;
-                      _syncAutofillUsernameMirror();
-
-                      if ((_storedUsername ?? '').isNotEmpty) {
-                        if ((_rememberDisplayName ?? '').isNotEmpty) {
-                          _showRememberedIdentityChip = true;
-                          _maskedPrefillActive = true;
-                          _usernameController.clear();
-                        } else {
-                          _applyMaskedUsernamePrefill();
-                        }
-                      }
-                      await _savePreferences();
-                      _checkUsernameExistsDebounced();
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) _passwordFocus.requestFocus();
-                      });
-                    },
-            ),
-            ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: _isSmallUi(context) ? 140 : 160,
+        const SizedBox(width: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerEnd,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Checkbox(
+                value: rememberMe,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: _busy ? null : onRememberChanged,
               ),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  t.rememberMe,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: TextStyle(
-                    color: _textPrimary,
-                    fontSize: _font(context, 13, 12),
-                    fontWeight: FontWeight.w900,
-                  ),
+              Text(
+                t.rememberMe,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  color: _textPrimary,
+                  fontSize: _font(context, 13, 12),
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ],
     );
@@ -2373,7 +2208,7 @@ class _LoginScreenState extends State<LoginScreen>
           textAlign: _isAr ? TextAlign.right : TextAlign.left,
           inputFormatters: [
             const _EnglishDigitsOnlyFormatter(),
-            StrictMaxLengthFormatter(10),
+            const StrictMaxLengthFormatter(10),
             LengthLimitingTextInputFormatter(10),
           ],
           maxLength: 10,
@@ -2426,136 +2261,42 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ✅ كلمة المرور
+  // كلمة المرور — Caps Lock من CapsAwarePasswordField فقط.
   Widget _buildPasswordField({required AppLocalizations t}) {
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    final useCapsText = _useCapsTextUnderField(context);
-    final passwordFocused = _passwordFocus.hasFocus;
-    final showCapsGlyph =
-        _capsLockPassword && !useCapsText && passwordFocused;
-    final showCapsText = _capsLockPassword && useCapsText && passwordFocused;
-
-    Widget eyeButton() => IconButton(
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-          icon: Icon(
-            obscurePassword ? Icons.visibility : Icons.visibility_off,
-            color: _iconColor,
-          ),
-          onPressed: () => setState(() => obscurePassword = !obscurePassword),
-          tooltip: obscurePassword
-              ? (_isAr ? 'إظهار' : 'Show')
-              : (_isAr ? 'إخفاء' : 'Hide'),
-        );
-
-    final affixes = CapsLockFieldAffixes.build(
-      isRtl: rtl,
-      showGlyph: showCapsGlyph,
-      isAr: _isAr,
-      isLight: _isLight,
-      iconColor: _iconColor,
-      eyeButton: eyeButton(),
-    );
-
     return Column(
       key: _passwordFieldKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // لا تمرّر نفس FocusNode لغلاف Focus والحقل معاً — يخلق دورة أب/ابن
-        // على الويب → Invalid array length ويعلّق شاشة الدخول.
-        Focus(
-          onKeyEvent: (node, event) {
-            if (_desktopWebCapsTextMode) {
-              if (event is KeyDownEvent || event is KeyUpEvent) {
-                _syncCapsLockFromHardware();
-              }
-              return KeyEventResult.ignored;
-            }
-            final inferred = _capsFromKeyEvent(event);
-            if (inferred != null) {
-              _liveUppercaseMode = inferred;
-              _applyCapsLockState(inferred, clearLatch: true);
-            } else {
-              _syncCapsLockFromHardware();
-            }
-            return KeyEventResult.ignored;
-          },
-          child: AqarTextField(
-            controller: _passwordController,
-            focusNode: _passwordFocus,
-            obscureText: obscurePassword,
-            keyboardType: SmartKeyboardFormatter.passwordKeyboard,
-            localeScript: SmartKeyboardFormatter.englishScript,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _login(),
-            autofillHints: const [AutofillHints.password],
-            enableSuggestions: false,
-            autocorrect: false,
-            cursorColor: _bankColor,
-            inputFormatters: [
-              PasswordLeadingDigitBleedGuard(
-                isActive: () => _passwordBleedGuardActive,
-              ),
-              ...passwordArabicGuardFormatters(
-                onArabicScriptBlocked: _schedulePasswordArabicDialog,
-              ),
-            ],
-            style: TextStyle(
-              color: _textPrimary,
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-            ),
-            decoration: _loginFieldDecoration(
-              labelText: t.loginPasswordFieldShortLabel,
-              hintText: null,
-              hintFontSize: 16,
-              prefixIcon: affixes.prefix,
-              suffixIcon: affixes.suffix,
-              prefixIconConstraints: affixes.prefixConstraints,
-              suffixIconConstraints: affixes.suffixConstraints,
-            ),
-            onTap: () {
-              final already = _passwordFocus.hasFocus;
-              if (!already) {
-                _passwordFocus.requestFocus();
-                _scrollLoginFieldIntoView(_passwordFieldKey);
-              }
-              _syncCapsLockFromHardware();
-            },
-            onChanged: (v) {
-              final prev = _lastPasswordForCapsInfer;
-              _lastPasswordForCapsInfer = v;
-              if (v.isEmpty) {
-                _liveUppercaseMode = null;
-                if (_desktopWebCapsTextMode) {
-                  _syncCapsLockFromHardware();
-                } else {
-                  _applyCapsLockState(false, clearLatch: true);
-                }
-                return;
-              }
-              final inferred = _capsFromInsertedLatin(prev, v);
-              if (inferred != null) {
-                _liveUppercaseMode = inferred;
-              }
-              if (_desktopWebCapsTextMode) {
-                _syncCapsLockFromHardware();
-                if (probeBrowserCapsLock() == null && inferred != null) {
-                  _applyCapsLockState(inferred);
-                }
-                return;
-              }
-              if (inferred != null) {
-                _applyCapsLockState(inferred);
-              }
-            },
-          ),
-        ),
-        CapsLockHintText(
-          visible: showCapsText,
+        CapsAwarePasswordField(
+          controller: _passwordController,
+          focusNode: _passwordFocus,
+          obscureText: obscurePassword,
+          onToggleObscure: () =>
+              setState(() => obscurePassword = !obscurePassword),
           isAr: _isAr,
-          isLight: _isLight,
+          iconColor: _iconColor,
+          cursorColor: _bankColor,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _login(),
+          autofillHints: const [AutofillHints.password],
+          inputFormatters: [
+            PasswordLeadingDigitBleedGuard(
+              isActive: () => _passwordBleedGuardActive,
+            ),
+            ...passwordArabicGuardFormatters(
+              onArabicScriptBlocked: _schedulePasswordArabicDialog,
+            ),
+          ],
+          style: TextStyle(
+            color: _textPrimary,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+          ),
+          decoration: _loginFieldDecoration(
+            labelText: t.loginPasswordFieldShortLabel,
+            hintText: null,
+            hintFontSize: 16,
+          ),
         ),
         if ((_passwordError ?? '').isNotEmpty) ...[
           const SizedBox(height: 6),
@@ -2575,6 +2316,7 @@ class _LoginScreenState extends State<LoginScreen>
       ],
     );
   }
+
 
   Widget _buildCaptchaSection({required AppLocalizations t}) {
     return Container(
@@ -3400,7 +3142,7 @@ class _PhoneMockup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLight = theme == ThemeMode.light;
+    final isLight = UserAppearanceSession.resolvesLight(theme);
 
     final frame = isLight ? const Color(0xFF111827) : const Color(0xFF0B1220);
     final screen = isLight ? Colors.white : const Color(0xFF0F1425);

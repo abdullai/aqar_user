@@ -38,6 +38,33 @@ class MarketInsightsSnapshot {
     this.extras,
   });
 
+  /// لقطة صفرية عند غياب الدالة أو عدم جاهزية الخادم — تعرض الواجهة بدل شاشة التعذر.
+  factory MarketInsightsSnapshot.empty() {
+    final now = DateTime.now().toUtc();
+    return MarketInsightsSnapshot(
+      generatedAt: now,
+      listings: const MarketListingsBlock(
+        publishedTotal: 0,
+        newLast7d: 0,
+        newLast30d: 0,
+        featuredTotal: 0,
+        byAccountType: {},
+        byPropertyType: {},
+      ),
+      listingRequests: const MarketListingRequestsBlock(
+        total: 0,
+        byStatus: {},
+      ),
+      orgs: const MarketOrgsBlock(registered: 0, top: []),
+      topPublishers: const [],
+      viewer: null,
+      extras: const MarketInsightsExtras(
+        distinctListingPublishers: 0,
+        registeredProfiles: 0,
+      ),
+    );
+  }
+
   static MarketInsightsSnapshot? tryParse(dynamic raw) {
     if (raw == null) return null;
     if (raw is! Map) return null;

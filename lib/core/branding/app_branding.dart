@@ -1,6 +1,10 @@
+// ignore_for_file: unused_element, unused_field
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../l10n/locale_content.dart';
+import '../security/web_user_agent.dart';
 import '../share/app_listing_links.dart';
 
 /// أسماء العلامة والسجل التجاري — مصدر واحد للحقيقة.
@@ -27,6 +31,34 @@ abstract final class AppBranding {
   static const String websiteUrl = 'https://eaqar-mawthuq.web.app';
   static const String supportEmail = 'support@mawthuq-line.com';
   static const String supportPhone = '+966500229909';
+
+  /// بيانات ترويسة الفاتورة الرسمية حتى اكتمال الربط الحكومي.
+  static const String invoiceUnifiedNationalPlaceholder = 'XXXXXXXXXX';
+  static const String invoiceFalLicensePlaceholder = 'XXXXXXXXXX';
+  static const String invoiceLetterheadPhone = '0555317770';
+
+  /// طباعة الفاتورة: تطبيق على الجوال وويب الجوال، مؤسسة على ويندوز وسطح المكتب.
+  static bool get invoiceUsesAppDisplayName {
+    if (isNativeMobileApp) return true;
+    if (!kIsWeb) return false;
+    final ua = readWebUserAgentImpl().toLowerCase();
+    if (ua.contains('windows') ||
+        ua.contains('macintosh') ||
+        ua.contains('linux')) {
+      return ua.contains('android') || ua.contains('iphone');
+    }
+    if (ua.contains('ipad')) return false;
+    return ua.contains('iphone') ||
+        ua.contains('android') ||
+        ua.contains('mobile');
+  }
+
+  static String invoiceLetterheadBrandName({required bool isAr}) {
+    if (invoiceUsesAppDisplayName) {
+      return isAr ? appStoreNameAr : appStoreNameEn;
+    }
+    return isAr ? companyNameAr : companyNameEn;
+  }
 
   /// يُحدَّث برقم السجل التجاري الموحّد الفعلي عند توفره.
   static const String? commercialRegisterNumber = null;
@@ -237,18 +269,17 @@ abstract final class AppBranding {
     return 104;
   }
 
-  /// شعار بارز في شاشة تسجيل الدخول — واضح وكبير حسب الشاشة.
+  /// شعار شاشة الدخول — صغير حتى لا يفصل «تسجيل دخول آمن» عن نص الترحيب.
   static double loginHeroLogoSize(BuildContext context) {
     final mq = MediaQuery.sizeOf(context);
-    final w = mq.width;
+    final shortest = mq.shortestSide;
     final h = mq.height;
     final compactH = h < 700;
-    if (w < 360) return compactH ? 148.0 : 172.0;
-    if (w < 480) return compactH ? 160.0 : 188.0;
-    if (w < 600) return compactH ? 152.0 : 176.0;
-    if (w < 900) return compactH ? 140.0 : 160.0;
-    if (w < 1200) return 128.0;
-    return 140.0;
+    if (shortest < 360) return compactH ? 40.0 : 48.0;
+    if (shortest < 480) return compactH ? 44.0 : 52.0;
+    if (shortest < 600) return compactH ? 48.0 : 56.0;
+    if (shortest < 800) return compactH ? 52.0 : 60.0;
+    return compactH ? 56.0 : 64.0;
   }
 
   static double titleFontSize(BuildContext context) {
@@ -278,7 +309,8 @@ abstract final class AppBranding {
   }) {
     final t = (input ?? '').trim();
     if (t.isEmpty) return t;
-    return migrateLegacyText(t);
+    final migrated = migrateLegacyText(t);
+    return LocaleContent.forUi(migrated, isAr: isAr);
   }
 
   /// اسم باقة اشتراك من صف قاعدة البيانات.
@@ -298,9 +330,9 @@ abstract final class AppBranding {
     required bool isAr,
   }) {
     final raw = isAr
-        ? '${row['title_ar'] ?? row['title_en'] ?? '—'}'
-        : '${row['title_en'] ?? row['title_ar'] ?? '—'}';
-    return _localizeBillingTitlePeriod(normalizeUserFacing(raw, isAr: isAr), isAr: isAr);
+        ? '${row['title_ar'] ?? row['title_en'] ?? ''}'
+        : '${row['title_en'] ?? row['title_ar'] ?? ''}';
+    return billingOperationTitle(raw, isAr: isAr);
   }
 
   /// ترجمة فترة الفوترة في العنوان (monthly → شهري).
@@ -326,55 +358,94 @@ abstract final class AppBranding {
     required bool isAr,
   }) {
     final cleaned = _cleanBillingPlanLabel(planLabel, isAr: isAr);
-    if (_planLabelAlreadyIncludesPeriod(cleaned, period, isAr: isAr)) {
-      return cleaned;
-    }
-    return '$cleaned — ${billingPeriodLabel(period, isAr: isAr)}';
+    return billingOperationTitle(
+      '$cleaned ${billingPeriodLabel(period, isAr: isAr)}',
+      isAr: isAr,
+    );
   }
 
-  /// عنوان فاتورة/إيصال نظيف بدون تكرار «شهري — شهري».
+  /// عنوان عملية واضح للعرض والطباعة: بلا شرطة وبلا أقواس.
+  static String billingOperationTitle(String raw, {required bool isAr}) {
+    var s = normalizeUserFacing(raw, isAr: isAr).trim();
+    if (s.isEmpty || s == '—') {
+      return isAr ? 'عملية دفع' : 'Payment';
+    }
+    s = s.replaceAll(RegExp(r'\([^)]*\)'), ' ');
+    s = s.replaceAll(RegExp(r'[—–\-_|]+'), ' ');
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final l = s.toLowerCase();
+
+    final monthly = l.contains('شهري') || l.contains('monthly');
+    final yearly = l.contains('سنوي') ||
+        l.contains('yearly') ||
+        l.contains('annual');
+    final extraReq = l.contains('طلبات إضافية') ||
+        l.contains('طلب إضافي') ||
+        l.contains('extra request') ||
+        l.contains('listing request') ||
+        l.contains('top-up') ||
+        l.contains('topup') ||
+        l.contains('top up');
+    final extraDeal = l.contains('صفقات') || l.contains('deal pack');
+    final seat = l.contains('مقعد') ||
+        l.contains('seat') ||
+        l.contains('عضو إضافي') ||
+        l.contains('extra member');
+    final upgrade = l.contains('ترقية') || l.contains('upgrade');
+    final convert = l.contains('تحويل') || l.contains('convert');
+    final fal = l.contains('فال') || l.contains('fal');
+    final card = l.contains('بطاقة') || l.contains('card');
+    final instant = l.contains('فوري') || l.contains('instant');
+    final sub = l.contains('اشتراك') || l.contains('subscription');
+
+    if (isAr) {
+      if (extraReq && yearly) return 'طلب إضافة اشتراك سنوي';
+      if (extraReq && monthly) return 'طلب إضافة اشتراك شهري';
+      if (extraReq) return 'شراء إضافة طلبات';
+      if (extraDeal && monthly) return 'شراء إضافة صفقات شهرية';
+      if (extraDeal) return 'شراء إضافة صفقات';
+      if (seat) return 'شراء مقعد إضافي';
+      if (upgrade) return 'ترقية باقة';
+      if (convert) return 'تحويل الاشتراك إلى سنوي';
+      if (fal) return 'تجديد رخصة فال';
+      if (card) return 'حفظ بطاقة دفع';
+      if (instant) return 'طلب عقاري فوري';
+      if (sub && yearly) return 'اشتراك سنوي';
+      if (sub && monthly) return 'اشتراك شهري';
+      if (yearly) return 'اشتراك سنوي';
+      if (monthly) return 'اشتراك شهري';
+      return s;
+    }
+
+    if (extraReq && yearly) return 'Yearly add-on subscription';
+    if (extraReq && monthly) return 'Monthly add-on subscription';
+    if (extraReq) return 'Purchase extra requests';
+    if (extraDeal && monthly) return 'Monthly extra deals pack';
+    if (extraDeal) return 'Purchase extra deals';
+    if (seat) return 'Purchase extra seat';
+    if (upgrade) return 'Plan upgrade';
+    if (convert) return 'Switch subscription to yearly';
+    if (fal) return 'FAL license renewal';
+    if (card) return 'Save payment card';
+    if (instant) return 'Instant listing request';
+    if (sub && yearly) return 'Yearly subscription';
+    if (sub && monthly) return 'Monthly subscription';
+    if (yearly) return 'Yearly subscription';
+    if (monthly) return 'Monthly subscription';
+    return s;
+  }
+
+  /// عنوان فاتورة/إيصال نظيف بدون شرطة ولا أقواس.
   static String billingDisplayTitle({
     required String rawTitle,
     required bool isAr,
     String? periodHint,
   }) {
-    var t = normalizeUserFacing(rawTitle, isAr: isAr).trim();
-    if (t.isEmpty || t == '—') return t;
-
-    t = t.replaceAll(RegExp(r'\s*[-–—]\s*'), ' — ');
-    final parts = t.split(' — ').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-    if (parts.isEmpty) return t;
-
-    final deduped = <String>[];
-    for (final part in parts) {
-      final lower = part.toLowerCase();
-      final isDup = deduped.any((prev) {
-        final pl = prev.toLowerCase();
-        return pl == lower ||
-            (pl.contains(lower) && lower.length >= 4) ||
-            (lower.contains(pl) && pl.length >= 4);
-      });
-      if (!isDup) deduped.add(part);
-    }
-
-    var plan = deduped.first;
-    plan = _cleanBillingPlanLabel(plan, isAr: isAr);
-
-    if (deduped.length == 1) {
-      if (periodHint != null &&
-          periodHint.trim().isNotEmpty &&
-          !_planLabelAlreadyIncludesPeriod(plan, periodHint, isAr: isAr)) {
-        return '$plan — ${billingPeriodLabel(periodHint, isAr: isAr)}';
-      }
-      return plan;
-    }
-
-    final tail = deduped.sublist(1).join(' · ');
-    if (_planLabelAlreadyIncludesPeriod(plan, tail, isAr: isAr) ||
-        _planLabelAlreadyIncludesPeriod(plan, periodHint ?? '', isAr: isAr)) {
-      return plan;
-    }
-    return '$plan — $tail';
+    final merged = [
+      rawTitle,
+      if ((periodHint ?? '').trim().isNotEmpty) periodHint!.trim(),
+    ].join(' ');
+    return billingOperationTitle(merged, isAr: isAr);
   }
 
   static String _cleanBillingPlanLabel(String label, {required bool isAr}) {

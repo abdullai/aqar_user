@@ -81,7 +81,6 @@ abstract final class PropertiesHomeFeedService {
         .or(SupabaseSchemaSelects.propertiesHomeFeedOrFilter)
         .order('created_at', ascending: false)
         .limit(limit);
-    if (data is! List) return const [];
     return data;
   }
 

@@ -183,48 +183,37 @@ bool _marketerOfferExcludedFromOffersList(
   Map<String, Map<String, dynamic>> reqMap,
   String marketerUid,
 ) {
-  // v8: العرض الخاسر بعد اختيار مسوّق آخر — يَختفي من قائمة هذا المسوّق.
   final lostAt = (o['lost_at'] ?? '').toString().trim();
   final status = (o['status'] ?? '').toString().toLowerCase().trim();
-  if (lostAt.isNotEmpty || status == 'lost') return true;
-
-  // cancelled/withdrawn/rejected تبقى في المصدر لتظهر في «مفسوخ/ملغى»؛
-  // تبويب عروضي يستبعدها عبر فلتر التبويب.
 
   final reqId =
       (o['request_id'] ?? o['listing_request_id'] ?? '').toString().trim();
-  if (reqId.isNotEmpty) {
-    final req = reqMap[reqId];
-    final selected = (req?['selected_marketer_id'] ?? '').toString().trim();
+  Map<String, dynamic>? req;
+  if (reqId.isNotEmpty) req = reqMap[reqId];
+  final stage = (req?['workflow_stage'] ?? '').toString().toLowerCase().trim();
+  final prev = (req?['prev_selected_marketer_id'] ?? '').toString().trim();
+  final offerMid = (o['marketer_id'] ?? '').toString().trim();
+
+  if (const {'owner_action_required', 'inactive_72h', 'inactive72h'}
+      .contains(stage)) {
+    if (offerMid == marketerUid) return false;
+    if (prev == marketerUid) return false;
+    if (const {'submitted', 'pending', ''}.contains(status)) return false;
+    return true;
+  }
+
+  if (lostAt.isNotEmpty || status == 'lost') return true;
+
+  if (req != null) {
+    final selected = (req['selected_marketer_id'] ?? '').toString().trim();
     if (selected.isNotEmpty && selected != marketerUid) {
-      // إن كان العرض ملغى/مرفوضاً نُبقيه للمفسوخ؛ وإلا نخفيه كخاسر.
-      if (!const {
-        'owner_rejected',
-        'rejected',
-        'declined',
-        'withdrawn',
-        'cancelled',
-      }.contains(status)) {
+      if (const {
+        'published',
+        'archived',
+        'reserved',
+      }.contains(stage)) {
         return true;
       }
-    }
-
-    final stage =
-        (req?['workflow_stage'] ?? '').toString().toLowerCase().trim();
-  // بعد انتهاء مهلة المالك: أبقِ عرض هذا المسوّق ليظهر في «بدون إجراء 72».
-    if (const {'owner_action_required', 'inactive_72h', 'inactive72h'}
-        .contains(stage)) {
-      final offerMid = (o['marketer_id'] ?? '').toString().trim();
-      if (offerMid == marketerUid) return false;
-      final prev =
-          (req?['prev_selected_marketer_id'] ?? '').toString().trim();
-      if (prev == marketerUid) return false;
-      final os = (o['status'] ?? '').toString().toLowerCase().trim();
-      if (const {'owner_accepted', 'selected', 'approved'}
-          .contains(os)) {
-        return prev.isNotEmpty && prev != marketerUid;
-      }
-      return true;
     }
   }
 
@@ -609,7 +598,18 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       if (c == null || c.indexIsChanging) return;
       if (_marketerPublisherHubMode == c.index) return;
       if (!mounted) return;
-      setState(() => _marketerPublisherHubMode = c.index);
+      _ss(() {
+        _marketerPublisherHubMode = c.index;
+        try {
+          if (c.index == 0) {
+            final mk = _marketerTabsCtrl;
+            if (mk != null && mk.length > 0 && mk.index != 0) mk.index = 0;
+          } else {
+            final o = _ownerTabsCtrl;
+            if (o != null && o.length > 0 && o.index != 0) o.index = 0;
+          }
+        } catch (_) {}
+      });
       if (c.index == 1) {
         unawaited(_loadOwnerRequestsBuckets(force: false, silent: true));
       }
@@ -618,7 +618,11 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   }
 
   /// مزامنة وضع كمسوّق/كمعلن مع شريط التبويب (للروابط العميقة وتحديثات الدلاء).
-  void _setMarketerPublisherHubMode(int mode, {bool animate = false}) {
+  void _setMarketerPublisherHubMode(
+    int mode, {
+    bool animate = false,
+    bool resetSubTab = true,
+  }) {
     final m = mode.clamp(0, 1);
     _ensureMarketerPublisherRoleTabsCtrl();
     if (_marketerPublisherHubMode != m) {
@@ -632,10 +636,21 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         c.index = m;
       }
     }
+    if (!resetSubTab) return;
+    try {
+      if (m == 0) {
+        final mk = _marketerTabsCtrl;
+        if (mk != null && mk.length > 0 && mk.index != 0) mk.index = 0;
+      } else {
+        final o = _ownerTabsCtrl;
+        if (o != null && o.length > 0 && o.index != 0) o.index = 0;
+      }
+    } catch (_) {}
   }
 
-  /// عند فتح صفحتي: ارجع لأول تبويب فرعي (يمين في العربية).
+  /// عند فتح صفحتي من الشريط: أول تبويب فرعي (وأول دور كمسوّق إن وُجد المبدّل).
   void _focusMyPageFirstSubTab() {
+    _setMarketerPublisherHubMode(0);
     _lastOwnerSubTabIndex = 0;
     _lastMarketerSubTabIndex = 0;
     try {
@@ -673,7 +688,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       unawaited(_persistSubTabIndex(isMarketer: isMarketer, index: idx));
       // إعادة بناء الواجهة بحيث تنعكس قرارات اعتمدت على التبويب الفرعي الحالي
       // (مثل كشف/تمويه رقم جوّال المالك للمسوّق داخل تبويب «تصاريح 72 ساعة»).
-      if (mounted) setState(() {});
+      if (mounted) _ss(() {});
     });
   }
 
@@ -737,26 +752,37 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     return payload;
   }
 
-  /// إعلان/طلب بدون رخصة REGA نشره المسوّق نفسه — لا يظهر له في «السوق العقاري».
+  /// إعلان/طلب طرحه الحساب أو منشأته في السوق — لا يظهر له في «السوق العقاري».
   bool _isMarketerOwnNoLicenseMarketRow(
     Map<String, dynamic> row,
-    String uid,
-  ) {
+    String uid, {
+    Set<String> sameOrgUserIds = const {},
+  }) {
     if (uid.isEmpty) return false;
+    final ids = <String>{uid, ...sameOrgUserIds};
     final pub =
-        (row['preview_published_by_marketer_id'] ?? '').toString().trim();
+        (row['preview_published_by_marketer_id'] ??
+                row['published_by_marketer_id'] ??
+                '')
+            .toString()
+            .trim();
     final owner =
         (row['owner_id'] ?? row['request_owner_id'] ?? '').toString().trim();
-    if (pub != uid && owner != uid) return false;
+    final created = (row['created_by'] ??
+            row['created_by_user_id'] ??
+            row['publisher_id'] ??
+            '')
+        .toString()
+        .trim();
+    if (ids.contains(pub) || ids.contains(owner) || ids.contains(created)) {
+      return true;
+    }
     if (row['market_without_rega_license'] == true ||
         row['no_rega_ad_license'] == true ||
         row['no_license_market_consent'] == true) {
-      return true;
+      return ids.contains(pub) || ids.contains(owner);
     }
-    final payload = _mergedJsonPayloadForRow(row);
-    return payload['market_without_rega_license'] == true ||
-        payload['no_rega_ad_license'] == true ||
-        payload['no_license_market_consent'] == true;
+    return false;
   }
 
   /// صف مؤهل لتبويب «السوق العقاري» فقط: بانتظار مسوّقين وبدون مسوّق مختار.
@@ -779,13 +805,21 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         .toString()
         .trim();
     if (selected.isNotEmpty) return false;
-    if (id.isNotEmpty && _isMarketerOwnNoLicenseMarketRow(row, id)) {
+    if (id.isNotEmpty &&
+        _isMarketerOwnNoLicenseMarketRow(
+          row,
+          id,
+          sameOrgUserIds: _marketerSameOrgUserIds,
+        )) {
       return false;
     }
     final owner = (row['owner_id'] ?? row['request_owner_id'] ?? '')
         .toString()
         .trim();
-    if (id.isNotEmpty && owner == id) return false;
+    if (id.isNotEmpty &&
+        (owner == id || _marketerSameOrgUserIds.contains(owner))) {
+      return false;
+    }
     final prevSelected =
         (row['prev_selected_marketer_id'] ?? '').toString().trim();
     final allowRetry = row['allow_previous_marketers_retry'] == true ||
@@ -1144,7 +1178,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
             return await _sb
                 .from('listing_offers')
                 .select(
-                    'id,request_id,marketer_id,status,expires_at,round_no,offer_amount,price')
+                    'id,request_id,marketer_id,status,expires_at,round_no,offer_amount,price,notes')
                 .inFilter('request_id', reqIdsForAgg);
           }, tag: 'OWNER_OFFER_AGG');
           final offerAggRows = _asMapList(offRaw);
@@ -1205,6 +1239,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
                       'id': oid,
                       'marketer_id': mid,
                       'offer_price': e['offer_amount'] ?? e['price'],
+                      'notes': e['notes'],
                       'is_repeat_offer': isRepeatPendingOffer(e),
                     }),
                   );
@@ -2385,6 +2420,34 @@ preview_property_id
     } catch (_) {}
   }
 
+  Future<void> _refreshMarketerSameOrgUserIds() async {
+    final uid = _uid.trim();
+    final ids = <String>{if (uid.isNotEmpty) uid};
+    try {
+      final ctx = await OrgTeamService(_sb).myOrgContext();
+      final orgId = (ctx?['org_id'] ?? '').toString().trim();
+      if (orgId.isNotEmpty && orgId != 'null') {
+        final members = await _sb
+            .from('org_memberships')
+            .select('user_id')
+            .eq('org_id', orgId)
+            .inFilter('status', const ['active', 'accepted', 'approved']);
+        for (final m in _asMapList(members)) {
+          final id = (m['user_id'] ?? '').toString().trim();
+          if (id.isNotEmpty) ids.add(id);
+        }
+        final unit = await _sb
+            .from('org_units')
+            .select('owner_user_id')
+            .eq('id', orgId)
+            .maybeSingle();
+        final owner = (unit?['owner_user_id'] ?? '').toString().trim();
+        if (owner.isNotEmpty) ids.add(owner);
+      }
+    } catch (_) {}
+    _marketerSameOrgUserIds = ids;
+  }
+
   // =========================================================
   // Marketer buckets
   // =========================================================
@@ -2426,6 +2489,7 @@ preview_property_id
     } catch (_) {
       _marketerHiddenMarketRequestIds = {};
     }
+    await _refreshMarketerSameOrgUserIds();
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw =
@@ -2749,11 +2813,24 @@ preview_property_id
         offerDeadlineExpiredByRequest,
       );
       for (final o in enrichedOffers) {
-        final inactive =
-            ListingWorkflowUnified.marketerOfferAwaitingOwnerPastDeadline(o) ||
-                ListingWorkflowUnified.fromMarketerMergedRow(o) ==
-                    ListingWorkflowStage.inactive72h;
-        o['_hub_inactive_72h'] = inactive;
+        final reqId = (o['request_id'] ?? o['listing_request_id'] ?? '')
+            .toString()
+            .trim();
+        final req = reqMap[reqId];
+        final prev = (req?['prev_selected_marketer_id'] ??
+                o['prev_selected_marketer_id'] ??
+                '')
+            .toString()
+            .trim();
+        final os = (o['status'] ?? '').toString().toLowerCase().trim();
+        final stageInactive =
+            ListingWorkflowUnified.fromMarketerMergedRow(o) ==
+                ListingWorkflowStage.inactive72h;
+        final isBlockedPrev = prev == uid;
+        final isExpiredOwn = os == 'expired' &&
+            (o['marketer_id'] ?? '').toString().trim() == uid;
+        o['_hub_inactive_72h'] =
+            stageInactive && (isBlockedPrev || isExpiredOwn);
       }
 
       final offeredPairs = <String>{};
@@ -2871,8 +2948,16 @@ preview_property_id
             (req['selected_marketer_id'] ?? '').toString().trim();
         if (selectedMarketerId.isNotEmpty) continue;
         final ownerId = (req['owner_id'] ?? '').toString().trim();
-        if (ownerId == uid) continue;
-        if (_isMarketerOwnNoLicenseMarketRow(req, uid)) continue;
+        if (ownerId == uid || _marketerSameOrgUserIds.contains(ownerId)) {
+          continue;
+        }
+        if (_isMarketerOwnNoLicenseMarketRow(
+          req,
+          uid,
+          sameOrgUserIds: _marketerSameOrgUserIds,
+        )) {
+          continue;
+        }
         // مسوّق سابق مُستثنى عند إعادة السوق بدون منحه فرصة.
         final prevSelected =
             (req['prev_selected_marketer_id'] ?? '').toString().trim();
@@ -3115,6 +3200,7 @@ preview_property_id
         _mkContracts = enrichedContracts;
         _mkPermits = enrichedPermits;
         _mkPublished = enrichedPublished;
+        _errorMarketing = null;
       });
 
       unawaited(_refreshExhaustedOpportunityIds([

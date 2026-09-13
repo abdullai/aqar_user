@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
 import '../core/platform/viewport_scroll_policy.dart';
 
 /// يربط [PrimaryScrollController] ويُظهر شريط تمرير ذكي على الويب (بما فيه جوال بشاشة كاملة).
@@ -24,9 +25,12 @@ class _AqarPrimaryScrollScopeState extends State<AqarPrimaryScrollScope> {
 
   @override
   Widget build(BuildContext context) {
-    final child = PrimaryScrollController(
-      controller: _controller,
-      child: widget.child,
+    final child = AppKeyboardPad(
+      extra: AppKeyboardInset.isOpen(context) ? 12 : 0,
+      child: PrimaryScrollController(
+        controller: _controller,
+        child: widget.child,
+      ),
     );
     if (!kIsWeb && !ViewportScrollPolicy.isDesktopLike(context)) return child;
 

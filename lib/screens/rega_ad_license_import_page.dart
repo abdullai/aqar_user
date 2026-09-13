@@ -1,9 +1,15 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../core/utils/date_helper.dart';
+import '../l10n/app_localizations.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 
@@ -228,12 +234,22 @@ class RegaAdLicenseImportPage extends StatefulWidget {
       _RegaAdLicenseImportPageState();
 }
 
+Future<Map<String, dynamic>?> showRegaManualLicenseForm(
+  BuildContext context, {
+  required bool isAr,
+}) {
+  return showAppDialog<Map<String, dynamic>>(
+    context: context,
+    builder: (ctx) => _RegaManualLicenseDialog(isAr: isAr),
+  );
+}
+
 /// حوار للويب: لصق الرابط + نص الصفحة (لا يوجد WebView لنطاق الهيئة من المتصفح بسبب CORS).
 Future<Map<String, dynamic>?> showRegaElanImportWebDialog(
   BuildContext context, {
   required bool isAr,
 }) {
-  return showDialog<Map<String, dynamic>>(
+  return showAppDialog<Map<String, dynamic>>(
     context: context,
     barrierDismissible: true,
     builder: (ctx) => _RegaElanWebImportDialog(isAr: isAr),
@@ -318,6 +334,20 @@ class _RegaElanWebImportDialogState extends State<_RegaElanWebImportDialog> {
           ),
         ),
         actions: [
+          OutlinedButton(
+            onPressed: () async {
+              final manual = await showRegaManualLicenseForm(
+                context,
+                isAr: isAr,
+              );
+              if (manual != null && context.mounted) {
+                Navigator.pop(context, manual);
+              }
+            },
+            child: Text(
+              isAr ? 'إدخال يدوي كامل' : 'Full manual entry',
+            ),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(isAr ? 'إلغاء' : 'Cancel'),
@@ -482,16 +512,25 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
 
       if (!mounted) return;
       if ((payload['rega_ad_license_number'] ?? '').toString().trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              _t(
-                'لم يُعثر على رقم الترخيص. انسخ نص الصفحة والصقه في الويب، أو أعد التحميل.',
-                'License number not found. Retry or use web paste flow.',
+        final manual = await showRegaManualLicenseForm(
+          context,
+          isAr: widget.isAr,
+        );
+        if (!mounted) return;
+        if (manual != null) {
+          Navigator.pop(context, {...payload, ...manual});
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                _t(
+                  'لم يُعثر على رقم الترخيص. استخدم الإدخال اليدوي أو أعد التحميل.',
+                  'License number not found. Use manual entry or reload.',
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
         return;
       }
 
@@ -518,9 +557,6 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
           leading: !widget.embedAppBar
               ? AppPageCloseButton(
                   isArabic: widget.isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           title: Text(
@@ -550,6 +586,22 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
                     icon: const Icon(Icons.download_outlined),
                     label: Text(
                         _t('تحميل الصفحة داخل التطبيق', 'Load page in app')),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final manual = await showRegaManualLicenseForm(
+                        context,
+                        isAr: widget.isAr,
+                      );
+                      if (manual != null && mounted) {
+                        Navigator.pop(context, manual);
+                      }
+                    },
+                    icon: const Icon(Icons.edit_note_outlined),
+                    label: Text(
+                      AppLocalizations.of(context)!.regaManualEntry,
+                    ),
                   ),
                 ],
               ),
@@ -615,6 +667,147 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _RegaManualLicenseDialog extends StatefulWidget {
+  const _RegaManualLicenseDialog({required this.isAr});
+
+  final bool isAr;
+
+  @override
+  State<_RegaManualLicenseDialog> createState() =>
+      _RegaManualLicenseDialogState();
+}
+
+class _RegaManualLicenseDialogState extends State<_RegaManualLicenseDialog> {
+  final _license = TextEditingController();
+  final _deed = TextEditingController();
+  final _price = TextEditingController();
+  final _city = TextEditingController();
+  DateTime? _expiry;
+  String? _imagePath;
+  var _uploading = false;
+
+  @override
+  void dispose() {
+    _license.dispose();
+    _deed.dispose();
+    _price.dispose();
+    _city.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return AlertDialog(
+      title: Text(l10n.regaManualEntry),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AqarTextField(
+              controller: _license,
+              decoration: InputDecoration(labelText: l10n.regaManualLicenseNo),
+            ),
+            const SizedBox(height: 8),
+            AqarTextField(
+              controller: _deed,
+              decoration: InputDecoration(labelText: l10n.regaManualDeedNo),
+            ),
+            const SizedBox(height: 8),
+            AqarTextField(
+              controller: _price,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(labelText: l10n.regaManualPrice),
+            ),
+            const SizedBox(height: 8),
+            AqarTextField(
+              controller: _city,
+              decoration: InputDecoration(labelText: l10n.regaManualCity),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final d = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now().add(const Duration(days: 365)),
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime.now().add(const Duration(days: 3650)),
+                );
+                if (d != null) setState(() => _expiry = d);
+              },
+              icon: const Icon(Icons.event_outlined),
+              label: Text(
+                _expiry == null
+                    ? l10n.regaManualExpiry
+                    : DateHelper.fmtCivilDate(
+                        _expiry!,
+                        isAr: widget.isAr,
+                      ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _uploading
+                  ? null
+                  : () async {
+                      final f = await ImagePicker()
+                          .pickImage(source: ImageSource.gallery);
+                      if (f == null) return;
+                      setState(() => _uploading = true);
+                      try {
+                        final bytes = await f.readAsBytes();
+                        final path = 'rega-manual/${const Uuid().v4()}.jpg';
+                        await Supabase.instance.client.storage
+                            .from('property-images')
+                            .uploadBinary(
+                              path,
+                              bytes,
+                              fileOptions: const FileOptions(
+                                upsert: true,
+                                contentType: 'image/jpeg',
+                              ),
+                            );
+                        if (mounted) setState(() => _imagePath = path);
+                      } catch (_) {
+                      } finally {
+                        if (mounted) setState(() => _uploading = false);
+                      }
+                    },
+              icon: const Icon(Icons.image_outlined),
+              label: Text(
+                _imagePath == null
+                    ? l10n.regaManualImage
+                    : l10n.photographerFilesCount(1),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.photographerDialogCancel),
+        ),
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(context, <String, dynamic>{
+              'rega_ad_license_number': _license.text.trim(),
+              'deed_or_benefit_doc_number': _deed.text.trim(),
+              'rega_unit_price': _price.text.trim(),
+              'rega_city': _city.text.trim(),
+              if (_expiry != null)
+                'rega_expiry_date': _expiry!.toIso8601String().split('T').first,
+              if (_imagePath != null) 'license_image_path': _imagePath,
+              'rega_manual_entry': true,
+            });
+          },
+          child: Text(l10n.regaManualSave),
+        ),
+      ],
     );
   }
 }

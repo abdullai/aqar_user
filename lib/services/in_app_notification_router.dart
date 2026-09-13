@@ -286,7 +286,8 @@ class InAppNotificationRouter {
               lang: lang,
               accountType: at.isEmpty ? 'user' : at,
               organizationId: null,
-              initialIndex: 2,
+              initialIndex: 0,
+              embedAppBar: false,
             ),
           ),
         );
@@ -331,8 +332,25 @@ class InAppNotificationRouter {
       return;
     }
 
+    if (deepRoute == InAppDeepRoutes.photographerHub ||
+        typeLower == InAppNotifTypes.photoShootRequested ||
+        typeLower == InAppNotifTypes.photoShootAccepted ||
+        typeLower == InAppNotifTypes.photoShootRejected ||
+        typeLower == InAppNotifTypes.photographerVerified ||
+        typeLower == InAppNotifTypes.photographerRejected ||
+        typeLower == InAppNotifTypes.photographerRated) {
+      await _pushRootNamed<void>(
+        context,
+        AppRoutes.photographerHub,
+        arguments: <String, dynamic>{'lang': lang},
+      );
+      return;
+    }
+
     if (deepRoute == InAppDeepRoutes.userDashboard ||
-        deepRoute == 'dashboard') {
+        deepRoute == 'dashboard' ||
+        typeLower == InAppNotifTypes.opsPush ||
+        typeLower == InAppNotifTypes.opsTeam) {
       await _goDashboard(context, enriched, lang);
       return;
     }

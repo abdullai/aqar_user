@@ -5,7 +5,8 @@ import 'supabase_anon_key_guard.dart';
 import 'supabase_runtime_overrides.dart';
 
 /// إعدادات Supabase: تُقرأ بالترتيب من
-/// `--dart-define=SUPABASE_*` ثم (ويب فقط) [SupabaseRuntimeOverrides] من `supabase_config.json`
+/// `--dart-define=SUPABASE_*` ثم [SupabaseRuntimeOverrides] (`supabase_config.json`
+/// على الويب بجانب الموقع، وعلى ويندوز بجانب التنفيذي / جذر المشروع)
 /// ثم [flutter_dotenv] (`assets/env/default.env` واختيارياً `.env`).
 ///
 /// استخدم من لوحة Supabase → **Project Settings → API Keys**:

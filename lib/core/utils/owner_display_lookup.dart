@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'compound_display_name.dart';
+
 /// جلب اسم المعلن للعرض العام: يُفضَّل [users_profiles] ثم [profiles].
 /// مع RLS المقيّد بدعوة: المسوّق يرى المالك عندما يوجد صف في
 /// [listing_request_invites] يربط `marketer_id` الحالي بـ `request_id` (انظر
@@ -32,17 +34,19 @@ Future<String> fetchOwnerDisplayName(
         ln = (up['fourth_name_en'] as String?)?.trim();
       }
       if ((fn != null && fn.isNotEmpty) || (ln != null && ln.isNotEmpty)) {
-        return '${fn ?? ''} ${ln ?? ''}'.trim();
+        return CompoundDisplayName.normalize('${fn ?? ''} ${ln ?? ''}');
       }
       if (isAr) {
         final a = (up['full_name_ar'] as String?)?.trim();
-        if (a != null && a.isNotEmpty) return a;
+        if (a != null && a.isNotEmpty) return CompoundDisplayName.normalize(a);
       } else {
         final e = (up['full_name_en'] as String?)?.trim();
-        if (e != null && e.isNotEmpty) return e;
+        if (e != null && e.isNotEmpty) return CompoundDisplayName.normalize(e);
       }
       final full = (up['full_name'] as String?)?.trim();
-      if (full != null && full.isNotEmpty) return full;
+      if (full != null && full.isNotEmpty) {
+        return CompoundDisplayName.normalize(full);
+      }
       final un = (up['username'] as String?)?.trim();
       if (un != null && un.isNotEmpty) return un;
       final em = (up['email'] as String?)?.trim();

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/l10n/locale_content.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/listing/property_type_catalog.dart';
 import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
 import '../core/utils/display_ids.dart';
 import '../models/property.dart';
 
@@ -83,34 +85,26 @@ class ListingFormattedSpecPanel extends StatelessWidget {
                 ? '${property.area.toStringAsFixed(2)} مترًا مربعًا'
                 : '${property.area.toStringAsFixed(2)} m²',
           ),
-          if ((property.city).trim().isNotEmpty)
+          if (PropertyListingDisplay.addressLine(property, isAr: isAr)
+              .trim()
+              .isNotEmpty)
             _kv(
               context,
               isAr,
-              isAr ? 'المدينة' : 'City',
-              property.city.trim(),
-              copyText: property.city.trim(),
-            ),
-          if ((property.region ?? '').trim().isNotEmpty)
-            _kv(
-              context,
-              isAr,
-              isAr ? 'المنطقة' : 'Region',
-              property.region!.trim(),
-            ),
-          if ((property.location ?? '').trim().isNotEmpty)
-            _kv(
-              context,
-              isAr,
-              isAr ? 'الحي / الموقع' : 'District / location',
-              property.location!.trim(),
+              isAr ? 'الموقع' : 'Location',
+              PropertyListingDisplay.addressLine(property, isAr: isAr),
+              copyText: PropertyListingDisplay.addressLine(
+                property,
+                isAr: isAr,
+              ),
+              icon: Icons.place_outlined,
             ),
           if ((property.addressLine ?? '').trim().isNotEmpty)
             _kv(
               context,
               isAr,
-              isAr ? 'العنوان' : 'Address',
-              property.addressLine!.trim(),
+              isAr ? 'العنوان الوطني' : 'National address',
+              LocaleContent.forUi(property.addressLine!.trim(), isAr: isAr),
             ),
         ],
       ),
@@ -133,7 +127,7 @@ class ListingFormattedSpecPanel extends StatelessWidget {
                 context,
                 isAr,
                 isAr ? 'تاريخ الصك' : 'Deed date',
-                property.deedDate!.toIso8601String().substring(0, 10),
+                DateHelper.fmtCivilDate(property.deedDate!, isAr: isAr),
                 icon: Icons.event_outlined,
               ),
             if ((property.deedIssuer ?? '').trim().isNotEmpty)
@@ -347,7 +341,7 @@ class ListingFormattedSpecPanel extends StatelessWidget {
       case 'parking':
         return isAr ? 'موقف' : 'Parking';
       default:
-        return key.replaceAll('_', ' ');
+        return LocaleContent.forUi(key.replaceAll('_', ' '), isAr: isAr);
     }
   }
 

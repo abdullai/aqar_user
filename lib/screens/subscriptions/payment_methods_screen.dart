@@ -1,7 +1,8 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
-import '../../core/navigation/dashboard_embedded_route.dart';
+import '../../core/navigation/payment_overlay_route.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/payment_card_manager.dart';
 import '../../services/payment_service.dart';
@@ -59,24 +60,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       );
       return;
     }
-    final embedded = DashboardEmbeddedRoute.shouldUseEmbeddedChrome(context);
-    final ok = await Navigator.push<bool>(
+    final ok = await PaymentOverlay.push<bool>(
       context,
-      MaterialPageRoute<bool>(
-        settings: RouteSettings(
-          name: embedded
-              ? DashboardEmbeddedRoute.subscriptionsAddCard
-              : '/subscriptions/add-card',
-        ),
-        builder: (_) => AddPaymentCardScreen(lang: widget.lang),
-      ),
+      name: '/subscriptions/add-card',
+      page: AddPaymentCardScreen(lang: widget.lang),
     );
     if (ok == true) await _load();
   }
 
   Future<void> _editLabel(String id, String? current) async {
     final controller = TextEditingController(text: current ?? '');
-    final label = await showDialog<String>(
+    final label = await showAppDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'تعديل اسم البطاقة' : 'Edit card label'),
@@ -111,7 +105,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
         content: Text(
           res['ok'] == true
               ? (_isAr ? 'تم التحديث' : 'Updated')
-              : '${res['error']}',
+              : PaymentService.userFacingError(res['error'], isAr: _isAr),
         ),
       ),
     );
@@ -131,7 +125,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                   ? (_isAr
                       ? 'لا يمكن تعيين بطاقة منتهية'
                       : 'Cannot prefer an expired card')
-                  : '${res['error']}',
+                  : PaymentService.userFacingError(res['error'], isAr: _isAr),
         ),
       ),
     );
@@ -139,7 +133,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
   }
 
   Future<void> _deleteCard(String id) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'حذف البطاقة؟' : 'Delete card?'),
@@ -172,7 +166,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
         content: Text(
           res['ok'] == true
               ? AppLocalizations.of(context)!.subscriptionsCardDeleted
-              : '${res['error']}',
+              : PaymentService.userFacingError(res['error'], isAr: _isAr),
         ),
       ),
     );
@@ -192,6 +186,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.all(16),
           children: [
             Text(

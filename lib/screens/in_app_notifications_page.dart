@@ -1,24 +1,31 @@
 ﻿// lib/screens/in_app_notifications_page.dart
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/app_branding.dart';
+import '../core/platform/viewport_scroll_policy.dart';
+import '../core/l10n/locale_content.dart';
 import '../core/utils/search_normalize.dart';
 import '../core/notifications/in_app_notification_catalog.dart';
 import '../core/input/locale_text_input_guard.dart';
+import '../models.dart';
 import '../l10n/app_localizations.dart';
+import '../services/ads_service.dart';
 import '../services/communication_hub_service.dart';
 import '../services/in_app_notification_hub.dart';
 import '../services/in_app_notification_router.dart';
 import '../services/marketing_flow_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 import '../widgets/inbox_bulk_toolbar.dart';
-import '../widgets/stable_select_chip.dart';
+import '../widgets/inbox_surface_chrome.dart';
 import '../widgets/swipe_actions_tile.dart';
 
 class InAppNotificationsPage extends StatefulWidget {
@@ -30,11 +37,15 @@ class InAppNotificationsPage extends StatefulWidget {
   /// يُستدعى بعد تحديث قائمة الصندوق (مثلاً لتحديث شارة تبويب «الإشعارات» في [CommunicationHubPage]).
   final VoidCallback? onInboxSurfaceChanged;
 
+  /// تبويب إعلانات المنصة وحملات الدفع داخل مركز الجرس.
+  final bool campaignsOnly;
+
   const InAppNotificationsPage({
     super.key,
     required this.lang,
     this.embedMode = false,
     this.onInboxSurfaceChanged,
+    this.campaignsOnly = false,
   });
 
   @override
@@ -52,9 +63,13 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
   bool _loading = true;
   String? _err;
   List<Map<String, dynamic>> _items = const [];
+  List<AdItem> _hubAds = const [];
   bool _selectMode = false;
+  bool _searchOpen = false;
   final Set<String> _selectedIds = {};
   _NotifSort _sort = _NotifSort.recent;
+
+  bool _didMarkOpenedRead = false;
 
   String get _lang {
     final fromRoute =
@@ -66,11 +81,16 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
   }
 
   bool get _isAr => _lang != 'en';
+  int get _archiveIndex => widget.campaignsOnly ? 1 : 3;
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 5, vsync: this, initialIndex: 0)
+    _tabCtrl = TabController(
+      length: widget.campaignsOnly ? 2 : 4,
+      vsync: this,
+      initialIndex: 0,
+    )
       ..addListener(() {
         if (mounted) setState(() {});
       });
@@ -96,9 +116,29 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     });
     try {
       final rows = await _svc.myInAppNotificationsInbox(includeArchived: true);
-      setState(() => _items = rows);
-    } catch (e) {
-      setState(() => _err = e.toString());
+      final filtered = widget.campaignsOnly
+          ? rows.where(MarketingFlowService.isOpsCampaignNotificationRow).toList()
+          : rows
+              .where((r) => !MarketingFlowService.isOpsCampaignNotificationRow(r))
+              .toList();
+      setState(() => _items = filtered);
+      if (!_didMarkOpenedRead && filtered.isNotEmpty) {
+        _didMarkOpenedRead = true;
+        unawaited(_markOpenedInboxRead());
+      }
+      if (widget.campaignsOnly) {
+        final ads = await AdsService.loadAds(
+          lang: widget.lang,
+          fallbackDemo: false,
+        );
+        if (mounted) setState(() => _hubAds = ads);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      final en = widget.lang.toLowerCase() == 'en';
+      setState(() => _err = en
+          ? 'Could not load notifications. Check your connection and retry.'
+          : 'تعذر تحميل الإشعارات. تحقق من الاتصال ثم أعد المحاولة.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -106,6 +146,31 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
       widget.onInboxSurfaceChanged?.call();
       InAppNotificationHub.onInboxInvalidate?.call();
     }
+  }
+
+  Future<void> _markOpenedInboxRead() async {
+    final unread = _items
+        .where((e) => e['is_read'] != true)
+        .map((e) => (e['id'] ?? '').toString())
+        .where((id) => id.isNotEmpty)
+        .toList();
+    if (unread.isEmpty) return;
+    if (mounted) {
+      setState(() {
+        _items = [
+          for (final e in _items) {...e, 'is_read': true},
+        ];
+      });
+    }
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
+    try {
+      await CommunicationHubService.markAllNotificationsRead(
+        Supabase.instance.client,
+      );
+    } catch (_) {}
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
   }
 
   Map<String, dynamic> _dataMap(Map<String, dynamic> row) {
@@ -120,24 +185,17 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     return {};
   }
 
-  /// 0=الكل، 1=تسويق/عقود، 2=دردشة، 3=أخرى
+  /// 0=الكل، 1=تسويق/عقود، 2=أخرى — دردشة تُدار من تبويب المحادثات لا هنا.
   int _categoryForRow(Map<String, dynamic> n) {
+    if (MarketingFlowService.isChatStyleNotificationRow(n)) return -1;
     final type = (n['type'] ?? '').toString().toLowerCase().trim();
     final data = _dataMap(n);
     final ent = (n['entity_type'] ?? data['entity_type'] ?? '')
         .toString()
         .toLowerCase()
         .trim();
-
-    if (type == InAppNotifTypes.chatMessage ||
-        type == 'message' ||
-        type == 'chat') {
-      return 2;
-    }
-
     if (_isMarketingOrListingType(type, ent)) return 1;
-
-    return 3;
+    return 2;
   }
 
   bool _isMarketingOrListingType(String type, String ent) {
@@ -163,6 +221,13 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
       InAppNotifTypes.listingRequestSubmitted,
       InAppNotifTypes.propertyCreated,
       InAppNotifTypes.reservation,
+      InAppNotifTypes.photoShootRequested,
+      InAppNotifTypes.photoShootAccepted,
+      InAppNotifTypes.photoShootRejected,
+      InAppNotifTypes.photoShootDelivered,
+      InAppNotifTypes.photographerVerified,
+      InAppNotifTypes.photographerRejected,
+      InAppNotifTypes.photographerRated,
       'marketing_offer',
       'contract_signed',
       'permit_issued',
@@ -180,11 +245,15 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
   List<Map<String, dynamic>> _visibleItems() {
     final i = _tabCtrl.index;
     Iterable<Map<String, dynamic>> base;
-    if (i == 4) {
+    final archiveIndex = widget.campaignsOnly ? 1 : 3;
+    if (i == archiveIndex) {
       base = _items.where(MarketingFlowService.isArchivedNotificationRow);
     } else {
-      base = _items.where(MarketingFlowService.isVisibleInMainInbox);
-      if (i != 0) {
+      base = _items.where((n) {
+        if (!MarketingFlowService.isVisibleInMainInbox(n)) return false;
+        return !MarketingFlowService.isChatStyleNotificationRow(n);
+      });
+      if (!widget.campaignsOnly && i != 0) {
         base = base.where((n) => _categoryForRow(n) == i);
       }
     }
@@ -206,24 +275,60 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
 
   String _titleForRow(Map<String, dynamic> row) {
     final data = _dataMap(row);
-    if (_isAr) {
-      final t = (data['title_ar'] ?? data['title'] ?? row['title'] ?? '')
-          .toString()
-          .trim();
-      if (t.isNotEmpty) {
-        return AppBranding.normalizeUserFacing(t, isAr: true);
-      }
-    } else {
-      final t = (data['title_en'] ?? data['title'] ?? row['title'] ?? '')
-          .toString()
-          .trim();
-      if (t.isNotEmpty) {
-        return AppBranding.normalizeUserFacing(t, isAr: false);
-      }
-    }
-    return AppBranding.normalizeUserFacing(
-      (row['title'] ?? row['type'] ?? '').toString(),
+    final picked = LocaleContent.pick(
       isAr: _isAr,
+      ar: (data['title_ar'] ?? '').toString(),
+      en: (data['title_en'] ?? '').toString(),
+      fallback: (data['title'] ?? row['title'] ?? row['type'] ?? '').toString(),
+    );
+    return AppBranding.normalizeUserFacing(
+      LocaleContent.forUi(picked, isAr: _isAr),
+      isAr: _isAr,
+    );
+  }
+
+  Widget _mediaThumb(String url) {
+    final lower = url.toLowerCase();
+    final isVideo = lower.contains('.mp4') ||
+        lower.contains('.webm') ||
+        lower.contains('.mov') ||
+        lower.contains('video');
+    if (isVideo) {
+      return Row(
+        children: [
+          const Icon(Icons.play_circle_outline_rounded, size: 28),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.network(
+        url,
+        height: 88,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Row(
+          children: [
+            const Icon(Icons.image_outlined, size: 28),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                url,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -237,44 +342,14 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     return _items.where((n) {
       if (!_isUnread(n)) return false;
       if (MarketingFlowService.isSecurityNoiseNotificationRow(n)) return false;
-      if (tabIndex == 4) {
+      if (MarketingFlowService.isChatStyleNotificationRow(n)) return false;
+      if (tabIndex == _archiveIndex) {
         return MarketingFlowService.isArchivedNotificationRow(n);
       }
       if (MarketingFlowService.isArchivedNotificationRow(n)) return false;
       if (tabIndex == 0) return true;
       return _categoryForRow(n) == tabIndex;
     }).length;
-  }
-
-  Widget _tabWithBadge(String title, int tabIndex) {
-    final n = _unreadCountForTab(tabIndex);
-    return Tab(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(title),
-          if (n > 0) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.error,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '$n',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 11,
-                  height: 1,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
   }
 
   String _bodyForRow(Map<String, dynamic> row) {
@@ -317,12 +392,21 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     });
   }
 
-  /// شاشة تمثَّل بأنها «لمسيّة»: تطبيق الجوّال أو متصفّح ضيّق.
-  bool get _isTouchScreen {
-    if (!kIsWeb) return true;
-    final w = MediaQuery.sizeOf(context).width;
-    return w < 800;
+  void _markLocalRead(String id) {
+    if (id.isEmpty) return;
+    setState(() {
+      _items = [
+        for (final e in _items)
+          if ((e['id']?.toString() ?? '') == id)
+            {...e, 'is_read': true}
+          else
+            e,
+      ];
+    });
   }
+
+  /// شاشة لمسيّة ضيقة: السحب إضافي — الأزرار تظهر دائماً.
+  bool get _isCompactTouch => ViewportScrollPolicy.isCompactTouchLike(context);
 
   Future<void> _runDelete(String id) async {
     if (id.isEmpty) return;
@@ -347,7 +431,7 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
   Future<void> _runBulkArchive() async {
     final ids = _selectedIds.toList();
     if (ids.isEmpty) return;
-    if (_tabCtrl.index == 4) {
+    if (_tabCtrl.index == _archiveIndex) {
       for (final id in ids) {
         try {
           await _svc.unarchiveInAppNotification(id);
@@ -389,6 +473,41 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     await _load();
   }
 
+  Widget _adTile(AdItem ad, AppLocalizations l10n) {
+    final title = ad.title(_lang);
+    final sub = ad.subtitle(_lang);
+    final cover = ad.bestCoverUrl();
+    return ListTile(
+      leading: cover != null
+          ? ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.network(
+                cover,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) =>
+                    const Icon(Icons.campaign_outlined),
+              ),
+            )
+          : const Icon(Icons.campaign_outlined),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: sub.trim().isEmpty ? null : Text(sub),
+      trailing: const Icon(Icons.open_in_new_rounded),
+      onTap: () {
+        final u = (ad.linkUrl ?? '').trim();
+        if (u.isEmpty) return;
+        final uri = Uri.tryParse(u);
+        if (uri != null) {
+          unawaited(launchUrl(uri, mode: LaunchMode.externalApplication));
+        }
+      },
+    );
+  }
+
   Widget _buildTile(Map<String, dynamic> n, AppLocalizations l10n) {
     final id = (n['id'] ?? '').toString();
     final type = (n['type'] ?? '').toString();
@@ -406,7 +525,7 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
       entityType: ent,
     );
     final cs = Theme.of(context).colorScheme;
-    final showInlineActions = !_isTouchScreen;
+    const showInlineActions = true;
 
     final tile = ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -452,12 +571,19 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
         title.isEmpty ? l10n.notificationDefaultTitle : title,
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
-      subtitle: body.trim().isEmpty
-          ? null
-          : Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(body),
-            ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (body.trim().isNotEmpty) Text(body),
+            if ((dataMap['media_url'] ?? '').toString().trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _mediaThumb((dataMap['media_url'] ?? '').toString().trim()),
+            ],
+          ],
+        ),
+      ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -496,6 +622,13 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
           });
           return;
         }
+        _markLocalRead(id);
+        try {
+          await _svc.markNotificationRead(id);
+        } catch (_) {}
+        widget.onInboxSurfaceChanged?.call();
+        InAppNotificationHub.onInboxInvalidate?.call();
+        if (!mounted) return;
         await InAppNotificationRouter.open(
           context,
           n,
@@ -508,7 +641,7 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
 
     // على الشاشات الكبيرة/سطح المكتب: نُبقي الإجراءات الصريحة وأي Dismissible
     // قد يلتقط حركات الـ trackpad بطريقة مزعجة، لذا لا نُغلِّف بـ Slidable.
-    if (showInlineActions) {
+    if (!_isCompactTouch) {
       return tile;
     }
 
@@ -544,87 +677,194 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     }).toList();
   }
 
-  Widget _embedFilterChips() {
-    final labels = _isAr
-        ? const ['الكل', 'التسويق', 'مراسلة', 'أخرى', 'الأرشيف']
-        : const ['All', 'Listings', 'Messaging', 'Other', 'Archive'];
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsetsDirectional.fromSTEB(8, 8, 8, 4),
-        child: Row(
-          children: List.generate(labels.length, (i) {
-            final selected = _tabCtrl.index == i;
-            final badge = i < 4 ? _unreadCountForTab(i) : 0;
-            return Padding(
-              padding: const EdgeInsetsDirectional.only(end: 6),
-              child: StableSelectChip(
-                exclusive: true,
-                label: badge > 0 ? '${labels[i]} ($badge)' : labels[i],
-                selected: selected,
-                onSelected: (_) {
-                  if (_tabCtrl.index == i) return;
-                  _tabCtrl.animateTo(i);
-                  setState(() {});
-                },
-              ),
-            );
-          }),
-        ),
-      ),
-    );
-  }
-  PreferredSizeWidget _filterTabBar(AppLocalizations l10n) {
-    return TabBar(
-      controller: _tabCtrl,
-      isScrollable: true,
-      tabAlignment: TabAlignment.start,
-      tabs: [
-        _tabWithBadge(_isAr ? 'الكل' : 'All', 0),
-        _tabWithBadge(_isAr ? 'التسويق' : 'Listings', 1),
-        _tabWithBadge(_isAr ? 'مراسلة' : 'Messaging', 2),
-        _tabWithBadge(_isAr ? 'أخرى' : 'Other', 3),
-        Tab(text: _isAr ? 'الأرشيف' : 'Archive'),
-      ],
-    );
+  List<InboxFilterTab> _filterTabs() {
+    final labels = widget.campaignsOnly
+        ? (_isAr ? const ['الكل', 'الأرشيف'] : const ['All', 'Archive'])
+        : (_isAr
+            ? const ['الكل', 'التسويق', 'أخرى', 'الأرشيف']
+            : const ['All', 'Listings', 'Other', 'Archive']);
+    return List.generate(labels.length, (i) {
+      return InboxFilterTab(
+        label: labels[i],
+        selected: _tabCtrl.index == i,
+        badge: i != _archiveIndex ? _unreadCountForTab(i) : 0,
+        onTap: () {
+          if (_tabCtrl.index == i) return;
+          _tabCtrl.animateTo(i);
+          setState(() {});
+        },
+      );
+    });
   }
 
-  List<Widget> _inboxToolbarActions() {
-    return [
-      if (!_loading && _items.isNotEmpty)
-        TextButton(
-          onPressed: () async {
-            await CommunicationHubService.markEverythingRead(
-              Supabase.instance.client,
-            );
-            if (mounted) await _load();
-          },
-          child: Text(
-            _isAr ? 'قراءة الكل' : 'Mark all read',
-            style: const TextStyle(fontWeight: FontWeight.w800),
+  Future<void> _markAllNotificationsRead() async {
+    setState(() {
+      _items = [
+        for (final e in _items) {...e, 'is_read': true},
+      ];
+    });
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
+    await CommunicationHubService.markAllNotificationsRead(
+      Supabase.instance.client,
+    );
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
+    if (mounted) await _load();
+  }
+
+  Future<void> _runBulkMarkRead() async {
+    final ids = _selectedIds.toList();
+    if (ids.isEmpty) return;
+    setState(() {
+      _items = [
+        for (final e in _items)
+          if (ids.contains((e['id'] ?? '').toString()))
+            {...e, 'is_read': true}
+          else
+            e,
+      ];
+      _selectedIds.clear();
+      _selectMode = false;
+    });
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
+    await CommunicationHubService.markNotificationsReadBulk(
+      Supabase.instance.client,
+      ids,
+    );
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
+    if (mounted) await _load();
+  }
+
+  void _onOverflow(String value) {
+    switch (value) {
+      case 'mark_all':
+        unawaited(_markAllNotificationsRead());
+        break;
+      case 'select':
+        setState(() {
+          _selectMode = !_selectMode;
+          if (!_selectMode) _selectedIds.clear();
+        });
+        break;
+      case 'refresh':
+        unawaited(_load());
+        break;
+      case 'sort':
+        setState(() {
+          _sort = _sort == _NotifSort.recent
+              ? _NotifSort.unreadFirst
+              : _NotifSort.recent;
+        });
+        break;
+    }
+  }
+
+  Widget _surfaceHeader(AppLocalizations l10n) {
+    final visible = _filteredInbox(_visibleItems());
+    final hasItems = !_loading && _items.isNotEmpty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_searchOpen)
+          InboxSearchBar(
+            controller: _inboxSearch,
+            hintText: l10n.inboxSearchHint,
+            onChanged: (_) => setState(() {}),
+            onClose: () {
+              setState(() {
+                _searchOpen = false;
+                _inboxSearch.clear();
+              });
+            },
+            closeTooltip: _isAr ? 'إغلاق البحث' : 'Close search',
+            fieldBuilder: ({
+              required controller,
+              required hintText,
+              required onChanged,
+            }) {
+              return AqarTextField(
+                controller: controller,
+                autofocus: true,
+                localeScript: localeScriptFromLang(_lang),
+                decoration: InputDecoration(
+                  hintText: hintText,
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  isDense: true,
+                ),
+                onChanged: onChanged,
+              );
+            },
           ),
-        ),
-      if (!_loading && _items.isNotEmpty)
-        TextButton(
-          onPressed: () {
+        InboxSurfaceChrome(
+          filters: _filterTabs(),
+          searchOpen: _searchOpen,
+          searchTooltip: _isAr ? 'بحث' : 'Search',
+          onToggleSearch: () {
             setState(() {
-              _selectMode = !_selectMode;
-              if (!_selectMode) _selectedIds.clear();
+              _searchOpen = !_searchOpen;
+              if (!_searchOpen) _inboxSearch.clear();
             });
           },
-          child: Text(
-            _selectMode ? (_isAr ? 'إنهاء' : 'Done') : (_isAr ? 'تحديد' : 'Select'),
-            style: const TextStyle(fontWeight: FontWeight.w800),
+          overflowTooltip: _isAr ? 'المزيد' : 'More',
+          overflowActions: [
+            if (hasItems)
+              InboxOverflowAction(
+                value: 'mark_all',
+                icon: Icons.mark_email_read_outlined,
+                label: _isAr ? 'قراءة الكل' : 'Mark all read',
+              ),
+            if (hasItems)
+              InboxOverflowAction(
+                value: 'select',
+                icon: _selectMode
+                    ? Icons.close_rounded
+                    : Icons.checklist_rounded,
+                label: _selectMode
+                    ? (_isAr ? 'إنهاء التحديد' : 'Done')
+                    : (_isAr ? 'تحديد' : 'Select'),
+              ),
+            InboxOverflowAction(
+              value: 'sort',
+              icon: Icons.sort_rounded,
+              label: _sort == _NotifSort.unreadFirst
+                  ? (_isAr ? 'الأحدث أولاً' : 'Most recent')
+                  : (_isAr ? 'غير المقروء أولاً' : 'Unread first'),
+            ),
+            InboxOverflowAction(
+              value: 'refresh',
+              icon: Icons.refresh_rounded,
+              label: _isAr ? 'تحديث' : 'Refresh',
+            ),
+          ],
+          onOverflowSelected: _onOverflow,
+        ),
+        if (_selectMode)
+          InboxBulkToolbar(
+            isAr: _isAr,
+            selectedCount: _selectedIds.length,
+            totalCount: visible.length,
+            onSelectAll: () {
+              setState(() {
+                _selectedIds
+                  ..clear()
+                  ..addAll(
+                    visible
+                        .map((e) => (e['id'] ?? '').toString())
+                        .where((s) => s.isNotEmpty),
+                  );
+              });
+            },
+            onClearSelection: () => setState(() => _selectedIds.clear()),
+            onMarkRead: _runBulkMarkRead,
+            onArchive: _runBulkArchive,
+            onDelete: _runBulkDelete,
+            showArchive: true,
           ),
-        ),
-      if (!_loading && _items.isNotEmpty)
-        IconButton(
-          tooltip: _isAr ? 'تحديث' : 'Refresh',
-          onPressed: _load,
-          icon: const Icon(Icons.refresh_rounded),
-        ),
-    ];
+      ],
+    );
   }
 
   Widget _inboxBody(AppLocalizations l10n) {
@@ -633,18 +873,39 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
       return const Center(child: AppLogoLoading());
     }
     if (_err != null) {
+      final cs = Theme.of(context).colorScheme;
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
-          child: Text(_err!, textAlign: TextAlign.center),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 40, color: cs.onSurface),
+              const SizedBox(height: 12),
+              Text(
+                _err!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: cs.onSurface,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.tonal(
+                onPressed: _load,
+                child: Text(_isAr ? 'إعادة المحاولة' : 'Retry'),
+              ),
+            ],
+          ),
         ),
       );
     }
-    if (_items.isEmpty) {
+    final ads = widget.campaignsOnly && _tabCtrl.index == 0 ? _hubAds : const <AdItem>[];
+    if (_items.isEmpty && ads.isEmpty) {
       return Center(child: Text(l10n.noNewNotifications));
     }
     final mainCount = _mainInboxCount();
-    if (visible.isEmpty && mainCount > 0 && _tabCtrl.index != 4) {
+    if (visible.isEmpty && ads.isEmpty && mainCount > 0 && _tabCtrl.index != _archiveIndex) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -675,54 +936,8 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_selectMode)
-          InboxBulkToolbar(
-            isAr: _isAr,
-            selectedCount: _selectedIds.length,
-            totalCount: visible.length,
-            onSelectAll: () {
-              setState(() {
-                _selectedIds
-                  ..clear()
-                  ..addAll(
-                    visible.map((e) => (e['id'] ?? '').toString()).where((s) => s.isNotEmpty),
-                  );
-              });
-            },
-            onClearSelection: () => setState(() => _selectedIds.clear()),
-            onArchive: _runBulkArchive,
-            onDelete: _runBulkDelete,
-            showArchive: true,
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Text(
-            _isAr
-                ? 'إشعارات العمليات والتسويق هنا. رموز التحقق (OTP) لا تُعرض في هذه القائمة. استخدم التبويبات للتصفية.'
-                : 'Workflow notifications appear here. OTP codes are hidden. Use tabs to filter.',
-            style: TextStyle(
-              fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-        if (_items.length > 6)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: AqarTextField(
-              controller: _inboxSearch,
-              localeScript: localeScriptFromLang(_lang),
-              decoration: InputDecoration(
-                hintText: l10n.inboxSearchHint,
-                prefixIcon: const Icon(Icons.search_rounded),
-                isDense: true,
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ),
         Expanded(
-          child: visible.isEmpty
+          child: visible.isEmpty && ads.isEmpty
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
@@ -738,10 +953,13 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
                   onRefresh: _load,
                   child: ListView.separated(
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    itemCount: visible.length,
+                    itemCount: ads.length + visible.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (_, i) {
-                      return _buildTile(visible[i], l10n);
+                      if (i < ads.length) {
+                        return _adTile(ads[i], l10n);
+                      }
+                      return _buildTile(visible[i - ads.length], l10n);
                     },
                   ),
                 ),
@@ -760,18 +978,7 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _embedFilterChips(),
-            if (!_loading && _items.isNotEmpty)
-              Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(8, 0, 8, 0),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  reverse: _isAr,
-                  child: Row(
-                    children: _inboxToolbarActions(),
-                  ),
-                ),
-              ),
+            _surfaceHeader(l10n),
             Expanded(child: _inboxBody(l10n)),
           ],
         ),
@@ -782,11 +989,21 @@ class _InAppNotificationsPageState extends State<InAppNotificationsPage>
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: Navigator.canPop(context)
+              ? AppPageCloseButton(
+                  isArabic: _isAr,
+                )
+              : null,
           title: Text(l10n.notificationsTitle),
-          bottom: _filterTabBar(l10n),
-          actions: _inboxToolbarActions(),
         ),
-        body: _inboxBody(l10n),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _surfaceHeader(l10n),
+            Expanded(child: _inboxBody(l10n)),
+          ],
+        ),
       ),
     );
   }

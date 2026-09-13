@@ -7,21 +7,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../main.dart' show langNotifier, themeModeNotifier;
+import '../core/session/user_appearance_session.dart';
 import '../core/session/return_after_auth.dart';
-import '../core/theme/app_text_scale.dart';
 import '../services/auth_service.dart';
 import '../services/fast_login_service.dart';
 import '../services/account_completion_service.dart';
 import '../core/auth/auth_local_sign_out.dart';
+import '../core/auth/inactivity_auth_landing.dart';
+import '../core/auth/auth_challenge_service.dart';
 import '../core/auth/login_success_banner.dart';
 import '../core/auth/post_login_security_guard.dart';
 import '../services/session_tracking_service.dart';
-import '../core/branding/branding_logo_image.dart';
-import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_stable.dart';
+import '../core/theme/app_text_scale.dart';
 import '../widgets/auth_top_chrome.dart';
 import '../widgets/login_known_user_hero.dart';
 import '../widgets/nafath_login_sheet.dart';
-import '../widgets/aqar_text_field.dart';
+import '../widgets/caps_aware_password_field.dart';
 import '../core/auth/login_method_policy.dart';
 import '../core/haptics/app_haptics.dart';
 import '../theme.dart' show AqarAuthScrollBehavior;
@@ -85,18 +87,24 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       duration: const Duration(milliseconds: 380),
     );
 
-    final hasSession = Supabase.instance.client.auth.currentSession != null;
-    if (!hasSession) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        Navigator.pushReplacementNamed(context, '/login');
-      });
-      return;
-    }
-
-    FastLoginService.clearRuntimeUnlock();
-
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (kIsWeb) {
+        Navigator.pushReplacementNamed(context, '/login');
+        return;
+      }
+      final hasSession = Supabase.instance.client.auth.currentSession != null;
+      if (!hasSession) {
+        final stay = InactivityAuthLanding.isActive ||
+            await FastLoginService.canSoftLockSession();
+        if (!stay) {
+          if (!mounted) return;
+          Navigator.pushReplacementNamed(context, '/login');
+          return;
+        }
+      }
+
+      FastLoginService.clearRuntimeUnlock();
       await _loadIdentity();
       await _loadPinConfig();
       await _initBiometricsAndMaybeAutoAuth();
@@ -222,7 +230,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
 
   Future<void> _showBioRetryDialog() async {
     if (!mounted) return;
-    final retry = await showDialog<bool>(
+    final retry = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
@@ -272,6 +280,12 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   }
 
   Future<void> _goUnlockedHome({required String loginMethod}) async {
+    final confirmed = await AuthChallengeService.confirmTrustedNativeUnlock();
+    if (!confirmed.fullyAuthenticated) {
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
     FastLoginService.markRuntimeUnlocked();
     await AccountCompletionService.clearEnrollmentDeferred();
     if (!mounted) return;
@@ -293,6 +307,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
           displayName: _displayName,
           loginMethod: loginMethod,
           isAr: isAr,
+          authEntryRoute: '/fastLogin',
         ),
       );
     } else {
@@ -454,7 +469,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   Future<void> _forgotPasscode() async {
     if (_busy) return;
 
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'تسجيل الدخول بالحساب' : 'Sign in with password'),
@@ -522,7 +537,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   Color _sub(bool isLight) =>
       isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
   Color _bg(bool isLight) =>
-      isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
 
   Widget _dot({
     required bool filled,
@@ -628,12 +643,12 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     return ListenableBuilder(
       listenable: Listenable.merge([langNotifier, themeModeNotifier]),
       builder: (context, _) {
-        final isLight = themeModeNotifier.value == ThemeMode.light;
+        final isLight =
+            UserAppearanceSession.resolvesLight(themeModeNotifier.value);
         final size = MediaQuery.sizeOf(context);
         final shortest = size.shortestSide;
         final width = size.width;
         final bottomInset = MediaQuery.paddingOf(context).bottom;
-        final kb = AppKeyboardInset.bottomOf(context);
         final isNarrow = width < 520;
         final isWideWeb = kIsWeb && width >= 720;
 
@@ -788,27 +803,19 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                         color: isLight ? Colors.white : const Color(0xFF141722),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: AqarTextField(
+                      child: CapsAwarePasswordField(
                         controller: _passwordCtrl,
                         focusNode: _passwordFocus,
                         obscureText: _obscure,
+                        onToggleObscure: () =>
+                            setState(() => _obscure = !_obscure),
                         enabled: !_busy,
+                        isAr: _isAr,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submitPassword(),
                         decoration: InputDecoration(
                           border: InputBorder.none,
-                          hintText:
-                              _isAr ? 'كلمة المرور' : 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          suffixIcon: IconButton(
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                            icon: Icon(
-                              _obscure
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
+                          hintText: _isAr ? 'كلمة المرور' : 'Password',
                         ),
                       ),
                     ),
@@ -934,23 +941,20 @@ class _FastLoginScreenState extends State<FastLoginScreen>
               behavior: const AqarAuthScrollBehavior(),
               child: Scaffold(
                 backgroundColor: bg,
-                body: SafeArea(
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.fromLTRB(
-                      hPad,
-                      kb > 48 ? 4 : 8,
-                      hPad,
-                      20 + bottomInset + kb,
-                    ),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: maxCard),
-                        child: Column(
-                          children: [
-                            AuthTopChrome(
+                resizeToAvoidBottomInset: false,
+                body: AppKeyboardStableScope(
+                  child: SafeArea(
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 6),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: maxCard),
+                            child: AuthTopChrome(
                               snapshot: _methodSnapshot.copyWith(
-                                hasKnownUser: _displayName.trim().isNotEmpty ||
-                                    (_username ?? '').isNotEmpty,
+                                hasKnownUser:
+                                    _displayName.trim().isNotEmpty ||
+                                        (_username ?? '').isNotEmpty,
                                 preferPassword: _passwordMode,
                               ),
                               busy: _busy,
@@ -973,68 +977,71 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                                 }
                               },
                             ),
-                            SizedBox(height: kb > 48 ? 8 : 12),
-                            const LoginBrandHero(),
-                            SizedBox(height: kb > 48 ? 8 : 12),
-                            LoginKnownUserHero(
-                              isAr: _isAr,
-                              displayName: _displayName,
-                              accent: _brand,
-                              compact: isNarrow,
-                            ),
-                            busyBar,
-                            const SizedBox(height: 14),
-                            if (_passwordMode) ...[
-                              passwordBlock,
-                            ] else if (_pinEnabled) ...[
-                              dotsRow,
-                              const SizedBox(height: 12),
-                              keypad,
-                            ] else ...[
-                              bioOnlyBlock,
-                            ],
-                            const SizedBox(height: 4),
-                            if (!_passwordMode && (_pinEnabled || _showBio))
-                              TextButton(
-                                onPressed: _busy ? null : _forgotPasscode,
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _isAr
-                                        ? 'نسيت رمز الدخول؟'
-                                        : 'Forgot passcode?',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: _brand,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            if (_passwordMode)
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () => unawaited(_leaveForAnotherUser()),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _isAr
-                                        ? 'الدخول بمستخدم آخر'
-                                        : 'Sign in as another user',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: sub,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
+                          ),
                         ),
-                      ),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: EdgeInsets.fromLTRB(
+                              hPad,
+                              0,
+                              hPad,
+                              20 + bottomInset,
+                            ),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(maxWidth: maxCard),
+                                child: Column(
+                                  children: [
+                                    const LoginBrandHero(),
+                                    const SizedBox(height: 12),
+                                    LoginKnownUserHero(
+                                      isAr: _isAr,
+                                      displayName: _displayName,
+                                      accent: _brand,
+                                      compact: isNarrow,
+                                      showPasswordPrompt: _passwordMode,
+                                    ),
+                                    busyBar,
+                                    const SizedBox(height: 14),
+                                    if (_passwordMode) ...[
+                                      passwordBlock,
+                                    ] else if (_pinEnabled) ...[
+                                      dotsRow,
+                                      const SizedBox(height: 12),
+                                      keypad,
+                                    ] else ...[
+                                      bioOnlyBlock,
+                                    ],
+                                    const SizedBox(height: 4),
+                                    if (!_passwordMode &&
+                                        (_pinEnabled || _showBio))
+                                      TextButton(
+                                        onPressed:
+                                            _busy ? null : _forgotPasscode,
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text(
+                                            _isAr
+                                                ? 'نسيت رمز الدخول؟'
+                                                : 'Forgot passcode?',
+                                            maxLines: 1,
+                                            softWrap: false,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              color: _brand,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

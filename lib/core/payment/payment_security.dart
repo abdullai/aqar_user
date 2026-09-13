@@ -17,6 +17,60 @@ class PaymentSecurity {
 
   static const _storage = FlutterSecureStorage();
   static const _keySlot = 'aqar_payment_aes_key_v1';
+  static const _boundUidSlot = 'aqar_payment_bound_uid';
+
+  static String? _memoryBoundUid;
+
+  static String _slotFor(String? uid) {
+    final id = (uid ?? '').trim();
+    if (id.isEmpty) return _keySlot;
+    return '${_keySlot}_$id';
+  }
+
+  static String? _activeUid() {
+    try {
+      return Supabase.instance.client.auth.currentUser?.id;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// يربط الكاش بـ auth.uid الحالي ويمسح مفاتيح الحساب السابق على نفس الجهاز.
+  static Future<void> isolateForUid(String uid) async {
+    final id = uid.trim();
+    if (id.isEmpty) return;
+    try {
+      final prev = (_memoryBoundUid ?? await _storage.read(key: _boundUidSlot) ?? '')
+          .trim();
+      if (prev.isNotEmpty && prev != id) {
+        await _storage.delete(key: _slotFor(prev));
+      }
+      _memoryBoundUid = id;
+      await _storage.write(key: _boundUidSlot, value: id);
+    } catch (_) {
+      _memoryBoundUid = id;
+    }
+  }
+
+  /// يمسح مفاتيح الدفع المحلية عند الخروج أو تبديل الحساب.
+  static Future<void> purgeLocalPaymentCache({String? uid}) async {
+    try {
+      final id = (uid ?? _memoryBoundUid ?? _activeUid() ?? '').trim();
+      final bound = (_memoryBoundUid ?? await _storage.read(key: _boundUidSlot) ?? '')
+          .trim();
+      if (bound.isNotEmpty && bound != id) {
+        await _storage.delete(key: _slotFor(bound));
+      }
+      if (id.isNotEmpty) {
+        await _storage.delete(key: _slotFor(id));
+      }
+      await _storage.delete(key: _keySlot);
+      await _storage.delete(key: _boundUidSlot);
+      _memoryBoundUid = null;
+    } catch (_) {
+      _memoryBoundUid = null;
+    }
+  }
 
   /// يُسجّل نتيجة/حدث دفع عبر RPC آمن (SECURITY DEFINER) — لا INSERT مباشر.
   static Future<void> recordOutcome({
@@ -123,18 +177,23 @@ class PaymentSecurity {
     return utf8.decode(plain);
   }
 
-  /// هل المبلغ يتطلب OTP إضافي؟ (> 500 ر.س)
+  /// هل المبلغ يتطلب OTP إضافي؟ (> 500 ريال)
   static bool requiresOtpForAmount(double amountSar) => amountSar > 500;
 
-  /// هل المبلغ يتطلب بصمة/Face ID؟ (> 1000 ر.س)
+  /// هل المبلغ يتطلب بصمة/Face ID؟ (> 1000 ريال)
   static bool requiresBiometricForAmount(double amountSar) => amountSar > 1000;
 
   static Future<Uint8List> _loadOrCreateKey() async {
-    var b64 = await _storage.read(key: _keySlot);
+    final uid = _activeUid();
+    if (uid != null && uid.isNotEmpty) {
+      await isolateForUid(uid);
+    }
+    final slot = _slotFor(uid);
+    var b64 = await _storage.read(key: slot);
     if (b64 == null || b64.isEmpty) {
       final seed = _randomBytes(32);
       b64 = base64Encode(seed);
-      await _storage.write(key: _keySlot, value: b64);
+      await _storage.write(key: slot, value: b64);
     }
     final raw = base64Decode(b64);
     if (raw.length >= 32) return Uint8List.fromList(raw.sublist(0, 32));

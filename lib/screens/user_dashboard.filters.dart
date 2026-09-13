@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element, unused_element_parameter
+
 part of 'user_dashboard.dart';
 
 extension _UserDashboardStateFilters on _UserDashboardState {
@@ -177,9 +179,6 @@ extension _UserDashboardStateFilters on _UserDashboardState {
   Future<Map<String, dynamic>> _loadCities({bool includeExtra = true}) async {
     if (_citiesCache != null) {
       if (!includeExtra || _citiesExtraLoaded) {
-        return _citiesCache!;
-      }
-      if (kIsWeb) {
         return _citiesCache!;
       }
     }
@@ -540,6 +539,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     final cityFilter = _cityFilter.trim();
 
     final filtered = src.where((r) {
+      if (_isFreshPublishRevealRequest(r.id)) return true;
       if (!forMySubmissions &&
           !ListingPermissionsHelper.shouldShowMarketRequestWithoutDeal(r)) {
         return false;
@@ -548,6 +548,12 @@ extension _UserDashboardStateFilters on _UserDashboardState {
           !_isGuest &&
           _uid.isNotEmpty &&
           _marketRequestIdsWithMyPendingOffer.contains(r.id)) {
+        return false;
+      }
+      if (!forMySubmissions &&
+          (_homeRequestApplicantCounts[r.id] ?? 0) >=
+              DealInventoryPolicy.maxApplicantsPerCard &&
+          !_marketRequestIdsWithMyPendingOffer.contains(r.id)) {
         return false;
       }
       // الطلبات التي سحب المستخدم عرضه عليها مرتين تختفي نهائياً.
@@ -585,7 +591,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     }
 
     filtered.sort(cmpDate);
-    return filtered;
+    return _pinRevealedRequestFirst(filtered);
   }
 
   /// خليط زمني: الأحدث أولاً (إعلانات + طلبات) عند تبويب «الكل» وترتيب «الأحدث».
@@ -624,10 +630,11 @@ extension _UserDashboardStateFilters on _UserDashboardState {
       }
       return b.sortAt.compareTo(a.sortAt);
     });
-    if (out.length > effectiveLimit) {
-      return out.sublist(0, effectiveLimit);
+    final pinned = _pinRevealedMixedFirst(out);
+    if (pinned.length > effectiveLimit) {
+      return pinned.sublist(0, effectiveLimit);
     }
-    return out;
+    return pinned;
   }
 
   // =========================
@@ -685,7 +692,18 @@ extension _UserDashboardStateFilters on _UserDashboardState {
         : null;
 
     final filtered = src.where((p) {
+      // كشف بعد النشر العام فقط — لا تُدخَل معاينات التسويق/72 ساعة للرئيسية.
+      if (_isFreshPublishRevealProperty(p.id) &&
+          ListingPermissionsHelper.shouldShowInPublicHome(p)) {
+        return true;
+      }
       if (cartPropIds != null && cartPropIds.contains(p.id)) return false;
+      if (excludePropertiesInCart &&
+          !includeMyPipelineListings &&
+          _activeReservationHoldCount(p.id) >=
+              DealInventoryPolicy.maxApplicantsPerCard) {
+        return false;
+      }
       if (!_matchesCityFilter(p, cityFilter)) return false;
       if (!_matchesHierarchyFilters(p)) return false;
       if (!_matchesSearch(p, q)) return false;
@@ -712,7 +730,50 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     }).toList();
 
     _applyLocalSorting(filtered, queryRaw: q);
-    return filtered;
+    return _pinRevealedPropertyFirst(filtered);
+  }
+
+  List<Property> _pinRevealedPropertyFirst(List<Property> src) {
+    final id = (_homeRevealOwnPropertyId ?? '').trim();
+    if (!_homeRevealOwnActive || id.isEmpty || src.length < 2) return src;
+    final i = src.indexWhere((p) => p.id == id);
+    if (i <= 0) return src;
+    final copy = List<Property>.from(src);
+    final hit = copy.removeAt(i);
+    copy.insert(0, hit);
+    return copy;
+  }
+
+  List<MarketPropertyRequestRow> _pinRevealedRequestFirst(
+    List<MarketPropertyRequestRow> src,
+  ) {
+    final id = (_homeRevealOwnMarketRequestId ?? '').trim();
+    if (!_homeRevealOwnActive || id.isEmpty || src.length < 2) return src;
+    final i = src.indexWhere((r) => r.id == id);
+    if (i <= 0) return src;
+    final copy = List<MarketPropertyRequestRow>.from(src);
+    final hit = copy.removeAt(i);
+    copy.insert(0, hit);
+    return copy;
+  }
+
+  List<HomeMixedFeedEntry> _pinRevealedMixedFirst(List<HomeMixedFeedEntry> src) {
+    if (!_homeRevealOwnActive || src.length < 2) return src;
+    final pid = (_homeRevealOwnPropertyId ?? '').trim();
+    final rid = (_homeRevealOwnMarketRequestId ?? '').trim();
+    if (pid.isEmpty && rid.isEmpty) return src;
+    final i = src.indexWhere((e) {
+      final p = e.listing;
+      if (pid.isNotEmpty && p != null && p.id == pid) return true;
+      final r = e.request;
+      if (rid.isNotEmpty && r != null && r.id == rid) return true;
+      return false;
+    });
+    if (i <= 0) return src;
+    final copy = List<HomeMixedFeedEntry>.from(src);
+    final hit = copy.removeAt(i);
+    copy.insert(0, hit);
+    return copy;
   }
 
   /// فلتر «المخفية» المحلي: إما إظهار المخفية فقط أو إخفاؤها من الرئيسية.
@@ -741,7 +802,13 @@ extension _UserDashboardStateFilters on _UserDashboardState {
           .where((p) => _hiddenPropertyIds.contains(p.id))
           .toList();
     }
-    return activeList.where((p) => !_hiddenPropertyIds.contains(p.id)).toList();
+    return activeList.where((p) {
+      if (_isFreshPublishRevealProperty(p.id) &&
+          ListingPermissionsHelper.shouldShowInPublicHome(p)) {
+        return true;
+      }
+      return !_hiddenPropertyIds.contains(p.id);
+    }).toList();
   }
 
   List<MarketPropertyRequestRow> _applyHiddenFeedFilterToRequests(
@@ -765,7 +832,10 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     if (_homeShowHiddenOnly) {
       return active.where((r) => _hiddenMarketRequestIds.contains(r.id)).toList();
     }
-    return active.where((r) => !_hiddenMarketRequestIds.contains(r.id)).toList();
+    return active.where((r) {
+      if (_isFreshPublishRevealRequest(r.id)) return true;
+      return !_hiddenMarketRequestIds.contains(r.id);
+    }).toList();
   }
 
   /// مصدر إعلانات الرئيسية: [_all] من استعلام الرئيسية (PostgREST + فلتر الحالات)،
@@ -796,6 +866,35 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     // لا نُظهر إعلاناتك/منشوراتك في الرئيسية حتى لو كان الكتالوج كله ملكك —
     // مكانها «طلباتي/إعلاناتي».
     final out = _all.where((p) => !ownedByCurrentUser(p)).toList();
+
+    if (_homeRevealOwnActive) {
+      final revealId = (_homeRevealOwnPropertyId ?? '').trim();
+      if (revealId.isNotEmpty) {
+        Property? hit;
+        for (final p in _mine) {
+          if (p.id == revealId) {
+            hit = p;
+            break;
+          }
+        }
+        if (hit == null) {
+          for (final p in _all) {
+            if (p.id == revealId) {
+              hit = p;
+              break;
+            }
+          }
+        }
+        if (hit == null) {
+          hit = _propertyCache[revealId];
+        }
+        if (hit != null &&
+            ListingPermissionsHelper.shouldShowInPublicHome(hit)) {
+          out.removeWhere((p) => p.id == revealId);
+          out.insert(0, hit);
+        }
+      }
+    }
 
     final seen = out.map((p) => p.id).where((id) => id.isNotEmpty).toSet();
     for (final p in _mine) {
@@ -924,10 +1023,15 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     _nestedDashboardMixedHomeCount =
         mixedTimeline.isEmpty ? null : mixedTimeline.length;
     _nestedDashboardMySubmissionsCount = buildMixedHomeTimeline(
-      filterListDashboard(_mine, excludePropertiesInCart: true),
-      _marketHomeRequests
-          .where((r) => r.requesterId == uid && uid.isNotEmpty)
-          .toList(),
+      filterListDashboard(
+        _propertiesOwnedOrPublishedByMe(),
+        includeMyPipelineListings: true,
+      ),
+      _myMarketSubmissions.isNotEmpty
+          ? _myMarketSubmissions
+          : _marketHomeRequests
+              .where((r) => r.requesterId == uid && uid.isNotEmpty)
+              .toList(),
     ).length;
     _nestedDashboardFeedCacheBuiltKey = key;
   }
@@ -982,7 +1086,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
           _webTabChildren = null;
           _webTabChildrenFeedSig = -1;
         }
-        setState(() {});
+        _ss(() {});
       }
     } finally {
       _nestedDashboardFeedCacheRebuildRunning = false;
@@ -1053,10 +1157,15 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     _nestedDashboardMixedHomeCount =
         mixedTimeline.isEmpty ? null : mixedTimeline.length;
     _nestedDashboardMySubmissionsCount = buildMixedHomeTimeline(
-      filterListDashboard(_mine, excludePropertiesInCart: true),
-      _marketHomeRequests
-          .where((r) => r.requesterId == uid && uid.isNotEmpty)
-          .toList(),
+      filterListDashboard(
+        _propertiesOwnedOrPublishedByMe(),
+        includeMyPipelineListings: true,
+      ),
+      _myMarketSubmissions.isNotEmpty
+          ? _myMarketSubmissions
+          : _marketHomeRequests
+              .where((r) => r.requesterId == uid && uid.isNotEmpty)
+              .toList(),
     ).length;
     _nestedDashboardFeedCacheBuiltKey = key;
   }

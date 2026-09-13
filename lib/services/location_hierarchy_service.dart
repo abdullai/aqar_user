@@ -3,7 +3,7 @@
 // خدمة تدرّج الموقع لجعل البحث «المنطقة → المحافظة → المدينة → الحي» متاحاً
 // لكامل التطبيق فوق ملفات JSON الموجودة في `assets/data/`:
 //   - `saudi_locations.json`     (المدن الأساسية + المنطقة + إحداثيات)
-//   - `saudi_locations_extra.json` (المدن التابعة لمحافظات صغيرة + المحافظة)
+//   - `saudi_locations_extra.json` (مدن وقرى وهجر ومراكز تحت المحافظة الرسمية)
 //   - `saudi_districts.json`     (الأحياء لكل مدينة)
 //
 // نَستفيد من [SaudiLocationsService] الذي يقوم بالدمج وفولباك المحافظة، ومن
@@ -20,6 +20,7 @@ import 'dart:math' as math;
 
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../core/geo/saudi_official_admin.dart';
 import '../models/saudi_location.dart';
 import 'saudi_districts_service.dart';
 import 'saudi_locations_service.dart';
@@ -32,20 +33,13 @@ class LocationHierarchyService {
   List<SaudiLocation>? _cache;
 
   Future<List<SaudiLocation>> _all() async {
-    return _cache ??= await SaudiLocationsService.instance.loadAll();
+    return _cache ??=
+        await SaudiLocationsService.instance.loadAll(includeExtra: true);
   }
 
-  /// قائمة المناطق الفريدة بترتيب أبجدي (عربي/إنجليزي حسب [isAr]).
+  /// المناطق الثلاث عشرة الرسمية (لا تُخلط بمحافظات أو مدن).
   Future<List<String>> regions({required bool isAr}) async {
-    final all = await _all();
-    final seen = <String>{};
-    for (final e in all) {
-      final v = (isAr ? e.regionAr : e.regionEn).trim();
-      if (v.isEmpty) continue;
-      seen.add(v);
-    }
-    final out = seen.toList()..sort(_naturalCompare);
-    return out;
+    return SaudiOfficialAdmin.officialRegionNames(isAr: isAr);
   }
 
   /// محافظات داخل [region] (يقبل اسماً عربياً أو إنجليزياً)، فريدة ومُرتّبة.
@@ -56,6 +50,8 @@ class LocationHierarchyService {
     final all = await _all();
     final r = region.trim();
     if (r.isEmpty) return const [];
+    final official = SaudiOfficialAdmin.governorates(region: r, isAr: isAr);
+    if (official.isNotEmpty) return official;
     final seen = <String>{};
     for (final e in all) {
       if (e.regionAr.trim() != r && e.regionEn.trim() != r) continue;
@@ -81,12 +77,23 @@ class LocationHierarchyService {
     final r = region.trim();
     final g = governorate.trim();
     if (r.isEmpty || g.isEmpty) return const [];
+    if (!SaudiOfficialAdmin.isOfficialGovernorate(region: r, governorate: g)) {
+      return const [];
+    }
     final seen = <String>{};
     for (final e in all) {
-      if (e.regionAr.trim() != r && e.regionEn.trim() != r) continue;
+      if (!SaudiOfficialAdmin.sameRegion(e.regionAr, r) &&
+          !SaudiOfficialAdmin.sameRegion(e.regionEn, r)) {
+        continue;
+      }
       final ga = (e.governorateAr ?? '').trim();
       final ge = (e.governorateEn ?? '').trim();
-      if (ga != g && ge != g) continue;
+      final cityAr = e.cityAr.trim();
+      final cityEn = e.cityEn.trim();
+      final underGov = ga == g ||
+          ge == g ||
+          (ga.isEmpty && ge.isEmpty && (cityAr == g || cityEn == g));
+      if (!underGov) continue;
       final v = (isAr ? e.cityAr : e.cityEn).trim();
       if (v.isEmpty) continue;
       seen.add(v);
@@ -118,8 +125,8 @@ class LocationHierarchyService {
     final c = city.trim();
     for (final e in all) {
       final regionMatches = r.isEmpty ||
-          e.regionAr.trim() == r ||
-          e.regionEn.trim() == r;
+          SaudiOfficialAdmin.sameRegion(e.regionAr, r) ||
+          SaudiOfficialAdmin.sameRegion(e.regionEn, r);
       final govMatches = g.isEmpty ||
           (e.governorateAr ?? '').trim() == g ||
           (e.governorateEn ?? '').trim() == g;
@@ -131,6 +138,68 @@ class LocationHierarchyService {
       return LatLng(e.lat, e.lng);
     }
     return null;
+  }
+
+  /// خرائط التدرّج كاملة (منطقة → محافظات → مدن) دفعة واحدة للنماذج.
+  Future<
+      ({
+        List<String> regions,
+        Map<String, List<String>> governoratesByRegion,
+        Map<String, List<String>> citiesByGovernorate,
+      })> cascade({required bool isAr}) async {
+    final all = await _all();
+    final regionList = SaudiOfficialAdmin.officialRegionNames(isAr: isAr);
+    final govs = <String, Set<String>>{};
+    final cities = <String, Set<String>>{};
+    for (final region in regionList) {
+      govs[region] = {
+        ...SaudiOfficialAdmin.governorates(region: region, isAr: isAr),
+      };
+    }
+    for (final item in all) {
+      final region = SaudiOfficialAdmin.canonicalRegionName(
+            isAr ? item.regionAr : item.regionEn,
+            isAr: isAr,
+          ) ??
+          '';
+      if (region.isEmpty) continue;
+      var gov = (isAr
+              ? (item.governorateAr ?? '')
+              : (item.governorateEn ?? ''))
+          .trim();
+      if (!SaudiOfficialAdmin.isOfficialGovernorate(
+        region: region,
+        governorate: gov,
+      )) {
+        final cityName = (isAr ? item.cityAr : item.cityEn).trim();
+        gov = SaudiOfficialAdmin.isOfficialGovernorate(
+              region: region,
+              governorate: cityName,
+            )
+            ? cityName
+            : '';
+      }
+      if (gov.isEmpty) continue;
+      govs.putIfAbsent(region, () => <String>{}).add(gov);
+      final city = (isAr ? item.cityAr : item.cityEn).trim();
+      if (city.isEmpty) continue;
+      cities.putIfAbsent(gov, () => <String>{}).add(city);
+    }
+    final govMap = <String, List<String>>{};
+    for (final e in govs.entries) {
+      final list = e.value.toList()..sort(_naturalCompare);
+      govMap[e.key] = list;
+    }
+    final cityMap = <String, List<String>>{};
+    for (final e in cities.entries) {
+      final list = e.value.toList()..sort(_naturalCompare);
+      cityMap[e.key] = list;
+    }
+    return (
+      regions: regionList,
+      governoratesByRegion: govMap,
+      citiesByGovernorate: cityMap,
+    );
   }
 
   /// لمواصلة استخدام نظام الإحداثيات في بقية المشروع — يستدعي الخدمة الأصلية.

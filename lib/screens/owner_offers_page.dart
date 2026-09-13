@@ -2,14 +2,18 @@
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:intl/intl.dart' show DateFormat, NumberFormat;
+import 'package:intl/intl.dart' show NumberFormat;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/branding_logo_image.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/marketing/listing_request_marketing_price.dart';
+import '../core/listing/offer_identity_tag.dart';
+import '../core/profile/publisher_identity_prefs.dart';
 import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
 import '../core/utils/chat_display_initials.dart';
 import '../core/marketing/marketing_offer_fee.dart';
 import '../core/workflow/listing_workflow_copy.dart';
@@ -304,14 +308,15 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
 
     final reasonCtl = TextEditingController();
     final allowRetryHolder = <bool>[false];
-    final ok = await showDialog<bool>(
+    final reasonErrorHolder = <String?>[null];
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setLocal) {
             return AlertDialog(
               title: Text(
-                ListingWorkflowCopy.t(_isAr, 'رفض العرض', 'Decline offer'),
+                ListingWorkflowCopy.t(_isAr, 'غير موافق', 'Decline'),
               ),
               content: SingleChildScrollView(
                 child: Column(
@@ -320,8 +325,8 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                   children: [
                     Text(
                       _isAr
-                          ? 'لن يُعتمد هذا العرض. يمكنك إضافة ملاحظة للمسوّق (اختياري).'
-                          : 'This offer will be declined. Optional note to the marketer.',
+                          ? 'لن يُعتمد هذا العرض. أدخل سبب الرفض ليظهر للمسوّق.'
+                          : 'This offer will be declined. Enter a reason so the marketer can see it.',
                       style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 12),
@@ -354,9 +359,11 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                       maxLines: 3,
                       maxLength: 500,
                       decoration: InputDecoration(
-                        labelText: _isAr
-                            ? 'ملاحظة (اختياري)'
-                            : 'Note (optional)',
+                        labelText: ListingWorkflowCopy.declineReasonLabel(_isAr),
+                        hintText: _isAr
+                            ? 'يظهر هذا السبب للمسوّق'
+                            : 'Shown to the marketer',
+                        errorText: reasonErrorHolder[0],
                         border: const OutlineInputBorder(),
                       ),
                     ),
@@ -373,8 +380,18 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                     backgroundColor: Theme.of(ctx).colorScheme.error,
                     foregroundColor: Theme.of(ctx).colorScheme.onError,
                   ),
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: Text(ListingWorkflowCopy.t(_isAr, 'رفض', 'Decline')),
+                  onPressed: () {
+                    final t = reasonCtl.text.trim();
+                    if (t.length < 3) {
+                      setLocal(() {
+                        reasonErrorHolder[0] =
+                            ListingWorkflowCopy.declineReasonRequired(_isAr);
+                      });
+                      return;
+                    }
+                    Navigator.pop(ctx, true);
+                  },
+                  child: Text(ListingWorkflowCopy.btnDeclineOffer(_isAr)),
                 ),
               ],
             );
@@ -384,7 +401,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     );
     final reasonText = reasonCtl.text.trim();
     reasonCtl.dispose();
-    if (ok != true || !mounted) return;
+    if (ok != true || !mounted || reasonText.length < 3) return;
 
     setState(() => _busyOfferId = id);
     try {
@@ -394,7 +411,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         await _svc.ownerDeclineOffer(
           offerId: id,
           requestId: widget.requestId,
-          ownerReason: reasonText.isEmpty ? null : reasonText,
+          ownerReason: reasonText,
           declineKind: 'apology',
         );
         await _svc.ownerSetAllowPreviousMarketersRetry(
@@ -405,7 +422,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         await _svc.ownerDeclineOffer(
           offerId: id,
           requestId: widget.requestId,
-          ownerReason: reasonText.isEmpty ? null : reasonText,
+          ownerReason: reasonText,
           declineKind: 'reject',
         );
         await _svc.ownerSetAllowPreviousMarketersRetry(
@@ -445,42 +462,21 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     if (v == null) return null;
     final dt = DateTime.tryParse(v.toString());
     if (dt == null) return null;
-    final loc = _isAr ? 'ar_SA' : 'en_US';
-    try {
-      return _fmtNumericUi(
-        DateFormat.yMMMd(loc).add_Hm().format(dt.toLocal()),
-      );
-    } catch (_) {
-      return _fmtNumericUi(
-        DateFormat('yyyy-MM-dd HH:mm').format(dt.toLocal()),
-      );
-    }
+    return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: _isAr);
   }
 
   String? _fmtDateOnly(dynamic v) {
     if (v == null) return null;
     final dt = DateTime.tryParse(v.toString());
     if (dt == null) return null;
-    try {
-      return normalizeAsciiDigits(
-        DateFormat('yyyy-MM-dd').format(dt.toLocal()),
-      );
-    } catch (_) {
-      return normalizeAsciiDigits(
-        DateFormat('yyyy-MM-dd').format(dt.toLocal()),
-      );
-    }
+    return DateHelper.fmtCivilDate(dt.toLocal(), isAr: _isAr);
   }
 
   String? _fmtTimeOnly(dynamic v) {
     if (v == null) return null;
     final dt = DateTime.tryParse(v.toString());
     if (dt == null) return null;
-    try {
-      return normalizeAsciiDigits(DateFormat('HH:mm').format(dt.toLocal()));
-    } catch (_) {
-      return normalizeAsciiDigits(DateFormat('HH:mm').format(dt.toLocal()));
-    }
+    return DateHelper.fmtClock(dt.toLocal());
   }
 
   static const Color _brandTeal = Color(0xFF0F766E);
@@ -595,7 +591,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     if (s.isEmpty) return '';
     final dt = DateTime.tryParse(s);
     if (dt != null) {
-      return DateFormat('yyyy-MM-dd').format(dt.toLocal());
+      return DateHelper.fmtCivilDate(dt.toLocal(), isAr: _isAr);
     }
     return normalizeAsciiDigits(s);
   }
@@ -685,8 +681,8 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
           ? '($pct من مجموع قيمة العقار + ضريبة 5٪ على العقار)'
           : '($pct of property value including 5% VAT on property)';
       return _isAr
-          ? 'قيمة التسويق: ${_fmtMoney(expected)} ${AppMoney.saudiRiyalSignUnicode} • $sub'
-          : 'Marketing fee: ${_fmtMoney(expected)} SAR • $sub';
+          ? 'قيمة التسويق: ${AppMoney.sarPhrase(_fmtMoney(expected), isAr: true)} • $sub'
+          : 'Marketing fee: ${AppMoney.sarPhrase(_fmtMoney(expected), isAr: false)} • $sub';
     }
     final ct = (o['commission_type'] ?? '').toString().trim();
     final cv = o['commission_value'];
@@ -699,8 +695,8 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     }
     return ListingWorkflowCopy.t(
       _isAr,
-      'قيمة العرض: $price ${AppMoney.saudiRiyalSignUnicode}',
-      'Offer: $price SAR',
+      'قيمة العرض: ${AppMoney.sarPhrase('$price', isAr: true)}',
+      'Offer: ${AppMoney.sarPhrase('$price', isAr: false)}',
     );
   }
 
@@ -756,8 +752,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
       if (price > 0)
         RequestSummaryRow(
           label: _isAr ? 'قيمة العقار' : 'Property value',
-          value:
-              '${_fmtMoney(price)} ${AppMoney.saudiRiyalSignUnicode}',
+          value: AppMoney.sarPhrase(_fmtMoney(price), isAr: _isAr),
           emphasize: true,
         ),
       if (deedNo.isNotEmpty)
@@ -935,9 +930,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
           leading: (widget.embeddedInSheet || Navigator.canPop(context))
               ? AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           title: Text(ListingWorkflowCopy.ownerOffersTitle(_isAr)),
@@ -1058,7 +1050,13 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
 
   Widget _buildOfferCard(Map<String, dynamic> o, ColorScheme cs) {
     final id = (o['id'] ?? '').toString();
-    final name = (o['_marketer_display_name'] ?? '').toString().trim();
+    final notesRaw = (o['notes'] ?? '').toString();
+    final identity = OfferIdentityTag.parse(notesRaw);
+    final notes = identity.notes.trim();
+    final taggedName = identity.displayName.trim();
+    final name = taggedName.isNotEmpty
+        ? taggedName
+        : (o['_marketer_display_name'] ?? '').toString().trim();
     final busy = _busyOfferId == id;
     final statusRaw = (o['status'] ?? '').toString();
     final winner = _isAcceptedWinner(o);
@@ -1066,7 +1064,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final canDecline = _canOwnerDecide(o) &&
         !_anotherOfferWasSelected(id) &&
         !_acceptInFlight;
-    final notes = (o['notes'] ?? '').toString().trim();
     final shortStatus = ListingWorkflowCopy.offerStatusShort(_isAr, statusRaw);
     final longStatus = ListingWorkflowCopy.offerStatusLong(_isAr, statusRaw);
     final mid = (o['marketer_id'] ?? '').toString().trim();
@@ -1078,7 +1075,9 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         winner ? _brandTeal : cs.outlineVariant.withValues(alpha: 0.45);
 
     final avatarUrl = (o['_marketer_avatar_url'] ?? '').toString().trim();
-    final phone = (o['_marketer_phone'] ?? '').toString().trim();
+    final phone = winner
+        ? (o['_marketer_phone'] ?? '').toString().trim()
+        : '';
     final license = (o['_marketer_license_no'] ?? '').toString().trim();
     final exp =
         DateTime.tryParse((o['expires_at'] ?? '').toString())?.toLocal();
@@ -1227,6 +1226,14 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                     label: _isAr ? 'نوع الجهة' : 'Entity type',
                     value: _accountTypeHuman(o),
                   ),
+                  RequestSummaryRow(
+                    label: _isAr ? 'صفة الظهور' : 'Name shown as',
+                    value: identity.source == PublicNameSource.display
+                        ? (_isAr ? 'اسم مستعار' : 'Alias')
+                        : (_isAr
+                            ? 'الاسم المعتمد (رباعي / مكتب / مؤسسة / شركة)'
+                            : 'Official (quad / office / institution / company)'),
+                  ),
                   if (phone.isNotEmpty)
                     RequestSummaryRow(
                       label: _isAr ? 'الجوال' : 'Phone',
@@ -1265,6 +1272,15 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
             ),
             if (notes.isNotEmpty) ...[
               const SizedBox(height: 8),
+              Text(
+                _isAr ? 'رسالة العرض' : 'Offer message',
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
               Text(
                 notes,
                 style: TextStyle(

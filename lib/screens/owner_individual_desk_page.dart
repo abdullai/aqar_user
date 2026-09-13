@@ -3,6 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../l10n/app_localizations.dart';
+import 'photographer_join_page.dart';
+import 'photographer_hub_page.dart';
+import '../services/photographer_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../main.dart' show langNotifier;
@@ -11,9 +15,11 @@ import 'subscriptions/subscriptions_root_screen.dart';
 
 /// «إدارتي» للمعلن المالك الفرد — شاشة بتبويبات منظّمة:
 ///   • نظرة عامة (إحصائيات + رسوم)
-///   • تحليل السوق (نُقل من قائمة الثلاث نقاط إلى تبويب مستقل)
-///   • إعلاناتي (قائمة سريعة)
+///   • تحليل السوق
 ///   • الاشتراك والمدفوعات
+///
+/// إدارة الإعلانات وطلبات التسويق من تبويب «صفحتي» في الشريط السفلي،
+/// وليست من إدارتي. طبقة الفريق (كل إعلانات/طلبات الأعضاء) في لوحة المنشأة.
 class OwnerIndividualDeskPage extends StatefulWidget {
   const OwnerIndividualDeskPage({
     super.key,
@@ -49,7 +55,7 @@ class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 4, vsync: this);
+    _tab = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -79,10 +85,6 @@ class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
           text: _isAr ? 'تحليل السوق' : 'Market insights',
         ),
         Tab(
-          icon: const Icon(Icons.list_alt_outlined),
-          text: _isAr ? 'إعلاناتي' : 'My listings',
-        ),
-        Tab(
           icon: const Icon(Icons.subscriptions_outlined),
           text: _isAr ? 'المدفوعات' : 'Payments',
         ),
@@ -92,7 +94,6 @@ class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
     final deskChildren = <Widget>[
       _OverviewTab(lang: widget.lang, userId: widget.userId),
       MarketInsightsPage(lang: widget.lang, embedAppBar: true),
-      _MyListingsTab(lang: widget.lang, userId: widget.userId),
       SubscriptionsRootScreen(
         lang: widget.lang,
         accountType: (widget.accountType == null ||
@@ -147,9 +148,6 @@ class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
           leading: !widget.suppressImpliedLeading
               ? AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           title: Text(title),
@@ -279,6 +277,18 @@ class _OverviewTabState extends State<_OverviewTab>
             style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
           ),
           const SizedBox(height: 12),
+          _PhotographerDeskEntry(lang: widget.lang),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.web_stories_outlined),
+              title: Text(
+                AppLocalizations.of(context)!.ownerDeskManageListingsInMyPage,
+                style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -386,160 +396,34 @@ class _OverviewTabState extends State<_OverviewTab>
   }
 }
 
-// ---------------------------------------------------------------------------
-// تبويب 3: إعلاناتي (قائمة سريعة)
-// ---------------------------------------------------------------------------
-
-class _MyListingsTab extends StatefulWidget {
-  const _MyListingsTab({required this.lang, required this.userId});
+class _PhotographerDeskEntry extends StatelessWidget {
+  const _PhotographerDeskEntry({required this.lang});
 
   final String lang;
-  final String userId;
-
-  @override
-  State<_MyListingsTab> createState() => _MyListingsTabState();
-}
-
-class _MyListingsTabState extends State<_MyListingsTab>
-    with AutomaticKeepAliveClientMixin {
-  final _sb = Supabase.instance.client;
-  bool _loading = true;
-  String? _err;
-  List<Map<String, dynamic>> _rows = const [];
-
-  bool get _isAr => langNotifier.value != 'en';
-
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _err = null;
-    });
-    try {
-      final rows = await _sb
-          .from('properties')
-          .select(
-              'id,title,status,views,price,created_at,property_type,bedrooms,bathrooms,area_sqm')
-          .eq('owner_id', widget.userId)
-          .order('created_at', ascending: false)
-          .limit(100);
-      if (!mounted) return;
-      setState(() {
-        _rows = (rows as List)
-            .map((e) => Map<String, dynamic>.from(e as Map))
-            .toList();
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _err = e.toString();
-        _loading = false;
-      });
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context);
-    final cs = Theme.of(context).colorScheme;
-    if (_loading) return const Center(child: AppLogoLoading());
-    if (_err != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: SelectableText(_err!),
+    final l10n = AppLocalizations.of(context)!;
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.photo_camera_outlined),
+        title: Text(
+          l10n.photographerJoinCta,
+          style: const TextStyle(fontWeight: FontWeight.w800),
         ),
-      );
-    }
-    if (_rows.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          padding: const EdgeInsets.all(24),
-          children: [
-            const SizedBox(height: 80),
-            Icon(Icons.inbox_outlined,
-                size: 56, color: cs.onSurface.withValues(alpha: 0.45)),
-            const SizedBox(height: 12),
-            Center(
-              child: Text(
-                _isAr
-                    ? 'لا توجد إعلانات بعد — ابدأ بنشر إعلانك الأول.'
-                    : 'No listings yet — start by posting your first ad.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        padding: const EdgeInsets.all(12),
-        itemCount: _rows.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (_, i) {
-          final r = _rows[i];
-          final title = (r['title'] ?? '').toString().trim();
-          final status = (r['status'] ?? '—').toString();
-          final views = (r['views'] as num?)?.toInt() ?? 0;
-          final price = (r['price'] as num?)?.toDouble();
-          final type = (r['property_type'] ?? '').toString();
-          final bed = (r['bedrooms'] as num?)?.toInt();
-          final bath = (r['bathrooms'] as num?)?.toInt();
-          final area = (r['area_sqm'] as num?)?.toDouble();
-          return Card(
-            margin: EdgeInsets.zero,
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: cs.primaryContainer,
-                foregroundColor: cs.onPrimaryContainer,
-                child: const Icon(Icons.apartment_outlined),
-              ),
-              title: Text(
-                title.isNotEmpty ? title : (_isAr ? 'بدون عنوان' : 'Untitled'),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                [
-                  if (type.isNotEmpty) type,
-                  if (bed != null) (_isAr ? '$bed غرف' : '$bed bed'),
-                  if (bath != null) (_isAr ? '$bath حمام' : '$bath bath'),
-                  if (area != null) (_isAr ? '${area.toStringAsFixed(0)} م²' : '${area.toStringAsFixed(0)} m²'),
-                  if (price != null)
-                    (_isAr
-                        ? '${price.toStringAsFixed(0)} ر.س'
-                        : '${price.toStringAsFixed(0)} SAR'),
-                  status,
-                ].join(' · '),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.visibility_outlined, size: 16, color: cs.primary),
-                  const SizedBox(height: 2),
-                  Text('$views',
-                      style: const TextStyle(fontWeight: FontWeight.w900)),
-                ],
-              ),
+        subtitle: Text(l10n.photographerReviewSla),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () async {
+          PhotographerProfile? p;
+          try {
+            p = await PhotographerService(Supabase.instance.client).myProfile();
+          } catch (_) {}
+          if (!context.mounted) return;
+          await Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(
+              builder: (_) => p != null && p.isVerified
+                  ? PhotographerHubPage(lang: lang)
+                  : PhotographerJoinPage(lang: lang),
             ),
           );
         },

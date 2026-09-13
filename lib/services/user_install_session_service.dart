@@ -81,11 +81,44 @@ class UserInstallSessionService {
     }
   }
 
-  /// تلميحات لـ bump_user_session_epoch (مدينة تقريبية + وصف الجهاز).
-  static Future<({String? city, String? label})> sessionHintsForBump() async {
+  /// تلميحات لـ bump_user_session_epoch (مدينة + وصف الجهاز + منصة + تثبيت).
+  static Future<
+      ({String? city, String? label, String platform, String installId})>
+      sessionHintsForBump() async {
     final city = await _preferredCityDisplay();
     final label = await AuthService.devicePlatformModelLabel();
-    return (city: city, label: label);
+    final installId = await installDeviceKey();
+    return (
+      city: city,
+      label: label,
+      platform: _sessionPlatformCode(label),
+      installId: installId,
+    );
+  }
+
+  static String _sessionPlatformCode(String label) {
+    final u = label.toLowerCase();
+    if (kIsWeb) {
+      if (u.contains('android') || u.contains('ios') || u.contains('iphone')) {
+        return 'web_mobile';
+      }
+      if (u.contains('windows')) return 'web_windows';
+      return 'web_desktop';
+    }
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'android';
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.windows:
+        return 'windows';
+      case TargetPlatform.macOS:
+        return 'macos';
+      case TargetPlatform.linux:
+        return 'linux';
+      default:
+        return defaultTargetPlatform.name;
+    }
   }
 
   /// بعد تسجيل الدخول: حجز خانة جهاز (حدّ 2) أو إرجاع device_limit.

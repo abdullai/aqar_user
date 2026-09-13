@@ -1,23 +1,23 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier;
 import '../services/org_team_service.dart';
-import '../services/subscription_service.dart';
+import '../services/photographer_service.dart';
+import 'photographer_hub_page.dart';
+import 'photographer_join_page.dart';
 import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
 
-/// إعدادات المنشأة للمالك (تعديل بيانات + تجديد رخصة العرض + مقاعد).
+/// إعدادات المنشأة: بيانات العرض العام فقط (الاشتراك/فال/المقاعد في تبويب الاشتراكات).
 class OrganizationSettingsScreen extends StatefulWidget {
   const OrganizationSettingsScreen({
     super.key,
     this.embedAppBar = false,
   });
 
-  /// عند `true`: بدون [AppBar] داخلي — تعتمد على الشريط العلوي
-  /// للشاشة الأم (لتفادي ظهور سهمَي رجوع داخل لوحة «إدارتي» والاشتراكات).
   final bool embedAppBar;
 
   @override
@@ -27,7 +27,6 @@ class OrganizationSettingsScreen extends StatefulWidget {
 
 class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen> {
   final _svc = OrgTeamService(Supabase.instance.client);
-  late final _sub = SubscriptionService(Supabase.instance.client);
 
   final _nameAr = TextEditingController();
   final _nameEn = TextEditingController();
@@ -42,8 +41,6 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
 
   bool _loading = true;
   bool _saving = false;
-  Map<String, dynamic>? _profile;
-  bool _orgSubscriptionInactive = false;
 
   bool get _isAr => langNotifier.value != 'en';
 
@@ -74,12 +71,6 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
     final org = await _svc.orgUnitForOwner();
     final id = org?['id']?.toString();
     if (id != null && id.isNotEmpty) {
-      final sub = await _sub.getCurrentSubscription(organizationId: id);
-      final end = DateTime.tryParse('${sub?['end_date']}');
-      final st = '${sub?['status'] ?? ''}';
-      final inactive = sub == null ||
-          st != 'active' ||
-          (end != null && end.isBefore(DateTime.now()));
       final p = await _svc.publicOrganizationProfile(id);
       if (p != null) {
         _nameAr.text = '${p['display_name_ar'] ?? ''}';
@@ -92,15 +83,22 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
         _phone.text = '${p['org_public_phone'] ?? ''}';
         _logoUrl.text = '${p['logo_url'] ?? ''}';
         _coverUrl.text = '${p['cover_url'] ?? ''}';
-        _profile = p;
       }
-      if (!mounted) return;
-      setState(() => _orgSubscriptionInactive = inactive);
-    } else {
-      _orgSubscriptionInactive = false;
     }
     if (!mounted) return;
     setState(() => _loading = false);
+  }
+
+  int get _completeness {
+    final filled = [
+      _nameAr,
+      _nameEn,
+      _descAr,
+      _addrAr,
+      _email,
+      _phone,
+    ].where((c) => c.text.trim().isNotEmpty).length;
+    return ((filled / 6) * 100).round();
   }
 
   Future<void> _save() async {
@@ -122,7 +120,11 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
       if (!mounted) return;
       if (res['ok'] == false) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${res['error'] ?? 'Error'}')),
+          SnackBar(
+            content: Text(
+              '${res['error'] ?? (_isAr ? 'تعذر الحفظ' : 'Save failed')}',
+            ),
+          ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -140,239 +142,231 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
     }
   }
 
-  Future<void> _renew() async {
-    final t = AppLocalizations.of(context)!;
-    final messenger = ScaffoldMessenger.of(context);
-    setState(() => _saving = true);
-    final r = await _svc.renewFalLicense();
-    if (!mounted) return;
-    setState(() => _saving = false);
-    if (r['ok'] == true) {
-      final c = '${r['fal_public_code'] ?? ''}';
-      await Clipboard.setData(ClipboardData(text: c));
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text(t.orgSetupFalLine(c))),
-      );
-      await _load();
-    }
-  }
+  String _lbl(String ar, String en) => _isAr ? ar : en;
 
-  Future<void> _buySeats() async {
-    final t = AppLocalizations.of(context)!;
-    // اقرأ سعر العضو الإضافي بخصم 50% من الباقة الحالية.
-    final info = await _sub.getSeatUnitPriceInfo();
-    if (!mounted) return;
-    if (info['ok'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isAr
-              ? 'لا يمكن قراءة سعر المقعد — هل لديك اشتراك فعّال؟'
-              : 'Cannot read seat price — do you have an active subscription?'),
-        ),
-      );
-      return;
-    }
-    final seatPriceNum = info['seat_unit_price_sar'];
-    final seatPrice = (seatPriceNum is num)
-        ? seatPriceNum.toDouble()
-        : double.tryParse('$seatPriceNum') ?? 0;
-    final remaining = int.tryParse('${info['remaining_slots_in_plan']}') ?? 0;
-    final disc = int.tryParse('${info['team_member_discount_percent']}') ?? 50;
-
-    final ctrl = TextEditingController(text: '1');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(t.orgBuySeats),
-        content: StatefulBuilder(
-          builder: (ctx2, setS) {
-            final n = int.tryParse(ctrl.text.trim()) ?? 0;
-            final total = (n > 0 ? n : 0) * seatPrice;
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _isAr
-                      ? 'سعر العضو الإضافي: ${seatPrice.toStringAsFixed(0)} ر.س (خصم $disc٪ تلقائي)'
-                      : 'Seat price: ${seatPrice.toStringAsFixed(0)} SAR (auto $disc% discount)',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _isAr
-                      ? 'المتبقي من حد الفريق في الباقة الحالية: $remaining'
-                      : 'Remaining slots in current plan: $remaining',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                const SizedBox(height: 12),
-                AqarTextField(
-                  controller: ctrl,
-                  keyboardType: TextInputType.number,
-                  decoration: InputDecoration(
-                    labelText: _isAr ? 'العدد' : 'Count',
-                  ),
-                  onChanged: (_) => setS(() {}),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _isAr
-                      ? 'الإجمالي المتوقّع: ${total.toStringAsFixed(0)} ر.س'
-                      : 'Total: ${total.toStringAsFixed(0)} SAR',
-                  style: const TextStyle(fontWeight: FontWeight.w900),
-                ),
-              ],
-            );
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_isAr ? 'تأكيد الشراء' : 'Confirm'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true) return;
-    final n = int.tryParse(ctrl.text.trim()) ?? 0;
-    ctrl.dispose();
-    if (n <= 0) return;
-    setState(() => _saving = true);
-    final r = await _sub.purchaseExtraSeatsPriced(extraSeats: n);
-    if (!mounted) return;
-    setState(() => _saving = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          r['ok'] == true
-              ? (_isAr
-                  ? 'تم تحديث المقاعد · المبلغ: ${r['total_charged_sar']} ر.س'
-                  : 'Seats updated · Total: ${r['total_charged_sar']} SAR')
-              : '${r['error']}',
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    String? helper,
+    int maxLines = 1,
+    TextInputType? keyboardType,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: AqarTextField(
+        controller: controller,
+        maxLines: maxLines,
+        keyboardType: keyboardType,
+        onChanged: (_) => setState(() {}),
+        decoration: InputDecoration(
+          labelText: label,
+          helperText: helper,
+          helperMaxLines: 2,
+          alignLabelWithHint: maxLines > 1,
         ),
       ),
     );
-    if (r['ok'] == true) await _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
-    final mc = int.tryParse('${_profile?['member_count']}') ?? 0;
-    final lim = int.tryParse('${_profile?['seat_limit']}') ?? 1;
+    final cs = Theme.of(context).colorScheme;
+    final previewName = _isAr
+        ? (_nameAr.text.trim().isNotEmpty
+            ? _nameAr.text.trim()
+            : _nameEn.text.trim())
+        : (_nameEn.text.trim().isNotEmpty
+            ? _nameEn.text.trim()
+            : _nameAr.text.trim());
 
     return Scaffold(
       appBar: widget.embedAppBar
           ? null
           : AppBar(
               automaticallyImplyLeading: false,
+              leading: AppPageCloseButton(isArabic: _isAr),
               title: Text(t.orgSettingsTitle),
             ),
       body: _loading
           ? const Center(child: AppLogoLoading())
           : SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  if (_orgSubscriptionInactive) ...[
-                    Card(
-                      color: Theme.of(context).colorScheme.errorContainer,
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.warning_amber_rounded,
-                              color: Theme.of(context).colorScheme.onErrorContainer,
+                  Card(
+                    color: cs.primaryContainer.withValues(alpha: 0.35),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 44,
+                            height: 44,
+                            child: CircularProgressIndicator(
+                              value: _completeness / 100,
+                              strokeWidth: 5,
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                t.subscriptionsOrgSubscriptionExpired,
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.onErrorContainer,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _lbl(
+                                    'اكتمال ملف المنشأة $_completeness٪',
+                                    'Profile completeness $_completeness%',
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                  ),
                                 ),
-                              ),
+                                Text(
+                                  _lbl(
+                                    'الاسم والوصف والعنوان والتواصل تظهر للعملاء.',
+                                    'Name, description, address and contact appear to clients.',
+                                  ),
+                                  style: TextStyle(
+                                    color: cs.onSurfaceVariant,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.photo_camera_outlined),
+                      title: Text(
+                        t.photographerJoinCta,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: Text(t.photographerReviewSla),
+                      onTap: () async {
+                        PhotographerProfile? p;
+                        try {
+                          p = await PhotographerService(
+                            Supabase.instance.client,
+                          ).myProfile();
+                        } catch (_) {}
+                        if (!context.mounted) return;
+                        final lang = langNotifier.value;
+                        await Navigator.of(context).push<void>(
+                          MaterialPageRoute<void>(
+                            builder: (_) => p != null && p.isVerified
+                                ? PhotographerHubPage(lang: lang)
+                                : PhotographerJoinPage(lang: lang),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Card(
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        child: Text(
+                          previewName.isEmpty
+                              ? '—'
+                              : String.fromCharCodes(previewName.runes.take(1)),
+                        ),
+                      ),
+                      title: Text(
+                        previewName.isEmpty
+                            ? _lbl('معاينة الاسم العام', 'Public name preview')
+                            : previewName,
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                      subtitle: Text(
+                        _lbl(
+                          'هكذا يظهر اسم منشأتك في البطاقات والتواصل.',
+                          'This is how your organization name appears on cards.',
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                  ],
-                  LinearProgressIndicator(
-                    value: lim > 0 ? mc / lim : null,
                   ),
-                  Text('$mc / $lim', textAlign: TextAlign.end),
+                  const SizedBox(height: 8),
+                  Text(
+                    _lbl(
+                      'تجديد رخصة فال وشراء المقاعد من تبويب «إدارة الاشتراك» وليس من هنا.',
+                      'Renew FAL and extra seats from the Subscription tab, not here.',
+                    ),
+                    style: TextStyle(
+                      color: cs.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
                   const SizedBox(height: 16),
-                  FilledButton.tonal(
-                    onPressed: (_saving || _orgSubscriptionInactive) ? null : _renew,
-                    child: Text(t.orgRenewFal),
-                  ),
-                  const SizedBox(height: 8),
-                  FilledButton.tonal(
-                    onPressed: _saving ? null : _buySeats,
-                    child: Text(t.orgBuySeats),
-                  ),
-                  const SizedBox(height: 24),
-                  AqarTextField(
+                  _field(
                     controller: _nameAr,
-                    decoration: const InputDecoration(labelText: 'Name (AR)'),
+                    label: _lbl('اسم المنشأة بالعربية', 'Organization name (Arabic)'),
+                    helper: _lbl(
+                      'الاسم الرسمي كما يظهر للعملاء في الواجهة العربية.',
+                      'Official name shown in the Arabic interface.',
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _nameEn,
-                    decoration: const InputDecoration(labelText: 'Name (EN)'),
+                    label: _lbl('اسم المنشأة بالإنجليزية', 'Organization name (English)'),
+                    helper: _lbl(
+                      'يُستخدم عند اختيار العميل للغة الإنجليزية.',
+                      'Used when the client chooses English.',
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _descAr,
+                    label: _lbl('وصف المنشأة بالعربية', 'Description (Arabic)'),
+                    helper: _lbl(
+                      'نبذة قصيرة عن نشاطكم العقاري.',
+                      'A short note about your real-estate work.',
+                    ),
                     maxLines: 3,
-                    decoration: const InputDecoration(labelText: 'Description (AR)'),
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _descEn,
+                    label: _lbl('وصف المنشأة بالإنجليزية', 'Description (English)'),
                     maxLines: 3,
-                    decoration: const InputDecoration(labelText: 'Description (EN)'),
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _addrAr,
-                    decoration: const InputDecoration(labelText: 'Address (AR)'),
+                    label: _lbl('العنوان بالعربية', 'Address (Arabic)'),
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _addrEn,
-                    decoration: const InputDecoration(labelText: 'Address (EN)'),
+                    label: _lbl('العنوان بالإنجليزية', 'Address (English)'),
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _email,
-                    decoration: const InputDecoration(labelText: 'Email'),
+                    label: _lbl('البريد الإلكتروني العام', 'Public email'),
+                    keyboardType: TextInputType.emailAddress,
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _phone,
-                    decoration: const InputDecoration(labelText: 'Phone'),
+                    label: _lbl('الجوال العام', 'Public phone'),
+                    keyboardType: TextInputType.phone,
                   ),
-                  const SizedBox(height: 8),
-                  AqarTextField(
+                  _field(
                     controller: _logoUrl,
-                    decoration: const InputDecoration(labelText: 'Logo URL'),
+                    label: _lbl('رابط الشعار', 'Logo link'),
+                    helper: _lbl(
+                      'رابط صورة الشعار إن رُفع إلى التخزين.',
+                      'Logo image URL if uploaded to storage.',
+                    ),
+                  ),
+                  _field(
+                    controller: _coverUrl,
+                    label: _lbl('رابط صورة الغلاف', 'Cover image link'),
                   ),
                   const SizedBox(height: 8),
-                  AqarTextField(
-                    controller: _coverUrl,
-                    decoration: const InputDecoration(labelText: 'Cover URL'),
-                  ),
-                  const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _saving ? null : _save,
                     child: Text(_isAr ? 'حفظ' : 'Save'),

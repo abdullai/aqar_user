@@ -1,4 +1,4 @@
-// ignore_for_file: unused_element, unused_field
+// ignore_for_file: unused_element, unused_field, unnecessary_null_comparison
 
 part of 'user_dashboard.dart';
 
@@ -22,7 +22,7 @@ class UserDashboard extends StatefulWidget {
 }
 
 class _UserDashboardState extends State<UserDashboard>
-    with TickerProviderStateMixin, MarketingStateMixin {
+    with TickerProviderStateMixin, MarketingStateMixin, WidgetsBindingObserver {
   // =========================
   // ✅ Loading watchdog (UI only)
   // =========================
@@ -57,11 +57,14 @@ class _UserDashboardState extends State<UserDashboard>
   static const int minePropertiesFetchLimitWeb = 80;
   static const int mapDiscoveryFetchLimit = 500;
 
-  /// يتبع لون التمييز من الثيم (يتحدّث مع اختيار اللون في الإعدادات).
-  Color _brandPrimary = const Color(0xFF0F766E);
+  /// لون التمييز الحي من الثيم (إعدادات + الوضع الليلي).
+  Color get _brandPrimary => Theme.of(context).colorScheme.primary;
   final _sb = Supabase.instance.client;
   final TextEditingController _inlineSearchCtrl = TextEditingController();
   final ScrollController _filterChipsHScrollCtrl = ScrollController();
+
+  /// تمرير فيد الرئيسية — يُثبَّت أعلى البطاقة الجديدة بعد النشر.
+  final ScrollController _homeFeedScrollCtrl = ScrollController();
 
   /// يُربَط بقائمة المحتوى أثناء جولة التعريف لتمرير العجلة من فوق الخلفية المعتمة.
   final ScrollController _dashboardOnboardingBackdropScroll =
@@ -83,6 +86,9 @@ class _UserDashboardState extends State<UserDashboard>
   /// عناوين المسارات المضمّنة تحت التحية (إدارتي / إعدادات / …).
   final List<String?> _nestedTitleStack = <String?>[];
 
+  /// أسماء مسارات الجسم المضمّن (لإخفاء X في تبويب إدارتي الرئيسي).
+  final List<String> _nestedRouteNameStack = <String>[];
+
   Offset? _dashboardSwipeStart;
   bool _swipeBackEnabled = true;
   bool _edgeOnlySwipeBack = false;
@@ -99,6 +105,7 @@ class _UserDashboardState extends State<UserDashboard>
   RealtimeChannel? _homeFeedRealtimeChannel;
   Timer? _homeFeedRealtimeDebounce;
   bool _didInitialLoad = false;
+  bool _shortsRouteOpen = false;
   bool _reloading = false;
   String? _lastAuthUserId;
 
@@ -107,7 +114,17 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   int _tabIndex = 0;
 
-  /// تمييز مؤقت لشريط التنقل أثناء شورتز/إدارتي (لا يُعاد للرئيسية بصرياً).
+  /// التبويب الذي كان مفتوحاً قبل زر + حتى الإغلاق يعيد المستخدم إليه.
+  int? _tabBeforePlusComposer;
+
+  /// 0 الرئيسية، 1 صفحتي، 2 طلباتي، 3 صفقاتي، 4 الدعم، 5 إدارتي.
+  static const int _kDashboardTabCount = 6;
+
+  /// أثناء طبقة مفتوحة: لا تُعد التبويب إذا اختار المستخدم تبويباً من الشريط.
+  bool _userChoseDashboardTab = false;
+  int _overlayNavDepth = 0;
+
+  /// تمييز مؤقت لشريط التنقل أثناء شورتز (لا يُعاد للرئيسية بصرياً).
   int? _bottomNavTransientIndex;
 
   /// ويب: تبويبات زِيرت + قائمة أبناء ثابتة لـ [IndexedStack].
@@ -118,11 +135,11 @@ class _UserDashboardState extends State<UserDashboard>
   List<Widget>? _webTabChildren;
   int _webTabChildrenFeedSig = -1;
   int _webTabChildrenHubSig = -1;
+  int _webTabChildrenCartSig = -1;
   int _webBuiltActiveTab = -1;
   String? _lastWebHomePaintSig;
 
   /// يُستخدم سابقاً لتشخيص «كتالوج ملكك فقط» — أُزيل مسار الإظهار الاحتياطي.
-  // ignore: unused_field
   int _webSelfOwnedPoolLogLen = -1;
 
   /// تبويب «التعاقد» للمسوّق: 0 = تمت الموافقة، 1 = بانتظار التعاقد.
@@ -169,6 +186,7 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   bool _showDashboardOnboarding = false;
+
   /// إعادة الجولة من الإعدادات فقط — بعدها يُعرض اختيار الألوان مرة.
   bool _offerAccentAfterTourReplay = false;
   String _searchQuery = '';
@@ -543,16 +561,68 @@ class _UserDashboardState extends State<UserDashboard>
     setState(fn);
   }
 
+  Future<T?> _keepCurrentTab<T>(Future<T?> Function() action) async {
+    final origin = _tabIndex;
+    _overlayNavDepth++;
+    try {
+      return await action();
+    } finally {
+      _overlayNavDepth--;
+      if (mounted) {
+        if (_userChoseDashboardTab) {
+          if (_overlayNavDepth <= 0) {
+            _userChoseDashboardTab = false;
+          }
+        } else if (_tabIndex != origin) {
+          _ss(() {
+            _tabIndex = origin;
+            _bottomNavTransientIndex = null;
+            if (kIsWeb) _webVisitedTabs.add(origin);
+          });
+        } else if (_bottomNavTransientIndex != null) {
+          _ss(() => _bottomNavTransientIndex = null);
+        }
+      }
+    }
+  }
+
+  Future<T?> _pushRootOverlay<T extends Object?>(Route<T> route) {
+    return _keepCurrentTab(
+      () => Navigator.of(context, rootNavigator: true).push<T>(route),
+    );
+  }
+
+  Object? _captureOverlayNavMemory() => _tabIndex;
+
+  void _restoreOverlayNavMemory(Object? snap) {
+    if (snap is! int || !mounted || _userChoseDashboardTab) return;
+    if (_tabIndex == snap) return;
+    _ss(() {
+      _tabIndex = snap.clamp(0, _kDashboardTabCount - 1);
+      _bottomNavTransientIndex = null;
+      if (kIsWeb) _webVisitedTabs.add(_tabIndex);
+    });
+  }
+
+  void _jumpMyPageHubTabs({int? ownerTabIndex, int? marketerTabIndex}) {
+    if (ownerTabIndex != null) {
+      final c = _ownerTabsCtrl;
+      if (c != null && ownerTabIndex >= 0 && ownerTabIndex < c.length) {
+        c.animateTo(ownerTabIndex);
+      }
+    }
+    if (marketerTabIndex != null) {
+      final c = _marketerTabsCtrl;
+      if (c != null && marketerTabIndex >= 0 && marketerTabIndex < c.length) {
+        c.animateTo(marketerTabIndex);
+      }
+    }
+  }
+
   void _markDashboardFeedDirty() {
     _nestedDashboardFeedCacheBuiltKey = -1;
-    // ويب: لا تهدم IndexedStack ولا تصفّر feedSig (تصفيره كان يفرض home.paint دائماً).
-    if (kIsWeb) {
-      _scheduleNestedDashboardFeedCacheRebuild();
-      return;
-    }
-    _webTabChildren = null;
-    _webTabChildrenFeedSig = -1;
-    _webMaterializedTabs.clear();
+    // لا تهدم IndexedStack — صفحتي تبقى حيّة عند تحديث فيد الرئيسية.
+    _scheduleNestedDashboardFeedCacheRebuild();
   }
 
   void _flushHomeFeedMutations() {
@@ -562,20 +632,12 @@ class _UserDashboardState extends State<UserDashboard>
     _homeFeedPendingMutations.clear();
     if (pending.isEmpty) return;
     _nestedDashboardFeedCacheBuiltKey = -1;
-    if (!kIsWeb) {
-      _webTabChildren = null;
-      _webTabChildrenFeedSig = -1;
-      _webMaterializedTabs.clear();
-    }
     setState(() {
       for (final mutate in pending) {
         mutate();
       }
     });
-    // جدول إعادة بناء واحدة بعد الدفعة — لا تستدعِها قبل setState مع عواصف متداخلة.
-    if (kIsWeb) {
-      _scheduleNestedDashboardFeedCacheRebuild();
-    }
+    _scheduleNestedDashboardFeedCacheRebuild();
   }
 
   /// على الويب: طبّق طابور الرئيسية فوراً (بعد الجلب) حتى لا يبقى `_all` فارغاً
@@ -600,6 +662,78 @@ class _UserDashboardState extends State<UserDashboard>
     }
     _markDashboardFeedDirty();
     _ss(fn);
+  }
+
+  /// بعد إتمام/إلغاء صفقة: أعد رسم الرئيسية و«صفقاتي» فوراً (ويب IndexedStack كان يُبقي التبويب قديماً).
+  void _bumpDealFeedSurfaces({bool openCart = false}) {
+    _homeFeedDataEpoch++;
+    _nestedDashboardFeedCacheBuiltKey = -1;
+    if (kIsWeb) {
+      _webTabChildrenFeedSig = -1;
+      _webTabChildrenHubSig = -1;
+      _webTabChildrenCartSig = -1;
+      _webVisitedTabs.add(3);
+      _webMaterializedTabs.remove(3);
+      _webMaterializedTabs.remove(0);
+    }
+    if (openCart && _showBottomNavCart) {
+      _tabIndex = 3;
+    }
+  }
+
+  void _applyLocalListingDealToCart(Property p, {double? basePrice}) {
+    final pid = p.id.trim();
+    if (pid.isEmpty) return;
+    final now = DateTime.now().toUtc();
+    final row = <String, dynamic>{
+      'id': 'local-$pid',
+      'property_id': pid,
+      'user_id': _uid,
+      'status': 'pending',
+      'created_at': now.toIso8601String(),
+      'expires_at': now.add(const Duration(hours: 72)).toIso8601String(),
+      'base_price': basePrice ?? p.price,
+      'platform_fee_amount': 0,
+      'extra_fee_amount': 0,
+      'total_amount': 0,
+    };
+    _cart = [
+      row,
+      ..._cart.where((r) => (r['property_id'] ?? '').toString().trim() != pid),
+    ];
+    _cartPropertyById = {..._cartPropertyById, pid: p};
+    _propertyCache[pid] = p;
+    _cartCount = _cart.length;
+    _loadingCart = false;
+    _errorCart = null;
+  }
+
+  void _applyLocalMarketRequestDealToCart(
+    MarketPropertyRequestRow row, {
+    String message = '',
+    double? price,
+  }) {
+    final rid = row.id.trim();
+    if (rid.isEmpty) return;
+    _marketRequestIdsWithMyPendingOffer = {
+      ..._marketRequestIdsWithMyPendingOffer,
+      rid,
+    };
+    final offer = <String, dynamic>{
+      'id': 'local-$rid',
+      'market_request_id': rid,
+      'status': 'submitted',
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'message': message,
+      if (price != null) 'price_offer': price,
+      '_request_title': row.title,
+    };
+    _myPendingMarketOffersForCart = [
+      offer,
+      ..._myPendingMarketOffersForCart.where(
+        (m) => (m['market_request_id'] ?? '').toString().trim() != rid,
+      ),
+    ];
   }
 
   void _toast(String msg, {bool isError = false}) {
@@ -652,11 +786,143 @@ class _UserDashboardState extends State<UserDashboard>
 
   DateTime? _tryParseDt(dynamic v) => DateHelper.tryParse(v);
 
-  String _fmtDateTime(DateTime dt) => DateHelper.fmtDateTime(dt);
+  String _fmtDateTime(DateTime dt) =>
+      DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: _isArabic);
 
   String _timeAgo(DateTime dt, [bool? isArabic]) {
     final ar = isArabic ?? _isArabic;
     return DateHelper.timeAgo(dt, isAr: ar);
+  }
+
+  String _fmtDealEnd(DateTime dt) =>
+      DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: _isArabic);
+
+  List<String> _myDealKeysChronological() {
+    final rows = <(String, DateTime)>[];
+    void add(String id, dynamic created) {
+      final k = id.trim();
+      if (k.isEmpty) return;
+      rows.add(
+          (k, _tryParseDt(created) ?? DateTime.fromMillisecondsSinceEpoch(0)));
+    }
+
+    for (final r in _cart) {
+      add((r['id'] ?? '').toString(), r['created_at']);
+    }
+    for (final o in _myPendingMarketOffersForCart) {
+      add((o['id'] ?? '').toString(), o['created_at']);
+    }
+    for (final o in _visibleArchivedMarketOffersForCart) {
+      add((o['id'] ?? '').toString(), o['created_at']);
+    }
+    for (final r in _completedCart) {
+      add((r['id'] ?? '').toString(), r['created_at']);
+    }
+    rows.sort((a, b) {
+      final c = a.$2.compareTo(b.$2);
+      return c != 0 ? c : a.$1.compareTo(b.$1);
+    });
+    final seen = <String>{};
+    final out = <String>[];
+    for (final r in rows) {
+      if (seen.add(r.$1)) out.add(r.$1);
+    }
+    return out;
+  }
+
+  int _myDealOrdinal(String id) {
+    final keys = _myDealKeysChronological();
+    final i = keys.indexOf(id.trim());
+    return i < 0 ? keys.length + 1 : i + 1;
+  }
+
+  Widget _smartDealInvoice(Property? p, {double fallbackBase = 0}) {
+    final entered = (p != null && p.price > 0) ? p.price : fallbackBase;
+    final kind = (p?.marketingCommissionKind ?? 'none').trim().toLowerCase();
+    final commissionAmt = p?.marketingCommissionTotal ?? 0;
+    final showCommission =
+        commissionAmt > 0.009 && (kind == 'percent' || kind == 'fixed');
+    final inv = ListingInvoiceModel(
+      enteredPrice: entered,
+      priceIncludesVat: p?.priceIncludesVat ?? false,
+      vatRate: (p?.priceIncludesVat == true) ? (p?.vatRate ?? 0) : 0,
+      commissionKind: showCommission ? kind : 'none',
+      commissionRate: p?.marketingCommissionRate ?? 0,
+      commissionAmount: p?.marketingCommissionAmount ?? 0,
+      currencyCode: ((p?.currency ?? 'SAR').trim().isEmpty)
+          ? 'SAR'
+          : (p?.currency ?? 'SAR').trim(),
+    );
+    return ListingPricingBreakdown(
+      invoice: inv,
+      isAr: _isArabic,
+      showTitle: false,
+    );
+  }
+
+  bool _dealOfferAllowsMessaging(String? status) =>
+      DealMessagingGate.offerApprovedByOwner(status);
+
+  bool _dealReservationAllowsMessaging(String? status) =>
+      DealMessagingGate.reservationApprovedByOwner(status);
+
+  bool _propertyHasAcceptedBuyer(String propertyId) {
+    final pid = propertyId.trim();
+    if (pid.isEmpty) return false;
+    for (final o in _offers) {
+      if ((o['property_id'] ?? '').toString().trim() != pid) continue;
+      if (_dealReservationAllowsMessaging((o['status'] ?? '').toString())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Widget _dealJourneyStrip({required bool chattingHint}) {
+    final cs = Theme.of(context).colorScheme;
+    final steps = _isArabic
+        ? const ['صفقة مفتوحة', 'تواصل', 'إتمام']
+        : const ['Open deal', 'Chat', 'Complete'];
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          for (var i = 0; i < steps.length; i++) ...[
+            if (i > 0)
+              Expanded(
+                child: Container(
+                  height: 2,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  color: cs.primary.withValues(alpha: i == 2 ? 0.18 : 0.45),
+                ),
+              ),
+            Column(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: i == 0 || (i == 1 && chattingHint)
+                        ? cs.primary
+                        : cs.outlineVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  steps[i],
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
   }
   // === DASH_HELPERS_END ===
 
@@ -690,15 +956,17 @@ class _UserDashboardState extends State<UserDashboard>
       _bottomNavSlideVisible = true;
     });
     unawaited(
-      ChatNavigation.push(
-        context,
-        isAr: _isArabic,
-        propertyId: propertyId,
-        reservationId: reservationId,
-        title: title,
-        marketRequestId: marketRequestId,
-        kind: kind,
-        counterpartyId: counterpartyId,
+      _keepCurrentTab(
+        () => ChatNavigation.push(
+          context,
+          isAr: _isArabic,
+          propertyId: propertyId,
+          reservationId: reservationId,
+          title: title,
+          marketRequestId: marketRequestId,
+          kind: kind,
+          counterpartyId: counterpartyId,
+        ),
       ),
     );
   }
@@ -814,15 +1082,13 @@ class _UserDashboardState extends State<UserDashboard>
       _showLoginDialog();
       return;
     }
+    AppHaptics.selection();
     unawaited(
-      _pushBody<void>(
-        MaterialPageRoute<void>(
-          settings: const RouteSettings(name: AppRoutes.inAppNotifications),
-          builder: (_) => CommunicationHubPage(
-            lang: widget.lang,
-            isAr: _isArabic,
-            hideLeadingBecauseShellHasBack: true,
-          ),
+      _keepCurrentTab(
+        () => CommunicationHubNavigation.push(
+          context,
+          lang: widget.lang,
+          isAr: _isArabic,
         ),
       ).then((_) {
         if (mounted) unawaited(_loadNotifications());
@@ -845,10 +1111,15 @@ class _UserDashboardState extends State<UserDashboard>
       MaterialPageRoute<void>(
         settings: const RouteSettings(name: '/dashboard/favorites'),
         builder: (routeCtx) {
-          final l10n = AppLocalizations.of(routeCtx)!;
+          final loc = AppLocalizations.of(routeCtx)!;
           return Scaffold(
             appBar: AppBar(
-              title: Text(l10n.navFavorites),
+              automaticallyImplyLeading: false,
+              leading: AppPageCloseButton(
+                isArabic: _isArabic,
+                onPressed: _popDashboardBodyRoute,
+              ),
+              title: Text(loc.navFavorites),
             ),
             body: Builder(
               builder: (inner) {
@@ -953,7 +1224,6 @@ class _UserDashboardState extends State<UserDashboard>
       final acct = at.isEmpty ? _accountType : at;
       final oid = await _orgUnitIdForSubscriptionsMenu();
       if (!mounted) return;
-      final embed = MediaQuery.sizeOf(context).width >= 580;
       await _pushBody<void>(
         MaterialPageRoute<void>(
           settings: const RouteSettings(name: '/dashboard/subscriptions'),
@@ -961,8 +1231,8 @@ class _UserDashboardState extends State<UserDashboard>
             lang: widget.lang,
             accountType: acct,
             organizationId: oid,
-            initialIndex: 2,
-            embedAppBar: embed,
+            initialIndex: 0,
+            embedAppBar: false,
           ),
         ),
       );
@@ -1016,7 +1286,7 @@ class _UserDashboardState extends State<UserDashboard>
     if (_usesMarketerMyPageHub &&
         wantsPublisher &&
         (_hasOwnerRequestsData || ownsRequest || role == 'owner')) {
-      setState(() => _setMarketerPublisherHubMode(1));
+      setState(() => _setMarketerPublisherHubMode(1, resetSubTab: false));
       unawaited(_loadOwnerRequestsBuckets(force: true, silent: true));
       _ensureSubTabControllers();
       final idx = explicitMyAdsTab ?? _ownerSubTabFromStatus(status);
@@ -1025,7 +1295,7 @@ class _UserDashboardState extends State<UserDashboard>
       }
     } else if (_isMarketerRole || role == 'marketer') {
       if (_usesMarketerMyPageHub) {
-        setState(() => _setMarketerPublisherHubMode(0));
+        setState(() => _setMarketerPublisherHubMode(0, resetSubTab: false));
       }
       final idx = explicitMyAdsTab ?? _marketerSubTabFromStatus(status);
       if (_marketerTabsCtrl != null &&
@@ -1149,6 +1419,25 @@ class _UserDashboardState extends State<UserDashboard>
   bool _loadingMarketRequests = false;
   String? _errorMarketRequests;
 
+  /// بعد النشر: إظهار إعلان/طلب الناشر نفسه في أعلى الرئيسية لثوانٍ دون شاشة بيضاء.
+  String? _homeRevealOwnPropertyId;
+  String? _homeRevealOwnMarketRequestId;
+  DateTime? _homeRevealOwnUntil;
+
+  bool get _homeRevealOwnActive =>
+      _homeRevealOwnUntil != null &&
+      DateTime.now().isBefore(_homeRevealOwnUntil!);
+
+  bool _isFreshPublishRevealProperty(String id) {
+    final want = (_homeRevealOwnPropertyId ?? '').trim();
+    return _homeRevealOwnActive && want.isNotEmpty && want == id;
+  }
+
+  bool _isFreshPublishRevealRequest(String id) {
+    final want = (_homeRevealOwnMarketRequestId ?? '').trim();
+    return _homeRevealOwnActive && want.isNotEmpty && want == id;
+  }
+
   /// طلبات سوق قدّمتُ عليها عرضاً نشطاً — تُخفى من رئيسيتي وتُعرض في السلة للمتابعة.
   Set<String> _marketRequestIdsWithMyPendingOffer = <String>{};
   List<Map<String, dynamic>> _myPendingMarketOffersForCart =
@@ -1184,6 +1473,9 @@ class _UserDashboardState extends State<UserDashboard>
   Set<String> _hiddenCartMarketOfferIds = <String>{};
   List<MarketPropertyRequestRow> _myMarketSubmissions =
       <MarketPropertyRequestRow>[];
+  List<Map<String, dynamic>> _incomingMarketOffersOnMine =
+      <Map<String, dynamic>>[];
+  Map<String, int> _homeRequestApplicantCounts = <String, int>{};
   bool _loadingMyMarketSubmissions = false;
   bool _expiringPromptShown = false;
   String? _ownerHubInlineOfferBusyId;
@@ -1199,6 +1491,12 @@ class _UserDashboardState extends State<UserDashboard>
   List<Map<String, dynamic>> _completedCart = <Map<String, dynamic>>[];
   Map<String, Property> _completedCartPropertyById = {};
   int _cartCount = 0;
+  int _cartPaneIndex = 0;
+  bool _incomingDealSortNewest = false;
+  String _incomingDealStatusFilter = 'all';
+  bool _dealCompletionPromptOpen = false;
+  bool _dealCompletionPromptConsumedThisVisit = false;
+  DateTime? _lastAppHiddenAt;
 
   final Map<String, Map<String, dynamic>> _activeReservationByPropertyId = {};
 
@@ -1394,20 +1692,11 @@ class _UserDashboardState extends State<UserDashboard>
     }
   }
 
-  /// عناوين شركاء متصلين حسب المنصة/العرض.
+  /// عنوان موحّد لكل المنصات: شركاء عقاريون متصلون الآن.
   String _audiencePartnersTitle({required bool isAr}) {
-    final wideDesktopWeb = kIsWeb &&
-        MediaQuery.sizeOf(context).width >= 600 &&
-        (defaultTargetPlatform == TargetPlatform.windows ||
-            defaultTargetPlatform == TargetPlatform.macOS ||
-            defaultTargetPlatform == TargetPlatform.linux);
-    if (wideDesktopWeb) {
-      return isAr ? 'الشركاء المتصلين' : 'Connected partners';
-    }
-    if (kIsWeb) {
-      return isAr ? 'الشركاء المتصلين بالويب' : 'Partners connected on web';
-    }
-    return isAr ? 'الشركاء المتصلين بالتطبيق' : 'Partners connected in the app';
+    return isAr
+        ? 'الشركاء العقاريين المتصلون حاليا'
+        : 'Real-estate partners currently online';
   }
 
   String _audienceOnlineNowLabel({required bool isAr}) {
@@ -1463,16 +1752,16 @@ class _UserDashboardState extends State<UserDashboard>
       }));
     }
 
-    await showModalBottomSheet(
+    await showAppModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: AqarBrandColors.bg,
+      backgroundColor: AqarBrandColors.surface(cs),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (context) {
-        final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+        final bottomInset = AppKeyboardInset.bottomOf(context);
         final sheetScrollCtrl = ScrollController();
 
         return StatefulBuilder(
@@ -1500,7 +1789,7 @@ class _UserDashboardState extends State<UserDashboard>
                     border: Border.all(
                       color: selected
                           ? AqarBrandColors.primary.withOpacity(0.45)
-                          : AqarBrandColors.border.withOpacity(0.85),
+                          : AqarBrandColors.frame(cs).withOpacity(0.85),
                     ),
                   ),
                   child: Row(
@@ -1523,7 +1812,7 @@ class _UserDashboardState extends State<UserDashboard>
                           fontWeight: FontWeight.w800,
                           fontFamily: 'Cairo',
                           fontSize: 12,
-                          color: selected ? AqarBrandColors.dark : cs.onSurface,
+                          color: selected ? AqarBrandColors.ink(cs) : cs.onSurface,
                         ),
                       ),
                     ],
@@ -1559,7 +1848,7 @@ class _UserDashboardState extends State<UserDashboard>
                                   height: 5,
                                   decoration: BoxDecoration(
                                     color:
-                                        AqarBrandColors.border.withOpacity(0.9),
+                                        AqarBrandColors.frame(cs).withOpacity(0.9),
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                 ),
@@ -1571,7 +1860,7 @@ class _UserDashboardState extends State<UserDashboard>
                                     width: 42,
                                     height: 42,
                                     decoration: BoxDecoration(
-                                      color: AqarBrandColors.accent,
+                                      color: AqarBrandColors.wash(cs),
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
                                         color: AqarBrandColors.gold
@@ -1597,7 +1886,7 @@ class _UserDashboardState extends State<UserDashboard>
                                           ?.copyWith(
                                             fontWeight: FontWeight.w900,
                                             fontFamily: 'Cairo',
-                                            color: AqarBrandColors.dark,
+                                            color: AqarBrandColors.ink(cs),
                                           ),
                                     ),
                                   ),
@@ -1700,7 +1989,7 @@ class _UserDashboardState extends State<UserDashboard>
                                 ],
                               ),
                               const SizedBox(height: 14),
-                              TextFormField(
+                              AqarTextFormField(
                                 initialValue: sheet.query,
                                 onChanged: (v) {
                                   sheet.query = v;
@@ -1771,7 +2060,7 @@ class _UserDashboardState extends State<UserDashboard>
                               Row(
                                 children: [
                                   Expanded(
-                                    child: TextFormField(
+                                    child: AqarTextFormField(
                                       initialValue: sheet.areaMin,
                                       keyboardType: TextInputType.number,
                                       inputFormatters:
@@ -1790,7 +2079,7 @@ class _UserDashboardState extends State<UserDashboard>
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
-                                    child: TextFormField(
+                                    child: AqarTextFormField(
                                       initialValue: sheet.areaMax,
                                       keyboardType: TextInputType.number,
                                       inputFormatters:
@@ -2325,7 +2614,7 @@ class _UserDashboardState extends State<UserDashboard>
       final uri = Uri.parse('https://local$path');
       final raw = uri.queryParameters['tab'] ?? uri.queryParameters['t'];
       final idx = int.tryParse((raw ?? '').trim());
-      if (idx == null || idx < 0 || idx > 4) return;
+      if (idx == null || idx < 0 || idx > 5) return;
       if (idx == 3 && _isGuest) {
         WebBootstrapDiag.warn('dashboard.tab', 'tab=3 cart ignored for guest');
         return;
@@ -2400,8 +2689,8 @@ class _UserDashboardState extends State<UserDashboard>
       SupabasePublicReadGuard.clearAuthFailureCooldown();
       // المرحلة 1: الرئيسية + طلبات السوق (+ إعلاناتي بالتوازي على الويب) ثم ارسم فوراً.
       final phase1 = <Future<void>>[
-        _loadHome(force: true, userInitiated: true),
-        _loadMarketHomeRequests(force: true),
+        _loadHome(force: true, userInitiated: true, silent: true),
+        _loadMarketHomeRequests(force: true, silent: true),
       ];
       // ويب: سخّن mine + طلباتي مع الرئيسية حتى طلباتي/إعلاناتي فوري عند أول نقرة.
       if (!_isGuest && kIsWeb) {
@@ -2410,14 +2699,11 @@ class _UserDashboardState extends State<UserDashboard>
       }
       await Future.wait(phase1);
       _flushHomeFeedMutationsSync();
-      if (mounted) {
-        _ensureSubTabControllers();
-        setState(() {});
-      }
       WebBootstrapDiag.log(
         'initial_load',
         'home painted listings=${_all.length} requests=${_marketHomeRequests.length} mine=${_mine.length}',
       );
+      unawaited(_maybeResumeShortsSession());
 
       // الدخول دائماً على الرئيسية — لا تُحوّل تلقائياً إلى صفحتي.
       if (!_isGuest) {
@@ -2435,7 +2721,8 @@ class _UserDashboardState extends State<UserDashboard>
             _refreshAppAudienceOnlineApprox(),
             if (!kIsWeb) _loadMineAndOffers(force: true),
             _loadFavoritesForUid(),
-            if (!kIsWeb) _loadCart(force: true),
+            _loadCart(force: true),
+            _loadMyMarketRequestOfferTracking(),
           ]);
           if (!mounted) return;
           // سخّن إدارتي مبكراً حتى يفتح فوراً عند النقر.
@@ -2459,6 +2746,7 @@ class _UserDashboardState extends State<UserDashboard>
             _ensureWorkflowRealtimeChannel();
             _ensureHomeFeedRealtimeChannel();
             setState(() {});
+            _scheduleDealCompletionPrompt();
           }
         }
 
@@ -2713,15 +3001,17 @@ class _UserDashboardState extends State<UserDashboard>
     _homeFeedRealtimeDebounce = Timer(const Duration(milliseconds: 380), () {
       if (!mounted) return;
       unawaited(Future.wait([
-        _loadMarketHomeRequests(force: true),
-        _loadHome(force: true),
+        _loadMarketHomeRequests(force: true, silent: true),
+        _loadHome(force: true, silent: true),
         if (!_isGuest) _loadMyMarketRequestOfferTracking(),
+        if (!_isGuest) _loadCart(force: true, silent: true),
+        if (!_isGuest && (_tabIndex == 1 || _tabIndex == 2))
+          _ensureMyAdsHubDataLoaded(force: true),
       ]));
     });
   }
 
   void _ensureHomeFeedRealtimeChannel({int deferMs = 0}) {
-    if (kIsWeb) return;
     void subscribe() {
       if (!mounted) return;
       try {
@@ -2746,6 +3036,12 @@ class _UserDashboardState extends State<UserDashboard>
             event: PostgresChangeEvent.all,
             schema: 'public',
             table: 'market_request_offers',
+            callback: (_) => _scheduleHomeFeedRealtimeRefresh(),
+          );
+          ch.onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'reservations',
             callback: (_) => _scheduleHomeFeedRealtimeRefresh(),
           );
         }
@@ -2788,7 +3084,6 @@ class _UserDashboardState extends State<UserDashboard>
           setState(() {
             _offerAccentAfterTourReplay = true;
             _showDashboardOnboarding = true;
-            _tabIndex = 0;
           });
         }
         return;
@@ -2825,7 +3120,6 @@ class _UserDashboardState extends State<UserDashboard>
       if (!mounted) return;
       setState(() {
         _showDashboardOnboarding = true;
-        _tabIndex = 0;
       });
     } catch (_) {}
   }
@@ -2839,7 +3133,7 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   Future<void> _completeDashboardOnboarding(
-      {bool resetTabToHome = true}) async {
+      {bool resetTabToHome = false}) async {
     final uid = _uid.trim().isEmpty ? null : _uid.trim();
     await DeviceFirstRunPrefs.setDashboardTourDone(userId: uid);
     if (!mounted) return;
@@ -2992,8 +3286,8 @@ class _UserDashboardState extends State<UserDashboard>
         DashboardOnboardingStepData(
           title: l10n.onboardingMyDeskTitle,
           body: deskBody,
-          tabIndex: 0,
-          arrow: DashboardCoachArrow.up,
+          tabIndex: 5,
+          arrow: DashboardCoachArrow.down,
           navFraction: 0.55,
         ),
       );
@@ -3179,6 +3473,10 @@ class _UserDashboardState extends State<UserDashboard>
 
   void _onMarketingWorkflowBucketsRevision() {
     if (!mounted || _isGuest) return;
+    final pendingTab = MarketingWorkflowHub.takePendingMarketerTab();
+    if (pendingTab != null && _isMarketerRole) {
+      _jumpMyPageHubTabs(marketerTabIndex: pendingTab);
+    }
     // كان يحدّث المسوّق فقط — المالك يبقى ببطاقات قديمة في التبويبات بعد الموافقة/الإعادة.
     if (_isMarketerRole) {
       MarketingBucketsCache.instance.invalidateMarketer(_uid);
@@ -3387,14 +3685,12 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _brandPrimary = Theme.of(context).colorScheme.primary;
-  }
-
-  @override
   void initState() {
     super.initState();
+
+    WebInAppNav.nestedNavigatorKey = _dashboardBodyNavKey;
+    WebInAppNav.popNested = _popDashboardBodyRoute;
+    SafeOverlayPop.popNested = _popDashboardBodyRoute;
 
     _lastAuthUserId = _sb.auth.currentUser?.id;
     _hydrateAccountRoleFromCache();
@@ -3403,12 +3699,22 @@ class _UserDashboardState extends State<UserDashboard>
 
     langNotifier.addListener(_onLiveAppearanceChanged);
     themeModeNotifier.addListener(_onLiveAppearanceChanged);
+    accentSeedNotifier.addListener(_onLiveAppearanceChanged);
 
     _ensureSubTabControllers();
     unawaited(_refreshOrgJoinRequestBadge());
     _ensureOrgJoinBadgePolling();
 
     unawaited(touchWebSessionActivity());
+    WidgetsBinding.instance.addObserver(this);
+    if (kIsWeb) {
+      listenDocumentVisibilityHidden(() {
+        _lastAppHiddenAt = DateTime.now();
+      });
+      listenDocumentVisibilityShown(() {
+        if (mounted) _onAppSurfaceEntered();
+      });
+    }
     if (context.read<AppSession>().isGuest) {
       unawaited(touchWebGuestActivity());
     }
@@ -3429,7 +3735,7 @@ class _UserDashboardState extends State<UserDashboard>
       AppWebSoftRefresh.register(() async {
         if (!mounted) return;
         // لا تحجب الواجهة عند العودة من الخلفية / F5 — حدّث في الخلفية فوراً.
-        unawaited(_reloadAll());
+        unawaited(_reloadAll(silent: true));
         unawaited(PresenceHeartbeatService.ping(_sb));
         unawaited(_refreshAppAudienceOnlineApprox());
       });
@@ -3445,7 +3751,7 @@ class _UserDashboardState extends State<UserDashboard>
       if (!mounted) return;
       unawaited(_refreshAppAudienceOnlineApprox());
       _appAudiencePollTimer?.cancel();
-      _appAudiencePollTimer = Timer.periodic(const Duration(seconds: 50), (_) {
+      _appAudiencePollTimer = Timer.periodic(const Duration(seconds: 12), (_) {
         if (!mounted) return;
         unawaited(_refreshAppAudienceOnlineApprox());
       });
@@ -3512,7 +3818,7 @@ class _UserDashboardState extends State<UserDashboard>
       AppWebSoftRefresh.register(() async {
         if (!mounted) return;
         // لا تحجب الواجهة عند العودة من الخلفية / F5 — حدّث في الخلفية فوراً.
-        unawaited(_reloadAll());
+        unawaited(_reloadAll(silent: true));
         unawaited(PresenceHeartbeatService.ping(_sb));
         unawaited(_refreshAppAudienceOnlineApprox());
       });
@@ -3532,7 +3838,7 @@ class _UserDashboardState extends State<UserDashboard>
     });
 
     _appAudiencePollTimer?.cancel();
-    _appAudiencePollTimer = Timer.periodic(const Duration(seconds: 50), (_) {
+    _appAudiencePollTimer = Timer.periodic(const Duration(seconds: 12), (_) {
       if (!mounted) return;
       unawaited(_refreshAppAudienceOnlineApprox());
     });
@@ -3578,6 +3884,7 @@ class _UserDashboardState extends State<UserDashboard>
       slot(2, _buildMySubmissionsBody),
       slot(3, _buildCartBody),
       slot(4, _buildSupportHubBody),
+      slot(5, _buildDeskBody),
     ];
   }
 
@@ -3586,10 +3893,13 @@ class _UserDashboardState extends State<UserDashboard>
     required List<MarketPropertyRequestRow> homeRequestsFiltered,
     required int homeLoadedPropertyRows,
   }) {
-    // ويب: IndexedStack — ابنِ التبويب النشط دائماً، وحدّث الرئيسية عند تغيّر الفيد،
-    // ولا تعِد بناء إعلاناتي/طلباتي عند كل home.paint (كان يسبب Null check + تجمّد).
-    if (kIsWeb) {
-      _webVisitedTabs.add(_tabIndex);
+    // IndexedStack ذكي على كل المنصات: لا تُهدم صفحتي عند مغادرة التبويب والعودة.
+    _webVisitedTabs.add(_tabIndex);
+      if (_webTabChildren != null &&
+          _webTabChildren!.length != _kDashboardTabCount) {
+        _webTabChildren = null;
+        _webMaterializedTabs.clear();
+      }
       final feedSig = Object.hash(
         _nestedDashboardFeedCacheBuiltKey,
         homeItems.length,
@@ -3599,6 +3909,9 @@ class _UserDashboardState extends State<UserDashboard>
         _nestedDashboardMixedEntries.length,
         _errorHome,
         _homeFeedKind,
+        _homeFeedDataEpoch,
+        _homeRevealOwnPropertyId,
+        _homeRevealOwnMarketRequestId,
         _homeShowHiddenOnly,
         _paidPriorityOnlyFilter,
         homeItems.isEmpty ? 0 : identityHashCode(homeItems.first),
@@ -3651,7 +3964,30 @@ class _UserDashboardState extends State<UserDashboard>
         ),
       );
       final hubChanged = _webTabChildrenHubSig != hubSig;
-      final active = _tabIndex.clamp(0, 4);
+      final cartSig = Object.hash(
+        _cart.length,
+        _cartCount,
+        _loadingCart,
+        _errorCart,
+        _completedCart.length,
+        _completedMarketOffersForCart.length,
+        _incomingListingReservationsForCart.length,
+        _incomingMarketOffersOnMine.length,
+        _completedOwnedMarketRequests.length,
+        _cartPaneIndex,
+        _incomingDealSortNewest,
+        _incomingDealStatusFilter,
+        _myPendingMarketOffersForCart.length,
+        _myArchivedMarketOffersForCart.length,
+        _marketRequestIdsWithMyPendingOffer.length,
+        _homeFeedDataEpoch,
+        _cart.isEmpty ? 0 : identityHashCode(_cart.first),
+        _myPendingMarketOffersForCart.isEmpty
+            ? 0
+            : identityHashCode(_myPendingMarketOffersForCart.first),
+      );
+      final cartChanged = _webTabChildrenCartSig != cartSig;
+      final active = _tabIndex.clamp(0, _kDashboardTabCount - 1);
       final tabSwitched = _webBuiltActiveTab != active;
       Widget buildSlot(int i) {
         switch (i) {
@@ -3663,6 +3999,8 @@ class _UserDashboardState extends State<UserDashboard>
             return _webTabSlot(i, _buildCartBody());
           case 4:
             return _webTabSlot(i, _buildSupportHubBody());
+          case 5:
+            return _webTabSlot(i, _buildDeskBody());
           case 0:
           default:
             return _webTabSlot(
@@ -3678,7 +4016,7 @@ class _UserDashboardState extends State<UserDashboard>
       }
 
       final prev = _webTabChildren;
-      final next = List<Widget>.generate(5, (i) {
+      final next = List<Widget>.generate(_kDashboardTabCount, (i) {
         if (!_webVisitedTabs.contains(i)) {
           return _webTabSlot(i, const SizedBox.shrink());
         }
@@ -3695,20 +4033,28 @@ class _UserDashboardState extends State<UserDashboard>
           }
           return prev[0];
         }
-        // إعلاناتي/طلباتي/…: لا تُهدم مع home.paint — فقط عند التبديل أو تغيّر بياناتها.
-        final needsHubRebuild = isActive &&
-            (tabSwitched ||
-                hubChanged ||
-                prev == null ||
-                !_webMaterializedTabs.contains(i));
-        if (needsHubRebuild) {
-          _webMaterializedTabs.add(i);
-          return buildSlot(i);
+        // صفقاتي: توقيع مستقل — تغيّر السلة/العروض لا يمر عبر hubSig فكان التبويب يبقى فارغاً.
+        if (i == 3) {
+          if (cartChanged ||
+              prev == null ||
+              !_webMaterializedTabs.contains(3) ||
+              (isActive && tabSwitched)) {
+            _webMaterializedTabs.add(3);
+            return buildSlot(3);
+          }
+          if (prev.length > 3) return prev[3];
+          return buildSlot(3);
         }
-        if (prev != null &&
-            i < prev.length &&
-            _webMaterializedTabs.contains(i)) {
-          return prev[i];
+        // صفحتي/طلباتي/الدعم/إدارتي: الإبقاء على المثيل عند العودة — بلا وميض تحميل.
+        if (i == 1 || i == 2 || i == 4 || i == 5) {
+          if (hubChanged ||
+              prev == null ||
+              !_webMaterializedTabs.contains(i)) {
+            _webMaterializedTabs.add(i);
+            return buildSlot(i);
+          }
+          if (i < prev.length) return prev[i];
+          return buildSlot(i);
         }
         if (isActive) {
           _webMaterializedTabs.add(i);
@@ -3718,10 +4064,9 @@ class _UserDashboardState extends State<UserDashboard>
       });
       _webTabChildrenFeedSig = feedSig;
       _webTabChildrenHubSig = hubSig;
+      _webTabChildrenCartSig = cartSig;
       _webBuiltActiveTab = active;
       _webTabChildren = next;
-      // IndexedStack يُبقي عدة ListView في الشجرة — بدون هذا يتعارض PrimaryScrollController
-      // ويظهر Uncaught Error عند فتح إعلاناتي/بعد تحديث الفيد.
       return PrimaryScrollController.none(
         child: IndexedStack(
           index: active,
@@ -3729,33 +4074,6 @@ class _UserDashboardState extends State<UserDashboard>
           children: _webTabChildren!,
         ),
       );
-    }
-
-    return _DeferredTabBody(
-      tabIndex: _tabIndex,
-      deferFirstFrame: _tabIndex != 0,
-      extraDeferFrames: 0,
-      builder: (context) {
-        switch (_tabIndex) {
-          case 1:
-            return _buildMyAdsHub();
-          case 2:
-            return _buildMySubmissionsBody();
-          case 3:
-            return _buildCartBody();
-          case 4:
-            return _buildSupportHubBody();
-          case 0:
-          default:
-            return _buildHomeBody(
-              homeItems,
-              homeRequestsFiltered,
-              loadedPropertyRows: homeLoadedPropertyRows,
-              loadedRequestRows: _marketHomeRequests.length,
-            );
-        }
-      },
-    );
   }
 
   Future<void> _loadDashboardGesturePreferences() async {
@@ -3793,6 +4111,37 @@ class _UserDashboardState extends State<UserDashboard>
   bool _dashboardCanGoBack() =>
       _dashboardBodyNavKey.currentState?.canPop() ?? false;
 
+  bool get _isMainShellHubRoute {
+    if (_nestedRouteNameStack.isNotEmpty) {
+      return DashboardEmbeddedRoute.isMainShellHub(_nestedRouteNameStack.last);
+    }
+    // احتياط إن فُرغت كدسة الأسماء أثناء إعادة البناء.
+    return _isHubShellTitle(_nestedShellTitle);
+  }
+
+  bool _isHubShellTitle(String? title) {
+    final t = (title ?? '').trim();
+    if (t.startsWith('الاشتراكات') ||
+        t.toLowerCase().startsWith('subscription')) {
+      return true;
+    }
+    switch (t) {
+      case 'الإعدادات':
+      case 'Settings':
+      case 'المفضلة':
+      case 'Favorites':
+      case 'إدارتي':
+      case 'My desk':
+      case 'رؤى السوق':
+      case 'Market insights':
+      case 'الإشعارات':
+      case 'Notifications':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   String? _nestedTitleForRouteSettings(RouteSettings settings) {
     final n = (settings.name ?? '').trim();
     if (n.isEmpty) return null;
@@ -3825,6 +4174,7 @@ class _UserDashboardState extends State<UserDashboard>
     final canPop = _dashboardBodyNavKey.currentState?.canPop() ?? false;
     if (!canPop) {
       if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.clear();
+      if (_nestedRouteNameStack.isNotEmpty) _nestedRouteNameStack.clear();
       if (_nestedShellTitle != null) {
         setState(() => _nestedShellTitle = null);
       } else {
@@ -3839,125 +4189,207 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   bool _onDashboardScrollForBottomNav(ScrollNotification n) {
-    if (!mounted) return false;
-    if (kIsWeb) return false;
-    if (AppLayout.useDashboardSideNavigation(context)) return false;
-    if (n is ScrollUpdateNotification) {
-      final d = n.scrollDelta;
-      if (d == null) return false;
-      if (d > 5) {
-        if (_bottomNavSlideVisible) {
-          setState(() => _bottomNavSlideVisible = false);
-        }
-      } else if (d < -5) {
-        if (!_bottomNavSlideVisible) {
-          setState(() => _bottomNavSlideVisible = true);
-        }
-      }
-    } else if (n is ScrollEndNotification) {
-      if (!_bottomNavSlideVisible) {
-        setState(() => _bottomNavSlideVisible = true);
-      }
-    }
+    // الشريط السفلي يبقى ثابتاً — إخفاؤه عند التمرير كان يرفع الشاشة للمنتصف ويعلق.
     return false;
   }
 
   bool _popDashboardBodyRoute() {
-    // أولاً جسم اللوحة (اشتراكات/دردشة/نماذج +) — لا تقفز إلى rootNavigator.
+    final snap = _captureOverlayNavMemory();
     final bodyNav = _dashboardBodyNavKey.currentState;
-    if (bodyNav != null && bodyNav.canPop()) {
-      bodyNav.pop();
-      if (mounted && !_bottomNavSlideVisible) {
+    if (bodyNav == null || !bodyNav.canPop()) return false;
+    bodyNav.pop();
+    if (mounted) {
+      if (!_bottomNavSlideVisible) {
         setState(() => _bottomNavSlideVisible = true);
       }
-      return true;
-    }
-    if (kIsWeb) {
-      final root = Navigator.of(context, rootNavigator: true);
-      if (!root.canPop()) return false;
-      final name = ModalRoute.of(context)?.settings.name ?? '';
-      if (name == '/userDashboard' || name == '/userdashboard' || name == '/') {
-        return false;
+      if (!_userChoseDashboardTab) {
+        _restoreOverlayNavMemory(snap);
       }
-      root.pop();
-      return true;
     }
-    return false;
+    return true;
   }
 
   /// شورتز بملء الشاشة — خارج فلاتر الكل/طلبات/إعلانات.
-  Future<void> _openHomeShortsFeed({required int slotsIndex}) async {
-    final listings = _nestedDashboardHomeItems.isNotEmpty
+  List<HomeShortsItem> _collectShortsItems() {
+    var listings = _nestedDashboardHomeItems.isNotEmpty
         ? List<Property>.from(_nestedDashboardHomeItems)
         : List<Property>.from(_all);
-    final requests = _nestedDashboardHomeRequests.isNotEmpty
+    var requests = _nestedDashboardHomeRequests.isNotEmpty
         ? List<MarketPropertyRequestRow>.from(_nestedDashboardHomeRequests)
         : List<MarketPropertyRequestRow>.from(_marketHomeRequests);
-    final items = <HomeShortsItem>[
-      for (final p in listings) HomeShortsItem.property(p),
+
+    final mineProps = _propertiesOwnedOrPublishedByMe();
+    final mineReqSource = _myMarketSubmissions.isNotEmpty
+        ? _myMarketSubmissions
+        : _marketHomeRequests
+            .where((r) => r.requesterId == _uid && _uid.isNotEmpty)
+            .toList();
+
+    final seenP =
+        listings.map((p) => p.id).where((id) => id.isNotEmpty).toSet();
+    for (final p in mineProps) {
+      if (p.id.isEmpty || seenP.contains(p.id)) continue;
+      seenP.add(p.id);
+      listings.add(p);
+    }
+    final seenR =
+        requests.map((r) => r.id).where((id) => id.isNotEmpty).toSet();
+    for (final r in mineReqSource) {
+      if (r.id.isEmpty || seenR.contains(r.id)) continue;
+      seenR.add(r.id);
+      requests.add(r);
+    }
+
+    final dealLocked = <String>{};
+    if (!_isGuest && _uid.isNotEmpty) {
+      for (final r in _cart) {
+        final id = (r['property_id'] ?? '').toString().trim();
+        if (id.isNotEmpty) dealLocked.add(id);
+      }
+      for (final r in _completedCart) {
+        final id = (r['property_id'] ?? '').toString().trim();
+        if (id.isNotEmpty) dealLocked.add(id);
+      }
+    }
+
+    return [
+      for (final p in listings)
+        if (!dealLocked.contains(p.id)) HomeShortsItem.property(p),
       for (final r in requests) HomeShortsItem.request(r),
     ];
-    if (!mounted) return;
-    setState(() => _bottomNavTransientIndex = slotsIndex);
-    await Navigator.of(context, rootNavigator: true).push<void>(
-      PageRouteBuilder<void>(
-        opaque: true,
-        barrierDismissible: false,
-        pageBuilder: (_, __, ___) => HomeShortsFeedPage(
-          items: items,
-          isAr: _isArabic,
-          onOpenProperty: (p) {
-            Navigator.of(context, rootNavigator: true).pop();
-            unawaited(_openDetails(p));
-          },
-          onOpenRequest: (r) {
-            Navigator.of(context, rootNavigator: true).pop();
-            _openMarketRequestDetail(r);
-          },
-          onCompleteDeal: (item) {
-            final p = item.property;
-            if (p != null) {
-              Navigator.of(context, rootNavigator: true).pop();
-              unawaited(_addToCart(p));
-            }
-          },
-        ),
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
-      ),
-    );
-    if (mounted) setState(() => _bottomNavTransientIndex = null);
   }
 
-  /// رجوع عند جذر اللوحة: تأكيد ثم خروج آمن (لا تُترك جلسة مفتوحة على شاشة الدخول).
-  Future<void> _handleDashboardRootBrowserBack() async {
-    if (!mounted) return;
-    final online = context.read<AppSession>().hasInternet;
-    if (!online) return;
-    final isAr = widget.lang.toLowerCase().startsWith('ar');
-    if (_isGuest) {
-      final ok = await AppBackRefreshDialogs.confirmLeaveGuest(context, isAr);
-      if (!ok || !mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        '/entryChoice',
-        (r) => false,
-      );
+  Set<String> _collectShortsMineIds() {
+    final mineProps = _propertiesOwnedOrPublishedByMe();
+    final mineReqSource = _myMarketSubmissions.isNotEmpty
+        ? _myMarketSubmissions
+        : _marketHomeRequests
+            .where((r) => r.requesterId == _uid && _uid.isNotEmpty)
+            .toList();
+    return {
+      for (final p in mineProps)
+        if (p.id.isNotEmpty) p.id,
+      for (final r in mineReqSource)
+        if (r.id.isNotEmpty) r.id,
+    };
+  }
+
+  Future<void> _maybeResumeShortsSession() async {
+    if (!mounted || _shortsRouteOpen) return;
+    if (ShortsFeedPrefs.userClosedThisSession) return;
+    try {
+      final root = Navigator.of(context, rootNavigator: true);
+      if (SafeOverlayPop.peekTopName(root) == '/dashboard/shorts') return;
+    } catch (_) {}
+    try {
+      if (!await ShortsFeedPrefs.isSessionActiveFor(
+        _uid.isNotEmpty ? _uid : 'guest',
+      )) {
+        return;
+      }
+    } catch (_) {
       return;
     }
-    final ok = await AppBackRefreshDialogs.confirmSignOut(context, isAr);
-    if (!ok || !mounted) return;
-    await SafeSignOutService.signOutAndNavigateToLogin(
-      context,
-      logoutReason: 'browser_back_exit',
-    );
+    unawaited(_openHomeShortsFeed());
+  }
+
+  Future<void> _openHomeShortsFeed({int? slotsIndex}) async {
+    if (_shortsRouteOpen) return;
+    _shortsRouteOpen = true;
+    ShortsFeedPrefs.clearUserClosed();
+    unawaited(ShortsFeedPrefs.setSessionActive(
+      true,
+      uid: _uid.isNotEmpty ? _uid : 'guest',
+    ));
+    final items = _collectShortsItems();
+    final mineIds = _collectShortsMineIds();
+    if (!mounted) {
+      _shortsRouteOpen = false;
+      return;
+    }
+    if (slotsIndex != null) {
+      setState(() => _bottomNavTransientIndex = slotsIndex);
+    }
+    try {
+      await _pushRootOverlay<void>(
+        PageRouteBuilder<void>(
+          opaque: true,
+          barrierDismissible: false,
+          settings: const RouteSettings(name: '/dashboard/shorts'),
+          pageBuilder: (_, __, ___) => HomeShortsFeedPage(
+            items: items,
+            isAr: _isArabic,
+            isGuest: _isGuest,
+            viewerUserId: _uid,
+            favoriteIds: Set<String>.from(_favoriteIds),
+            mineIds: mineIds,
+            onReloadCatalog: () async {
+              await _loadHome(force: true, silent: true);
+              await _loadMarketHomeRequests(force: true, silent: true);
+              if (!_isGuest) {
+                try {
+                  await _loadCart(force: true);
+                } catch (_) {}
+              }
+              if (!mounted) return const <HomeShortsItem>[];
+              return _collectShortsItems();
+            },
+            onShare: (item) {
+              final p = item.property;
+              if (p != null) {
+                unawaited(_shareListingFromCard(p));
+                return;
+              }
+              final r = item.request;
+              if (r != null) unawaited(_shareMarketRequestFromCard(r));
+            },
+            onToggleFavorite: (id) => unawaited(_toggleFav(id)),
+            onRequireLogin: _showLoginDialog,
+            onOpenProperty: (p) async {
+              await _openDetails(p);
+            },
+            onOpenRequest: (r) async {
+              await _openMarketRequestDetail(r, useRootNavigator: true);
+            },
+            onCompleteDeal: (item) async {
+              final p = item.property;
+              if (p != null) {
+                await _addToCart(p, preserveTab: true);
+                return;
+              }
+              final r = item.request;
+              if (r != null) {
+                await _openMarketRequestDetail(
+                  r,
+                  autoOpenSubmitOffer: true,
+                  useRootNavigator: true,
+                );
+              }
+            },
+          ),
+          transitionsBuilder: (_, anim, __, child) =>
+              FadeTransition(opacity: anim, child: child),
+        ),
+      );
+    } finally {
+      _shortsRouteOpen = false;
+      if (mounted) setState(() => _bottomNavTransientIndex = null);
+    }
+  }
+
+  /// رجوع عند جذر اللوحة: ابقَ داخل المشروع — لا تغادر المتصفح ولا تسجّل خروجاً.
+  Future<void> _handleDashboardRootBrowserBack() async {
+    return;
   }
 
   Future<void> _onDashboardPopInvoked(bool didPop) async {
     if (didPop) return;
     if (!mounted) return;
     if (!context.read<AppSession>().hasInternet) return;
+    // ويب: سهم المتصفح يمر عبر [WebInAppNav.handleBack] فقط — لا إغلاق مزدوج.
+    if (kIsWeb) return;
     if (_popDashboardBodyRoute()) return;
-    await _handleDashboardRootBrowserBack();
+    SafeOverlayPop.pop(context);
   }
 
   Future<void> _refreshOrgJoinRequestBadge() async {
@@ -4021,7 +4453,7 @@ class _UserDashboardState extends State<UserDashboard>
         key != LogicalKeyboardKey.goBack) {
       return KeyEventResult.ignored;
     }
-    return _popDashboardBodyRoute()
+    return SafeOverlayPop.pop(context)
         ? KeyEventResult.handled
         : KeyEventResult.ignored;
   }
@@ -4052,8 +4484,17 @@ class _UserDashboardState extends State<UserDashboard>
 
   @override
   void dispose() {
+    if (identical(WebInAppNav.nestedNavigatorKey, _dashboardBodyNavKey)) {
+      WebInAppNav.nestedNavigatorKey = null;
+      WebInAppNav.popNested = null;
+    }
+    if (identical(SafeOverlayPop.popNested, _popDashboardBodyRoute)) {
+      SafeOverlayPop.popNested = null;
+    }
     langNotifier.removeListener(_onLiveAppearanceChanged);
     themeModeNotifier.removeListener(_onLiveAppearanceChanged);
+    accentSeedNotifier.removeListener(_onLiveAppearanceChanged);
+    WidgetsBinding.instance.removeObserver(this);
     MarketingWorkflowHub.bucketsRevision
         .removeListener(_onMarketingWorkflowBucketsRevision);
     _disposeWorkflowRealtimeChannel();
@@ -4069,6 +4510,7 @@ class _UserDashboardState extends State<UserDashboard>
     _orgJoinBadgeTimer?.cancel();
     _inlineSearchCtrl.dispose();
     _filterChipsHScrollCtrl.dispose();
+    _homeFeedScrollCtrl.dispose();
     _dashboardOnboardingBackdropScroll.dispose();
     _ownerTabsCtrl?.dispose();
     _marketerTabsCtrl?.dispose();
@@ -4119,27 +4561,10 @@ class _UserDashboardState extends State<UserDashboard>
               Expanded(
                 // ويب: IndexedStack ذكي (لا يهدم إعلاناتي مع كل home.paint).
                 // KeyedSubtree(tabIndex) السابق كان يعيد بناء الجسم بالكامل → عاصفة + Uncaught Error.
-                child: kIsWeb
-                    ? _buildDashboardTabBody(
+                child: _buildDashboardTabBody(
                         homeItems: homeItems,
                         homeRequestsFiltered: homeRequestsFiltered,
                         homeLoadedPropertyRows: homeLoadedPropertyRows,
-                      )
-                    : IndexedStack(
-                        index: _tabIndex,
-                        sizing: StackFit.expand,
-                        children: [
-                          _buildHomeBody(
-                            homeItems,
-                            homeRequestsFiltered,
-                            loadedPropertyRows: homeLoadedPropertyRows,
-                            loadedRequestRows: _marketHomeRequests.length,
-                          ),
-                          _buildMyAdsHub(),
-                          _buildMySubmissionsBody(),
-                          _buildCartBody(),
-                          _buildSupportHubBody(),
-                        ],
                       ),
               ),
             ],
@@ -4182,7 +4607,9 @@ class _UserDashboardState extends State<UserDashboard>
                 if (mounted) setState(() => _tabIndex = i);
               },
               onComplete: () {
-                unawaited(_completeDashboardOnboarding());
+                unawaited(
+                  _completeDashboardOnboarding(resetTabToHome: false),
+                );
               },
               onBackdropPointerScroll: _onOnboardingBackdropPointerScroll,
             ),
@@ -4196,18 +4623,25 @@ class _UserDashboardState extends State<UserDashboard>
   Widget _buildNestedDashboardBody(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final homePropertyPool = _mergedHomePropertyPool();
-    final homeItems = _applyHiddenFeedFilterToProperties(
-      filterListDashboard(
-        homePropertyPool,
-        excludePropertiesInCart: !_isGuest && _uid.isNotEmpty,
-        homeDiscoveryListingCardsOnly: true,
+    final homeItems = _pinRevealedPropertyFirst(
+      _applyHiddenFeedFilterToProperties(
+        filterListDashboard(
+          homePropertyPool,
+          excludePropertiesInCart: !_isGuest && _uid.isNotEmpty,
+          homeDiscoveryListingCardsOnly: true,
+        ),
       ),
     );
-    final homeRequestsFiltered = _applyHiddenFeedFilterToRequests(
-      filterMarketRequests(
-        _isGuest || _uid.isEmpty
-            ? _marketHomeRequests
-            : _marketHomeRequests.where((r) => r.requesterId != _uid).toList(),
+    final homeRequestsFiltered = _pinRevealedRequestFirst(
+      _applyHiddenFeedFilterToRequests(
+        filterMarketRequests(
+          _isGuest || _uid.isEmpty
+              ? _marketHomeRequests
+              : _marketHomeRequests.where((r) {
+                  if (r.requesterId != _uid) return true;
+                  return _isFreshPublishRevealRequest(r.id);
+                }).toList(),
+        ),
       ),
     );
     // حدّث كاش العرض المتزامن حتى تستخدمه بطاقات الرئيسية المختلطة.
@@ -4215,7 +4649,9 @@ class _UserDashboardState extends State<UserDashboard>
     _nestedDashboardHomeRequests = homeRequestsFiltered;
     _nestedDashboardHomePropertyPoolSize = homePropertyPool.length;
     final mixedTimeline = _sortBy == 'latest'
-        ? buildMixedHomeTimeline(homeItems, homeRequestsFiltered)
+        ? _pinRevealedMixedFirst(
+            buildMixedHomeTimeline(homeItems, homeRequestsFiltered),
+          )
         : const <HomeMixedFeedEntry>[];
     _nestedDashboardMixedEntries = mixedTimeline;
     final mixedHomeCount = _tabIndex == 0 &&
@@ -4373,6 +4809,9 @@ class _UserDashboardState extends State<UserDashboard>
               _openSubscriptionsHub(initialIndex: 0);
             }
             break;
+          case 'quick_browse':
+            unawaited(_openHomeShortsFeed());
+            break;
           case 'login':
             _navigateToLogin();
             break;
@@ -4413,11 +4852,29 @@ class _UserDashboardState extends State<UserDashboard>
             badge: _subscriptionMenuBadge,
           ),
           _dashboardActionMenuItem(
-            value: 'reports_dashboard',
-            icon: Icons.assessment_outlined,
-            label: _isArabic ? 'التقارير المتقدمة' : 'Reports',
+            value: 'quick_browse',
+            icon: Icons.smart_display_outlined,
+            label: _isArabic ? 'تصفح سريع' : 'Quick browse',
           ),
-        ],
+          if (OrgPermissionManager.can(
+                _orgMembershipPermissions,
+                OrgPermissionKeys.viewReports,
+              ) ||
+              OrgPermissionManager.can(
+                _orgMembershipPermissions,
+                OrgPermissionKeys.viewAnalytics,
+              ))
+            _dashboardActionMenuItem(
+              value: 'reports_dashboard',
+              icon: Icons.assessment_outlined,
+              label: _isArabic ? 'التقارير المتقدمة' : 'Reports',
+            ),
+        ] else
+          _dashboardActionMenuItem(
+            value: 'quick_browse',
+            icon: Icons.smart_display_outlined,
+            label: _isArabic ? 'تصفح سريع' : 'Quick browse',
+          ),
         const PopupMenuDivider(),
         if (!_isGuest && _packageVersionLine.isNotEmpty)
           _dashboardActionMenuItem(
@@ -4486,7 +4943,7 @@ class _UserDashboardState extends State<UserDashboard>
       ],
     );
 
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       builder: (ctx) {
         return Dialog(
@@ -4671,7 +5128,7 @@ class _UserDashboardState extends State<UserDashboard>
                 ),
               ),
             ),
-            if (n != null)
+            if (n != null && n > 0)
               PositionedDirectional(
                 end: -2,
                 top: -2,
@@ -4703,9 +5160,7 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   Widget _dashboardNotificationsButton(AppLocalizations l10n, ColorScheme cs) {
-    final attentionCount = _unreadNotificationsCount +
-        _ownerOffersAttentionCount +
-        _chatUnreadTotal;
+    final attentionCount = _unreadNotificationsCount + _chatUnreadTotal;
 
     // لون الجرس ثابت (هوية التطبيق) — الشارة الحمراء وحدها للتنبيه.
     // سابقاً: error عند وجود غير مقروء → أحمر لبعض المستخدمين وأسود/أساسي لآخرين.
@@ -4719,7 +5174,6 @@ class _UserDashboardState extends State<UserDashboard>
         badge: attentionCount,
         color: cs.primary,
         onPressed: () {
-          AppHaptics.light();
           _openNotificationsPage();
         },
       ),
@@ -4787,11 +5241,8 @@ class _UserDashboardState extends State<UserDashboard>
             );
           }),
         ),
-        child: MediaQuery.removePadding(
-          context: context,
-          removeBottom: true,
-          child: NavigationBar(
-            height: hideBottomLabels ? 56 : 68,
+        child: NavigationBar(
+            height: hideBottomLabels ? 64 : 72,
             labelBehavior: hideBottomLabels
                 ? NavigationDestinationLabelBehavior.alwaysHide
                 : NavigationDestinationLabelBehavior.alwaysShow,
@@ -4809,10 +5260,20 @@ class _UserDashboardState extends State<UserDashboard>
               hideLabels: hideBottomLabels,
             ),
           ),
-        ),
       );
-      // ويب: ثابت بلا انزلاق — يمنع رفع الشاشة/الفراغ عند التحديث.
-      if (kIsWeb) return bar;
+      // ويب: SafeArea حتى لا تُقص التبويبات تحت شريط المتصفح، مع ارتفاع يكفي لدائرة +.
+      if (kIsWeb) {
+        return Material(
+          color: Theme.of(context).colorScheme.surface,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: bar,
+            ),
+          ),
+        );
+      }
       return SafeArea(
         top: false,
         child: bar,
@@ -4820,54 +5281,52 @@ class _UserDashboardState extends State<UserDashboard>
     }
 
     final dashboardScaffold = Scaffold(
-      resizeToAvoidBottomInset: true,
-      backgroundColor: AqarBrandColors.bg,
-      appBar: AppBar(
-        elevation: 0,
-        toolbarHeight: _isGuest ? 68 : 96,
-        automaticallyImplyLeading: false,
-        // X مقابل قائمة ⋮ — يظهر على الجوال والشاشات الكبيرة عند وجود صفحة للرجوع إليها.
-        leading: bodyNavCanPop
-            ? AppPageCloseButton(
-                isArabic: _isArabic,
-                tooltip: _isArabic ? 'إغلاق / رجوع' : 'Close / Back',
-                onPressed: _popDashboardBodyRoute,
-              )
-            : null,
-        title: _dashboardHomeAppBarTitle(l10n),
-        actions: [
-          if (!_isGuest &&
-              _orgNavIsOwner &&
-              _accountRoleLoaded &&
-              _orgPendingJoinCount > 0)
-            Padding(
-              padding: const EdgeInsetsDirectional.only(end: 2),
-              child: _IconBadgeButton(
-                tooltip: l10n.appBarOrgJoinRequestsTooltip,
-                icon: Icons.how_to_reg_outlined,
-                badge: _orgPendingJoinCount,
-                color: cs.primary,
-                onPressed: () {
-                  unawaited(
-                    _pushBody<void>(
-                      MaterialPageRoute<void>(
-                        builder: (_) => MyOrganizationScreen(
-                          lang: widget.lang,
-                          initialTab: MyOrganizationTabKey.joinRequests,
-                        ),
-                      ),
+      resizeToAvoidBottomInset: false,
+      backgroundColor: cs.surface,
+      // صفحة فوق التبويب: شريط الترحيب يُخفى حتى لا يتكرر X بجانب الاسم.
+      // الصفحة الداخلية تعرض إغلاقاً واحداً بجانب عنوانها.
+      appBar: bodyNavCanPop
+          ? null
+          : AppBar(
+              elevation: 0,
+              toolbarHeight: _isGuest ? 68 : 96,
+              automaticallyImplyLeading: false,
+              title: _dashboardHomeAppBarTitle(l10n),
+              actions: [
+                if (!_isGuest &&
+                    _orgNavIsOwner &&
+                    _accountRoleLoaded &&
+                    _orgPendingJoinCount > 0)
+                  Padding(
+                    padding: const EdgeInsetsDirectional.only(end: 2),
+                    child: _IconBadgeButton(
+                      tooltip: l10n.appBarOrgJoinRequestsTooltip,
+                      icon: Icons.how_to_reg_outlined,
+                      badge: _orgPendingJoinCount,
+                      color: cs.primary,
+                      onPressed: () {
+                        unawaited(
+                          _pushBody<void>(
+                            MaterialPageRoute<void>(
+                              builder: (_) => MyOrganizationScreen(
+                                lang: widget.lang,
+                                initialTab: MyOrganizationTabKey.joinRequests,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
+                  ),
+                _dashboardMapButton(cs),
+                _dashboardLiveAudienceButton(cs),
+                _dashboardNotificationsButton(l10n, cs),
+                _dashboardActionsMenu(l10n, cs),
+              ],
             ),
-          _dashboardMapButton(cs),
-          _dashboardLiveAudienceButton(cs),
-          _dashboardNotificationsButton(l10n, cs),
-          _dashboardActionsMenu(l10n, cs),
-        ],
-      ),
-      body: NotificationListener<ScrollNotification>(
+      body: AppKeyboardPad(
+        extra: 12,
+        child: NotificationListener<ScrollNotification>(
         onNotification: _onDashboardScrollForBottomNav,
         child: Navigator(
           key: _dashboardBodyNavKey,
@@ -4887,6 +5346,7 @@ class _UserDashboardState extends State<UserDashboard>
           ],
         ),
       ),
+      ),
       floatingActionButton: useSideNav && _showBottomNavAddSlot
           ? FloatingActionButton(
               onPressed: () {
@@ -4900,24 +5360,9 @@ class _UserDashboardState extends State<UserDashboard>
           : null,
       bottomNavigationBar: useSideNav
           ? null
-          : (kIsWeb
-              ? LayoutBuilder(
-                  builder: (context, constraints) =>
-                      buildBottomNavBar(constraints),
-                )
-              : ClipRect(
-                  child: AnimatedSlide(
-                    duration: AppMotionPolicy.barSlide,
-                    curve: AppMotionPolicy.curve,
-                    offset: _bottomNavSlideVisible
-                        ? Offset.zero
-                        : const Offset(0, 1.15),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) =>
-                          buildBottomNavBar(constraints),
-                    ),
-                  ),
-                )),
+          : LayoutBuilder(
+              builder: (context, constraints) => buildBottomNavBar(constraints),
+            ),
     );
 
     final mainChrome = useSideNav
@@ -5075,7 +5520,6 @@ class _UserDashboardState extends State<UserDashboard>
     // ضيف ومسجّل: نفس التبويبات دائماً — الحماية عبر شيت الدخول عند الضغط.
     return const <DashboardBottomSlot>[
       DashboardBottomSlot.home,
-      DashboardBottomSlot.shorts,
       DashboardBottomSlot.myAds,
       DashboardBottomSlot.mySubmissions,
       DashboardBottomSlot.addListing,
@@ -5118,8 +5562,10 @@ class _UserDashboardState extends State<UserDashboard>
         case DashboardBottomSlot.support:
           if (_tabIndex == 4) return i;
           break;
-        case DashboardBottomSlot.shorts:
         case DashboardBottomSlot.myDesk:
+          if (_tabIndex == 5) return i;
+          break;
+        case DashboardBottomSlot.shorts:
         case DashboardBottomSlot.addListing:
           break;
       }
@@ -5135,6 +5581,7 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   void _onDashboardBottomNavSelected(List<DashboardBottomSlot> slots, int i) {
+    _userChoseDashboardTab = true;
     // ويب: لا unfocus متزامن على شجرة ضخمة — كان يزيد تأخير النقرة.
     if (!kIsWeb) {
       FocusScope.of(context).unfocus();
@@ -5150,16 +5597,20 @@ class _UserDashboardState extends State<UserDashboard>
       DashboardBottomSlot.mySubmissions => 2,
       DashboardBottomSlot.cart => 3,
       DashboardBottomSlot.support => 4,
+      DashboardBottomSlot.myDesk => 5,
       _ => null,
     };
-    if (instantTab != null && _tabIndex != instantTab) {
+    final guestBlocked = _isGuest &&
+        slot != DashboardBottomSlot.home &&
+        slot != DashboardBottomSlot.support &&
+        slot != DashboardBottomSlot.shorts;
+    if (!guestBlocked && instantTab != null && _tabIndex != instantTab) {
       setState(() {
         _tabIndex = instantTab;
         _bottomNavTransientIndex = null;
-        if (kIsWeb) _webVisitedTabs.add(instantTab);
+        _webVisitedTabs.add(instantTab);
       });
-    } else if (slot == DashboardBottomSlot.shorts ||
-        slot == DashboardBottomSlot.myDesk) {
+    } else if (slot == DashboardBottomSlot.shorts) {
       setState(() => _bottomNavTransientIndex = i);
     }
 
@@ -5173,6 +5624,7 @@ class _UserDashboardState extends State<UserDashboard>
         return;
       }
       _applyDashboardBottomNavSelection(slots, i);
+      if (mounted) _userChoseDashboardTab = false;
     }());
   }
 
@@ -5214,7 +5666,7 @@ class _UserDashboardState extends State<UserDashboard>
       setState(() {
         _tabIndex = tab;
         _bottomNavTransientIndex = null;
-        if (kIsWeb) _webVisitedTabs.add(tab);
+        _webVisitedTabs.add(tab);
       });
     }
 
@@ -5237,13 +5689,10 @@ class _UserDashboardState extends State<UserDashboard>
           );
           return;
         }
-        // ويب: جهّز TabController قبل goTab — يمنع تجمّد المسوّق عند null ctrl.
-        if (kIsWeb) _ensureSubTabControllers();
-        // أول ما يُفتح صفحتي: أول تبويب يمين (index 0 في العربية).
+        // أول ما يُفتح صفحتي من الشريط: أول تبويب فرعي فوراً (لا يعتمد على _tabIndex بعد instantTab).
         _focusMyPageFirstSubTab();
         goTab(1);
         if (!_isGuest) {
-          // كل المنصات: حمّل صفحتي فور فتح التبويب دون انتظار تفاعل إضافي.
           _ensureSubTabControllers();
           unawaited(_ensureMyAdsHubDataLoaded());
         }
@@ -5268,8 +5717,8 @@ class _UserDashboardState extends State<UserDashboard>
         if (!_isGuest) {
           unawaited(() async {
             await Future.wait([
-              if (_mine.isEmpty) _loadMineAndOffers(force: false),
-              _loadMyMarketSubmissions(force: false),
+              _loadMineAndOffers(force: true, silent: true),
+              _loadMyMarketSubmissions(force: true, silent: true),
             ]);
             if (mounted) setState(() {});
           }());
@@ -5305,18 +5754,17 @@ class _UserDashboardState extends State<UserDashboard>
           );
           return;
         }
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          unawaited(() async {
-            await _openMyDeskNav();
-            if (mounted) setState(() => _bottomNavTransientIndex = null);
-          }());
-        });
+        unawaited(_prefetchMyDeskWarm());
+        goTab(5);
         break;
       case DashboardBottomSlot.cart:
         _ensureAccountRoleLoadedForNav();
         if (_isGuest) return;
         goTab(3);
+        unawaited(_loadCart(force: true, silent: true));
+        unawaited(_loadMyMarketRequestOfferTracking());
+        unawaited(_loadMineAndOffers(force: true, silent: true));
+        unawaited(_loadMyMarketSubmissions(force: true, silent: true));
         break;
       case DashboardBottomSlot.support:
         goTab(4);
@@ -5380,12 +5828,10 @@ class _UserDashboardState extends State<UserDashboard>
               child: SizedBox(
                 width: addSize,
                 height: addSize,
-                child: Center(
-                  child: Icon(
-                    Icons.add_rounded,
-                    size: addIconSize,
-                    color: csAdd.onPrimary,
-                  ),
+                child: Icon(
+                  Icons.add_rounded,
+                  size: addIconSize,
+                  color: csAdd.onPrimary,
                 ),
               ),
             );
@@ -5662,6 +6108,8 @@ class _UserDashboardState extends State<UserDashboard>
         return l10n.navCart;
       case 4:
         return l10n.navSupport;
+      case 5:
+        return l10n.navMyDesk;
       default:
         return '';
     }
@@ -5732,31 +6180,28 @@ class _UserDashboardState extends State<UserDashboard>
       setState(() {
         _offerAccentAfterTourReplay = true;
         _showDashboardOnboarding = true;
-        _tabIndex = 0;
       });
     } catch (_) {}
   }
 
   Future<void> _openSettings() async {
     if (!mounted) return;
-    final embed = MediaQuery.sizeOf(context).width >= 580;
 
     await _pushBody<void>(
       MaterialPageRoute<void>(
         settings: const RouteSettings(name: '/dashboard/settings'),
-        builder: (_) => SettingsPage(embedAppBar: embed),
+        builder: (_) => const SettingsPage(embedAppBar: false),
       ),
     );
   }
 
   Future<void> _openMarketInsights() async {
     if (!mounted) return;
-    final embed = MediaQuery.sizeOf(context).width >= 580;
     await _pushBody<void>(
       MaterialPageRoute<void>(
         settings: const RouteSettings(name: AppRoutes.marketInsights),
         builder: (_) =>
-            MarketInsightsPage(lang: widget.lang, embedAppBar: embed),
+            MarketInsightsPage(lang: widget.lang, embedAppBar: false),
       ),
     );
   }
@@ -5806,13 +6251,7 @@ class _UserDashboardState extends State<UserDashboard>
       _showLoginDialog();
       return;
     }
-
-    _showNotification(
-      _isArabic ? 'قريباً' : 'Coming Soon',
-      _isArabic
-          ? 'صفحة إضافة طلب تسويق قريباً'
-          : 'Add marketing request page coming soon',
-    );
+    await _openCreateMarketRequestOnly();
   }
 
   // =========================
@@ -5948,14 +6387,13 @@ class _UserDashboardState extends State<UserDashboard>
         valueListenable: _inlineSearchCtrl,
         builder: (context, val, _) {
           final hasDraft = val.text.trim().isNotEmpty;
-          return TextField(
+          return AqarTextField(
             controller: _inlineSearchCtrl,
             onChanged: (_) => _scheduleInlineSearchApply(),
             onSubmitted: (_) {
               _flushInlineSearchNow();
               FocusScope.of(context).unfocus();
             },
-            onTapOutside: (_) => FocusScope.of(context).unfocus(),
             textInputAction: TextInputAction.search,
             maxLines: 1,
             decoration: InputDecoration(
@@ -6146,13 +6584,6 @@ class _UserDashboardState extends State<UserDashboard>
                       children: [
                         buildSearchField(),
                         const SizedBox(height: 6),
-                        _SortMenu(
-                          isAr: _isArabic,
-                          value: _sortBy,
-                          onChanged: _setSortBy,
-                          compactToolbar: true,
-                        ),
-                        const SizedBox(height: 6),
                         stretchRow(primaryActions),
                       ],
                     );
@@ -6163,16 +6594,6 @@ class _UserDashboardState extends State<UserDashboard>
                       Expanded(
                         flex: 4,
                         child: buildSearchField(),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: _isArabic ? 168 : 158,
-                        child: _SortMenu(
-                          isAr: _isArabic,
-                          value: _sortBy,
-                          onChanged: _setSortBy,
-                          compactToolbar: true,
-                        ),
                       ),
                       const SizedBox(width: 8),
                       refreshBtn,
@@ -6402,6 +6823,8 @@ class _UserDashboardState extends State<UserDashboard>
                       l10n,
                       r.requestPriority,
                     ),
+                    dealApplicantCount:
+                        _homeRequestApplicantCounts[r.id] ?? 0,
                     onOpen: () => _openMarketRequestDetail(r),
                     onSubmitOffer: _isGuest
                         ? null
@@ -6436,6 +6859,30 @@ class _UserDashboardState extends State<UserDashboard>
     );
   }
 
+  Widget _wrapFreshPublishGlow({
+    required bool active,
+    required Widget child,
+  }) {
+    if (!active) return child;
+    const accent = Color(0xFF0F766E);
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.72), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.18),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
   Widget _buildHomeBody(
     List<Property> homeItems,
     List<MarketPropertyRequestRow> homeRequestsFiltered, {
@@ -6447,7 +6894,8 @@ class _UserDashboardState extends State<UserDashboard>
     if (l10n == null) {
       return const SizedBox.shrink();
     }
-    final onboardingScroll = _scrollControllerForOnboardingTab(0);
+    final onboardingScroll =
+        _scrollControllerForOnboardingTab(0) ?? _homeFeedScrollCtrl;
     final dealSubBlocked = context.select<AppSubscriptionGate, bool>(
       (g) => g.shouldShowSubscribeInsteadOfDeal,
     );
@@ -6494,11 +6942,16 @@ class _UserDashboardState extends State<UserDashboard>
           homeRequestsFiltered.isNotEmpty ||
           _all.isNotEmpty ||
           _marketHomeRequests.isNotEmpty;
-      if (!hasAnyFeedContent && homeFeedStillLoading) {
+      if (!hasAnyFeedContent &&
+          homeFeedStillLoading &&
+          _lastHomeFetch == null) {
         return fallback;
       }
-    } else if (_loadingHome && homeItems.isEmpty && _all.isEmpty) {
-      // لا تُظهر شاشة بيضاء/هيكل إذا كانت البطاقات موجودة مسبقاً أثناء التحديث.
+    } else if (_loadingHome &&
+        homeItems.isEmpty &&
+        _all.isEmpty &&
+        _marketHomeRequests.isEmpty &&
+        _lastHomeFetch == null) {
       return fallback;
     }
 
@@ -6782,6 +7235,7 @@ class _UserDashboardState extends State<UserDashboard>
         ...homeRequestsFiltered.map(HomeMixedFeedEntry.request),
       ];
     }
+    mixedEntries = _pinRevealedMixedFirst(mixedEntries);
 
     final showRequestsBelowListings = _homeFeedKind == HomeFeedKind.listings &&
         homeRequestsFiltered.isNotEmpty;
@@ -6839,7 +7293,7 @@ class _UserDashboardState extends State<UserDashboard>
                       _openMarketRequestDetail(r, autoOpenSubmitOffer: true),
               marketRequestPriorityLabel: (r) =>
                   _marketRequestPriorityL10nLabel(l10n, r.requestPriority),
-              suppressPublicOwnerIdentityOnCards: false,
+              suppressPublicOwnerIdentityOnCards: true,
               onShareListingFromCard: _shareListingFromCard,
               onHomeHideFromFeed: _isGuest
                   ? (p) async => _showLoginDialog()
@@ -6861,6 +7315,8 @@ class _UserDashboardState extends State<UserDashboard>
               onRestoreMarketRequest: _isGuest ? null : _onRestoreMarketRequest,
               onCopyMarketRequestWebLink: _copyMarketRequestPublicLink,
               onShareMarketRequestFromCard: _shareMarketRequestFromCard,
+              marketRequestApplicantCount: (id) =>
+                  _homeRequestApplicantCounts[id] ?? 0,
             ),
           );
 
@@ -6893,7 +7349,7 @@ class _UserDashboardState extends State<UserDashboard>
                   canShowCartButton: _cartReservationFeaturesEnabled,
                   showListingQuickActions: false,
                   onCopyListingWebLink: _copyListingPublicLink,
-                  suppressPublicOwnerIdentityOnCards: false,
+                  suppressPublicOwnerIdentityOnCards: true,
                   onShareListingFromCard: _shareListingFromCard,
                   onHomeHideFromFeed: _isGuest
                       ? (p) async => _showLoginDialog()
@@ -7141,21 +7597,13 @@ class _UserDashboardState extends State<UserDashboard>
       if (paintListings.isEmpty &&
           paintRequests.isEmpty &&
           (loadedPropertyRows > 0 || loadedRequestRows > 0)) {
+        // لا تُرجع القوائم الخام: كانت تُظهر لصاحب الصفقة بطاقات أخفاها فلتر السلة/العرض.
         WebBootstrapDiag.warn(
           'home.paint',
-          'filter emptied UI — fallback raw '
-              'listings=${_all.length} requests=${_marketHomeRequests.length}',
+          'filter emptied UI — keep filtered empty '
+              'rawListings=${_all.length} rawRequests=${_marketHomeRequests.length} '
+              'cart=${_cart.length} myOffers=${_marketRequestIdsWithMyPendingOffer.length}',
         );
-        if (showListings) {
-          paintListings = List<Property>.from(_all);
-        }
-        if (showRequests || showRequestsBelowListings) {
-          paintRequests = _isGuest || _uid.isEmpty
-              ? List<MarketPropertyRequestRow>.from(_marketHomeRequests)
-              : _marketHomeRequests
-                  .where((r) => r.requesterId != _uid)
-                  .toList();
-        }
       }
       // لا تُغرق الـ Console — سجّل عند تغيّر العدد فقط.
       final paintSig =
@@ -7175,8 +7623,8 @@ class _UserDashboardState extends State<UserDashboard>
             child: LayoutBuilder(
               builder: (context, constraints) {
                 // شاشات كبيرة ≥600: أعمدة متعددة؛ جوال/ضيّق: عمود واحد — دون GridView shrink.
-                final cross =
-                    _homeListingGridCrossAxisCount(constraints.maxWidth);
+                final cross = _homeListingGridCrossAxisCount(
+                    constraints.maxWidth, context);
                 const spacing = 12.0;
                 final equalH = _homeListingGridEqualCardHeight(
                   maxWidth: constraints.maxWidth,
@@ -7185,18 +7633,20 @@ class _UserDashboardState extends State<UserDashboard>
                   spacing: spacing,
                 );
                 // خليط مرتّب: المستعجل/الفوري المدفوع أولاً ثم الأحدث.
-                final mixedPaint = buildMixedHomeTimeline(
-                  paintListings,
-                  paintRequests,
-                  limit: paintListings.length + paintRequests.length,
+                final mixedPaint = _pinRevealedMixedFirst(
+                  buildMixedHomeTimeline(
+                    paintListings,
+                    paintRequests,
+                    limit: paintListings.length + paintRequests.length,
+                  ),
                 );
                 final totalCards = mixedPaint.length;
                 if (totalCards == 0) {
                   // أثناء التحميل أو قبل أول جلب ناجح: لا رسالة فارغة مضلّلة.
-                  if (homeFeedStillLoading ||
-                      _lastHomeFetch == null ||
-                      loadedPropertyRows > 0 ||
-                      loadedRequestRows > 0) {
+                  if (homeFeedStillLoading &&
+                      _lastHomeFetch == null &&
+                      loadedPropertyRows == 0 &&
+                      loadedRequestRows == 0) {
                     return const PropertyCardSkeletonList(
                       count: 6,
                       topPadding: 16,
@@ -7221,80 +7671,89 @@ class _UserDashboardState extends State<UserDashboard>
 
                 Widget listingCard(Property p) {
                   final isOwner = p.ownerId == _uid;
-                  return _RealEstateCard(
-                    property: p,
-                    isOwner: isOwner,
-                    isAr: _isArabic,
-                    bankColor: _brandPrimary,
-                    favorite: !_isGuest && _isFav(p.id),
-                    onToggleFav: () => _toggleFav(p.id),
-                    onOpenDetails: () => _openDetails(p),
-                    activeCartHoldsCount: _activeReservationHoldCount(p.id),
-                    isReserved: _isReservedByAnyone(p.id),
-                    reservedUntil: _reservedUntil(p.id),
-                    reservedByName: _reservedByName(p.id),
-                    onAddToCart: _cartReservationFeaturesEnabled
-                        ? () => _addToCart(p)
-                        : null,
-                    currentUserId: _uid.isEmpty ? 'guest' : _uid,
-                    showEditDelete: false,
-                    onEditProperty: null,
-                    onDeleteProperty: null,
-                    timeAgo: _timeAgo,
-                    canShowCartButton: _cartReservationFeaturesEnabled,
-                    showListingQuickActions: false,
-                    suppressPublicOwnerIdentity: false,
-                    // الضيف: لا بيانات مسوّق على بطاقة الرئيسية.
-                    showRegulatoryIdentityOnCard: !_isGuest,
-                    omitMarketingLicenseEntriesOnCard: true,
-                    preferStaticPrimaryImage: true,
-                    onCopyListingWebLink: _copyListingPublicLink,
-                    onShareListingFromCard: () => _shareListingFromCard(p),
-                    onHomeHideFromFeed: _isGuest
-                        ? (x) async => _showLoginDialog()
-                        : _onHomeHideProperty,
-                    onHomeReportListing: _isGuest
-                        ? (x) async => _showLoginDialog()
-                        : _onHomeReportProperty,
-                    homeFeedShowsHiddenOnly: _homeShowHiddenOnly,
-                    onRestorePropertyToHome:
-                        _isGuest ? null : _onRestorePropertyToHome,
-                    onWithdrawPropertyReport:
-                        _isGuest ? null : _onWithdrawPropertyReport,
+                  return _wrapFreshPublishGlow(
+                    active: _isFreshPublishRevealProperty(p.id),
+                    child: _RealEstateCard(
+                      property: p,
+                      isOwner: isOwner,
+                      isAr: _isArabic,
+                      bankColor: _brandPrimary,
+                      favorite: !_isGuest && _isFav(p.id),
+                      onToggleFav: () => _toggleFav(p.id),
+                      onOpenDetails: () => _openDetails(p),
+                      activeCartHoldsCount: _activeReservationHoldCount(p.id),
+                      isReserved: _isReservedByAnyone(p.id),
+                      reservedUntil: _reservedUntil(p.id),
+                      reservedByName: _reservedByName(p.id),
+                      onAddToCart: _cartReservationFeaturesEnabled
+                          ? () => _addToCart(p)
+                          : null,
+                      currentUserId: _uid.isEmpty ? 'guest' : _uid,
+                      showEditDelete: false,
+                      onEditProperty: null,
+                      onDeleteProperty: null,
+                      timeAgo: _timeAgo,
+                      canShowCartButton: _cartReservationFeaturesEnabled,
+                      showListingQuickActions: false,
+                      suppressPublicOwnerIdentity: true,
+                      // الضيف: لا بيانات مسوّق على بطاقة الرئيسية.
+                      showRegulatoryIdentityOnCard: false,
+                      omitMarketingLicenseEntriesOnCard: true,
+                      preferStaticPrimaryImage: true,
+                      onCopyListingWebLink: _copyListingPublicLink,
+                      onShareListingFromCard: () => _shareListingFromCard(p),
+                      onHomeHideFromFeed: _isGuest
+                          ? (x) async => _showLoginDialog()
+                          : _onHomeHideProperty,
+                      onHomeReportListing: _isGuest
+                          ? (x) async => _showLoginDialog()
+                          : _onHomeReportProperty,
+                      homeFeedShowsHiddenOnly: _homeShowHiddenOnly,
+                      onRestorePropertyToHome:
+                          _isGuest ? null : _onRestorePropertyToHome,
+                      onWithdrawPropertyReport:
+                          _isGuest ? null : _onWithdrawPropertyReport,
+                    ),
                   );
                 }
 
                 Widget requestCard(MarketPropertyRequestRow r) {
-                  return _MarketRequestListingStyleCard(
-                    request: r,
-                    isAr: _isArabic,
-                    bankColor: _brandPrimary,
-                    currentUserId: _uid.isEmpty ? 'guest' : _uid,
-                    timeAgo: _timeAgo,
-                    priorityLabel: _marketRequestPriorityL10nLabel(
-                      l10n,
-                      r.requestPriority,
+                  return _wrapFreshPublishGlow(
+                    active: _isFreshPublishRevealRequest(r.id),
+                    child: _MarketRequestListingStyleCard(
+                      request: r,
+                      isAr: _isArabic,
+                      bankColor: _brandPrimary,
+                      currentUserId: _uid.isEmpty ? 'guest' : _uid,
+                      timeAgo: _timeAgo,
+                      priorityLabel: _marketRequestPriorityL10nLabel(
+                        l10n,
+                        r.requestPriority,
+                      ),
+                      dealApplicantCount:
+                          _homeRequestApplicantCounts[r.id] ?? 0,
+                      onOpen: () => _openMarketRequestDetail(r),
+                      onSubmitOffer: _isGuest
+                          ? null
+                          : () => _openMarketRequestDetail(
+                                r,
+                                autoOpenSubmitOffer: true,
+                              ),
+                      dealSubscriptionBlocked: dealSubBlocked,
+                      onSubscribeForDeal: _isGuest || !dealSubBlocked
+                          ? null
+                          : openDealSubscribe,
+                      homeFeedShowsHiddenOnly: _homeShowHiddenOnly,
+                      onRestoreMarketRequest:
+                          _isGuest ? null : _onRestoreMarketRequest,
+                      onHomeHideMarketRequest: _isGuest
+                          ? (row) async => _showLoginDialog()
+                          : _onHomeHideMarketRequest,
+                      onHomeReportMarketRequest:
+                          _isGuest ? null : _onHomeReportMarketRequest,
+                      onCopyMarketRequestWebLink: _copyMarketRequestPublicLink,
+                      onShareMarketRequestFromCard: _shareMarketRequestFromCard,
                     ),
-                    onOpen: () => _openMarketRequestDetail(r),
-                    onSubmitOffer: _isGuest
-                        ? null
-                        : () => _openMarketRequestDetail(
-                              r,
-                              autoOpenSubmitOffer: true,
-                            ),
-                    dealSubscriptionBlocked: dealSubBlocked,
-                    onSubscribeForDeal:
-                        _isGuest || !dealSubBlocked ? null : openDealSubscribe,
-                    homeFeedShowsHiddenOnly: _homeShowHiddenOnly,
-                    onRestoreMarketRequest:
-                        _isGuest ? null : _onRestoreMarketRequest,
-                    onHomeHideMarketRequest: _isGuest
-                        ? (row) async => _showLoginDialog()
-                        : _onHomeHideMarketRequest,
-                    onHomeReportMarketRequest:
-                        _isGuest ? null : _onHomeReportMarketRequest,
-                    onCopyMarketRequestWebLink: _copyMarketRequestPublicLink,
-                    onShareMarketRequestFromCard: _shareMarketRequestFromCard,
                   );
                 }
 
@@ -7320,22 +7779,13 @@ class _UserDashboardState extends State<UserDashboard>
                   separatorBuilder: (_, __) => const SizedBox(height: spacing),
                   itemBuilder: (context, row) {
                     final start = row * cross;
-                    // ارتفاع موحّد عبر SizedBox — بدون IntrinsicHeight/stretch.
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        for (var j = 0; j < cross; j++) ...[
-                          if (j > 0) const SizedBox(width: spacing),
-                          Expanded(
-                            child: start + j < totalCards
-                                ? _wrapEqualGridCardHeight(
-                                    height: equalH,
-                                    child: cardAt(start + j),
-                                  )
-                                : const SizedBox.shrink(),
-                          ),
-                        ],
-                      ],
+                    return _listingFeedCardsRow(
+                      cross: cross,
+                      start: start,
+                      total: totalCards,
+                      spacing: spacing,
+                      equalH: equalH,
+                      cardAt: cardAt,
                     );
                   },
                 );
@@ -7359,81 +7809,7 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   Widget _buildMyAdsHub() {
     _ensureSubTabControllers();
-    final cs = Theme.of(context).colorScheme;
-    final l10n = AppLocalizations.of(context)!;
-    final onboardingScroll = _scrollControllerForOnboardingTab(1);
-
-    final hasImmediateMyPageData =
-        _mine.isNotEmpty || _hasMarketingData || _hasOwnerRequestsData;
-    final hubStillLoading = _myAdsHubDataLoadStarted &&
-        ((_usesMarketerMyPageHub && _loadingMarketing) ||
-            (!_usesMarketerMyPageHub && _loadingOwnerRequests));
-    if (!kIsWeb &&
-        (_loadingMine || hubStillLoading) &&
-        !hasImmediateMyPageData) {
-      return const PropertyCardSkeletonList(count: 6, topPadding: 16);
-    }
-
-    if (_errorMine != null) {
-      final offline = _isOfflineErrorStr(_errorMine);
-
-      return ListView(
-        controller: onboardingScroll,
-        physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: const EdgeInsets.all(16),
-        children: [
-          const SizedBox(height: 60),
-          Center(
-            child: Text(
-              offline ? l10n.noInternetConnectionTitle : l10n.failedToLoadAds,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              offline
-                  ? l10n.ensureInternetThenRetry
-                  : (_isArabic
-                      ? 'تحقق من الاتصال ثم أعد المحاولة.'
-                      : 'Check connection then retry.'),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                  ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 14),
-          if (kDebugMode) Text(_errorMine!, textAlign: TextAlign.center),
-          const SizedBox(height: 14),
-          Center(
-            child: ElevatedButton.icon(
-              onPressed: () => _retryWithOfflineHint(
-                () => _loadMineAndOffers(force: true),
-              ),
-              icon: const Icon(Icons.refresh),
-              label: Text(l10n.retryLabel),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _brandPrimary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    // التبويبات الكاملة (معلن/مسوّق) — اعرض ما توفر فوراً حتى قبل اكتمال الدلاء.
-    final hubItems = sortedMineForHub();
-    return _buildMyAdsMarketingHub(hubItems);
+    return _buildMyAdsMarketingHub(sortedMineForHub());
   }
 
   // =========================
@@ -7527,7 +7903,10 @@ class _UserDashboardState extends State<UserDashboard>
       );
     }
 
-    if (_errorMine != null && mineFiltered.isEmpty && myReq.isEmpty) {
+    if (_errorMine != null &&
+        _mine.isEmpty &&
+        mineFiltered.isEmpty &&
+        myReq.isEmpty) {
       final offline = _isOfflineErrorStr(_errorMine);
       return ListView(
         controller: onboardingScroll,
@@ -7645,18 +8024,34 @@ class _UserDashboardState extends State<UserDashboard>
     }
 
     final marketErr = (_errorMarketRequests ?? '').trim();
-    // ويب/سطح مكتب: صفوف شبكة (1 أو 2 عمود) — بدون shrinkWrap GridView.
+    // ويب/سطح مكتب: صفوف شبكة ذكية (1 أو 2 أو 3 أعمدة) — بدون shrinkWrap GridView.
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cross = _homeListingGridCrossAxisCount(constraints.maxWidth);
+        final layoutW =
+            constraints.maxWidth.isFinite && constraints.maxWidth > 80
+                ? constraints.maxWidth
+                : MediaQuery.sizeOf(context).width;
+        final cross = _homeListingGridCrossAxisCount(layoutW, context);
         const spacing = 12.0;
         final equalH = _homeListingGridEqualCardHeight(
-          maxWidth: constraints.maxWidth,
+          maxWidth: layoutW,
           crossAxisCount: cross,
           horizontalPadding: 24,
           spacing: spacing,
         );
-        final header = marketErr.isNotEmpty
+        final invUsed = _activeInventoryCardCount;
+        final invMax = DealInventoryPolicy.maxActiveListingsAndRequests;
+        final countBar = Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            l10n.cartActiveCount(invUsed, invMax),
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: cs.primary,
+                ),
+          ),
+        );
+        final errBanner = marketErr.isNotEmpty
             ? Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Material(
@@ -7690,10 +8085,17 @@ class _UserDashboardState extends State<UserDashboard>
                 ),
               )
             : null;
+        final header = Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            countBar,
+            if (errBanner != null) errBanner,
+          ],
+        );
 
         Widget listingCard(Property p) {
           final isOwner = p.ownerId == _uid;
-          return _RealEstateCard(
+          final card = _RealEstateCard(
             property: p,
             isOwner: isOwner,
             isAr: _isArabic,
@@ -7715,9 +8117,18 @@ class _UserDashboardState extends State<UserDashboard>
             canShowCartButton: _cartReservationFeaturesEnabled,
             showListingQuickActions: true,
             onCopyListingWebLink: _copyListingPublicLink,
-            suppressPublicOwnerIdentity: false,
+            suppressPublicOwnerIdentity: true,
+            showRegulatoryIdentityOnCard: false,
+            omitMarketingLicenseEntriesOnCard: true,
             onShareListingFromCard: () => _shareListingFromCard(p),
             preferStaticPrimaryImage: true,
+            relaxTextTruncation: true,
+          );
+          return _wrapMinePublishedListingCard(
+            card: card,
+            property: p,
+            currentUserId: _uid,
+            isAr: _isArabic,
           );
         }
 
@@ -7732,6 +8143,7 @@ class _UserDashboardState extends State<UserDashboard>
               l10n,
               r.requestPriority,
             ),
+            dealApplicantCount: _homeRequestApplicantCounts[r.id] ?? 0,
             onOpen: () => _openMarketRequestDetail(r),
             onEditMarketRequest: _editMarketRequest,
             onSubmitOffer: _isGuest
@@ -7747,7 +8159,12 @@ class _UserDashboardState extends State<UserDashboard>
           myReq,
           limit: mineFiltered.length + myReq.length,
           pinPaidRequests: false,
-        );
+        )..sort((a, b) {
+            final fa = a.listing?.isFeatured == true;
+            final fb = b.listing?.isFeatured == true;
+            if (fa != fb) return fa ? -1 : 1;
+            return b.sortAt.compareTo(a.sortAt);
+          });
         final totalCards = mixedMine.length;
         Widget cardAt(int i) {
           final e = mixedMine[i];
@@ -7789,22 +8206,13 @@ class _UserDashboardState extends State<UserDashboard>
               );
             }
             final start = rowIdx * cross;
-            // ارتفاع موحّد عبر SizedBox — بدون IntrinsicHeight/stretch.
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var j = 0; j < cross; j++) ...[
-                  if (j > 0) const SizedBox(width: spacing),
-                  Expanded(
-                    child: start + j < totalCards
-                        ? _wrapEqualGridCardHeight(
-                            height: equalH,
-                            child: cardAt(start + j),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ],
+            return _listingFeedCardsRow(
+              cross: cross,
+              start: start,
+              total: totalCards,
+              spacing: spacing,
+              equalH: equalH,
+              cardAt: cardAt,
             );
           },
         );
@@ -8026,156 +8434,442 @@ class _UserDashboardState extends State<UserDashboard>
     );
   }
 
-  // =========================
-  // Build support hub (الدعم الفني + قنوات الإدارة — قريباً)
-  // =========================
-  Widget _buildSupportHubBody() {
-    final cs = Theme.of(context).colorScheme;
-    final l10n = AppLocalizations.of(context)!;
-    final onboardingScroll = _scrollControllerForOnboardingTab(4);
-
+  Widget _buildDeskBody() {
     if (_isGuest) {
-      return ListView(
-        controller: onboardingScroll,
-        physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-        children: [
-          const SizedBox(height: 40),
-          Icon(
-            Icons.lock_outline,
-            size: 84,
-            color: _brandPrimary.withOpacity(_op(180)),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            _isArabic
-                ? 'سجّل الدخول لعرض الدعم الفني'
-                : 'Log in to access support',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.onSurfaceVariant,
-                ),
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            _isArabic ? 'سجّل الدخول لفتح إدارتي.' : 'Sign in to open My desk.',
             textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Cairo'),
           ),
-          const SizedBox(height: 20),
-          Center(
-            child: ElevatedButton(
-              onPressed: _navigateToLogin,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _brandPrimary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 16,
-                ),
-              ),
-              child: Text(
-                l10n.loginNowLabel,
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-            ),
-          ),
-        ],
+        ),
       );
     }
 
-    return ListView(
-      controller: onboardingScroll,
-      physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-      children: [
-        ListTile(
-          leading: Icon(Icons.forum_outlined, color: cs.primary),
-          title: Text(
-            l10n.openChatInboxButton,
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-          subtitle: Text(
-            l10n.communicationHubChatsHint,
-            style: TextStyle(
-              color: cs.onSurfaceVariant,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          onTap: () {
-            AppHaptics.light();
-            unawaited(ChatNavigation.push(context, isAr: _isArabic));
-          },
+    if (!_accountRoleLoaded || !_orgNavResolved) {
+      unawaited(_loadAccountRole());
+      unawaited(_prefetchMyDeskWarm());
+      return const Center(child: AppLogoLoading());
+    }
+
+    const deskShellBack = true;
+    if (AppRoleHelper.isMarketingRole(
+            AppRoleHelper.fromAccountType(_accountType)) ||
+        AppRoleHelper.isOrgEntity(_accountType)) {
+      return AppKeyboardPad(
+        child: MyOrganizationScreen(
+          lang: widget.lang,
+          suppressImpliedLeading: deskShellBack,
+          embedAppBar: true,
         ),
-        const Divider(height: 1),
-        DefaultTabController(
-          length: 3,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                tabs: [
-                  Tab(text: l10n.supportHubTechnicalTab),
-                  Tab(text: l10n.supportHubAdminTab),
-                  Tab(text: l10n.supportHubTicketsTab),
-                ],
-              ),
-              SizedBox(
-                height: MediaQuery.sizeOf(context).height * 0.58,
-                child: TabBarView(
-                  children: [
-                    SupportPage(
-                      userId: _uid,
-                      isAr: _isArabic,
-                      bankColor: _brandPrimary,
-                      wrapInScaffold: false,
-                    ),
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Text(
-                          l10n.supportHubAdminSoon,
-                          textAlign: TextAlign.center,
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.35,
-                                  ),
-                        ),
-                      ),
-                    ),
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Text(
-                          l10n.supportHubTicketsSoon,
-                          textAlign: TextAlign.center,
-                          style:
-                              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.35,
-                                  ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+      );
+    }
+
+    if (AppRoleHelper.isOwnerIndividual(_accountType)) {
+      return AppKeyboardPad(
+        child: OwnerIndividualDeskPage(
+          lang: widget.lang,
+          userId: _uid,
+          accountType: _accountType,
+          suppressImpliedLeading: deskShellBack,
+          embedAppBar: true,
         ),
-      ],
+      );
+    }
+
+    if (_orgNavIsOwner ||
+        AppRoleHelper.orgPermissionsOpenDeskShell(_orgMembershipPermissions)) {
+      return AppKeyboardPad(
+        child: MyOrganizationScreen(
+          lang: widget.lang,
+          suppressImpliedLeading: deskShellBack,
+          embedAppBar: true,
+        ),
+      );
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          _isArabic
+              ? 'تحقق من ربط حسابك بالمؤسسة ثم أعد المحاولة.'
+              : 'Check your organization link and try again.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Cairo'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSupportHubOverlay() async {
+    AppHaptics.light();
+    if (!mounted) return;
+    _ss(() {
+      _tabIndex = 4;
+      _bottomNavTransientIndex = null;
+      if (kIsWeb) _webVisitedTabs.add(4);
+    });
+  }
+
+  // =========================
+  // Build support hub (الدعم الفني)
+  // =========================
+  Widget _buildSupportHubBody() {
+    final onboardingScroll = _scrollControllerForOnboardingTab(4);
+    return AppKeyboardPad(
+      child: SupportHubBody(
+        userId: _isGuest ? '' : _uid,
+        isAr: _isArabic,
+        accentColor: _brandPrimary,
+        onLogin: _navigateToLogin,
+        helpScrollController: onboardingScroll,
+      ),
     );
   }
 
   // =========================
   // Build cart body
   // =========================
+  int get _activeDealCardCount =>
+      _cart.length + _myPendingMarketOffersForCart.length;
+
+  String _dealRatioLabel(int used, int max) =>
+      DateHelper.ltrIsolate('$used/$max');
+
+  List<Map<String, dynamic>> get _completedMarketOffersForCart {
+    return _myArchivedMarketOffersForCart
+        .where(MarketingFlowService.marketOfferIsCompletedWin)
+        .toList(growable: false);
+  }
+
+  List<Map<String, dynamic>> get _incomingListingReservationsForCart {
+    return _offers.where((r) {
+      final st = (r['status'] ?? '').toString().toLowerCase().trim();
+      final buyer = (r['user_id'] ?? '').toString();
+      return buyer.isNotEmpty &&
+          buyer != _uid &&
+          (st == 'pending' || st == 'paid' || st == 'accepted');
+    }).toList(growable: false);
+  }
+
+  DateTime? _incomingDealCreatedAt(Map<String, dynamic> row) =>
+      _tryParseDt(row['created_at']);
+
+  bool _incomingDealAccepted(Map<String, dynamic> row) {
+    final st = (row['status'] ?? '').toString().toLowerCase().trim();
+    return DealMessagingGate.offerApprovedByOwner(st) ||
+        DealMessagingGate.reservationApprovedByOwner(st);
+  }
+
+  List<Map<String, dynamic>> _filteredIncomingDeals(
+    List<Map<String, dynamic>> src,
+  ) {
+    var list = List<Map<String, dynamic>>.from(src);
+    if (_incomingDealStatusFilter == 'waiting') {
+      list = list.where((e) => !_incomingDealAccepted(e)).toList();
+    } else if (_incomingDealStatusFilter == 'accepted') {
+      list = list.where(_incomingDealAccepted).toList();
+    }
+    list.sort((a, b) {
+      final da = _incomingDealCreatedAt(a) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final db = _incomingDealCreatedAt(b) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return _incomingDealSortNewest ? db.compareTo(da) : da.compareTo(db);
+    });
+    return list;
+  }
+
+  ({int index, int total}) _incomingQueueRank(
+    Map<String, dynamic> row, {
+    required bool listing,
+  }) {
+    final idKey = listing ? 'property_id' : 'market_request_id';
+    final id = (row[idKey] ?? '').toString();
+    final pool = listing
+        ? _incomingListingReservationsForCart
+        : _incomingMarketOffersOnMine;
+    final same = pool.where((e) => (e[idKey] ?? '').toString() == id).toList()
+      ..sort((a, b) {
+        final da = _incomingDealCreatedAt(a) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final db = _incomingDealCreatedAt(b) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        return da.compareTo(db);
+      });
+    final rid = (row['id'] ?? '').toString();
+    final i = same.indexWhere((e) => (e['id'] ?? '').toString() == rid);
+    return (index: i < 0 ? same.length : i + 1, total: same.length);
+  }
+
+  DateTime? _incomingApprovedAt(Map<String, dynamic> row) {
+    return _tryParseDt(row['owner_accepted_at']) ??
+        (_incomingDealAccepted(row) ? _tryParseDt(row['updated_at']) : null);
+  }
+
+  String _ownerDisplayNameForDeals() {
+    final n = _displayNameFromProfile(_profileCache[_uid]).trim();
+    if (n.isNotEmpty) return n;
+    return _greetingNameCache.trim();
+  }
+
+  Widget _incomingDealFilterBar(AppLocalizations l10n) {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return FilterChip(
+        selected: selected,
+        label: Text(label, maxLines: 1),
+        visualDensity: VisualDensity.compact,
+        onSelected: (_) => onTap(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          chip(
+            l10n.dealIncomingSortOldest,
+            !_incomingDealSortNewest,
+            () => setState(() => _incomingDealSortNewest = false),
+          ),
+          chip(
+            l10n.dealIncomingSortNewest,
+            _incomingDealSortNewest,
+            () => setState(() => _incomingDealSortNewest = true),
+          ),
+          chip(
+            l10n.dealIncomingFilterAll,
+            _incomingDealStatusFilter == 'all',
+            () => setState(() => _incomingDealStatusFilter = 'all'),
+          ),
+          chip(
+            l10n.dealIncomingFilterWaiting,
+            _incomingDealStatusFilter == 'waiting',
+            () => setState(() => _incomingDealStatusFilter = 'waiting'),
+          ),
+          chip(
+            l10n.dealIncomingFilterAccepted,
+            _incomingDealStatusFilter == 'accepted',
+            () => setState(() => _incomingDealStatusFilter = 'accepted'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<MarketPropertyRequestRow> get _completedOwnedMarketRequests {
+    return _myMarketSubmissions.where((r) {
+      final st = r.status.trim().toLowerCase();
+      return st == 'completed' || st == 'closed' || r.completedAt != null;
+    }).toList(growable: false);
+  }
+
+  bool get _hasIncomingDealCards =>
+      _incomingListingReservationsForCart.isNotEmpty ||
+      _incomingMarketOffersOnMine.isNotEmpty;
+
+  bool get _hasOutgoingDealCards =>
+      _cart.isNotEmpty || _myPendingMarketOffersForCart.isNotEmpty;
+
+  bool get _hasCompletedDealCards =>
+      _completedCart.isNotEmpty ||
+      _completedMarketOffersForCart.isNotEmpty ||
+      _completedOwnedMarketRequests.isNotEmpty;
+
+  int get _activeInventoryCardCount {
+    final listingProps = _propertiesOwnedOrPublishedByMe().where((p) {
+      if (p.isDeletedLike) return false;
+      return p.effectiveWorkflowStage != ListingWorkflowStage.archived;
+    }).toList();
+    final countedIds = listingProps.map((p) => p.id).toSet();
+    final listings = listingProps.length;
+    final src = _myMarketSubmissions.isNotEmpty
+        ? _myMarketSubmissions
+        : _marketHomeRequests
+            .where((r) => r.requesterId == _uid && _uid.isNotEmpty)
+            .toList();
+    final reqs = src.where((r) {
+      final st = r.status.trim().toLowerCase();
+      return st != 'completed' &&
+          st != 'cancelled' &&
+          st != 'canceled' &&
+          st != 'closed';
+    }).length;
+    var unpublishedMarketing = 0;
+    for (final r in _ownerListingRequests) {
+      final stage = (r['workflow_stage'] ?? '').toString().trim().toLowerCase();
+      if (stage == 'published' ||
+          stage == 'archived' ||
+          stage == 'cancelled' ||
+          stage == 'terminated' ||
+          stage == 'contract_cancelled') {
+        continue;
+      }
+      final pid = (r['preview_property_id'] ?? r['property_id'] ?? '')
+          .toString()
+          .trim();
+      if (pid.isNotEmpty && countedIds.contains(pid)) continue;
+      unpublishedMarketing++;
+    }
+    return listings + reqs + unpublishedMarketing;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _lastAppHiddenAt = DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      _onAppSurfaceEntered();
+    }
+  }
+
+  void _onAppSurfaceEntered() {
+    final hiddenAt = _lastAppHiddenAt;
+    if (hiddenAt != null &&
+        DateTime.now().difference(hiddenAt) < const Duration(seconds: 2)) {
+      return;
+    }
+    _dealCompletionPromptConsumedThisVisit = false;
+    if (!_isGuest && _uid.isNotEmpty) {
+      unawaited(_loadCart(force: true, silent: true));
+      unawaited(_loadMyMarketRequestOfferTracking());
+      unawaited(_loadMineAndOffers(force: true, silent: true));
+      unawaited(_loadMyMarketSubmissions(force: true, silent: true));
+      _scheduleDealCompletionPrompt();
+    }
+  }
+
+  void _scheduleDealCompletionPrompt() {
+    if (_isGuest || _uid.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_promptOpenAcceptedDeals());
+    });
+  }
+
+  Future<void> _promptOpenAcceptedDeals() async {
+    if (!mounted || _isGuest || _uid.isEmpty) return;
+    if (_dealCompletionPromptOpen || _dealCompletionPromptConsumedThisVisit) {
+      return;
+    }
+    _dealCompletionPromptOpen = true;
+    try {
+      final deals = await DealCompletionInbox.load(_sb);
+      if (!mounted || deals.isEmpty) return;
+      for (final deal in deals) {
+        if (!mounted) return;
+        final choice = await showDealEnterCompletionPrompt(
+          context: context,
+          deal: deal,
+        );
+        if (choice != DealEnterPromptChoice.yesDone) continue;
+        final note = await showDealCompletionNoteSheet(context: context);
+        if (note == null || note.trim().isEmpty || !mounted) continue;
+        await _submitDealCompletion(deal: deal, note: note.trim());
+      }
+    } catch (_) {
+    } finally {
+      _dealCompletionPromptConsumedThisVisit = true;
+      _dealCompletionPromptOpen = false;
+    }
+  }
+
+  Future<void> _submitDealCompletion({
+    required OpenAcceptedDeal deal,
+    required String note,
+  }) async {
+    try {
+      if (deal.isListing) {
+        final pid = (deal.propertyId ?? '').trim();
+        if (pid.isEmpty) return;
+        await MarketingFlowService(_sb).completePropertySale(pid, note: note);
+      } else {
+        final rid = (deal.requestId ?? '').trim();
+        if (rid.isEmpty) return;
+        await MarketRequestOffersService(_sb).completeRequest(
+          requestId: rid,
+          offerId: deal.offerId,
+          note: note,
+        );
+      }
+      if (!mounted) return;
+      await Future.wait([
+        _loadCart(force: true, silent: true),
+        _loadHome(force: true, silent: true),
+        _loadMineAndOffers(force: true, silent: true),
+        _loadMyMarketRequestOfferTracking(),
+        _loadMyMarketSubmissions(force: true, silent: true),
+      ]);
+      if (!mounted) return;
+      _bumpDealFeedSurfaces(openCart: true);
+      _ss(() => _cartPaneIndex = 2);
+      _showNotification(
+        widget.isAr ? 'تم إتمام الصفقة' : 'Deal completed',
+        widget.isAr
+            ? 'انتقلت الصفقة إلى المنتهية، واختفت من صفقات المتقدمين الآخرين.'
+            : 'The deal moved to Completed and left other applicants’ My deals.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showNotification(
+        widget.isAr ? 'تعذر الإتمام' : 'Could not complete',
+        RpcUserMessage.of(e, isAr: widget.isAr),
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> _completeMarketDealFromCart(Map<String, dynamic> o) async {
+    final deal = OpenAcceptedDeal(
+      kind: 'market_request',
+      id: (o['id'] ?? '').toString(),
+      title: (o['_request_title'] ?? '').toString(),
+      role: 'partner',
+      requestId: (o['market_request_id'] ?? '').toString(),
+      offerId: (o['id'] ?? '').toString(),
+    );
+    final note = await showDealCompletionNoteSheet(context: context);
+    if (note == null || note.trim().isEmpty || !mounted) return;
+    await _submitDealCompletion(deal: deal, note: note.trim());
+  }
+
+  Future<bool> _ensureDealSlotAvailable() async {
+    final used = _activeDealCardCount;
+    if (!DealInventoryPolicy.dealsAtCap(used)) return true;
+    await showDealSlotCapDialog(
+      context: context,
+      used: used,
+      max: DealInventoryPolicy.maxActiveDeals,
+    );
+    return false;
+  }
+
+  Future<bool> _ensureInventorySlotAvailable() async {
+    final used = _activeInventoryCardCount;
+    if (!DealInventoryPolicy.inventoryAtCap(used)) return true;
+    await showInventorySlotCapDialog(
+      context: context,
+      used: used,
+      max: DealInventoryPolicy.maxActiveListingsAndRequests,
+    );
+    return false;
+  }
+
   Widget _buildCartBody() {
     final cs = Theme.of(context).colorScheme;
     final l10n = AppLocalizations.of(context)!;
     final onboardingScroll = _scrollControllerForOnboardingTab(3);
 
-    if (_loadingCart) {
+    if (_loadingCart &&
+        _cart.isEmpty &&
+        _myPendingMarketOffersForCart.isEmpty &&
+        _completedCart.isEmpty &&
+        _incomingMarketOffersOnMine.isEmpty &&
+        _incomingListingReservationsForCart.isEmpty) {
       return const CartRowSkeletonList(count: 5, topPadding: 16);
     }
 
@@ -8288,9 +8982,9 @@ class _UserDashboardState extends State<UserDashboard>
       );
     }
 
-    if (_cart.isEmpty &&
-        _myPendingMarketOffersForCart.isEmpty &&
-        _completedCart.isEmpty) {
+    if (!_hasOutgoingDealCards &&
+        !_hasCompletedDealCards &&
+        !_hasIncomingDealCards) {
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
@@ -8358,138 +9052,365 @@ class _UserDashboardState extends State<UserDashboard>
       );
     }
 
-    return ListView.separated(
-      controller: onboardingScroll,
-      physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-      padding: const EdgeInsets.all(12),
-      itemCount: _cart.length +
-          1 +
-          (_myPendingMarketOffersForCart.isEmpty ? 0 : 1) +
-          _myPendingMarketOffersForCart.length +
-          (_visibleArchivedMarketOffersForCart.isEmpty ? 0 : 1) +
-          _visibleArchivedMarketOffersForCart.length +
-          (_completedCart.isEmpty ? 0 : 1 + _completedCart.length),
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, i) {
-        final introEnd = _myPendingMarketOffersForCart.isEmpty ? 1 : 2;
-        if (i == 0) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth.isFinite && constraints.maxWidth > 80
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final l10nCart = AppLocalizations.of(context)!;
+        final used = _activeDealCardCount;
+        final maxDeals = DealInventoryPolicy.maxActiveDeals;
+
+        Widget sectionTitle(String text) {
           return Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 4),
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
             child: Text(
-              _isArabic
-                  ? 'صفقاتي: عروضك/حجوزاتك على الإعلانات وطلبات السوق. تُعرض الأحدث أولاً، ولا يظهر زر تقديم عرض مرة أخرى بعد وجود عرض نشط.'
-                  : 'My deals: your offers/holds on listings and market requests, newest first. Submit offer is hidden after an active offer exists.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontWeight: FontWeight.w600,
-                    height: 1.35,
-                  ),
-            ),
-          );
-        }
-        if (_myPendingMarketOffersForCart.isNotEmpty && i == 1) {
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-            child: Text(
-              AppLocalizations.of(context)!.cartMarketOffersSectionTitle,
+              text,
               style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w900,
                   ),
             ),
           );
         }
-        final offerIdx = i - introEnd;
-        if (offerIdx >= 0 && offerIdx < _myPendingMarketOffersForCart.length) {
-          final o = _myPendingMarketOffersForCart[offerIdx];
-          final rid = (o['market_request_id'] ?? '').toString();
-          final st = (o['status'] ?? '').toString();
-          final stLabel = _marketOfferStatusLabel(st);
-          final price = o['price_offer'];
-          final priceValue = _toDouble0(price);
-          final msg = (o['message'] ?? '').toString().trim();
-          final titleHint = (o['_request_title'] ?? '').toString().trim();
-          MarketPropertyRequestRow? foundRow;
-          for (final e in _marketHomeRequests) {
-            if (e.id == rid) {
-              foundRow = e;
-              break;
-            }
-          }
-          return _ReservationCard(
-            bankColor: _brandPrimary,
-            icon: Icons.local_offer_outlined,
-            title: titleHint.isNotEmpty
-                ? titleHint
-                : (foundRow?.title ?? (_isArabic ? 'طلب عقاري' : 'Request')),
-            subtitle: Text(
-              _isArabic
-                  ? 'عرضك على طلب عقاري'
-                  : 'Your offer on a market request',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: cs.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
+
+        final incomingCount = _incomingListingReservationsForCart.length +
+            _incomingMarketOffersOnMine.length;
+        final incomingOffers =
+            _filteredIncomingDeals(_incomingMarketOffersOnMine);
+        final incomingListings =
+            _filteredIncomingDeals(_incomingListingReservationsForCart);
+        final incomingChildren = <Widget>[
+          _incomingDealFilterBar(l10nCart),
+          if (!_hasIncomingDealCards)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 8),
+              child: Text(
+                l10nCart.cartIncomingEmpty,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            )
+          else if (incomingOffers.isEmpty && incomingListings.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 8),
+              child: Text(
+                l10nCart.cartIncomingEmpty,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            )
+          else ...[
+            if (incomingOffers.isNotEmpty) ...[
+              sectionTitle(l10nCart.cartIncomingSectionRequests),
+              ..._smartDashboardCardRows(
+                cards: [
+                  for (final o in incomingOffers) _buildIncomingMarketOfferCard(o),
+                ],
+                maxWidth: w,
+                context: context,
+              ),
+            ],
+            if (incomingListings.isNotEmpty) ...[
+              sectionTitle(l10nCart.cartIncomingSectionListings),
+              ..._smartDashboardCardRows(
+                cards: [
+                  for (final r in incomingListings)
+                    _buildCartActiveReservationCard(r, ownerSide: true),
+                ],
+                maxWidth: w,
+                context: context,
+              ),
+            ],
+          ],
+        ];
+
+        final activeChildren = <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+            child: Text(
+              _dealRatioLabel(used, maxDeals),
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: cs.primary,
                   ),
             ),
-            chips: [
-              _MiniChip(
-                icon: Icons.verified_outlined,
-                text: '${_isArabic ? 'الحالة' : 'Status'}: $stLabel',
-                color: _brandPrimary,
+          ),
+          if (!_hasOutgoingDealCards)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 8),
+              child: Text(
+                l10nCart.cartOutgoingEmptyHint,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurfaceVariant,
+                    ),
               ),
-              if (rid.trim().isNotEmpty)
-                _MiniChip(
-                  icon: Icons.copy_outlined,
-                  text: _isArabic
-                      ? 'طلب: ${DisplayIds.tenDigit(rid)}'
-                      : 'Request: ${DisplayIds.tenDigit(rid)}',
-                  color: _brandPrimary,
-                  onTap: () => _copyPlainToClipboard(
-                    rid.trim(),
-                    _isArabic ? 'تم نسخ رقم الطلب' : 'Request ID copied',
-                  ),
-                ),
+            ),
+        ];
+        if (_myPendingMarketOffersForCart.isNotEmpty) {
+          activeChildren.add(sectionTitle(l10n.cartMarketOffersSectionTitle));
+          activeChildren.addAll(
+            _smartDashboardCardRows(
+              cards: [
+                for (final o in _myPendingMarketOffersForCart)
+                  _buildCartPendingMarketOfferCard(o),
+              ],
+              maxWidth: w,
+              context: context,
+            ),
+          );
+        }
+        if (_cart.isNotEmpty) {
+          activeChildren.addAll(
+            _smartDashboardCardRows(
+              cards: [
+                for (final r in _cart) _buildCartActiveReservationCard(r),
+              ],
+              maxWidth: w,
+              context: context,
+            ),
+          );
+        }
+
+        final completedCount = _completedCart.length +
+            _completedMarketOffersForCart.length +
+            _completedOwnedMarketRequests.length;
+        final completedChildren = <Widget>[
+          if (completedCount == 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40),
+              child: Text(
+                _isArabic
+                    ? 'لا توجد صفقات منتهية بعد'
+                    : 'No completed deals yet',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            )
+          else ...[
+            if (_completedOwnedMarketRequests.isNotEmpty) ...[
+              sectionTitle(
+                _isArabic
+                    ? 'طلباتي المنتهية'
+                    : 'My completed requests',
+              ),
+              ..._smartDashboardCardRows(
+                cards: [
+                  for (final r in _completedOwnedMarketRequests)
+                    _buildCompletedOwnedMarketRequestCard(r),
+                ],
+                maxWidth: w,
+                context: context,
+              ),
             ],
-            priceTable: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _priceRow(
-                  context,
-                  label: _isArabic ? 'قيمة عرضك' : 'Your offer amount',
-                  value: priceValue,
-                  bold: true,
+            if (_completedMarketOffersForCart.isNotEmpty) ...[
+              sectionTitle(
+                _isArabic ? 'طلبات سوق منتهية' : 'Completed market requests',
+              ),
+              ..._smartDashboardCardRows(
+                cards: [
+                  for (final o in _completedMarketOffersForCart)
+                    _buildCompletedMarketOfferCard(o),
+                ],
+                maxWidth: w,
+                context: context,
+              ),
+            ],
+            if (_completedCart.isNotEmpty) ...[
+              sectionTitle(_isArabic ? 'صفقات منتهية' : 'Completed deals'),
+              ..._smartDashboardCardRows(
+                cards: [
+                  for (final r in _completedCart) _buildCompletedPurchaseCard(r),
+                ],
+                maxWidth: w,
+                context: context,
+              ),
+            ],
+          ],
+        ];
+
+        final pane = _cartPaneIndex.clamp(0, 2);
+        final paneChildren = switch (pane) {
+          0 => incomingChildren,
+          2 => completedChildren,
+          _ => activeChildren,
+        };
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: SegmentedButton<int>(
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-                if (msg.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _isArabic ? 'رسالتك' : 'Your message',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: cs.onSurfaceVariant,
-                          fontWeight: FontWeight.w900,
-                        ),
+                segments: [
+                  ButtonSegment<int>(
+                    value: 0,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${l10nCart.cartTabIncoming} ($incomingCount)',
+                        maxLines: 1,
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    msg,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          height: 1.35,
-                        ),
+                  ButtonSegment<int>(
+                    value: 1,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${l10nCart.cartTabActive} (${_dealRatioLabel(used, maxDeals)})',
+                        maxLines: 1,
+                      ),
+                    ),
+                  ),
+                  ButtonSegment<int>(
+                    value: 2,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${l10nCart.cartTabCompleted} ($completedCount)',
+                        maxLines: 1,
+                      ),
+                    ),
                   ),
                 ],
-              ],
+                selected: {pane},
+                onSelectionChanged: (s) {
+                  if (s.isEmpty) return;
+                  setState(() => _cartPaneIndex = s.first);
+                },
+              ),
             ),
-            primaryAction: _ReservationAction(
+            Expanded(
+              child: ListView(
+                controller: onboardingScroll,
+                physics: const AlwaysScrollableScrollPhysics(),
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.all(12),
+                children: paneChildren,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildIncomingMarketOfferCard(Map<String, dynamic> o) {
+    final cs = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context)!;
+    final rid = (o['market_request_id'] ?? '').toString();
+    final oid = (o['id'] ?? '').toString().trim();
+    final st = (o['status'] ?? '').toString();
+    final stLabel = _marketOfferStatusLabel(st);
+    final priceValue = _toDouble0(o['price_offer']);
+    final msg = (o['message'] ?? '').toString().trim();
+    final titleHint = (o['_request_title'] ?? '').toString().trim();
+    final partner = (o['_offerer_display_name'] ?? '').toString().trim();
+    final canMessage = _dealOfferAllowsMessaging(st);
+    final rank = _incomingQueueRank(o, listing: false);
+    final requestedAt = _incomingDealCreatedAt(o);
+    final approvedAt = _incomingApprovedAt(o);
+    final addr = (o['_offerer_city'] ?? '').toString().trim();
+    final offererId = (o['offerer_id'] ?? '').toString().trim();
+    MarketPropertyRequestRow? owned;
+    for (final e in _myMarketSubmissions) {
+      if (e.id == rid) {
+        owned = e;
+        break;
+      }
+    }
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.handshake_outlined,
+      title: titleHint.isNotEmpty
+          ? titleHint
+          : (owned?.title ?? (_isArabic ? 'طلب عقاري' : 'Request')),
+      subtitle: Text(
+        canMessage
+            ? l10n.dealOwnerAcceptedPartner
+            : (_isArabic
+                ? 'عرض إتمام صفقة بانتظار قبولك'
+                : 'Complete-deal offer waiting for your acceptance'),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+      chips: [
+        _MiniChip(
+          icon: Icons.verified_outlined,
+          text: '${_isArabic ? 'الحالة' : 'Status'}: $stLabel',
+          color: _brandPrimary,
+        ),
+        if (partner.isNotEmpty)
+          _MiniChip(
+            icon: Icons.person_outline,
+            text: partner,
+            color: _brandPrimary,
+          ),
+      ],
+      priceTable: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _priceRow(
+            context,
+            label: _isArabic ? 'قيمة العرض' : 'Offer amount',
+            value: priceValue,
+            bold: true,
+          ),
+          if (msg.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              msg,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+            ),
+          ],
+        ],
+      ),
+      primaryAction: canMessage
+          ? _ReservationAction(
               kind: _ReservationActionKind.outlined,
-              icon: Icons.open_in_new,
-              label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
-              onPressed: rid.isEmpty
+              icon: Icons.verified_outlined,
+              label: l10n.dealCompleteWithPartner,
+              onPressed: () => unawaited(_completeIncomingMarketOffer(o)),
+            )
+          : _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.check_circle_outline,
+              label: l10n.dealOwnerAcceptPartner,
+              onPressed: oid.isEmpty
                   ? null
-                  : () => unawaited(_openMarketRequestDetailById(rid)),
+                  : () => unawaited(_acceptIncomingMarketOffer(oid)),
             ),
-            secondaryAction: _ReservationAction(
+      secondaryAction: _ReservationAction(
+        kind: _ReservationActionKind.outlined,
+        icon: Icons.open_in_new,
+        label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+        onPressed: rid.isEmpty
+            ? null
+            : () => unawaited(_openMarketRequestDetailById(rid)),
+      ),
+      thirdAction: canMessage
+          ? _ReservationAction(
               kind: _ReservationActionKind.outlined,
               icon: Icons.chat_bubble_outline,
               label: _isArabic ? 'مراسلة' : 'Message',
@@ -8501,246 +9422,559 @@ class _UserDashboardState extends State<UserDashboard>
                         kind: ConversationKind.marketRequest,
                         title: titleHint.isNotEmpty
                             ? titleHint
-                            : (_isArabic
-                                ? 'مراسلة الطلب'
-                                : 'Request messaging'),
+                            : (_isArabic ? 'مراسلة الطلب' : 'Request messaging'),
                       ),
+            )
+          : null,
+      bodyExtra: DealApplicantTransparencyBoard(
+        isAr: _isArabic,
+        applicantName: partner,
+        requestedAt: requestedAt,
+        expiresAt: requestedAt?.add(const Duration(hours: 72)),
+        applicantAddress: addr.isEmpty ? null : addr,
+        applicantNote: msg.isEmpty ? null : msg,
+        applicantUserId: offererId,
+        ownerName: _ownerDisplayNameForDeals(),
+        ownerUserId: _uid,
+        approvedAt: approvedAt,
+        ownerApproved: canMessage,
+        queueIndex: rank.index,
+        queueTotal: rank.total,
+      ),
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
+    );
+  }
+
+  Widget _buildCartPendingMarketOfferCard(Map<String, dynamic> o) {
+    final cs = Theme.of(context).colorScheme;
+    final rid = (o['market_request_id'] ?? '').toString();
+    final st = (o['status'] ?? '').toString();
+    final stLabel = _marketOfferStatusLabel(st);
+    final price = o['price_offer'];
+    final priceValue = _toDouble0(price);
+    final msg = (o['message'] ?? '').toString().trim();
+    final titleHint = (o['_request_title'] ?? '').toString().trim();
+    MarketPropertyRequestRow? foundRow;
+    for (final e in _marketHomeRequests) {
+      if (e.id == rid) {
+        foundRow = e;
+        break;
+      }
+    }
+    final oid = (o['id'] ?? '').toString().trim();
+    final dealNo = _myDealOrdinal(oid);
+    final canMessage = _dealOfferAllowsMessaging(st);
+    final requestedAt = _tryParseDt(o['created_at']);
+    final ownerName = (o['_requester_display_name'] ?? '').toString().trim();
+    final ownerId = (o['_requester_id'] ?? '').toString().trim();
+    final selectedOther = () {
+      final selected = (o['_selected_offer_id'] ?? '').toString().trim();
+      return !canMessage &&
+          selected.isNotEmpty &&
+          oid.isNotEmpty &&
+          selected != oid;
+    }();
+    final l10n = AppLocalizations.of(context)!;
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.local_offer_outlined,
+      title: titleHint.isNotEmpty
+          ? titleHint
+          : (foundRow?.title ?? (_isArabic ? 'طلب عقاري' : 'Request')),
+      subtitle: Text(
+        canMessage
+            ? (_isArabic
+                ? 'وافق المالك — يمكنك المراسلة ومتابعة إتمام الصفقة'
+                : 'Owner accepted — you can message and complete the deal')
+            : (selectedOther
+                ? l10n.dealStayPendingUntilCancel
+                : l10n.dealWaitingOwnerAccept),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
             ),
-            thirdAction: _ReservationAction(
+      ),
+      chips: [
+        _MiniChip(
+          icon: Icons.verified_outlined,
+          text: '${_isArabic ? 'الحالة' : 'Status'}: $stLabel',
+          color: _brandPrimary,
+        ),
+        if (oid.isNotEmpty)
+          _MiniChip(
+            icon: Icons.handshake_outlined,
+            text: _isArabic ? 'صفقة رقم: $dealNo' : 'Deal no. $dealNo',
+            color: _brandPrimary,
+            onTap: () => _copyPlainToClipboard(
+              '$dealNo',
+              _isArabic ? 'تم نسخ رقم الصفقة' : 'Deal number copied',
+            ),
+          ),
+      ],
+      priceTable: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _priceRow(
+            context,
+            label: _isArabic ? 'قيمة عرضك' : 'Your offer amount',
+            value: priceValue,
+            bold: true,
+          ),
+          if (msg.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _isArabic ? 'رسالتك' : 'Your message',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              msg,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+            ),
+          ],
+        ],
+      ),
+      primaryAction: canMessage
+          ? _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.verified_outlined,
+              label: _isArabic ? 'إتمام الصفقة' : 'Complete deal',
+              onPressed: () => unawaited(_completeMarketDealFromCart(o)),
+            )
+          : _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.open_in_new,
+              label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+              onPressed: rid.isEmpty
+                  ? null
+                  : () => unawaited(_openMarketRequestDetailById(rid)),
+            ),
+      secondaryAction: canMessage
+          ? _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.open_in_new,
+              label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+              onPressed: rid.isEmpty
+                  ? null
+                  : () => unawaited(_openMarketRequestDetailById(rid)),
+            )
+          : null,
+      thirdAction: canMessage
+          ? _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.chat_bubble_outline,
+              label: _isArabic ? 'مراسلة' : 'Message',
+              onPressed: rid.isEmpty
+                  ? null
+                  : () => _openChat(
+                        mode: 'market_request',
+                        marketRequestId: rid,
+                        kind: ConversationKind.marketRequest,
+                        title: titleHint.isNotEmpty
+                            ? titleHint
+                            : (_isArabic ? 'مراسلة الطلب' : 'Request messaging'),
+                      ),
+            )
+            : _ReservationAction(
               kind: _ReservationActionKind.filledDanger,
               icon: Icons.close,
               label: _isArabic ? 'إلغاء العرض' : 'Cancel offer',
               onPressed: () {
-                final oid = (o['id'] ?? '').toString().trim();
-                unawaited(_withdrawCartMarketOffer(rid, oid));
+                final oid2 = (o['id'] ?? '').toString().trim();
+                unawaited(_withdrawCartMarketOffer(rid, oid2));
               },
             ),
-            tryParseDt: _tryParseDt,
-            timeAgo: _timeAgo,
-            fmtDateTime: _fmtDateTime,
-          );
-        }
-        final archived = _visibleArchivedMarketOffersForCart;
-        final afterPending =
-            i - introEnd - _myPendingMarketOffersForCart.length;
-        // أرشيف العروض الخاسرة/المنتهية
-        if (archived.isNotEmpty) {
-          if (afterPending == 0) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-              child: Text(
-                _isArabic
-                    ? 'عروض أُغلقت مع شريك آخر'
-                    : 'Closed with another partner',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-            );
-          }
-          final archIdx = afterPending - 1;
-          if (archIdx >= 0 && archIdx < archived.length) {
-            final o = archived[archIdx];
-            final rid = (o['market_request_id'] ?? '').toString();
-            final oid = (o['id'] ?? '').toString().trim();
-            final titleHint = (o['_request_title'] ?? '').toString().trim();
-            final lost = _marketOfferLostToOtherPartner(o);
-            final st = (o['status'] ?? '').toString();
-            return _ReservationCard(
-              bankColor: _brandPrimary,
-              icon: Icons.sentiment_dissatisfied_outlined,
-              title: titleHint.isNotEmpty
-                  ? titleHint
-                  : (_isArabic ? 'طلب عقاري' : 'Request'),
-              subtitle: Text(
-                lost
-                    ? (_isArabic
-                        ? 'تمت الصفقة مع شريك آخر — لم يحالفك الحظ هذه المرة.'
-                        : 'Deal completed with another partner — not selected this time.')
-                    : (_isArabic
-                        ? 'انتهى هذا العرض ولم يُعتمد.'
-                        : 'This offer ended and was not accepted.'),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: lost ? cs.error : cs.onSurfaceVariant,
-                      fontWeight: FontWeight.w800,
-                      height: 1.35,
-                    ),
-              ),
-              chips: [
-                _MiniChip(
-                  icon: Icons.info_outline,
-                  text:
-                      '${_isArabic ? 'الحالة' : 'Status'}: ${_marketOfferStatusLabel(st)}',
-                  color: cs.error,
-                ),
-              ],
-              priceTable: const SizedBox.shrink(),
-              primaryAction: _ReservationAction(
-                kind: _ReservationActionKind.outlined,
-                icon: Icons.open_in_new,
-                label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
-                onPressed: rid.isEmpty
-                    ? null
-                    : () => unawaited(_openMarketRequestDetailById(rid)),
-              ),
-              secondaryAction: _ReservationAction(
-                kind: _ReservationActionKind.filledDanger,
-                icon: Icons.delete_outline,
-                label: _isArabic ? 'حذف من صفقاتي' : 'Remove from My deals',
-                onPressed: oid.isEmpty
-                    ? null
-                    : () => unawaited(_hideCartMarketOffer(oid)),
-              ),
-              thirdAction: null,
-              tryParseDt: _tryParseDt,
-              timeAgo: _timeAgo,
-              fmtDateTime: _fmtDateTime,
-            );
-          }
-        }
-        final archiveBlock = archived.isEmpty ? 0 : 1 + archived.length;
-        final cartIdx = afterPending - archiveBlock;
-        if (cartIdx >= _cart.length) {
-          final completedIdx = cartIdx - _cart.length - 1;
-          if (_completedCart.isNotEmpty && cartIdx == _cart.length) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-              child: Text(
-                _isArabic ? 'صفقات منتهية' : 'Completed deals',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-            );
-          }
-          if (completedIdx >= 0 && completedIdx < _completedCart.length) {
-            return _buildCompletedPurchaseCard(_completedCart[completedIdx]);
-          }
-          return const SizedBox.shrink();
-        }
-        final r = _cart[cartIdx];
-        final reservationId = (r['id'] ?? '').toString();
-        final propertyId = (r['property_id'] ?? '').toString();
-        final p = _cartPropertyById[propertyId];
+      bodyExtra: DealApplicantTransparencyBoard(
+        isAr: _isArabic,
+        applicantName: _ownerDisplayNameForDeals(),
+        requestedAt: requestedAt,
+        expiresAt: requestedAt?.add(const Duration(hours: 72)),
+        applicantNote: msg.isEmpty ? null : msg,
+        applicantUserId: _uid,
+        ownerName: ownerName,
+        ownerUserId: ownerId,
+        approvedAt: _incomingApprovedAt(o),
+        ownerApproved: canMessage,
+        showSecretQueueHint: false,
+      ),
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
+    );
+  }
 
-        final basePrice = _toDouble0(r['base_price']);
-        final platformFee = _toDouble0(r['platform_fee_amount']);
-        final extraFee = _toDouble0(r['extra_fee_amount']);
-        final total = _toDouble0(r['total_amount']);
-
-        final createdAt = _tryParseDt(r['created_at']);
-        final expiresAt = _tryParseDt(r['expires_at']);
-        final createdText = createdAt == null
-            ? (_isArabic ? 'غير معروف' : 'Unknown')
-            : _timeAgo(createdAt, _isArabic);
-        final expiresText = expiresAt == null
-            ? (_isArabic ? 'غير معروف' : 'Unknown')
-            : _fmtDateTime(expiresAt);
-
-        return _ReservationCard(
-          bankColor: _brandPrimary,
-          icon: Icons.handshake_outlined,
-          title: p?.title ?? (_isArabic ? 'عقار' : 'Property'),
-          chips: [
-            if (expiresAt != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: _ReservationExpiryCountdown(
-                  expiresAt: expiresAt,
-                  isAr: _isArabic,
-                ),
-              ),
-            _MiniChip(
-              icon: Icons.schedule,
-              text: _isArabic ? 'منذ: $createdText' : 'Since: $createdText',
-              color: _brandPrimary,
+  Widget _buildOwnerOpenMarketDealCard(MarketPropertyRequestRow r) {
+    final cs = Theme.of(context).colorScheme;
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.handshake_outlined,
+      title: r.title,
+      subtitle: Text(
+        _isArabic
+            ? 'تم اختيار شريك. أكّد إتمام الصفقة خارج التطبيق.'
+            : 'A partner was selected. Confirm completion outside the app.',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
             ),
-            _MiniChip(
-              icon: Icons.timer_outlined,
-              text: _isArabic ? 'ينتهي: $expiresText' : 'Expires: $expiresText',
-              color: _brandPrimary,
+      ),
+      chips: const [],
+      priceTable: const SizedBox.shrink(),
+      primaryAction: _ReservationAction(
+        kind: _ReservationActionKind.outlined,
+        icon: Icons.verified_outlined,
+        label: _isArabic ? 'إتمام الصفقة' : 'Complete deal',
+        onPressed: () {
+          unawaited(() async {
+            final deal = OpenAcceptedDeal(
+              kind: 'market_request',
+              id: (r.selectedOfferId ?? r.id),
+              title: r.title,
+              role: 'owner',
+              requestId: r.id,
+              offerId: r.selectedOfferId,
+            );
+            final note = await showDealCompletionNoteSheet(context: context);
+            if (note == null || note.trim().isEmpty || !mounted) return;
+            await _submitDealCompletion(deal: deal, note: note.trim());
+          }());
+        },
+      ),
+      secondaryAction: _ReservationAction(
+        kind: _ReservationActionKind.outlined,
+        icon: Icons.open_in_new,
+        label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+        onPressed: () => unawaited(_openMarketRequestDetail(r)),
+      ),
+      thirdAction: null,
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
+    );
+  }
+
+  Widget _buildCompletedOwnedMarketRequestCard(MarketPropertyRequestRow r) {
+    final cs = Theme.of(context).colorScheme;
+    final completedText = r.completedAt == null
+        ? ''
+        : _fmtDateTime(r.completedAt!);
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.verified_outlined,
+      title: r.title,
+      subtitle: Text(
+        completedText.isEmpty
+            ? (_isArabic ? 'طلب منتهٍ' : 'Completed request')
+            : (_isArabic
+                ? 'انتهت الصفقة · $completedText'
+                : 'Deal ended · $completedText'),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
             ),
-            if (reservationId.trim().isNotEmpty)
-              _MiniChip(
-                icon: Icons.copy_outlined,
-                text: _isArabic
-                    ? 'حجز: ${DisplayIds.plainNumericOrClean(reservationId)}'
-                    : 'Hold: ${DisplayIds.plainNumericOrClean(reservationId)}',
-                color: _brandPrimary,
-                onTap: () => _copyPlainToClipboard(
-                  reservationId.trim(),
-                  _isArabic ? 'تم نسخ رقم الحجز' : 'Reservation ID copied',
+      ),
+      chips: [
+        _MiniChip(
+          icon: Icons.check_circle_outline,
+          text: _isArabic ? 'مكتمل' : 'Completed',
+          color: Colors.green.shade700,
+        ),
+      ],
+      priceTable: const SizedBox.shrink(),
+      primaryAction: _ReservationAction(
+        kind: _ReservationActionKind.outlined,
+        icon: Icons.open_in_new,
+        label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+        onPressed: () => unawaited(_openMarketRequestDetail(r)),
+      ),
+      secondaryAction: null,
+      thirdAction: null,
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
+    );
+  }
+
+  Widget _buildCompletedMarketOfferCard(Map<String, dynamic> o) {
+    final cs = Theme.of(context).colorScheme;
+    final rid = (o['market_request_id'] ?? '').toString();
+    final titleHint = (o['_request_title'] ?? '').toString().trim();
+    final note = (o['_deal_completion_note'] ?? '').toString().trim();
+    final completedAt = _tryParseDt(o['_request_completed_at']);
+    final completedText =
+        completedAt == null ? '' : _fmtDateTime(completedAt);
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.verified_outlined,
+      title: titleHint.isNotEmpty
+          ? titleHint
+          : (_isArabic ? 'طلب مكتمل' : 'Completed request'),
+      subtitle: Text(
+        [
+          _isArabic ? 'صفقة منتهية' : 'Completed deal',
+          if (completedText.isNotEmpty) completedText,
+          if (note.isNotEmpty) note,
+        ].join(' · '),
+        maxLines: 4,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+              height: 1.35,
+            ),
+      ),
+      chips: const [],
+      priceTable: const SizedBox.shrink(),
+      primaryAction: _ReservationAction(
+        kind: _ReservationActionKind.outlined,
+        icon: Icons.open_in_new,
+        label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+        onPressed: rid.isEmpty
+            ? null
+            : () => unawaited(_openMarketRequestDetailById(rid)),
+      ),
+      secondaryAction: null,
+      thirdAction: null,
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
+    );
+  }
+
+  Widget _buildCartArchivedOfferCard(Map<String, dynamic> o) {
+    final cs = Theme.of(context).colorScheme;
+    final rid = (o['market_request_id'] ?? '').toString();
+    final oid = (o['id'] ?? '').toString().trim();
+    final titleHint = (o['_request_title'] ?? '').toString().trim();
+    final lost = _marketOfferLostToOtherPartner(o);
+    final st = (o['status'] ?? '').toString();
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.sentiment_dissatisfied_outlined,
+      title: titleHint.isNotEmpty
+          ? titleHint
+          : (_isArabic ? 'طلب عقاري' : 'Request'),
+      subtitle: Text(
+        lost
+            ? (_isArabic
+                ? 'تمت الصفقة مع شريك آخر — لم يحالفك الحظ هذه المرة.'
+                : 'Deal completed with another partner — not selected this time.')
+            : (_isArabic
+                ? 'انتهى هذا العرض ولم يُعتمد.'
+                : 'This offer ended and was not accepted.'),
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: lost ? cs.error : cs.onSurfaceVariant,
+              fontWeight: FontWeight.w800,
+              height: 1.35,
+            ),
+      ),
+      chips: [
+        _MiniChip(
+          icon: Icons.info_outline,
+          text:
+              '${_isArabic ? 'الحالة' : 'Status'}: ${_marketOfferStatusLabel(st)}',
+          color: cs.error,
+        ),
+      ],
+      priceTable: const SizedBox.shrink(),
+      primaryAction: _ReservationAction(
+        kind: _ReservationActionKind.outlined,
+        icon: Icons.open_in_new,
+        label: _isArabic ? 'تفاصيل الطلب' : 'Request details',
+        onPressed: rid.isEmpty
+            ? null
+            : () => unawaited(_openMarketRequestDetailById(rid)),
+      ),
+      secondaryAction: _ReservationAction(
+        kind: _ReservationActionKind.filledDanger,
+        icon: Icons.delete_outline,
+        label: _isArabic ? 'حذف من صفقاتي' : 'Remove from My deals',
+        onPressed:
+            oid.isEmpty ? null : () => unawaited(_hideCartMarketOffer(oid)),
+      ),
+      thirdAction: null,
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
+    );
+  }
+
+  Widget _buildCartActiveReservationCard(
+    Map<String, dynamic> r, {
+    bool ownerSide = false,
+  }) {
+    final reservationId = (r['id'] ?? '').toString();
+    final propertyId = (r['property_id'] ?? '').toString();
+    final p = _cartPropertyById[propertyId] ??
+        _myPropertyById[propertyId] ??
+        _propertyCache[propertyId];
+    final dealNo = _myDealOrdinal(reservationId);
+    final basePrice = _toDouble0(r['base_price']);
+    final total = _toDouble0(r['total_amount']);
+    final invoiceFallback =
+        basePrice > 0 ? basePrice : (total > 0 ? total : 0.0);
+    final createdAt = _tryParseDt(r['created_at']);
+    final expiresAt = _tryParseDt(r['expires_at']);
+    final createdText = createdAt == null
+        ? (_isArabic ? 'غير معروف' : 'Unknown')
+        : _fmtDateTime(createdAt);
+    final expiresText = expiresAt == null
+        ? (_isArabic ? 'غير معروف' : 'Unknown')
+        : _fmtDealEnd(expiresAt);
+    final canMessage = _dealReservationAllowsMessaging(
+      (r['status'] ?? '').toString(),
+    );
+    final applicantName = (r['reserved_by_name'] ?? '').toString().trim();
+    final addr = (r['reserved_by_city'] ?? '').toString().trim();
+    final note = (r['applicant_note'] ?? '').toString().trim();
+    final applicantId = (r['user_id'] ?? '').toString().trim();
+    final rank = ownerSide
+        ? _incomingQueueRank(r, listing: true)
+        : (index: 0, total: 0);
+    final ownerName = ownerSide
+        ? _ownerDisplayNameForDeals()
+        : (p?.ownerDisplayName ?? '').toString().trim();
+    final ownerId = ownerSide ? _uid : (p?.ownerId ?? '');
+
+    return _ReservationCard(
+      bankColor: _brandPrimary,
+      icon: Icons.handshake_outlined,
+      title: p?.title ?? (_isArabic ? 'عقار' : 'Property'),
+      subtitle: canMessage
+          ? _dealJourneyStrip(chattingHint: true)
+          : Text(
+              AppLocalizations.of(context)!.dealWaitingOwnerAccept,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    height: 1.35,
+                  ),
+            ),
+      chips: [
+        if (expiresAt != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: SizedBox(
+              width: double.infinity,
+              child: _ReservationExpiryCountdown(
+                expiresAt: expiresAt,
+                heldSince: createdAt,
+                isAr: _isArabic,
+              ),
+            ),
+          ),
+        _MiniChip(
+          icon: Icons.schedule,
+          text: createdText,
+          color: _brandPrimary,
+        ),
+        _MiniChip(
+          icon: Icons.event_outlined,
+          text: _isArabic ? 'ينتهي: $expiresText' : 'Ends: $expiresText',
+          color: _brandPrimary,
+        ),
+        if (reservationId.trim().isNotEmpty)
+          _MiniChip(
+            icon: Icons.tag,
+            text: _isArabic ? 'صفقة رقم: $dealNo' : 'Deal no. $dealNo',
+            color: _brandPrimary,
+            onTap: () => _copyPlainToClipboard(
+              '$dealNo',
+              _isArabic ? 'تم نسخ رقم الصفقة' : 'Deal number copied',
+            ),
+          ),
+      ],
+      priceTable: _smartDealInvoice(p, fallbackBase: invoiceFallback),
+      primaryAction: canMessage
+          ? _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.verified_outlined,
+              label: ownerSide
+                  ? (_isArabic ? 'إتمام الصفقة' : 'Complete deal')
+                  : (_isArabic ? 'إتمام الشراء' : 'Complete purchase'),
+              onPressed: p == null
+                  ? null
+                  : () => ownerSide
+                      ? _completeListingSaleFromOwner(propertyId)
+                      : _completeSaleFromCart(propertyId),
+            )
+          : ownerSide
+              ? _ReservationAction(
+                  kind: _ReservationActionKind.outlined,
+                  icon: Icons.check_circle_outline,
+                  label: AppLocalizations.of(context)!.dealOwnerAcceptPartner,
+                  onPressed: () =>
+                      unawaited(_acceptListingReservationFromOwner(r)),
+                )
+              : _ReservationAction(
+                  kind: _ReservationActionKind.outlined,
+                  icon: Icons.open_in_new,
+                  label: _isArabic ? 'تفاصيل العرض' : 'Offer details',
+                  onPressed: p == null ? null : () => _openDetails(p),
                 ),
-              ),
-          ],
-          priceTable: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _priceRow(
-                context,
-                label: _isArabic ? 'السعر الأساسي' : 'Base price',
-                value: basePrice,
-              ),
-              const SizedBox(height: 6),
-              _priceRow(
-                context,
-                label: _isArabic ? 'عمولة المنصة (5%)' : 'Platform fee (5%)',
-                value: platformFee,
-              ),
-              const SizedBox(height: 6),
-              _priceRow(
-                context,
-                label: _isArabic ? 'رسوم إضافية (2.5%)' : 'Extra fee (2.5%)',
-                value: extraFee,
-              ),
-              const Divider(height: 16),
-              _priceRow(
-                context,
-                label: _isArabic ? 'الإجمالي' : 'Total',
-                value: total,
-                bold: true,
-              ),
-            ],
-          ),
-          primaryAction: _ReservationAction(
-            kind: _ReservationActionKind.outlined,
-            icon: Icons.open_in_new,
-            label: _isArabic ? 'تفاصيل العرض' : 'Offer details',
-            onPressed: p == null ? null : () => _openDetails(p),
-          ),
-          secondaryAction: _ReservationAction(
-            kind: _ReservationActionKind.outlined,
-            icon: Icons.chat_bubble_outline,
-            label: _isArabic ? 'مراسلة' : 'Message',
-            onPressed: () {
-              final t = p?.title ??
-                  (_isArabic ? 'مراسلة الحجز' : 'Reservation messaging');
-              _openChat(
-                mode: 'reservation',
-                propertyId: propertyId,
-                reservationId: reservationId,
-                title: t,
-              );
-            },
-          ),
-          thirdAction: _ReservationAction(
-            kind: _ReservationActionKind.filledDanger,
-            icon: Icons.close,
-            label: _isArabic ? 'إلغاء' : 'Cancel',
-            onPressed: () => _cancelReservationFromCart(r),
-          ),
-          fourthAction: _ReservationAction(
-            kind: _ReservationActionKind.outlined,
-            icon: Icons.verified_outlined,
-            label: _isArabic ? 'إتمام الشراء' : 'Complete purchase',
-            onPressed:
-                p == null ? null : () => _completeSaleFromCart(propertyId),
-          ),
-          tryParseDt: _tryParseDt,
-          timeAgo: _timeAgo,
-          fmtDateTime: _fmtDateTime,
-        );
-      },
+      secondaryAction: canMessage || ownerSide
+          ? _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.open_in_new,
+              label: _isArabic ? 'تفاصيل العرض' : 'Offer details',
+              onPressed: p == null ? null : () => _openDetails(p),
+            )
+          : null,
+      thirdAction: canMessage
+          ? _ReservationAction(
+              kind: _ReservationActionKind.outlined,
+              icon: Icons.chat_bubble_outline,
+              label: _isArabic ? 'مراسلة' : 'Message',
+              onPressed: () {
+                final t = p?.title ??
+                    (_isArabic ? 'مراسلة الصفقة' : 'Deal messaging');
+                _openChat(
+                  mode: 'reservation',
+                  propertyId: propertyId,
+                  reservationId: reservationId,
+                  title: t,
+                );
+              },
+            )
+          : null,
+      fourthAction: canMessage || ownerSide
+          ? null
+          : _ReservationAction(
+              kind: _ReservationActionKind.filledDanger,
+              icon: Icons.close,
+              label: _isArabic ? 'إلغاء' : 'Cancel',
+              onPressed: () => _cancelReservationFromCart(r),
+            ),
+      bodyExtra: DealApplicantTransparencyBoard(
+        isAr: _isArabic,
+        applicantName: ownerSide
+            ? applicantName
+            : _ownerDisplayNameForDeals(),
+        requestedAt: createdAt,
+        expiresAt: expiresAt,
+        applicantAddress: addr.isEmpty ? null : addr,
+        applicantNote: note.isEmpty ? null : note,
+        applicantUserId: ownerSide ? applicantId : _uid,
+        ownerName: ownerName,
+        ownerUserId: ownerId,
+        approvedAt: _incomingApprovedAt(r),
+        ownerApproved: canMessage,
+        queueIndex: ownerSide ? rank.index : null,
+        queueTotal: ownerSide ? rank.total : null,
+        showSecretQueueHint: ownerSide && !canMessage,
+      ),
+      tryParseDt: _tryParseDt,
+      timeAgo: _timeAgo,
+      fmtDateTime: _fmtDateTime,
     );
   }
 
@@ -8752,20 +9986,29 @@ class _UserDashboardState extends State<UserDashboard>
         _completedCartPropertyById[propertyId] ?? _cartPropertyById[propertyId];
     final basePrice = _toDouble0(r['base_price']);
     final total = _toDouble0(r['total_amount']);
-    final completedAt =
-        _tryParseDt(r['updated_at']) ?? _tryParseDt(r['created_at']);
+    final completedAt = _tryParseDt(r['deal_completed_at']) ??
+        _tryParseDt(r['updated_at']) ??
+        _tryParseDt(r['created_at']);
     final completedText = completedAt == null
         ? (_isArabic ? 'غير معروف' : 'Unknown')
-        : _timeAgo(completedAt, _isArabic);
+        : _fmtDateTime(completedAt);
+    final note = (r['deal_completion_note'] ?? '').toString().trim();
+
+    final dealNo = _myDealOrdinal(reservationId);
+    final invoiceFallback =
+        basePrice > 0 ? basePrice : (total > 0 ? total : 0.0);
 
     return _ReservationCard(
       bankColor: _brandPrimary,
       icon: Icons.verified_outlined,
       title: p?.title ?? (_isArabic ? 'إعلان مكتمل' : 'Completed listing'),
       subtitle: Text(
-        _isArabic
-            ? 'صفقة منتهية منذ: $completedText'
-            : 'Completed deal since: $completedText',
+        [
+          _isArabic ? 'صفقة منتهية · $completedText' : 'Completed deal · $completedText',
+          if (note.isNotEmpty) note,
+        ].join('\n'),
+        maxLines: 4,
+        overflow: TextOverflow.ellipsis,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: cs.onSurfaceVariant,
               fontWeight: FontWeight.w700,
@@ -8779,34 +10022,16 @@ class _UserDashboardState extends State<UserDashboard>
         ),
         if (reservationId.trim().isNotEmpty)
           _MiniChip(
-            icon: Icons.copy_outlined,
-            text: _isArabic
-                ? 'صفقة: ${DisplayIds.plainNumericOrClean(reservationId)}'
-                : 'Deal: ${DisplayIds.plainNumericOrClean(reservationId)}',
+            icon: Icons.tag,
+            text: _isArabic ? 'صفقة رقم: $dealNo' : 'Deal no. $dealNo',
             color: _brandPrimary,
             onTap: () => _copyPlainToClipboard(
-              reservationId.trim(),
-              _isArabic ? 'تم نسخ رقم الصفقة' : 'Deal ID copied',
+              '$dealNo',
+              _isArabic ? 'تم نسخ رقم الصفقة' : 'Deal number copied',
             ),
           ),
       ],
-      priceTable: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _priceRow(
-            context,
-            label: _isArabic ? 'سعر الإعلان' : 'Listing price',
-            value: basePrice,
-          ),
-          const SizedBox(height: 6),
-          _priceRow(
-            context,
-            label: _isArabic ? 'إجمالي الصفقة' : 'Deal total',
-            value: total,
-            bold: true,
-          ),
-        ],
-      ),
+      priceTable: _smartDealInvoice(p, fallbackBase: invoiceFallback),
       primaryAction: _ReservationAction(
         kind: _ReservationActionKind.outlined,
         icon: Icons.open_in_new,
@@ -9025,22 +10250,31 @@ class _UserDashboardState extends State<UserDashboard>
         final reservationId = (r['id'] ?? '').toString();
         final propertyId = (r['property_id'] ?? '').toString();
         final p = _myPropertyById[propertyId];
-
         final basePrice = _toDouble0(r['base_price']);
-        final platformFee = _toDouble0(r['platform_fee_amount']);
-        final extraFee = _toDouble0(r['extra_fee_amount']);
         final total = _toDouble0(r['total_amount']);
+
+        final dealNo = _myDealOrdinal(reservationId);
+        final invoiceFallback =
+            basePrice > 0 ? basePrice : (total > 0 ? total : 0.0);
 
         final createdAt = _tryParseDt(r['created_at']);
         final expiresAt = _tryParseDt(r['expires_at']);
         final createdText = createdAt == null
             ? (_isArabic ? 'غير معروف' : 'Unknown')
-            : _timeAgo(createdAt, _isArabic);
+            : _fmtDateTime(createdAt);
         final expiresText = expiresAt == null
             ? (_isArabic ? 'غير معروف' : 'Unknown')
-            : _fmtDateTime(expiresAt);
+            : _fmtDealEnd(expiresAt);
 
         final status = (r['status'] ?? '').toString().trim();
+        final statusLc = status.toLowerCase();
+        final canMessage = _dealReservationAllowsMessaging(status);
+        final otherAccepted = _propertyHasAcceptedBuyer(propertyId) &&
+            !canMessage;
+        final canAcceptThis = !otherAccepted &&
+            (statusLc.isEmpty ||
+                statusLc == 'pending' ||
+                statusLc == 'paid');
         final buyerName = (r['reserved_by_name'] ?? '').toString().trim();
         final buyerLabel = buyerName.isNotEmpty
             ? buyerName
@@ -9057,10 +10291,15 @@ class _UserDashboardState extends State<UserDashboard>
           icon: Icons.receipt_long_outlined,
           title: p?.title ?? (_isArabic ? 'إعلان' : 'Listing'),
           subtitle: Text(
-            _isArabic ? 'منذ: $createdText' : 'Time: $createdText',
+            canMessage
+                ? AppLocalizations.of(context)!.dealOwnerAcceptedPartner
+                : otherAccepted
+                    ? AppLocalizations.of(context)!.dealStayPendingUntilCancel
+                    : createdText,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: cs.onSurfaceVariant,
                   fontWeight: FontWeight.w700,
+                  height: 1.35,
                 ),
           ),
           chips: [
@@ -9111,74 +10350,69 @@ class _UserDashboardState extends State<UserDashboard>
                 color: _brandPrimary,
               ),
             _MiniChip(
-              icon: Icons.timer_outlined,
-              text: _isArabic ? 'ينتهي: $expiresText' : 'Expires: $expiresText',
+              icon: Icons.event_outlined,
+              text: _isArabic ? 'ينتهي: $expiresText' : 'Ends: $expiresText',
               color: _brandPrimary,
             ),
             if (reservationId.trim().isNotEmpty)
               _MiniChip(
-                icon: Icons.copy_outlined,
-                text: _isArabic
-                    ? 'حجز: ${DisplayIds.plainNumericOrClean(reservationId)}'
-                    : 'Hold: ${DisplayIds.plainNumericOrClean(reservationId)}',
+                icon: Icons.tag,
+                text: _isArabic ? 'صفقة رقم: $dealNo' : 'Deal no. $dealNo',
                 color: _brandPrimary,
                 onTap: () => _copyPlainToClipboard(
-                  reservationId.trim(),
-                  _isArabic ? 'تم نسخ رقم الحجز' : 'Reservation ID copied',
+                  '$dealNo',
+                  _isArabic ? 'تم نسخ رقم الصفقة' : 'Deal number copied',
                 ),
               ),
           ],
-          priceTable: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _priceRow(
-                context,
-                label: _isArabic ? 'السعر الأساسي' : 'Base price',
-                value: basePrice,
-              ),
-              const SizedBox(height: 6),
-              _priceRow(
-                context,
-                label: _isArabic ? 'عمولة المنصة (5%)' : 'Platform fee (5%)',
-                value: platformFee,
-              ),
-              const SizedBox(height: 6),
-              _priceRow(
-                context,
-                label: _isArabic ? 'رسوم إضافية (2.5%)' : 'Extra fee (2.5%)',
-                value: extraFee,
-              ),
-              const Divider(height: 16),
-              _priceRow(
-                context,
-                label: _isArabic ? 'الإجمالي' : 'Total',
-                value: total,
-                bold: true,
-              ),
-            ],
-          ),
+          priceTable: _smartDealInvoice(p, fallbackBase: invoiceFallback),
           primaryAction: _ReservationAction(
             kind: _ReservationActionKind.outlined,
             icon: Icons.open_in_new,
             label: _isArabic ? 'فتح الإعلان' : 'Open listing',
             onPressed: p == null ? null : () => _openDetails(p),
           ),
-          secondaryAction: _ReservationAction(
-            kind: _ReservationActionKind.outlined,
-            icon: Icons.chat_bubble_outline,
-            label: _isArabic ? 'مراسلة' : 'Message',
-            onPressed: () {
-              final t = p?.title ??
-                  (_isArabic ? 'مراسلة الحجز' : 'Reservation messaging');
-              _openChat(
-                mode: 'reservation',
-                propertyId: propertyId,
-                reservationId: reservationId,
-                title: t,
-              );
-            },
-          ),
-          thirdAction: null,
+          secondaryAction: canMessage
+              ? _ReservationAction(
+                  kind: _ReservationActionKind.outlined,
+                  icon: Icons.chat_bubble_outline,
+                  label: _isArabic ? 'مراسلة' : 'Message',
+                  onPressed: () {
+                    final t = p?.title ??
+                        (_isArabic
+                            ? 'مراسلة الحجز'
+                            : 'Reservation messaging');
+                    _openChat(
+                      mode: 'reservation',
+                      propertyId: propertyId,
+                      reservationId: reservationId,
+                      title: t,
+                    );
+                  },
+                )
+              : (canAcceptThis
+                  ? _ReservationAction(
+                      kind: _ReservationActionKind.outlined,
+                      icon: Icons.check_circle_outline,
+                      label: AppLocalizations.of(context)!
+                          .dealOwnerAcceptPartner,
+                      onPressed: () => unawaited(
+                        _acceptListingReservationFromOwner(r),
+                      ),
+                    )
+                  : null),
+          thirdAction: canMessage
+              ? _ReservationAction(
+                  kind: _ReservationActionKind.outlined,
+                  icon: Icons.done_all_outlined,
+                  label: AppLocalizations.of(context)!.dealCompleteWithPartner,
+                  onPressed: propertyId.trim().isEmpty
+                      ? null
+                      : () => unawaited(
+                            _completeListingSaleFromOwner(propertyId),
+                          ),
+                )
+              : null,
           tryParseDt: _tryParseDt,
           timeAgo: _timeAgo,
           fmtDateTime: _fmtDateTime,
@@ -9193,14 +10427,10 @@ class _DeferredTabBody extends StatefulWidget {
   const _DeferredTabBody({
     required this.tabIndex,
     required this.builder,
-    this.deferFirstFrame = true,
-    this.extraDeferFrames = 0,
   });
 
   final int tabIndex;
   final WidgetBuilder builder;
-  final bool deferFirstFrame;
-  final int extraDeferFrames;
 
   @override
   State<_DeferredTabBody> createState() => _DeferredTabBodyState();
@@ -9212,7 +10442,7 @@ class _DeferredTabBodyState extends State<_DeferredTabBody> {
 
   void _armReady() {
     final gen = ++_gen;
-    final frames = 1 + widget.extraDeferFrames.clamp(0, 4);
+    const frames = 1;
     void step(int left) {
       if (!mounted || gen != _gen) return;
       if (left <= 0) {
@@ -9229,22 +10459,14 @@ class _DeferredTabBodyState extends State<_DeferredTabBody> {
   @override
   void initState() {
     super.initState();
-    if (!widget.deferFirstFrame) {
-      _ready = true;
-    } else {
-      _ready = false;
-      _armReady();
-    }
+    _ready = false;
+    _armReady();
   }
 
   @override
   void didUpdateWidget(covariant _DeferredTabBody oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.tabIndex == widget.tabIndex) return;
-    if (!widget.deferFirstFrame) {
-      _ready = true;
-      return;
-    }
     _armReady();
   }
 
@@ -9263,7 +10485,8 @@ class _DeferredTabBodyState extends State<_DeferredTabBody> {
   }
 }
 
-/// إعادة بناء اللوحة عند تغيّر كدسة [Navigator] الداخلي لإخفاء [AppBar] الخارجي عند وجود صفحة فوق الجذر.
+/// إعادة بناء اللوحة عند تغيّر كدسة [Navigator] الداخلي لإخفاء شريط الترحيب
+/// عند وجود صفحة فوق الجذر — الصفحة الداخلية تعرض زر الإغلاق.
 class _DashboardBodyNavObserver extends NavigatorObserver {
   _DashboardBodyNavObserver({required this.onChange});
   final VoidCallback onChange;
@@ -9273,12 +10496,18 @@ class _DashboardBodyNavObserver extends NavigatorObserver {
   }
 
   @override
-  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _schedule();
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    WebInAppNav.notePop(route, nested: true);
+    _schedule();
+  }
 
   @override
-  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
-      _schedule();
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (previousRoute != null) {
+      WebInAppNav.notePush(route, nested: true);
+    }
+    _schedule();
+  }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import '../core/utils/date_helper.dart';
 
 import '../core/security/device_display_labels.dart';
 
@@ -94,7 +94,6 @@ class SessionTile extends StatelessWidget {
   static String _formatTs(String raw, bool isAr) {
     final dt = DateTime.tryParse(raw);
     if (dt == null) return raw.isEmpty ? '—' : raw;
-    final loc = isAr ? 'ar' : 'en';
-    return DateFormat.yMMMd(loc).add_jm().format(dt.toLocal());
+    return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: isAr);
   }
 }

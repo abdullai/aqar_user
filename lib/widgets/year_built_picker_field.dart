@@ -1,6 +1,9 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_stable.dart';
+
 /// اختيار سنة البناء: قائمة قابلة للتمرير + بحث.
 /// [maxYear] الافتراضي = السنة الميلادية الحالية (لا تُضاف السنة القادمة قبل رأس السنة).
 class YearBuiltPickerField extends StatelessWidget {
@@ -31,7 +34,7 @@ class YearBuiltPickerField extends StatelessWidget {
     );
     var filter = '';
 
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       isScrollControlled: true,
@@ -43,16 +46,16 @@ class YearBuiltPickerField extends StatelessWidget {
                 ? years
                 : years.where((y) => y.toString().contains(q)).toList();
 
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  bottom: MediaQuery.paddingOf(ctx).bottom + 12,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+            final vis = AppKeyboardInset.visibleHeightOf(ctx);
+            return SizedBox(
+              height: vis,
+              width: double.infinity,
+              child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                     Text(
                       isAr ? 'سنة البناء' : 'Year built',
                       style: const TextStyle(
@@ -61,7 +64,9 @@ class YearBuiltPickerField extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    AqarTextField(
+                    AppKeyboardReveal(
+                      below: (vis * 0.5).clamp(120.0, 360.0),
+                      child: AqarTextField(
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search),
@@ -69,9 +74,9 @@ class YearBuiltPickerField extends StatelessWidget {
                       ),
                       onChanged: (s) => setModal(() => filter = s),
                     ),
+                    ),
                     const SizedBox(height: 8),
-                    SizedBox(
-                      height: 280,
+                    Expanded(
                       child: filtered.isEmpty
                           ? Center(
                               child: Text(
@@ -131,8 +136,9 @@ class YearBuiltPickerField extends StatelessWidget {
                       ],
                     ),
                   ],
+                    ),
+                  ),
                 ),
-              ),
             );
           },
         );

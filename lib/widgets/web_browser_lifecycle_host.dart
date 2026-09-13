@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/platform/web_browser_lifecycle.dart';
 import '../core/navigation/app_web_soft_refresh.dart';
+import '../core/navigation/web_in_app_nav.dart';
 import '../services/user_session_coordination_service.dart';
 import 'app_back_refresh_dialogs.dart';
 
@@ -28,6 +29,8 @@ class _WebBrowserLifecycleHostState extends State<WebBrowserLifecycleHost> {
   void initState() {
     super.initState();
     if (!kIsWeb) return;
+    WebInAppNavHost.navigatorKey = UserSessionCoordinationService.navigatorKey;
+    WebInAppNav.install();
     installWebBrowserLifecycle(
       shouldOfferRefresh: _shouldOfferRefresh,
       onRefreshPrompt: _promptRefresh,
@@ -37,6 +40,7 @@ class _WebBrowserLifecycleHostState extends State<WebBrowserLifecycleHost> {
   @override
   void dispose() {
     if (kIsWeb) {
+      WebInAppNav.dispose();
       disposeWebBrowserLifecycle();
     }
     super.dispose();

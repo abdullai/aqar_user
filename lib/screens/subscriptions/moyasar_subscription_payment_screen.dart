@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:moyasar/moyasar.dart';
 
-import '../../core/navigation/dashboard_embedded_route.dart';
+import '../../core/gestures/app_keyboard_inset.dart';
+import '../../core/navigation/payment_overlay_route.dart';
+import '../../core/navigation/safe_overlay_pop.dart';
 import '../../core/payment/aqar_moyasar_credit_card.dart';
 import '../../core/utils/app_money.dart';
+import '../../l10n/app_localizations.dart';
 import '../../services/payment_service.dart';
 import '../../widgets/aqar_primary_scroll_scope.dart';
+import '../../widgets/app_page_close_button.dart';
 
 enum MoyasarWalletMode { none, applePay, samsungPay }
 
@@ -35,15 +39,17 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     PaymentService.configureMoyasarCallbackUrlFromEnv();
     final loc = isAr ? const Localization.ar() : const Localization.en();
-    final embedded = DashboardEmbeddedRoute.isEmbedded(context);
     final cs = Theme.of(context).colorScheme;
     final displayAmount = amountSar ?? (config.amount / 100);
     final callback = PaymentConfig.callbackUrl.trim();
     final configError = _configError(isAr, callback);
 
-    final body = AqarPrimaryScrollScope(
+    final body = AppKeyboardPad(
+      extra: 16,
+      child: AqarPrimaryScrollScope(
       child: SafeArea(
         child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -140,36 +146,55 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
 
-    return Scaffold(
-      appBar: embedded
-          ? null
-          : AppBar(title: Text(isAr ? 'دفع ميسّر' : 'Moyasar payment')),
+    final title = useApplePay
+        ? 'Apple Pay'
+        : useSamsungPay
+            ? 'Samsung Pay'
+            : (AppLocalizations.of(context)?.subscriptionsCreditMadaTitle ??
+                (isAr ? 'بطاقة ائتمان / مدى' : 'Credit / mada card'));
+
+    return PaymentPopGuard(
+      child: Scaffold(
+      resizeToAvoidBottomInset: false,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(
+          isArabic: isAr,
+          onPressed: () => SafeOverlayPop.pop(context),
+        ),
+        title: Text(title),
+      ),
       body: body,
+    ),
     );
   }
 
   String? _configError(bool ar, String callback) {
     if ((config.publishableApiKey).trim().isEmpty) {
-      return ar
-          ? 'مفتاح ميسّر غير مضبوط. راجع supabase_config.json.'
-          : 'Moyasar key missing. Check supabase_config.json.';
+      return PaymentService.userFacingError(
+        'payment_gateway_not_configured',
+        isAr: ar,
+      );
     }
     if (callback.isEmpty || callback.contains('example.com')) {
-      return ar
-          ? 'رابط إكمال الدفع (3DS) غير مضبوط. راجع MOYASAR_CALLBACK_URL.'
-          : '3DS callback URL missing. Set MOYASAR_CALLBACK_URL.';
+      return PaymentService.userFacingError(
+        'moyasar_config_error',
+        isAr: ar,
+      );
     }
     if (useApplePay && config.applePay == null) {
-      return ar
-          ? 'Apple Pay غير مضبوط — أضف MOYASAR_APPLE_PAY_MERCHANT_ID.'
-          : 'Apple Pay not configured — set MOYASAR_APPLE_PAY_MERCHANT_ID.';
+      return PaymentService.userFacingError(
+        'apple_pay_merchant_missing',
+        isAr: ar,
+      );
     }
     if (useSamsungPay && config.samsungPay == null) {
       return ar
-          ? 'Samsung Pay غير مضبوط — أضف MOYASAR_SAMSUNG_PAY_SERVICE_ID.'
-          : 'Samsung Pay not configured — set MOYASAR_SAMSUNG_PAY_SERVICE_ID.';
+          ? 'هذه المحفظة غير متاحة حالياً. استخدم بطاقة أو طريقة أخرى.'
+          : 'This wallet is not available right now. Use a card or another method.';
     }
     return null;
   }

@@ -122,6 +122,26 @@ class PermissionService {
 
 
 
+  /// إعلانات وطلبات كل أعضاء الفريق (ليست صفحتي الشخصية).
+
+  bool get showDeskTabTeamInventory =>
+
+      isOwner ||
+
+      manageTeam ||
+
+      viewAnalytics ||
+
+      addProperties ||
+
+      editProperties ||
+
+      addListingRequests ||
+
+      addAds;
+
+
+
   /// تبويبات الشريط السفلي الرئيسية (معرّفات ثابتة للاستدعاء من الواجهة).
 
   static const String mainTabHome = 'home';
@@ -161,6 +181,8 @@ class PermissionService {
   static const String orgSubOrgSettings = 'org_settings';
 
   static const String orgSubMemberActivity = 'member_activity';
+
+  static const String orgSubTeamInventory = 'team_inventory';
 
 
 
@@ -265,6 +287,10 @@ class PermissionService {
       case orgSubMemberActivity:
 
         return showDeskTabMemberActivity;
+
+      case orgSubTeamInventory:
+
+        return showDeskTabTeamInventory;
 
       default:
 

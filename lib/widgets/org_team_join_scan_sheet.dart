@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../core/org/org_join_qr_payload.dart';
@@ -23,7 +24,7 @@ Future<void> showOrgTeamJoinQrScanner(
     return;
   }
 
-  await showModalBottomSheet<void>(
+  await showAppModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (ctx) {

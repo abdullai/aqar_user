@@ -115,7 +115,7 @@ serve(async (req) => {
 
   const { data: billing, error: billErr } = await svc
     .from("billing_transactions")
-    .select("id,user_id,amount,currency,status,payment_method")
+    .select("id,user_id,amount,currency,status,payment_method,purpose")
     .eq("id", billingId)
     .eq("user_id", userId)
     .maybeSingle();
@@ -174,7 +174,7 @@ serve(async (req) => {
   const meta = {
     billing_transaction_id: billingId,
     user_id: userId,
-    purpose: String(body.purpose ?? "subscription_checkout"),
+    purpose: String(billing.purpose ?? "subscribe_new"),
     merchant_contact: merchantContact(),
     product: "aqar_reliable",
   };
@@ -253,14 +253,16 @@ serve(async (req) => {
     : "";
 
   if (st === "paid" || st === "captured") {
-    await svc.from("billing_transactions").update({
-      status: "success",
-      gateway_transaction_id: payId || null,
-      gateway_response: payJson,
-      completed_at: new Date().toISOString(),
-    }).eq("id", billingId).eq("status", "pending");
-
-    return json(200, { ok: true, status: st, pay_id: payId });
+    await svc.rpc("mark_billing_gateway_outcome", {
+      p_billing_transaction_id: billingId,
+      p_status: "success",
+      p_gateway_transaction_id: payId || null,
+      p_gateway_response: payJson,
+    });
+    const { data: fulfilled } = await svc.rpc("fulfill_paid_billing", {
+      p_billing_transaction_id: billingId,
+    });
+    return json(200, { ok: true, status: st, pay_id: payId, fulfillment: fulfilled });
   }
 
   if (st === "failed" || st === "voided") {

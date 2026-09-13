@@ -12,7 +12,7 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="aqar_user">
+  <meta name="apple-mobile-web-app-title" content="موثوق لاين">
 
   <!-- viewport-fit + interactive-widget=resizes-visual:
        يمرّر ارتفاع لوحة المفاتيح إلى Flutter عبر MediaQuery.viewInsets
@@ -23,7 +23,7 @@
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png">
 
-  <title>aqar_user</title>
+  <title>مؤسسة موثوق لاين العقارية</title>
   <link rel="manifest" href="manifest.json">
 
   <!-- خطوط Flutter تُحمَّل عبر FontManifest — preload المبكر يسبب تحذيرات Console -->
@@ -43,6 +43,16 @@
       min-height: 100dvh;
     }
 
+    @media (prefers-color-scheme: dark) {
+      html, body {
+        background-color: #071210;
+        background-image: radial-gradient(ellipse at 50% 35%, #0F1C19 0%, #071210 55%, #050C0A 100%);
+      }
+      #splash {
+        background: radial-gradient(ellipse at 50% 35%, #0F1C19 0%, #071210 55%, #050C0A 100%);
+      }
+    }
+
     input, textarea, select {
       font-size: 16px;
     }
@@ -57,6 +67,12 @@
       background: radial-gradient(ellipse at 50% 35%, #E6F4F1 0%, #F3F6F8 55%, #EEF2F5 100%);
     }
 
+    @media (prefers-color-scheme: dark) {
+      #splash {
+        background: radial-gradient(ellipse at 50% 35%, #0F1C19 0%, #071210 55%, #050C0A 100%);
+      }
+    }
+
     #splash img {
       width: min(72vw, 280px);
       height: auto;
@@ -65,6 +81,50 @@
     }
   </style>
 
+  <script>
+    /* ثبّت نافذة المتصفح عند فتح كيبورد الجوال حتى لا يقفز حقل Flutter لأعلى الشاشة.
+       التمرير الداخلي في التطبيق هو من يُظهر الحقل فوق اللوحة مع قائمة البحث. */
+    (function () {
+      function pinViewport() {
+        try { window.scrollTo(0, 0); } catch (e) {}
+      }
+      function restoreLayoutViewport() {
+        try {
+          var h = window.innerHeight || 0;
+          if (h > 0) {
+            document.documentElement.style.height = h + "px";
+            document.body.style.height = h + "px";
+            document.documentElement.style.minHeight = h + "px";
+          }
+          window.scrollTo(0, 0);
+        } catch (e) {}
+      }
+      window.addEventListener("scroll", pinViewport, { passive: true });
+      document.addEventListener("focusin", function () {
+        pinViewport();
+        setTimeout(pinViewport, 40);
+        setTimeout(pinViewport, 220);
+      }, true);
+      document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "visible") {
+          restoreLayoutViewport();
+          setTimeout(restoreLayoutViewport, 50);
+          setTimeout(restoreLayoutViewport, 250);
+          setTimeout(restoreLayoutViewport, 700);
+        }
+      });
+      window.addEventListener("pageshow", restoreLayoutViewport);
+      window.addEventListener("orientationchange", function () {
+        setTimeout(restoreLayoutViewport, 80);
+        setTimeout(restoreLayoutViewport, 400);
+      });
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener("resize", pinViewport);
+        window.visualViewport.addEventListener("scroll", pinViewport);
+      }
+      restoreLayoutViewport();
+    })();
+  </script>
   <script>
     function removeSplashFromWeb() {
       document.getElementById("splash")?.remove();
@@ -85,12 +145,26 @@
   </script>
 
   <!--
-    Maps JavaScript API: load before Flutter so google_maps_flutter_web can initialize.
-    In Google Cloud Console: enable "Maps JavaScript API" + Places (if used), link billing,
-    and add HTTP referrer restrictions for your hosts (e.g. https://*.web.app/* ,
-    https://*.firebaseapp.com/* , localhost for dev).
+    Maps JS: key is NOT in this file. Flutter loads it from dart-define / dotenv /
+    web/supabase_config.json (GOOGLE_MAPS_WEB_KEY). Restrict the key in Google Cloud
+    to this host (HTTP referrers) and Maps JavaScript API + Places only.
   -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyB1GB51H6O-8O5wab9WnEDSj5aY_qQL4Vs&libraries=places&loading=async"></script>
+  <script>
+    window.aqarLoadGoogleMapsJs = function (key) {
+      if (window.google && window.google.maps) return Promise.resolve();
+      if (!key) return Promise.resolve();
+      if (window.__aqarMapsLoading) return window.__aqarMapsLoading;
+      window.__aqarMapsLoading = new Promise(function (resolve, reject) {
+        var s = document.createElement("script");
+        s.src = "https://maps.googleapis.com/maps/api/js?key=" + encodeURIComponent(key) + "&libraries=places&loading=async";
+        s.async = true;
+        s.onload = function () { resolve(); };
+        s.onerror = function () { reject(new Error("maps_js")); };
+        document.head.appendChild(s);
+      });
+      return window.__aqarMapsLoading;
+    };
+  </script>
 </head>
 
 <body>

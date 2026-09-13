@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/payment/platform_fee_catalog.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../services/individual_market_offer_service.dart';
 
 /// نافذة منبثقة قبل تحويل المستخدم لصفحة الاشتراكات (عروض السوق).
@@ -8,7 +10,7 @@ Future<bool> showMarketOfferPaywallDialog({
   required bool isAr,
   required IndividualMarketOfferAllowance allowance,
 }) async {
-  final result = await showDialog<bool>(
+  final result = await showAppDialog<bool>(
     context: context,
     barrierDismissible: true,
     builder: (ctx) {
@@ -42,7 +44,8 @@ Future<bool> showMarketOfferPaywallDialog({
               _planTile(
                 ctx,
                 isAr: isAr,
-                title: isAr ? 'الطلب الفوري — 30 ر.س' : 'Instant request — SAR 30',
+                title: PlatformFeeCatalog.of(ctx, listen: true)
+                    .instantTitle(isAr: isAr),
                 bullets: isAr
                     ? const [
                         'أولوية أسبوع في منطقتك و72 ساعة في باقي المناطق',

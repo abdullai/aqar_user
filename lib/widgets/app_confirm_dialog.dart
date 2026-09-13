@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/haptics/app_haptics.dart';
 import '../core/config/app_config.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 
 /// Standard Yes/No confirmation for sensitive actions (delete, exit, publish, …).
 Future<bool> showAppConfirmDialog({
@@ -13,7 +14,7 @@ Future<bool> showAppConfirmDialog({
   bool isDanger = false,
 }) async {
   final cs = Theme.of(context).colorScheme;
-  final r = await showDialog<bool>(
+  final r = await showAppDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) {

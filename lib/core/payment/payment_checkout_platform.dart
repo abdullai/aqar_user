@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../services/payment_service.dart';
@@ -15,11 +14,12 @@ class PaymentCheckoutPlatform {
   static bool showApplePay(BuildContext context) =>
       PaymentPlatformDetector.supportsApplePay();
 
-  static bool showGooglePay(BuildContext context) =>
-      PaymentPlatformDetector.supportsGooglePay();
+  static bool showGooglePay(BuildContext context) => false;
 
-  static bool showStcPay(BuildContext context) =>
-      PaymentPlatformDetector.supportsStcPay();
+  static bool showSamsungPay(BuildContext context) =>
+      PaymentPlatformDetector.supportsSamsungPay();
+
+  static bool showStcPay(BuildContext context) => false;
 
   static bool showCardPayment(BuildContext context) =>
       PaymentService.useMoyasarLiveFlow || PaymentService.allowMockGateway;
@@ -35,9 +35,11 @@ class PaymentCheckoutPlatform {
       case 'apple_pay':
         return showApplePay(context) ? mode : 'new';
       case 'google_pay':
-        return showGooglePay(context) ? mode : 'new';
+        return 'new';
+      case 'samsung_pay':
+        return showSamsungPay(context) ? mode : 'new';
       case 'stc_pay':
-        return showStcPay(context) ? mode : 'new';
+        return 'new';
       case 'web_pay':
         return 'new';
       default:

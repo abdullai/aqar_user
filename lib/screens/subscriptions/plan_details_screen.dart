@@ -5,10 +5,13 @@ import '../../core/branding/app_branding.dart';
 import '../../core/subscription/plan_display_copy.dart';
 import '../../core/config/app_config.dart';
 import '../../core/payment/plan_price_resolver.dart';
+import '../../core/gestures/app_keyboard_inset.dart';
 import '../../core/utils/app_money.dart';
 import '../../services/subscription_service.dart';
+import '../../widgets/aqar_primary_scroll_scope.dart';
 import '../../widgets/fal_support_whatsapp_row.dart';
 import '../../widgets/subscription/subscription_ui_helpers.dart';
+import '../../widgets/app_page_close_button.dart';
 
 /// شاشة تفاصيل الباقة — تعرض الأسعار حسب الفترة التي اختارها المستخدم (شهري/سنوي/مرة واحدة).
 class PlanDetailsScreen extends StatelessWidget {
@@ -105,12 +108,18 @@ class PlanDetailsScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(isArabic: _isAr),
         title: Text(_isAr ? 'تفاصيل الباقة' : 'Plan details'),
       ),
-      body: Center(
+      body: AppKeyboardPad(
+        extra: 8,
+        child: AqarPrimaryScrollScope(
+        child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppConfig.maxContentWidth),
           child: ListView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.all(14),
             children: [
               _header(context, cs, isTrial, periodLabel),
@@ -300,6 +309,8 @@ class PlanDetailsScreen extends StatelessWidget {
             ],
           ),
         ),
+        ),
+      ),
       ),
     );
   }

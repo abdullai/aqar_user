@@ -1,4 +1,6 @@
 // lib/main.dart
+// ignore_for_file: unused_element
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -24,10 +26,16 @@ import 'package:provider/provider.dart';
 // ✅ Session
 import 'core/security/inactivity_policy.dart';
 import 'core/config/app_config.dart';
+import 'core/l10n/locale_content.dart';
+import 'core/maps/google_maps_js_loader.dart';
 import 'core/session/account_role_cache.dart';
 import 'core/theme/app_text_scale.dart';
 import 'core/session/app_session.dart';
+import 'core/session/session_connectivity_lock.dart';
+import 'core/navigation/web_in_app_nav.dart';
+import 'core/auth/auth_challenge_service.dart';
 import 'core/auth/auth_signed_out_navigation_guard.dart';
+import 'core/auth/inactivity_auth_landing.dart';
 import 'core/auth/auth_local_sign_out.dart';
 import 'core/session/user_appearance_session.dart';
 import 'core/session/return_after_auth.dart';
@@ -35,6 +43,7 @@ import 'core/session/web_session_ttl.dart';
 import 'core/session/web_visibility.dart';
 import 'core/navigation/web_bootstrap_diag.dart';
 import 'core/navigation/web_dashboard_hash.dart';
+import 'core/payment/platform_fee_catalog.dart';
 import 'core/subscription/app_subscription_gate.dart';
 import 'widgets/web_browser_lifecycle_host.dart';
 
@@ -43,11 +52,15 @@ import 'package:aqar_user/l10n/app_localizations.dart';
 
 import 'shared/core/supabase_config.dart';
 import 'shared/core/root_dotenv_loader.dart';
+import 'shared/core/desktop_supabase_config.dart';
 import 'shared/core/supabase_runtime_overrides.dart';
+import 'shared/core/app_runtime_env.dart';
+import 'shared/core/app_flags.dart';
 import 'core/share/app_listing_links.dart';
 import 'screens/listing_loader_page.dart';
 import 'screens/contract_verify_page.dart';
 import 'screens/login_screen.dart';
+import 'screens/post_login_home.dart';
 import 'screens/user_dashboard.dart';
 import 'screens/verify_screen.dart';
 import 'screens/settings_page.dart';
@@ -73,6 +86,8 @@ import 'services/connectivity_guard.dart';
 import 'theme.dart';
 import 'core/theme/app_accent.dart';
 import 'core/theme/app_appearance_bridge.dart';
+import 'core/gestures/app_keyboard_inset.dart';
+import 'core/gestures/app_outside_unfocus.dart';
 import 'core/gestures/hardware_keyboard_scroll.dart';
 import 'core/gestures/soft_keyboard_ensure_visible.dart';
 import 'core/utils/listing_date_display.dart';
@@ -81,6 +96,7 @@ import 'widgets/app_logo_loading.dart';
 import 'widgets/app_busy_indicator.dart';
 import 'core/branding/app_branding.dart';
 import 'core/platform/app_web_splash.dart';
+import 'core/platform/app_surface.dart';
 import 'core/haptics/app_haptics.dart';
 import 'core/motion/app_motion_policy.dart';
 import 'core/notifications/in_app_notification_sound.dart';
@@ -91,11 +107,12 @@ import 'services/notification_service.dart';
 
 // ✅ Marketing Flow
 import 'routes.dart';
-import 'services/marketing_flow_service.dart';
 import 'screens/owner_requests_page.dart';
 import 'screens/marketer_dashboard_page.dart';
 import 'screens/listing_request_status_page.dart';
 import 'screens/owner_offers_page.dart';
+import 'screens/photographer_hub_page.dart';
+import 'screens/photographer_join_page.dart';
 import 'screens/submit_offer_page.dart';
 import 'screens/submit_permits_page.dart';
 import 'screens/device_management_page.dart';
@@ -157,19 +174,20 @@ const double kAppTextScaleMax = AppConfig.textScaleMax;
 // ✅ Notifiers (ثابتة حسب اختيار المستخدم)
 final ValueNotifier<String> langNotifier = ValueNotifier<String>('ar');
 final ValueNotifier<ThemeMode> themeModeNotifier =
-    ValueNotifier<ThemeMode>(ThemeMode.light);
+    ValueNotifier<ThemeMode>(ThemeMode.system);
 final ValueNotifier<double> textScaleNotifier = ValueNotifier<double>(1.0);
 
 Future<void> setAppLang(String lang) async {
   final v = (lang.toLowerCase() == 'en') ? 'en' : 'ar';
-  await UserAppearanceSession.persistLangChoice(v);
   langNotifier.value = v;
+  await UserAppearanceSession.persistLangChoice(v);
 }
 
 Future<void> setAppTheme(ThemeMode mode) async {
-  final v = (mode == ThemeMode.dark) ? 'dark' : 'light';
-  await UserAppearanceSession.persistThemeChoice(v);
-  themeModeNotifier.value = (v == 'dark') ? ThemeMode.dark : ThemeMode.light;
+  themeModeNotifier.value = mode;
+  await UserAppearanceSession.persistThemeChoice(
+    UserAppearanceSession.persistToken(mode),
+  );
 }
 
 Future<void> setAppHapticsEnabled(bool enabled) async {
@@ -255,6 +273,7 @@ void _runSupabaseConfigMissingApp() {
 /// يدمج [assets/env/default.env] مع [`.env`] في جذر المشروع عند التشغيل من القرص (VM فقط)،
 /// أو مع أصل مضمّن [`.env`] إن أضفته إلى `flutter.assets`.
 /// ويب: يحمّل [supabase_config.json] من نفس أصل الموقع (يُنسخ من مجلد [web/] عند البناء).
+/// ويندوز: يحمّل الملف بجانب التنفيذي أو `web/supabase_config.json` من جذر المشروع.
 Future<void> _tryLoadWebSupabaseRuntimeConfig() async {
   if (!kIsWeb) return;
   try {
@@ -274,10 +293,11 @@ Future<void> _tryLoadWebSupabaseRuntimeConfig() async {
     final dec = jsonDecode(res.body);
     if (dec is Map<String, dynamic>) {
       SupabaseRuntimeOverrides.applyFromJson(dec);
+      AppRuntimeEnv.mergeFromWebConfig(dec);
     } else if (dec is Map) {
-      SupabaseRuntimeOverrides.applyFromJson(
-        Map<String, dynamic>.from(dec),
-      );
+      final map = Map<String, dynamic>.from(dec);
+      SupabaseRuntimeOverrides.applyFromJson(map);
+      AppRuntimeEnv.mergeFromWebConfig(map);
     }
   } catch (e) {
     if (kDebugMode) {
@@ -313,11 +333,23 @@ Future<void> _loadAppDotEnv() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) {
+    try {
+      await BrowserContextMenu.disableContextMenu();
+    } catch (_) {}
+  }
 
   await Future.wait([
     _loadAppDotEnv(),
     _tryLoadWebSupabaseRuntimeConfig(),
   ]);
+  if (!kIsWeb) {
+    await tryLoadDesktopSupabaseRuntimeConfig();
+  }
+  await LocaleContent.hydratePlaces();
+  if (kIsWeb) {
+    await ensureGoogleMapsJsLoaded(AppConfig.googleMapsWebBrowserKey);
+  }
 
   try {
     await Future.wait([
@@ -368,11 +400,10 @@ Future<void> main() async {
   // ✅ Load user-selected language/theme
   // =========================
   final savedLang = prefs.getString(kPrefLang) ?? 'ar';
-  final savedTheme = prefs.getString(kPrefTheme) ?? 'light';
+  final savedTheme = prefs.getString(kPrefTheme);
 
   langNotifier.value = (savedLang == 'en') ? 'en' : 'ar';
-  themeModeNotifier.value =
-      (savedTheme == 'dark') ? ThemeMode.dark : ThemeMode.light;
+  themeModeNotifier.value = UserAppearanceSession.parseMode(savedTheme);
   AppHaptics.enabled = prefs.getBool(kPrefHapticsEnabled) ?? true;
   final savedScale = prefs.getDouble(kPrefTextScale);
   textScaleNotifier.value = savedScale == null
@@ -391,8 +422,6 @@ Future<void> main() async {
   ]);
   reloadAppAppearanceFromStoredPrefs = () async {
     final p = await SharedPreferences.getInstance();
-    final st = p.getString(kPrefTheme) ?? 'light';
-    themeModeNotifier.value = (st == 'dark') ? ThemeMode.dark : ThemeMode.light;
     final sc = p.getDouble(kPrefTextScale);
     textScaleNotifier.value = sc == null
         ? 1.0
@@ -507,6 +536,13 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AppSession()),
+        ChangeNotifierProvider(
+          create: (_) {
+            final catalog = PlatformFeeCatalog(Supabase.instance.client);
+            unawaited(catalog.refresh());
+            return catalog;
+          },
+        ),
         ChangeNotifierProvider(
           create: (_) {
             final gate = AppSubscriptionGate(Supabase.instance.client);
@@ -626,6 +662,10 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     _inactivity.start();
 
     UserSessionCoordinationService.navigatorKey = _navKey;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      SessionConnectivityLock.attach(context.read<AppSession>());
+    });
 
     if (!kIsWeb) {
       NotificationService.bindFcmNavigation(
@@ -659,19 +699,19 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       // ADMIN_HOOK: Fetch live session logs — اربط لوحة الإدارة بـ user_login_audit / Edge Function.
       // ADMIN_HOOK: Remote force-logout trigger — استخدم Admin API أو bump_user_session_epoch من الخادم.
       if (event == AuthChangeEvent.signedIn && data.session != null) {
+        InactivityAuthLanding.release();
         final uid = data.session!.user.id;
         // كل دخول جديد: أعد بوابة استكمال البيانات (حتى بعد «ذكرني لاحقاً»).
         unawaited(AccountCompletionService.clearEnrollmentDeferred());
         unawaited(_completePostSignIn(uid));
-        unawaited(
-          loadAppAccentFromPrefs(userId: uid),
-        );
-        unawaited(
-          UserAppearanceSession.applyNotifiersToMatchStoredSession(
+        unawaited((() async {
+          await UserAppearanceSession.absorbLoginChromeIntoUser(uid);
+          await loadAppAccentFromPrefs(userId: uid);
+          await UserAppearanceSession.applyNotifiersToMatchStoredSession(
             langNotifier: langNotifier,
             themeModeNotifier: themeModeNotifier,
-          ),
-        );
+          );
+        })());
       }
 
       // ✅ Recovery
@@ -698,6 +738,17 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
           isGuest = guestMode || entryMode == 'guest';
         } catch (_) {}
 
+        if (kIsOpsDesktopSurface) {
+          isGuest = false;
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool(kPrefGuestMode, false);
+            if ((prefs.getString(kPrefEntryMode) ?? '') == 'guest') {
+              await prefs.remove(kPrefEntryMode);
+            }
+          } catch (_) {}
+        }
+
         final ctx = _navKey.currentContext;
         if (ctx != null && ctx.mounted) {
           final sessionProvider = ctx.read<AppSession>();
@@ -719,16 +770,24 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
         }
 
         final current = _currentRouteName();
+        if (current == '/login' || current == '/fastLogin') {
+          return;
+        }
+        if (AuthSignedOutNavigationGuard.suppressRootRedirectOnSignedOut) {
+          return;
+        }
+
         final isProtected = current == '/userDashboard' ||
             current == '/settings' ||
             current == AppRoutes.ownerRequests ||
             current == AppRoutes.marketerDashboard;
 
-        // ضيف الويب/الجوال: signOut(local) بعد setGuest يطلق signedOut — لا نعيد
-        // التوجيه إلى '/' وإلا نُعاد لـ [StartRouter] (شاشة تحميل) ويُشعَر بتعليق.
-        if (isProtected &&
-            !isGuest &&
-            !AuthSignedOutNavigationGuard.suppressRootRedirectOnSignedOut) {
+        if (InactivityAuthLanding.isActive) {
+          final dest = InactivityAuthLanding.preferredRoute;
+          if (current != dest) {
+            _safeNavTo(dest);
+          }
+        } else if (isProtected && !isGuest) {
           _safeNavTo('/');
         }
       }
@@ -750,13 +809,20 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       listenDocumentVisibilityShown(() {
         if (suspendAutoLock.value) return;
         unawaited(_inactivity.onAppResumedAfterBackground());
-        unawaited(_onAppResumedCheckAppLock());
         unawaited(UserInstallSessionService.reconcileSlotOnForeground());
+      });
+      listenDocumentFreeze(() {
+        _inactivity.onAppPaused();
       });
       // تحديث الصفحة / رجوع المتصفح يطلقان pagehide — لا نسجّل خروجاً هنا.
       // نبقي فقط ختم وقت الإخفاء للأمان عند العودة بعد مهلة طويلة.
       listenDocumentPageHide(({required bool persisted}) {
         unawaited(_stampWebPageHidePause(persisted: persisted));
+      });
+      listenDocumentPageShow(({required bool persisted}) {
+        if (suspendAutoLock.value) return;
+        unawaited(_inactivity.onAppResumedAfterBackground());
+        unawaited(UserInstallSessionService.reconcileSlotOnForeground());
       });
     }
 
@@ -804,9 +870,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       return;
     }
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final otpVerified = prefs.getBool(otpVerifiedKey(userId)) ?? false;
-      if (!otpVerified) return;
+      if (!await AuthChallengeService.isFullyAuthenticated()) return;
     } catch (_) {
       return;
     }
@@ -969,24 +1033,27 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       return;
     }
 
-    // مستخدم مسجّل: بعد مهلة الخلفية → قفل سريع (بصمة/PIN) أو تسجيل دخول كامل.
+    // مستخدم مسجّل: بعد مهلة الخلفية → نفس سطح الدخول الذي دخل منه.
     FastLoginService.clearRuntimeUnlock();
     final session = Supabase.instance.client.auth.currentSession;
-    final hasLock = await FastLoginService.hasAnyLockEnabled();
-
-    if (session != null && hasLock) {
-      unawaited(ReturnAfterAuth.saveFromNavigatorKey(_navKey));
-      _inactivity.dismissBlockingPrompt();
-      nav.pushNamedAndRemoveUntil('/fastLogin', (r) => false);
-      return;
-    }
-
     if (session == null) {
       nav.pushNamedAndRemoveUntil('/login', (r) => false);
       return;
     }
 
-    // جلسة موجودة بلا قفل سريع بعد تجاوز المهلة → خروج إلى شاشة الدخول.
+    _inactivity.dismissBlockingPrompt();
+    unawaited(ReturnAfterAuth.saveFromNavigatorKey(_navKey));
+    final dest = await FastLoginService.resolveInactivityLockRoute();
+    if (dest == '/fastLogin') {
+      nav.pushNamedAndRemoveUntil('/fastLogin', (r) => false);
+      return;
+    }
+    if (await FastLoginService.canSoftLockSession()) {
+      nav.pushNamedAndRemoveUntil('/login', (r) => false);
+      return;
+    }
+
+    // جلسة موجودة بلا سياق قفل بعد تجاوز المهلة → خروج إلى شاشة الدخول.
     _inactivity.stop();
     try {
       await AuthLocalSignOut.signOutLocal(
@@ -1033,6 +1100,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     } catch (_) {}
     _inAppNotifChannel = null;
     _inactivity.stop();
+    try {
+      SessionConnectivityLock.detach(context.read<AppSession>());
+    } catch (_) {}
     super.dispose();
   }
 
@@ -1043,9 +1113,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       unawaited(NotificationService.clearOsApplicationIconBadge());
       if (suspendAutoLock.value != true) {
-        unawaited(_inactivity.onAppResumedAfterBackground());
-        unawaited(_onAppResumedCheckAppLock());
-        unawaited(UserInstallSessionService.reconcileSlotOnForeground());
+      unawaited(_inactivity.onAppResumedAfterBackground());
+      unawaited(UserInstallSessionService.reconcileSlotOnForeground());
       }
       return;
     }
@@ -1083,7 +1152,10 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
 
                     return MaterialApp(
                       navigatorKey: _navKey,
-                      navigatorObservers: <NavigatorObserver>[appRouteObserver],
+                      navigatorObservers: <NavigatorObserver>[
+                        appRouteObserver,
+                        WebInAppNavObserver(),
+                      ],
                       scrollBehavior: const AqarScrollBehavior(),
                       debugShowCheckedModeBanner: false,
                       localizationsDelegates:
@@ -1091,8 +1163,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                       supportedLocales: AppLocalizations.supportedLocales,
                       locale: Locale(lang),
                       onGenerateTitle: (context) =>
-                          AppLocalizations.of(context)?.appTitle ??
-                          'Motawoq Real Estate',
+                          AppBranding.displayName(isAr: lang == 'ar'),
                       theme: AppTheme.lightThemeFor(accentSeed),
                       darkTheme: AppTheme.darkThemeFor(accentSeed),
                       themeMode: mode,
@@ -1101,6 +1172,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                         final l10n = AppLocalizations.of(context);
                         Widget wrapped = child ?? const SizedBox.shrink();
 
+                        wrapped = AppKeyboardHost(child: wrapped);
+
                         final mq0 = MediaQuery.of(context);
                         final scaler = buildAppCombinedTextScaler(
                           mq: mq0,
@@ -1108,7 +1181,40 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                           logicalSize: mq0.size,
                         );
                         wrapped = MediaQuery(
-                          data: mq0.copyWith(textScaler: scaler),
+                          data: MediaQuery.of(context).copyWith(
+                            textScaler: scaler,
+                          ),
+                          child: wrapped,
+                        );
+
+                        wrapped = AppSurfaceScope(
+                          snapshot: AppSurfaceSnapshot.from(context),
+                          child: wrapped,
+                        );
+
+                        final overlayBrightness = Theme.of(context).brightness;
+                        wrapped = AnnotatedRegion<SystemUiOverlayStyle>(
+                          value: SystemUiOverlayStyle(
+                            statusBarColor: Colors.transparent,
+                            statusBarIconBrightness:
+                                overlayBrightness == Brightness.dark
+                                    ? Brightness.light
+                                    : Brightness.dark,
+                            statusBarBrightness: overlayBrightness,
+                            systemNavigationBarColor:
+                                Theme.of(context).colorScheme.surface,
+                            systemNavigationBarIconBrightness:
+                                overlayBrightness == Brightness.dark
+                                    ? Brightness.light
+                                    : Brightness.dark,
+                          ),
+                          child: wrapped,
+                        );
+
+                        final selTheme = Theme.of(context).textSelectionTheme;
+                        wrapped = DefaultSelectionStyle(
+                          selectionColor: selTheme.selectionColor,
+                          cursorColor: selTheme.cursorColor,
                           child: wrapped,
                         );
 
@@ -1149,74 +1255,91 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                         wrapped = Consumer<AppSession>(
                           builder: (context, session, appChild) {
                             final child = appChild ?? const SizedBox.shrink();
-                            // جوال + ويب: شريط علوي فقط — لا IgnorePointer على كامل التطبيق.
-                            // الطبقة الكاملة كانت تجمّد اللمس بعد الدخول عند فشل فحص خاطئ.
                             if (session.hasInternet) return child;
                             final loc = l10n;
                             final cs = Theme.of(context).colorScheme;
+                            final isAr = lang == 'ar';
                             return Stack(
                               fit: StackFit.expand,
                               children: [
-                                child,
-                                Positioned(
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  child: Material(
-                                    elevation: 4,
-                                    color: cs.errorContainer,
-                                    child: SafeArea(
-                                      bottom: false,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 6,
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              Icons.wifi_off_rounded,
-                                              size: 20,
-                                              color: cs.onErrorContainer,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                loc?.noInternetConnectionTitle ??
-                                                    (lang == 'ar'
+                                AbsorbPointer(
+                                  absorbing: true,
+                                  child: Opacity(opacity: 0.28, child: child),
+                                ),
+                                ModalBarrier(
+                                  dismissible: false,
+                                  color: cs.scrim.withValues(alpha: 0.72),
+                                ),
+                                SafeArea(
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints:
+                                          const BoxConstraints(maxWidth: 420),
+                                      child: Card(
+                                        elevation: 12,
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(20),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.wifi_off_rounded,
+                                                size: 48,
+                                                color: cs.error,
+                                              ),
+                                              const SizedBox(height: 10),
+                                              Text(
+                                                loc?.offlineNoInternetTitle ??
+                                                    (isAr
                                                         ? 'لا يوجد اتصال بالإنترنت'
-                                                        : 'No Internet Connection'),
+                                                        : 'No internet connection'),
+                                                textAlign: TextAlign.center,
+                                                style: const TextStyle(
+                                                  fontWeight: FontWeight.w900,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                isAr
+                                                    ? 'تم قفل التطبيق فوراً. عند عودة الشبكة سجّل الدخول بالطريقة المفعّلة على هذا الجهاز.'
+                                                    : 'The app is locked. When the network returns, sign in with this device’s enabled method.',
+                                                textAlign: TextAlign.center,
                                                 style: TextStyle(
-                                                  color: cs.onErrorContainer,
+                                                  height: 1.35,
+                                                  color: cs.onSurfaceVariant,
                                                   fontWeight: FontWeight.w600,
                                                 ),
                                               ),
-                                            ),
-                                            if (session.networkCheckBusy)
-                                              SizedBox(
-                                                width: 20,
-                                                height: 20,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  color: cs.onErrorContainer,
-                                                ),
-                                              )
-                                            else
-                                              TextButton(
-                                                onPressed: () => unawaited(
-                                                  session.refreshConnectivity(
-                                                    userInitiated: true,
+                                              const SizedBox(height: 14),
+                                              if (session.networkCheckBusy)
+                                                const SizedBox(
+                                                  width: 28,
+                                                  height: 28,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                                )
+                                              else
+                                                FilledButton.icon(
+                                                  onPressed: () => unawaited(
+                                                    session.refreshConnectivity(
+                                                      userInitiated: true,
+                                                    ),
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons.refresh_rounded,
+                                                  ),
+                                                  label: Text(
+                                                    loc?.retryLabel ??
+                                                        (isAr
+                                                            ? 'إعادة المحاولة'
+                                                            : 'Retry'),
                                                   ),
                                                 ),
-                                                child: Text(
-                                                  loc?.retryLabel ??
-                                                      (lang == 'ar'
-                                                          ? 'إعادة المحاولة'
-                                                          : 'Retry'),
-                                                ),
-                                              ),
-                                          ],
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1243,7 +1366,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                         return Directionality(
                           textDirection:
                               isRtl ? TextDirection.rtl : TextDirection.ltr,
-                          child: wrapped,
+                          child: AppOutsideUnfocus(child: wrapped),
                         );
                       },
                       routes: {
@@ -1258,7 +1381,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                             const ChangePasswordScreen(),
                         '/passwordSetup': (context) =>
                             const PasswordSetupScreen(),
-                        '/register': (context) => const RegisterScreen(),
+                        '/register': (context) => kIsOpsDesktopSurface
+                            ? const LoginScreen()
+                            : const RegisterScreen(),
 
                         // ✅ NEW routes
                         '/accountTypeSetup': (_) =>
@@ -1268,14 +1393,24 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
 
                         '/userDashboard': (context) => kIsWeb
                             ? WebDashboardEntryRedirect(lang: lang)
-                            : UserDashboard(
-                                key: const ValueKey('dashboard'),
+                            : PostLoginHome(
+                                key: ValueKey(
+                                  'post-login-${Supabase.instance.client.auth.currentUser?.id ?? 'anon'}',
+                                ),
+                                dashboardKey: ValueKey(
+                                  'dashboard-${Supabase.instance.client.auth.currentUser?.id ?? 'anon'}',
+                                ),
                                 lang: lang,
                               ),
                         '/userdashboard': (context) => kIsWeb
                             ? WebDashboardEntryRedirect(lang: lang)
-                            : UserDashboard(
-                                key: const ValueKey('dashboard'),
+                            : PostLoginHome(
+                                key: ValueKey(
+                                  'post-login-${Supabase.instance.client.auth.currentUser?.id ?? 'anon'}',
+                                ),
+                                dashboardKey: ValueKey(
+                                  'dashboard-${Supabase.instance.client.auth.currentUser?.id ?? 'anon'}',
+                                ),
                                 lang: lang,
                               ),
                         '/settings': (context) => const SettingsPage(),
@@ -1299,6 +1434,27 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                         // ✅ FIX: استخدم AppRoutes بدل '/inAppNotifications'
                         AppRoutes.inAppNotifications: (_) =>
                             InAppNotificationsPage(lang: lang),
+
+                        AppRoutes.photographerHub: (context) {
+                          final args =
+                              ModalRoute.of(context)?.settings.arguments;
+                          var resolved = lang;
+                          if (args is Map) {
+                            final l = (args['lang'] ?? '').toString();
+                            if (l.isNotEmpty) resolved = l;
+                          }
+                          return PhotographerHubPage(lang: resolved);
+                        },
+                        AppRoutes.photographerJoin: (context) {
+                          final args =
+                              ModalRoute.of(context)?.settings.arguments;
+                          var resolved = lang;
+                          if (args is Map) {
+                            final l = (args['lang'] ?? '').toString();
+                            if (l.isNotEmpty) resolved = l;
+                          }
+                          return PhotographerJoinPage(lang: resolved);
+                        },
 
                         AppRoutes.marketInsights: (_) =>
                             MarketInsightsPage(lang: lang),
@@ -1435,6 +1591,18 @@ class _StartRouterState extends State<StartRouter> {
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
+  Widget _postAuthHome() {
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? 'anon';
+    return PostAuthShell(
+      lang: widget.lang,
+      child: PostLoginHome(
+        key: ValueKey('post-login-$uid'),
+        dashboardKey: ValueKey('dashboard-$uid'),
+        lang: widget.lang,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1452,7 +1620,7 @@ class _StartRouterState extends State<StartRouter> {
             final guest = prefs.getBool(kPrefGuestMode) ?? false;
             final entry =
                 (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
-            if (guest || entry == 'guest') return;
+            if (!kIsOpsDesktopSurface && (guest || entry == 'guest')) return;
           } catch (_) {}
           if (!mounted) return;
           // الويب: اللوحة مُضمّنة — لا تُعد التحميل عند signedOut عرضي.
@@ -1497,6 +1665,13 @@ class _StartRouterState extends State<StartRouter> {
 
     if (isGuest || session == null) {
       if (!mounted) return;
+      if (kIsOpsDesktopSurface) {
+        setState(() {
+          _target = const LoginScreen();
+          _loading = false;
+        });
+        return;
+      }
       setState(() {
         _target = UserDashboard(
           key: const ValueKey('dashboard-guest'),
@@ -1508,15 +1683,14 @@ class _StartRouterState extends State<StartRouter> {
       return;
     }
 
+    if (!await AuthChallengeService.isFullyAuthenticated()) {
+      await _resolve();
+      return;
+    }
+
     if (!mounted) return;
     setState(() {
-      _target = PostAuthShell(
-        lang: widget.lang,
-        child: UserDashboard(
-          key: const ValueKey('dashboard'),
-          lang: widget.lang,
-        ),
-      );
+      _target = _postAuthHome();
       _loading = false;
     });
     if (kIsWeb) syncWebDashboardHashInAddressBar();
@@ -1538,13 +1712,7 @@ class _StartRouterState extends State<StartRouter> {
       return;
     }
 
-    final sb = Supabase.instance.client;
-    final uid = sb.auth.currentUser?.id ?? '';
-    final verified = uid.isNotEmpty
-        ? (prefs.getBool(otpVerifiedKey(uid)) ?? false)
-        : false;
-
-    if (verified) {
+    if (await AuthChallengeService.isFullyAuthenticated()) {
       await _openWebDashboardInPlace();
       return;
     }
@@ -1581,7 +1749,7 @@ class _StartRouterState extends State<StartRouter> {
       return;
     }
 
-    final okNet = kIsWeb ? true : await _hasInternet();
+    final okNet = await _hasInternet();
     if (!mounted) return;
 
     if (!okNet) {
@@ -1627,6 +1795,18 @@ class _StartRouterState extends State<StartRouter> {
     }
 
     if (isGuest) {
+      if (kIsOpsDesktopSurface) {
+        try {
+          await prefs.setBool(kPrefGuestMode, false);
+          await prefs.remove(kPrefEntryMode);
+        } catch (_) {}
+        if (!mounted) return;
+        setState(() {
+          _target = const LoginScreen();
+          _loading = false;
+        });
+        return;
+      }
       if (kIsWeb && await shouldForceWebGuestEndDueToIdle()) {
         await clearWebGuestIdleStamp();
         try {
@@ -1653,17 +1833,15 @@ class _StartRouterState extends State<StartRouter> {
     }
 
     if (session != null) {
-      final uid = sb.auth.currentUser?.id ?? '';
-      final verified = uid.isNotEmpty
-          ? (prefs.getBool(otpVerifiedKey(uid)) ?? false)
-          : false;
+      final fully = await AuthChallengeService.isFullyAuthenticated();
 
-      // ✅ Dashboard إذا session != null && otpVerified == true
-      if (verified) {
+      if (fully) {
         unawaited(FastLoginService.syncBootstrapRoutePrefs());
 
         // عند كل فتح جديد للعملية: إن وُجد قفل سريع (PIN/بصمة) يُطلب قبل اللوحة.
-        if (await FastLoginService.hasAnyLockEnabled() &&
+        if (!kIsWeb &&
+            AuthChallengeService.allowQuickUnlockOnThisSurface() &&
+            await FastLoginService.hasAnyLockEnabled() &&
             !FastLoginService.hasUnlockedThisRuntimeSession) {
           if (!mounted) return;
           setState(() {
@@ -1673,21 +1851,32 @@ class _StartRouterState extends State<StartRouter> {
           return;
         }
 
-        // مايو: فتح مباشر دون WebDashboardShell.
-        // لا نوجّه المسوّق إلى MarketerDashboardPage (لوحة فريق فقط) —
-        // الرئيسية/إعلاناتي/طلباتي كلها داخل UserDashboard.
         if (!mounted) return;
         setState(() {
-          _target = PostAuthShell(
-            lang: widget.lang,
-            child: UserDashboard(
-              key: const ValueKey('dashboard'),
-              lang: widget.lang,
-            ),
-          );
+          _target = _postAuthHome();
           _loading = false;
         });
         if (kIsWeb) syncWebDashboardHashInAddressBar();
+        return;
+      }
+
+      final pending = await AuthChallengeService.readPending();
+      var username = (pending.username ?? '').trim();
+      if (username.isEmpty) {
+        try {
+          username = (await FastLoginService.getUsernameNationalId() ?? '')
+              .trim();
+        } catch (_) {}
+      }
+      if (username.isNotEmpty || (pending.challengeId ?? '').isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _target = VerifyScreen(
+            initialUsername: username.isEmpty ? null : username,
+            initialChallengeId: pending.challengeId,
+          );
+          _loading = false;
+        });
         return;
       }
     }
@@ -1698,7 +1887,9 @@ class _StartRouterState extends State<StartRouter> {
     if (isFirstRun) {
       if (!mounted) return;
       setState(() {
-        _target = const EntryChoiceScreen();
+        _target = kIsOpsDesktopSurface
+            ? const LoginScreen()
+            : const EntryChoiceScreen();
         _loading = false;
       });
       return;
@@ -1720,7 +1911,11 @@ class _StartRouterState extends State<StartRouter> {
         });
       }
       return Scaffold(
-        backgroundColor: const Color(0xFFF3F6F8),
+        backgroundColor: UserAppearanceSession.resolvesLight(
+          themeModeNotifier.value,
+        )
+            ? const Color(0xFFF3F6F8)
+            : const Color(0xFF071210),
         body: Center(
           child: TweenAnimationBuilder<double>(
             tween: Tween(begin: 0.92, end: 1),

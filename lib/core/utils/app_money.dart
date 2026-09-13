@@ -6,18 +6,44 @@ import 'package:intl/intl.dart';
 
 import '../../widgets/saudi_riyal_symbol_icon.dart';
 
-/// تقريب المبالغ وعرضها: عملة SAR مع [SaudiRiyalSymbolIcon] بجانب الرقم؛ غير SAR كنص.
+/// تنسيق موحد للمبالغ: رمز الريال ملاصق بعد الرقم بالعربية، وSAR بعد الرقم بالإنجليزية.
 class AppMoney {
   AppMoney._();
 
-  /// رمز الريال في يونيكود (للنصوص/المشاركة حيث لا يُعرض SVG).
+  /// رمز الريال الرسمي في يونيكود (U+20C1). Cairo/Noto لا يغطيانه فيظهر مربع □.
   static const String saudiRiyalSignUnicode = '\u{20C1}';
 
-  /// لعرض الواجهة كنص فقط: عربي → ر.س، إنجليزي → SAR.
-  /// لا تستخدم U+20C1 هنا — Cairo/Noto لا يغطيانه فيظهر مربع □.
-  /// للواجهة المرئية فضّل [AppMoneyLine] (SVG بجانب الرقم).
+  /// ﷼ (U+FDFC) للنصوص/المشاركة عندما لا يُعرض SVG.
+  static const String saudiRiyalSignCompat = '\u{FDFC}';
+
+  /// رمز العملة النصي حسب اللغة.
   static String sarUiSuffix({required bool isAr}) {
-    return isAr ? 'ر.س' : 'SAR';
+    return isAr ? saudiRiyalSignCompat : 'SAR';
+  }
+
+  /// المبلغ ثم العملة: `1234﷼` بالعربية و`1234 SAR` بالإنجليزية.
+  static String sarPhrase(String amountText, {required bool isAr}) {
+    final t = amountText.trim();
+    final suffix = sarUiSuffix(isAr: isAr);
+    return isAr ? '\u202A$t$suffix\u202C' : '$t $suffix';
+  }
+
+  /// يزيل رموز/اختصارات الريال من حقل إدخال قبل التحليل.
+  static String stripSarMarks(String raw) {
+    return raw
+        .replaceAll('ر.س', '')
+        .replaceAll('ر. س', '')
+        .replaceAll('ريال', '')
+        .replaceAll('Riyal', '')
+        .replaceAll('riyal', '')
+        .replaceAll(saudiRiyalSignUnicode, '')
+        .replaceAll(saudiRiyalSignCompat, '')
+        .replaceAll('SAR', '')
+        .replaceAll('sar', '')
+        .replaceAll('\u202A', '')
+        .replaceAll('\u202C', '')
+        .replaceAll('\u200E', '')
+        .replaceAll('\u200F', '');
   }
 
   /// تقريب مبلغ بالريال (منزلتان عشريتان افتراضياً).
@@ -49,7 +75,7 @@ class AppMoney {
     return NumberFormat(pattern, locale).format(rounded);
   }
 
-  /// نص فقط (مشاركة، أسطر متعددة): عربي + يونيكود؛ إنجليزي + `SAR`.
+  /// نص فقط (مشاركة، أسطر متعددة): الرقم ثم ﷼.
   static String formatWithCurrencyCode(
     double amount, {
     required bool isAr,
@@ -62,11 +88,24 @@ class AppMoney {
       isAr: isAr,
       maxFractionDigits: maxFractionDigits,
     );
+    return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$code $fmt';
+  }
+
+  /// PDF — الرقم ثم ﷼ دائماً. لا ر.س ولا SAR (تظهر مربعات إن غاب الرمز في الخط).
+  static String formatForPdf(
+    double amount, {
+    required bool isAr,
+    String currencyCode = 'SAR',
+    int maxFractionDigits = 2,
+  }) {
+    final fmt = formatNumber(
+      amount,
+      isAr: isAr,
+      maxFractionDigits: maxFractionDigits,
+    );
+    final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      // عربي: الرمز على يسار الرقم (من منظور المستخدم) عبر بادئة LTR.
-      return isAr
-          ? '\u200E${sarUiSuffix(isAr: true)} $fmt'
-          : '$fmt ${sarUiSuffix(isAr: false)}';
+      return isAr ? '$fmt$saudiRiyalSignCompat' : '$fmt SAR';
     }
     return '$fmt $code';
   }
@@ -85,13 +124,79 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '\u200Eر.س $fmt' : '$fmt SAR';
+      return isAr ? '$fmt$saudiRiyalSignCompat' : '$fmt SAR';
     }
     return '$fmt $code';
   }
 }
 
-/// سطر مبلغ مع رمز الريال (SVG) بجانب الرقم عند SAR.
+/// الرقم ثم رمز الريال SVG بالعربية، والرقم ثم SAR بالإنجليزية.
+class AppMoneyInline extends StatelessWidget {
+  final String amountText;
+  final bool isAr;
+  final TextStyle? style;
+  final Color? symbolColor;
+
+  const AppMoneyInline({
+    super.key,
+    required this.amountText,
+    required this.isAr,
+    this.style,
+    this.symbolColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = amountText.trim();
+    final baseStyle = style ?? DefaultTextStyle.of(context).style;
+    final rawFont = baseStyle.fontSize ?? 14;
+    final fontSize = MediaQuery.textScalerOf(context).scale(rawFont).clamp(10.0, 48.0);
+    final color = baseStyle.color ?? Theme.of(context).colorScheme.onSurface;
+    final symColor = symbolColor ?? color;
+    final mergedStyle = baseStyle.merge(
+      TextStyle(
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.15,
+        color: color,
+        fontSize: fontSize,
+        height: 1.0,
+      ),
+    );
+
+    final amount = Directionality(
+      textDirection: ui.TextDirection.ltr,
+      child: Text(
+        fmt,
+        style: mergedStyle,
+        maxLines: 1,
+        softWrap: false,
+      ),
+    );
+    final gap = SizedBox(width: (fontSize * 0.18).clamp(2.0, 6.0));
+    final currency = isAr
+        ? SaudiRiyalSymbolIcon(size: fontSize, color: symColor)
+        : Text(
+            'SAR',
+            style: mergedStyle.copyWith(
+              fontSize: (fontSize * 0.72).clamp(10.0, 32.0),
+              color: symColor,
+            ),
+          );
+
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: AlignmentDirectional.centerStart,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        textDirection: ui.TextDirection.ltr,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [amount, if (!isAr) gap, currency],
+      ),
+    );
+  }
+}
+
+/// سطر مبلغ مع رمز الريال (SVG) بعد الرقم عند SAR.
 class AppMoneyLine extends StatelessWidget {
   final double amount;
   final String currencyCode;
@@ -99,7 +204,7 @@ class AppMoneyLine extends StatelessWidget {
   final TextStyle? style;
   final int maxFractionDigits;
 
-  /// لون رمز الريال SVG؛ الافتراضي يتبع لون النص.
+  /// لون رمز الريال SVG؛ الافتراضي يتبع لون النص (فاتح/داكن).
   final Color? symbolColor;
 
   const AppMoneyLine({
@@ -127,46 +232,15 @@ class AppMoneyLine extends StatelessWidget {
       return Text('$fmt $code', style: style);
     }
 
-    final baseStyle = style ?? DefaultTextStyle.of(context).style;
-    final rawFont = baseStyle.fontSize ?? 14;
-    final textScaler = MediaQuery.textScalerOf(context);
-    final fontSize = textScaler.scale(rawFont).clamp(10.0, 64.0);
-    final color = baseStyle.color ?? Theme.of(context).colorScheme.onSurface;
-    final symColor = symbolColor ?? color;
-    final mergedStyle = baseStyle.merge(
-      const TextStyle(
-        fontWeight: FontWeight.w800,
-        letterSpacing: -0.15,
-      ),
-    );
+    if (!isAr) {
+      return Text('$fmt SAR', style: style);
+    }
 
-    // رقم + رمز الريال في Row (آمن على الويب؛ تجنّب WidgetSpan).
-    // دائماً LTR داخل الصف: الرمز على يسار المستخدم ثم الرقم.
-    final amountText = Text(
-      fmt,
-      style: mergedStyle,
-      maxLines: 1,
-      softWrap: false,
-    );
-    final symbol = SaudiRiyalSymbolIcon(
-      size: fontSize * 1.02,
-      color: symColor,
-    );
-    final gap = SizedBox(width: fontSize * 0.32);
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: isAr ? Alignment.centerRight : Alignment.centerLeft,
-      child: Directionality(
-        textDirection: ui.TextDirection.ltr,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: isAr
-              ? [symbol, gap, amountText]
-              : [amountText, gap, Text('SAR', style: mergedStyle)],
-        ),
-      ),
+    return AppMoneyInline(
+      amountText: fmt,
+      isAr: isAr,
+      style: style,
+      symbolColor: symbolColor,
     );
   }
 }

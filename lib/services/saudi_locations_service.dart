@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
+import '../core/geo/saudi_official_admin.dart';
 import '../models/saudi_location.dart';
 
 class SaudiLocationsService {
@@ -13,7 +14,7 @@ class SaudiLocationsService {
   bool _extraMerged = false;
 
   Future<List<SaudiLocation>> loadAll({bool? includeExtra}) async {
-    final wantExtra = includeExtra ?? !kIsWeb;
+    final wantExtra = includeExtra ?? true;
     if (_cache != null && (!wantExtra || _extraMerged)) {
       return _cache!;
     }
@@ -67,18 +68,28 @@ class SaudiLocationsService {
     }
   }
 
-  /// عند غياب المحافظة في البيانات: نستخدم المدينة كمفتاح محافظة لربط هرمي واضح.
+  /// لا نُحوّل اسم المدينة إلى محافظة — المحافظات من القائمة الرسمية فقط.
   static SaudiLocation _withGovernorateFallback(SaudiLocation e) {
     final ga = e.governorateAr?.trim() ?? '';
     final ge = e.governorateEn?.trim() ?? '';
-    if (ga.isNotEmpty && ge.isNotEmpty) return e;
+    final official = (ga.isNotEmpty &&
+            SaudiOfficialAdmin.isOfficialGovernorate(
+              region: e.regionAr,
+              governorate: ga,
+            )) ||
+        (ge.isNotEmpty &&
+            SaudiOfficialAdmin.isOfficialGovernorate(
+              region: e.regionEn,
+              governorate: ge,
+            ));
+    if (official) return e;
     return SaudiLocation(
       cityAr: e.cityAr,
       cityEn: e.cityEn,
       regionAr: e.regionAr,
       regionEn: e.regionEn,
-      governorateAr: ga.isNotEmpty ? ga : e.cityAr,
-      governorateEn: ge.isNotEmpty ? ge : e.cityEn,
+      governorateAr: null,
+      governorateEn: null,
       lat: e.lat,
       lng: e.lng,
     );
@@ -94,6 +105,36 @@ class SaudiLocationsService {
       if (_normalize(item.cityAr) == c || _normalize(item.cityEn) == c) {
         return item;
       }
+    }
+
+    return null;
+  }
+
+  /// إحداثيات للخريطة من مدينة/محافظة/منطقة عندما لا يوجد دبوس دقيق.
+  Future<({double lat, double lng})?> findCoordsForPlace({
+    required String city,
+    String? governorate,
+    String? region,
+  }) async {
+    Future<({double lat, double lng})?> fromLoc(SaudiLocation? loc) async {
+      if (loc == null) return null;
+      if (loc.lat.abs() < 1e-5 && loc.lng.abs() < 1e-5) return null;
+      return (lat: loc.lat, lng: loc.lng);
+    }
+
+    final byCity = await fromLoc(await findByCity(city));
+    if (byCity != null) return byCity;
+
+    final gov = (governorate ?? '').trim();
+    if (gov.isNotEmpty) {
+      final byGov = await fromLoc(await findByCity(gov));
+      if (byGov != null) return byGov;
+    }
+
+    final reg = (region ?? '').trim();
+    if (reg.isNotEmpty) {
+      final byReg = await fromLoc(await findByCity(reg));
+      if (byReg != null) return byReg;
     }
 
     return null;
