@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../core/notifications/in_app_notification_catalog.dart';
 import '../core/notifications/in_app_notification_writer.dart';
 import '../models/market_property_request_row.dart';
@@ -12,6 +14,12 @@ import 'app_confirm_dialog.dart';
 
 /// بلاغ مفتوح سابق لنفس المستخدم على نفس العقار (فهرس فريد في الخادم).
 class DuplicateOpenListingReportException implements Exception {}
+
+/// حد البلاغات من الخادم (ساعة/يوم).
+class ListingReportRateLimitException implements Exception {
+  ListingReportRateLimitException(this.code);
+  final String code;
+}
 
 Map<String, String> _bilingualMarketerListingNotif(bool suppressed) {
   final ar = lookupAppLocalizations(const Locale('ar'));
@@ -134,7 +142,7 @@ Future<void> showPropertyListingReportSheet(
     if (!ok || !context.mounted) return;
   }
 
-  await showModalBottomSheet<void>(
+  await showAppModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -150,18 +158,28 @@ Future<void> showPropertyListingReportSheet(
 
         Map<String, dynamic>? inserted;
         try {
-          inserted = await sb
-              .from('listing_user_reports')
-              .insert({
-                'property_id': property.id,
-                'reporter_user_id': reporter.isEmpty ? null : reporter,
-                'reason_keys': keys,
-                'note': note.trim().isEmpty ? null : note.trim(),
-                'status': 'pending',
-                'created_at': DateTime.now().toUtc().toIso8601String(),
-              })
-              .select('id')
-              .maybeSingle();
+          final raw = await sb.rpc(
+            'submit_listing_report',
+            params: {
+              'p_property_id': property.id,
+              'p_reason_keys': keys,
+              'p_note': note.trim().isEmpty ? null : note.trim(),
+            },
+          );
+          if (raw is Map) {
+            final m = Map<String, dynamic>.from(raw);
+            if (m['ok'] != true) {
+              final err = '${m['error'] ?? ''}';
+              if (err == 'duplicate_open') {
+                throw DuplicateOpenListingReportException();
+              }
+              if (err == 'hourly_limit' || err == 'daily_limit') {
+                throw ListingReportRateLimitException(err);
+              }
+              throw StateError(err.isEmpty ? 'report_failed' : err);
+            }
+            inserted = {'id': m['id']};
+          }
         } on PostgrestException catch (e) {
           if (e.code == '23505') {
             throw DuplicateOpenListingReportException();
@@ -272,7 +290,7 @@ Future<void> showMarketRequestReportSheet(
     if (!ok || !context.mounted) return;
   }
 
-  await showModalBottomSheet<void>(
+  await showAppModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -376,6 +394,18 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
           SnackBar(content: Text(_l.listingReportDuplicateOpen)),
         );
       }
+    } on ListingReportRateLimitException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.code == 'hourly_limit'
+                  ? _l.listingReportGateHourlyBlock
+                  : _l.listingReportGateDailyBlock,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -395,7 +425,7 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
         left: 20,
         right: 20,
         top: 8,
-        bottom: mq.viewInsets.bottom + mq.padding.bottom + 16,
+        bottom: AppKeyboardInset.bottomOf(context) + mq.padding.bottom + 16,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

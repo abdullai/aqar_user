@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../session/app_session.dart';
+import '../gestures/app_keyboard_popups.dart';
 
 Future<bool> requireAuth(
   BuildContext context, {
@@ -18,7 +19,7 @@ Future<bool> requireAuth(
   // ✅ خزن Navigator قبل أي await حتى لا تستخدم context بعد async gap
   final nav = Navigator.of(context, rootNavigator: true);
 
-  final go = await showDialog<bool>(
+  final go = await showAppDialog<bool>(
     context: context,
     builder: (_) => AlertDialog(
       title: const Text('تسجيل الدخول مطلوب'),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'package:aqar_user/l10n/app_localizations.dart';
+import 'package:aqar_user/main.dart';
 
 import '../core/session/app_session.dart';
 import '../core/session/web_session_ttl.dart';
@@ -14,12 +15,12 @@ import '../widgets/field_group_frame.dart';
 // ✅ Internet guard
 import '../services/connectivity_guard.dart';
 import '../core/navigation/post_auth_navigation.dart';
+import '../shared/core/app_flags.dart';
 
 class GateScreen extends StatelessWidget {
   const GateScreen({super.key});
 
-  // Gate غالباً عربي – اربطه بـ langNotifier لاحقاً إن رغبت
-  bool get _isAr => true;
+  bool get _isAr => langNotifier.value != 'en';
 
   /// فحص الإنترنت + تنبيه
   Future<bool> _ensureInternet(BuildContext context) async {
@@ -28,13 +29,16 @@ class GateScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = AppLocalizations.of(context);
-    if (t == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-    return Scaffold(
+    return ValueListenableBuilder<String>(
+      valueListenable: langNotifier,
+      builder: (context, _, __) {
+        final t = AppLocalizations.of(context);
+        if (t == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return Scaffold(
       appBar: AppBar(
         title: Text(_isAr ? 'بوابة الدخول' : 'Entry Gate'),
       ),
@@ -69,6 +73,7 @@ class GateScreen extends StatelessWidget {
 
                 const SizedBox(height: 12),
 
+                if (!kIsOpsDesktopSurface) ...[
                 // =========================
                 // دخول كضيف
                 // =========================
@@ -111,6 +116,13 @@ class GateScreen extends StatelessWidget {
                       : 'Note: Some features require login.',
                   textAlign: TextAlign.center,
                 ),
+                ] else ...[
+                const SizedBox(height: 16),
+                Text(
+                  AppLocalizations.of(context)!.opsDeskLoginHint,
+                  textAlign: TextAlign.center,
+                ),
+                ],
 
                 if (kIsWeb) ...[
                   const SizedBox(height: 12),
@@ -121,12 +133,14 @@ class GateScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                   ),
                 ],
-              ],
-            ),
+                ],
+              ),
             ),
           ),
         ),
       ),
+    );
+      },
     );
   }
 }

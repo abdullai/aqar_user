@@ -78,38 +78,36 @@ class ListingPermissionsHelper {
     if (_completedDealStatusHints.contains(property.normalizedStatus)) {
       return false;
     }
-    final s = _stage(property);
+    final wf = (property.workflowStage ?? '').trim().toLowerCase();
     if (const {
-      ListingWorkflowStage.cancelled,
-      ListingWorkflowStage.terminated,
-      ListingWorkflowStage.archived,
-      ListingWorkflowStage.contractCancelled,
-      ListingWorkflowStage.waitingMarketers,
-      ListingWorkflowStage.marketerSelected,
-      ListingWorkflowStage.contractPending,
-      ListingWorkflowStage.contractSent,
-      ListingWorkflowStage.contractReturned,
-      ListingWorkflowStage.contractSigned,
-      ListingWorkflowStage.permitPending,
-      ListingWorkflowStage.permitIssued,
-      ListingWorkflowStage.inactive72h,
-    }.contains(s)) {
+      'waiting_marketers',
+      'added_by_owner',
+      'marketer_selected',
+      'contract_pending',
+      'contract_sent',
+      'contract_returned',
+      'contract_signed',
+      'permit_pending',
+      'permit_issued',
+      'inactive_72h',
+      'inactive72h',
+      'owner_action_required',
+      'offers_received',
+      'draft',
+      'cancelled',
+      'terminated',
+      'archived',
+      'contract_cancelled',
+    }.contains(wf)) {
       return false;
     }
-    if (s == ListingWorkflowStage.published ||
-        s == ListingWorkflowStage.reserved) {
-      return true;
-    }
-    // مواءمة مع PostgREST: [propertiesHomeFeedOrFilter].
-    // مراحل التسويق الداخلية تبقى في لوحات المالك/المسوق ولا تظهر في الرئيسية.
-    if (_publicHomeStatusHints.contains(property.normalizedStatus)) return true;
-    return property.isActive;
+    final s = _stage(property);
+    return s == ListingWorkflowStage.published ||
+        s == ListingWorkflowStage.reserved;
   }
 
   /// بطاقة إعلان في **تبويب الرئيسية** — مطابقة لاستعلام الخادم
   /// ([propertiesHomeFeedOrFilter] + [shouldShowInPublicHome]).
-  /// الشرط السابق على `publishedAt`/مرحلة published فقط كان يخفي صفوفاً
-  /// بحالة `active`/`live`/`available` رغم وصولها من PostgREST.
   static bool shouldShowOnHomeDiscoveryCard(Property property) {
     return shouldShowInPublicHome(property);
   }
@@ -124,22 +122,6 @@ class ListingPermissionsHelper {
     'closed',
     'done',
     'purchased',
-  };
-
-  static const Set<String> _publicHomeStatusHints = {
-    'published',
-    'active',
-    'available',
-    'live',
-    'reserved',
-    'approved',
-    'listed',
-    'open',
-    'visible',
-    'for_sale',
-    'for_rent',
-    'forsale',
-    'forrent',
   };
 
   /// طلبات السوق الظاهرة للجميع — دفاع إضافي عن أخطاء الصف أو بيانات قديمة.
@@ -185,6 +167,21 @@ class ListingPermissionsHelper {
     return true;
   }
 
+  /// زر «إتمام الصفقة» على بطاقة الإعلان في الرئيسية — يظهر للضيف أيضاً (يفتح الدخول).
+  static bool shouldShowHomeListingDealButton({
+    required Property property,
+    required String? currentUserId,
+    required bool isGuest,
+  }) {
+    if (property.isAuction) return false;
+    if (_stage(property) != ListingWorkflowStage.published) return false;
+    if (isGuest || currentUserId == null || currentUserId.isEmpty) return true;
+    if (property.ownerId == currentUserId) return false;
+    if (property.selectedMarketerId == currentUserId) return false;
+    if (property.publishedByMarketerId == currentUserId) return false;
+    return true;
+  }
+
   /// زر «مزايدة» على البطاقة: يفتح التفاصيل حيث `place_property_bid`.
   static bool canOpenBidFromHomeCard({
     required Property property,
@@ -194,6 +191,21 @@ class ListingPermissionsHelper {
     if (!property.isAuction) return false;
     if (isGuest || currentUserId == null || currentUserId.isEmpty) return false;
     if (_stage(property) != ListingWorkflowStage.published) return false;
+    if (property.ownerId == currentUserId) return false;
+    if (property.selectedMarketerId == currentUserId) return false;
+    if (property.publishedByMarketerId == currentUserId) return false;
+    return true;
+  }
+
+  /// مزايدة على بطاقة الرئيسية للضيف (نفس مسار الطلب: يظهر الزر ويطلب الدخول).
+  static bool shouldShowHomeListingBidButton({
+    required Property property,
+    required String? currentUserId,
+    required bool isGuest,
+  }) {
+    if (!property.isAuction) return false;
+    if (_stage(property) != ListingWorkflowStage.published) return false;
+    if (isGuest || currentUserId == null || currentUserId.isEmpty) return true;
     if (property.ownerId == currentUserId) return false;
     if (property.selectedMarketerId == currentUserId) return false;
     if (property.publishedByMarketerId == currentUserId) return false;

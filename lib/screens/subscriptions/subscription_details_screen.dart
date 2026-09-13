@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/branding/app_branding.dart';
+import '../../core/utils/date_helper.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/individual_market_offer_service.dart';
 import '../../services/subscription_lifecycle_service.dart';
@@ -255,7 +255,7 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
       if (v == null) return '';
       try {
         final d = DateTime.parse('$v').toLocal();
-        return DateFormat('yyyy-MM-dd HH:mm').format(d);
+        return DateHelper.fmtCivilDateTime(d, isAr: _isAr);
       } catch (_) {
         return '$v';
       }

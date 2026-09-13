@@ -1,4 +1,6 @@
-﻿// lib/screens/login_screen.dart
+// ignore_for_file: unused_element, unused_field
+
+// lib/screens/login_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -18,6 +20,9 @@ import 'package:aqar_user/models.dart';
 import 'package:aqar_user/services/ads_service.dart';
 import 'package:aqar_user/services/auth_service.dart';
 import 'package:aqar_user/theme.dart';
+import '../core/auth/login_success_banner.dart';
+import '../core/auth/inactivity_auth_landing.dart';
+import '../core/auth/in_app_otp_handoff.dart';
 import 'package:aqar_user/widgets/app_busy_indicator.dart';
 import 'package:aqar_user/widgets/app_logo_loading.dart';
 import 'package:aqar_user/widgets/inline_property_video.dart';
@@ -26,27 +31,35 @@ import 'package:aqar_user/widgets/app_about_credits.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../core/branding/app_branding.dart';
-import '../core/branding/branding_logo_image.dart';
-import '../core/input/caps_lock_probe.dart';
+import '../core/branding/aqar_brand_colors.dart';
 import '../core/config/app_config.dart';
 import '../core/input/password_arabic_script_guard.dart';
+import '../core/input/password_field_input_guard.dart';
+import '../core/input/smart_keyboard_formatter.dart';
+import '../core/gestures/app_keyboard_stable.dart';
 import '../core/session/app_session.dart';
+import '../core/session/user_appearance_session.dart';
 import '../core/session/web_session_ttl.dart';
 import '../core/theme/app_appearance_bridge.dart';
 import '../core/session/return_after_auth.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/compound_display_name.dart';
-import '../core/utils/dashboard_greeting.dart';
 import '../services/connectivity_guard.dart';
 import '../services/session_manager.dart';
 import '../services/fast_login_service.dart';
 import '../services/profile_compliance_service.dart';
-import '../services/user_install_session_service.dart';
 import '../core/navigation/post_auth_navigation.dart';
-import '../core/government/nafath_models.dart';
 import '../core/haptics/app_haptics.dart';
-import '../services/nafath_auth_service.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../widgets/nafath_login_sheet.dart';
+import '../widgets/auth_top_chrome.dart';
+import '../widgets/login_known_user_hero.dart';
+import '../widgets/caps_aware_password_field.dart';
+import '../core/auth/auth_challenge_service.dart';
+import '../core/auth/auth_completion_policy.dart';
+import '../core/auth/login_method_policy.dart';
+import '../core/platform/app_surface.dart';
+import '../core/auth/auth_local_sign_out.dart';
+import '../shared/core/app_flags.dart';
 import 'verify_screen.dart';
 
 /// تمرير داخل بطاقة الدخول — بدون شريط (حتى على الويب/سطح المكتب).
@@ -62,7 +75,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen>
-    with TickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
+    with TickerProviderStateMixin, RouteAware {
   static const Color _bankColor = Color(0xFF0F766E);
 
   // ✅ سياسة محاولات الدخول (محليًا)
@@ -86,6 +99,18 @@ class _LoginScreenState extends State<LoginScreen>
 
   /// يظهر زر «الدخول السريع / البصمة» فقط عند وجود قفل فعلي (PIN أو بصمة مفعّلة).
   bool _showQuickLoginEntry = false;
+  LoginMethodSnapshot _methodSnapshot = LoginMethodSnapshot(
+    host: LoginMethodPolicy.detectHost(),
+    trustedThisInstall: false,
+    firstPasswordDone: false,
+    hasSession: false,
+    hasKnownUser: false,
+    pinEnabled: false,
+    faceEnabled: false,
+    fingerprintEnabled: false,
+    preferPassword: true,
+    unlockMode: FastUnlockMode.password,
+  );
 
   bool _routeAwareSubscribed = false;
 
@@ -140,32 +165,11 @@ class _LoginScreenState extends State<LoginScreen>
 
   String? _usernameError;
   String? _passwordError;
-  bool _capsLockPassword = false;
-  bool _pendingCapsUi = false;
-  Timer? _capsUiDebounce;
-
-  /// آخر حرف لاتيني مكتوب: true=كبير → يظهر السهم، false=صغير → يختفي.
-  bool? _lastLatinWasUpper;
-
-  /// عند فشل lockModes على ويب الجوال: حالة يدوية بعد ضغط Caps Lock.
-  bool? _capsLockLatched;
   bool _didAutoAdvanceToPassword = false;
-  Timer? _capsResyncTimer;
+  Timer? _passwordBleedGuardTimer;
 
-  /// ويب سطح المكتب (ويندوز/ماك/لينكس).
-  bool get _desktopWebCapsTextMode {
-    if (!kIsWeb) return false;
-    return defaultTargetPlatform == TargetPlatform.windows ||
-        defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.linux;
-  }
-
-  /// ويب سطح المكتب العريض (>=700): نص Caps تحت الحقل.
-  /// الجوال / ويب الجوال / التطبيق / الشاشات الصغيرة: سهم بجانب القفل فقط.
-  bool _useCapsTextUnderField(BuildContext context) {
-    if (!_desktopWebCapsTextMode) return false;
-    return MediaQuery.sizeOf(context).width >= 700;
-  }
+  /// يمنع تسرّب الرقم الحادي عشر إلى كلمة المرور بعد الانتقال التلقائي.
+  bool _passwordBleedGuardActive = false;
 
   DateTime? _lastPasswordArabicDialogAt;
 
@@ -174,10 +178,10 @@ class _LoginScreenState extends State<LoginScreen>
   bool get _isAr => langNotifier.value != 'en';
 
   ThemeMode get _currentTheme => themeModeNotifier.value;
-  bool get _isLight => _currentTheme == ThemeMode.light;
+  bool get _isLight => UserAppearanceSession.resolvesLight(_currentTheme);
 
   Color get _pageBg =>
-      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      _isLight ? const Color(0xFFF5F7FA) : AqarBrandColors.nightSurface;
   Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
@@ -201,175 +205,45 @@ class _LoginScreenState extends State<LoginScreen>
   double _font(BuildContext context, double desktop, double mobile) =>
       _isSmallUi(context) ? mobile : desktop;
 
-  void _notePasswordLatinCase(String text) {
-    for (var i = text.length - 1; i >= 0; i--) {
-      final c = text.codeUnitAt(i);
-      if (c >= 65 && c <= 90) {
-        _lastLatinWasUpper = true;
-        return;
-      }
-      if (c >= 97 && c <= 122) {
-        _lastLatinWasUpper = false;
-        return;
-      }
-    }
-  }
-
-  bool? _readHardwareCaps() {
-    try {
-      return HardwareKeyboard.instance.lockModesEnabled
-          .contains(KeyboardLockMode.capsLock);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// يستنتج Caps من حرف + Shift (موثوق على الويب بعد أول ضغطة).
-  bool? _capsFromKeyEvent(KeyEvent event) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return null;
-    final ch = event.character;
-    if (ch == null || ch.length != 1) return null;
-    final cu = ch.codeUnitAt(0);
-    final isUpper = cu >= 65 && cu <= 90;
-    final isLower = cu >= 97 && cu <= 122;
-    if (!isUpper && !isLower) return null;
-    final shift = HardwareKeyboard.instance.isShiftPressed;
-    // بدون Shift: حرف كبير ⇒ Caps ON، صغير ⇒ OFF.
-    // مع Shift: العكس (Shift+Caps يعطي صغيراً).
-    if (!shift) return isUpper;
-    return isLower;
-  }
-
-  void _applyCapsLockState(bool caps, {bool clearLatch = false}) {
-    if (clearLatch) _capsLockLatched = null;
-    if (!mounted || caps == _capsLockPassword) return;
-    // ويب ويندوز/سطح المكتب: ثبّت النص تحت الحقل (تجنّب وميض probe/resync).
-    if (_desktopWebCapsTextMode) {
-      _pendingCapsUi = caps;
-      _capsUiDebounce?.cancel();
-      _capsUiDebounce = Timer(const Duration(milliseconds: 140), () {
-        if (!mounted) return;
-        if (_pendingCapsUi == _capsLockPassword) return;
-        setState(() => _capsLockPassword = _pendingCapsUi);
-      });
-      return;
-    }
-    setState(() => _capsLockPassword = caps);
-  }
-
-  void _syncCapsLockFromHardware({bool preferHardware = false}) {
-    if (preferHardware) {
-      _capsLockLatched = null;
-    }
-
-    final browser = probeBrowserCapsLock();
-    final hardware = _readHardwareCaps();
-
-    // ويب سطح المكتب: اعتمد DOM + استدلال الأحرف فقط (lockModes يُومض النص).
-    if (_desktopWebCapsTextMode) {
-      if (browser != null) {
-        _applyCapsLockState(browser);
-        return;
-      }
-      if (_lastLatinWasUpper != null) {
-        _applyCapsLockState(_lastLatinWasUpper!);
-      }
-      return;
-    }
-
-    // لا تُصفّر الحالة عند التركيز قبل أي حدث لوحة — Caps قد يكون شغال مسبقاً.
-    if (browser == null &&
-        hardware == null &&
-        _capsLockLatched == null &&
-        _lastLatinWasUpper == null) {
-      return;
-    }
-
-    var caps = false;
-    if (browser != null) {
-      caps = browser;
-    } else if (hardware != null) {
-      caps = hardware;
-    } else if (_capsLockLatched != null) {
-      caps = _capsLockLatched!;
-    } else if (_lastLatinWasUpper == true) {
-      caps = true;
-    }
-
-    // مصدر حقيقي يفوز دائماً (لا يطغى عليه استدلال حرف صغير).
-    if (browser == true || hardware == true) {
-      caps = true;
-    } else if (browser == false || hardware == false) {
-      caps = false;
-      if (_lastLatinWasUpper == true && browser == null && hardware == false) {
-        // لوحات جوال ناعمة قد تُبلّغ lockModes=false مع حرف كبير.
-        caps = true;
-      }
-    }
-
-    _applyCapsLockState(caps);
-  }
-
-  void _scheduleCapsResync() {
-    _capsResyncTimer?.cancel();
-    // ويب سطح المكتب: أقل إعادة مزامنة لتقليل وميض النص.
-    final delays = _desktopWebCapsTextMode
-        ? <int>[50, 180, 450]
-        : <int>[0, 16, 48, 120, 280, 500, 900];
-    var i = 0;
-    void tick() {
+  void _armPasswordBleedGuard() {
+    _passwordBleedGuardActive = true;
+    _passwordBleedGuardTimer?.cancel();
+    _passwordBleedGuardTimer = Timer(const Duration(milliseconds: 480), () {
       if (!mounted) return;
-      _syncCapsLockFromHardware(preferHardware: true);
-      i++;
-      if (i >= delays.length) return;
-      _capsResyncTimer = Timer(Duration(milliseconds: delays[i]), tick);
-    }
-
-    tick();
+      _passwordBleedGuardActive = false;
+    });
   }
 
-  bool _loginHardwareCapsKeyHandler(KeyEvent event) {
-    if (!_passwordFocus.hasFocus &&
-        event.logicalKey != LogicalKeyboardKey.capsLock) {
-      // حدّث كاش DOM حتى لو الحقل غير مركّز (مهم عند دخول الحقل وCaps شغال مسبقاً).
-      if (kIsWeb && (event is KeyDownEvent || event is KeyUpEvent)) {
-        probeBrowserCapsLock();
+  /// انتقال صارم بعد اكتمال 10 أرقام — بدون تسرّب الرقم التالي لكلمة المرور.
+  void _advanceToPasswordAfterUsernameComplete() {
+    if (_didAutoAdvanceToPassword) return;
+    if (_sanitizeUsernameInput(_usernameController.text).length != 10) return;
+
+    // تعبئة محفوظة/أولية بدون كتابة نشطة: لا تسرق التركيز.
+    if (!_usernameFocus.hasFocus) {
+      _didAutoAdvanceToPassword = true;
+      return;
+    }
+
+    _didAutoAdvanceToPassword = true;
+    _armPasswordBleedGuard();
+
+    // أغلق محرر اسم المستخدم أولاً لتصفية أحداث IME المعلقة.
+    _usernameFocus.unfocus();
+    Future<void>.delayed(const Duration(milliseconds: 70), () {
+      if (!mounted) return;
+      if (_sanitizeUsernameInput(_usernameController.text).length != 10) {
+        _didAutoAdvanceToPassword = false;
+        _passwordBleedGuardActive = false;
+        return;
       }
-    }
-
-    if (event.logicalKey == LogicalKeyboardKey.capsLock) {
-      if (event is KeyDownEvent) {
-        final hardwareOn = _readHardwareCaps() ?? false;
-        final browserOn = probeBrowserCapsLock();
-        // بدّل التوقّع يدوياً إن تأخرت المنصة؛ يُصحَّح بعد الإطار من المصدر الحقيقي.
-        if (browserOn == null && _readHardwareCaps() == null) {
-          _capsLockLatched = !(_capsLockPassword || hardwareOn);
-        } else {
-          _capsLockLatched = null;
-        }
+      // إن وصلت أرقام يتيمة لكلمة المرور أثناء الانتقال — امسحها.
+      final leaked = _passwordController.text;
+      if (leaked.isNotEmpty && RegExp(r'^\d{1,4}$').hasMatch(leaked)) {
+        _passwordController.clear();
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _syncCapsLockFromHardware(preferHardware: true);
-        _scheduleCapsResync();
-      });
-      return false;
-    }
-
-    final inferred = _capsFromKeyEvent(event);
-    if (inferred != null) {
-      _lastLatinWasUpper = inferred;
-      _capsLockLatched = null;
-      _applyCapsLockState(inferred);
-      return false;
-    }
-
-    if (event is KeyDownEvent || event is KeyUpEvent) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _syncCapsLockFromHardware();
-      });
-    }
-    return false;
+      _passwordFocus.requestFocus();
+    });
   }
 
   Future<void> _shakeCredentialsGroup() async {
@@ -399,7 +273,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   void _applyInitialFocus() {
-    if (rememberMe && (_storedUsername ?? '').isNotEmpty) {
+    if (_knownUserReady) {
       _passwordFocus.requestFocus();
     } else {
       _usernameFocus.requestFocus();
@@ -566,10 +440,16 @@ class _LoginScreenState extends State<LoginScreen>
       begin: const Offset(0, 0.035),
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _enterCtrl, curve: Curves.easeOutCubic));
-    _enterCtrl.forward();
+    if (InactivityAuthLanding.suppressEnterMotion) {
+      _enterCtrl.value = 1;
+    } else {
+      _enterCtrl.forward();
+    }
 
     _generateCaptcha();
-    unawaited(_loadAds());
+    if (!InactivityAuthLanding.suppressEnterMotion) {
+      unawaited(_loadAds());
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -597,18 +477,9 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
-      // بعد 10 أرقام: الانتقال فوراً لحقل كلمة المرور (جوال/ويب/ويندوز).
+      // بعد 10 أرقام: انتقال صارم مع حارس ضد تسرّب الرقم إلى كلمة المرور.
       if (sanitized.length == 10) {
-        if (!_didAutoAdvanceToPassword) {
-          _didAutoAdvanceToPassword = true;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            if (_sanitizeUsernameInput(_usernameController.text).length != 10) {
-              return;
-            }
-            _passwordFocus.requestFocus();
-          });
-        }
+        _advanceToPasswordAfterUsernameComplete();
       } else {
         _didAutoAdvanceToPassword = false;
       }
@@ -626,43 +497,6 @@ class _LoginScreenState extends State<LoginScreen>
         setState(() => _passwordError = null);
       }
     });
-
-    _passwordFocus.addListener(() {
-      if (_passwordFocus.hasFocus) {
-        _scrollLoginFieldIntoView(_passwordFieldKey);
-        // لا تمسح الـ latch قبل قراءة حقيقية — Caps قد يكون شغال مسبقاً.
-        refreshBrowserCapsLockCache();
-        probeBrowserCapsLock();
-        _syncCapsLockFromHardware(preferHardware: true);
-        _scheduleCapsResync();
-      } else {
-        // عند مغادرة الحقل أعد المزامنة دون إجبار إخفاء الإشارة.
-        _syncCapsLockFromHardware();
-      }
-    });
-    // يفعّل مستمع DOM مبكراً على الويب.
-    refreshBrowserCapsLockCache();
-    probeBrowserCapsLock();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _syncCapsLockFromHardware(preferHardware: true);
-    });
-
-    _usernameFocus.addListener(() {
-      if (_usernameFocus.hasFocus) {
-        _scrollLoginFieldIntoView(_usernameFieldKey);
-      }
-    });
-
-    HardwareKeyboard.instance.addHandler(_loginHardwareCapsKeyHandler);
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void didChangeMetrics() {
-    super.didChangeMetrics();
-    if (!_usernameFocus.hasFocus && !_passwordFocus.hasFocus) return;
-    final key = _passwordFocus.hasFocus ? _passwordFieldKey : _usernameFieldKey;
-    _scrollLoginFieldIntoView(key);
   }
 
   @override
@@ -682,35 +516,6 @@ class _LoginScreenState extends State<LoginScreen>
     unawaited(_loadPreferences());
   }
 
-  void _scrollLoginFieldIntoView(GlobalKey key) {
-    // ويب الجوال: تمريرة واحدة كافية — التكرار مع SoftKeyboardEnsureVisible كان يهز الحقل.
-    void run([int attempt = 0]) {
-      if (!mounted) return;
-      final ctx = key.currentContext;
-      if (ctx == null) {
-        if (attempt < 2) {
-          Future<void>.delayed(const Duration(milliseconds: 100), () {
-            run(attempt + 1);
-          });
-        }
-        return;
-      }
-      final inset = MediaQuery.viewInsetsOf(context).bottom;
-      if (inset < 8 && attempt == 0) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: inset > 0 ? 0.14 : 0.28,
-        duration: const Duration(milliseconds: 240),
-        curve: Curves.easeOutCubic,
-      );
-    }
-
-    Future<void>.delayed(const Duration(milliseconds: 90), run);
-    if (kIsWeb) {
-      Future<void>.delayed(const Duration(milliseconds: 280), () => run(1));
-    }
-  }
-
   @override
   void dispose() {
     if (_routeAwareSubscribed) {
@@ -718,8 +523,7 @@ class _LoginScreenState extends State<LoginScreen>
       _routeAwareSubscribed = false;
     }
     _userCheckDebounce?.cancel();
-    _capsResyncTimer?.cancel();
-    _capsUiDebounce?.cancel();
+    _passwordBleedGuardTimer?.cancel();
     _shakeCtrl.dispose();
     _enterCtrl.dispose();
     _loginScrollCtrl.dispose();
@@ -728,8 +532,6 @@ class _LoginScreenState extends State<LoginScreen>
     _autofillUsernameMirror.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
-    HardwareKeyboard.instance.removeHandler(_loginHardwareCapsKeyHandler);
-    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
@@ -896,14 +698,6 @@ class _LoginScreenState extends State<LoginScreen>
     fastLogin = prefs.getBool('fastLogin') ?? false;
     if (kIsWeb) fastLogin = false;
 
-    var quick = false;
-    try {
-      final hasSession = Supabase.instance.client.auth.currentSession != null;
-      if (hasSession) {
-        quick = await FastLoginService.hasAnyLockEnabled();
-      }
-    } catch (_) {}
-
     String? resumeName;
     String? resumeUser;
     try {
@@ -913,16 +707,13 @@ class _LoginScreenState extends State<LoginScreen>
         (resume.username ?? '').trim(),
       );
       if (resumeUser.length < 10) resumeUser = null;
-      if ((resumeName ?? '').isEmpty) resumeName = null;
+      if (resumeName.isEmpty) resumeName = null;
     } catch (_) {}
 
-    final savedLang =
-        prefs.getString(AppConfig.prefLangKey) ?? langNotifier.value;
-    langNotifier.value = (savedLang == 'en') ? 'en' : 'ar';
-
-    final savedTheme = prefs.getString(AppConfig.prefThemeKey) ?? 'light';
-    themeModeNotifier.value =
-        (savedTheme == 'dark') ? ThemeMode.dark : ThemeMode.light;
+    await UserAppearanceSession.applyNotifiersToMatchStoredSession(
+      langNotifier: langNotifier,
+      themeModeNotifier: themeModeNotifier,
+    );
 
     final attemptsJson = prefs.getString('failedAttempts') ?? '{}';
     final lockoutJson = prefs.getString('lockoutUntil') ?? '{}';
@@ -938,33 +729,64 @@ class _LoginScreenState extends State<LoginScreen>
     if (rememberMe) {
       final u =
           _sanitizeUsernameInput((prefs.getString('username') ?? '').trim());
-      _storedUsername = u.isEmpty ? null : u;
+      _storedUsername = u.isEmpty ? resumeUser : u;
+      if ((_storedUsername ?? '').isEmpty) _storedUsername = resumeUser;
       final dn = (prefs.getString('rememberDisplayName') ?? '').trim();
-      _rememberDisplayName =
-          dn.isEmpty ? null : CompoundDisplayName.normalize(dn);
-      if ((_storedUsername ?? '').isNotEmpty) {
-        _showRememberedIdentityChip = (_rememberDisplayName ?? '').isNotEmpty;
-        _syncAutofillUsernameMirror();
-        if (!_showRememberedIdentityChip) {
-          _applyMaskedUsernamePrefill();
-        } else {
-          _maskedPrefillActive = true;
-          _usernameEdited = false;
-          _usernameController.clear();
-        }
+      _rememberDisplayName = dn.isEmpty
+          ? resumeName
+          : CompoundDisplayName.normalize(dn);
+      if ((_rememberDisplayName ?? '').isEmpty && resumeName != null) {
+        _rememberDisplayName = CompoundDisplayName.normalize(resumeName);
       }
     } else {
-      // بدون تذكرني: لا تملأ اسم المستخدم من التخزين أو الاستئناف.
       await prefs.remove('username');
       await prefs.remove('rememberDisplayName');
-      _storedUsername = null;
-      _rememberDisplayName = null;
+      _storedUsername = resumeUser;
+      _rememberDisplayName = resumeName == null
+          ? null
+          : CompoundDisplayName.normalize(resumeName);
+    }
+
+    final hasIdentity = (_storedUsername ?? '').isNotEmpty &&
+        (_rememberDisplayName ?? '').trim().isNotEmpty;
+
+    try {
+      _methodSnapshot =
+          await LoginMethodPolicy.resolve(hasKnownUser: hasIdentity);
+    } catch (_) {}
+
+    var forcePasswordLogin = false;
+    try {
+      forcePasswordLogin = await FastLoginService.consumeForcePasswordLoginOnce();
+    } catch (_) {}
+
+    if (!forcePasswordLogin &&
+        _methodSnapshot.autoOpenFastLogin &&
+        !FastLoginService.hasUnlockedThisRuntimeSession) {
+      if (!mounted) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.of(context).pushReplacementNamed('/fastLogin');
+      });
+      return;
+    }
+
+    // جهاز غير معتمد أو أول دخول: حقول تقليدية كاملة (اسم مستخدم + كلمة مرور).
+    if (!_methodSnapshot.nameOnlyPassword) {
       _showRememberedIdentityChip = false;
       _maskedPrefillActive = false;
+      _storedUsername = null;
+      _rememberDisplayName = null;
       _syncAutofillUsernameMirror();
       if (_usernameController.text.trim().isNotEmpty && !_usernameEdited) {
         _usernameController.clear();
       }
+    } else {
+      _showRememberedIdentityChip = true;
+      _syncAutofillUsernameMirror();
+      _maskedPrefillActive = true;
+      _usernameEdited = false;
+      _usernameController.clear();
     }
 
     if (prefs.containsKey('password')) {
@@ -972,8 +794,12 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     if (!mounted) return;
+    final known = _showRememberedIdentityChip &&
+        (_rememberDisplayName ?? '').trim().isNotEmpty &&
+        (_storedUsername ?? '').isNotEmpty;
     setState(() {
-      _showQuickLoginEntry = quick;
+      _showQuickLoginEntry = _methodSnapshot.showAnyQuickUnlock;
+      _methodSnapshot = _methodSnapshot.copyWith(hasKnownUser: known);
     });
     _checkUsernameExistsDebounced();
   }
@@ -1011,19 +837,6 @@ class _LoginScreenState extends State<LoginScreen>
     if (prefs.containsKey('password')) {
       await prefs.remove('password');
     }
-  }
-
-  Future<void> _setLanguage(String code) async {
-    await setAppLang(code);
-
-    if (!mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _setTheme(ThemeMode mode) async {
-    await setAppTheme(mode);
-    if (!mounted) return;
-    setState(() {});
   }
 
   // ===== Mask helpers =====
@@ -1131,6 +944,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   // ✅ فتح شاشة الدخول السريع
   Future<void> _openQuickLogin() async {
+    if (!_methodSnapshot.showAnyQuickUnlock) return;
     final okNet = await _ensureInternetOrAlert();
     if (!mounted) return;
     ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
@@ -1170,6 +984,10 @@ class _LoginScreenState extends State<LoginScreen>
     if (mounted) {
       await context.read<AppSession>().reloadFromPrefs();
     }
+
+    try {
+      await FastLoginService.setPreferPasswordSurface(false);
+    } catch (_) {}
 
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, '/fastLogin');
@@ -1260,7 +1078,7 @@ class _LoginScreenState extends State<LoginScreen>
     ScaffoldMessenger.of(context).clearSnackBars();
     setState(() => isBusy = true);
     // نافذة منبثقة فوق شاشة الدخول — بلا صفحة بيضاء وسيطة.
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       barrierDismissible: false,
       barrierColor: Colors.black.withValues(alpha: 0.38),
@@ -1312,7 +1130,10 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
 
+    var loginOverlayOpen = true;
     void dismissLoginOverlay() {
+      if (!loginOverlayOpen) return;
+      loginOverlayOpen = false;
       final nav = Navigator.of(context, rootNavigator: true);
       if (nav.canPop()) nav.pop();
     }
@@ -1363,12 +1184,30 @@ class _LoginScreenState extends State<LoginScreen>
     }
 
     TextInput.finishAutofillContext(shouldSave: rememberMe);
-    await _clearOtpVerifiedForCurrentSession();
 
-    final known = await UserInstallSessionService.isCurrentInstallRegistered();
+    final challenge = await AuthChallengeService.start(
+      username: u,
+      loginMethod: 'password',
+    );
     if (!mounted) return;
 
-    if (!kIsWeb && fastLogin && known) {
+    final skipOtp = challenge.fullyAuthenticated &&
+        AuthCompletionPolicy.allowFastLogin(
+          isWeb: kIsWeb,
+          platform: defaultTargetPlatform,
+        ) &&
+        !AuthCompletionPolicy.localFlagCanBypassOtp();
+
+    if (skipOtp) {
+      dismissLoginOverlay();
+      try {
+        await FastLoginService.saveUserContext(
+          uid: uid,
+          usernameNationalId: u,
+          displayName: _rememberDisplayName,
+        );
+        await FastLoginService.markTrustedInstall(uid: uid);
+      } catch (_) {}
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_otpVerifiedKey(uid), true);
@@ -1383,6 +1222,10 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => isBusy = false);
 
       if (!mounted) return;
+      await LoginSuccessBanner.showOrQueue(
+        null,
+        isAr: langNotifier.value != 'en',
+      );
       await ReturnAfterAuth.navigatePostAuthOrDefault(
         Navigator.of(context),
         '/userDashboard',
@@ -1419,31 +1262,87 @@ class _LoginScreenState extends State<LoginScreen>
       await _savePreferences();
     }
 
+    try {
+      await FastLoginService.saveUserContext(
+        uid: uid,
+        usernameNationalId: u,
+        displayName: prefetchFullName ?? _rememberDisplayName,
+      );
+    } catch (_) {}
+
     final args = <String, dynamic>{
       'next': kIsWeb ? '/' : '/userDashboard',
       'nextArgs': <String, dynamic>{},
       'username': u,
       'deviceId': deviceId,
-      'registerDeviceOnSuccess': !known,
+      'registerDeviceOnSuccess': !challenge.trusted,
       'backToLogin': true,
+      if ((challenge.challengeId ?? '').isNotEmpty)
+        'challengeId': challenge.challengeId,
     };
     if (prefetchFullName != null && prefetchFullName.trim().isNotEmpty) {
       args['fullName'] = prefetchFullName.trim();
     }
 
-    // إرسال الرمز دون انتظار — الانتقال لشاشة التحقق فوري؛ الشاشة تكمل الجلب إن لزم.
-    unawaited(AuthService.requestOtpWithMessage(u));
+    // إرسال الرمز وجلبه + آخر دخول أثناء نافذة التحميل حتى تكون الشاشة فورية.
+    final requestedAt = DateTime.now().toUtc();
+    var otpRes = challenge.needsOtp && challenge.ok
+        ? InAppOtpRequestResult(
+            expiresAt: challenge.expiresAt,
+            username: u,
+            challengeId: challenge.challengeId,
+            devCode: challenge.devCode,
+          )
+        : await AuthService.requestOtpDetailed(u);
+    if (otpRes.error == 'not_authenticated') {
+      await _waitForSession();
+      if (!mounted) return;
+      otpRes = await AuthService.requestOtpDetailed(u);
+    }
+    if ((challenge.error ?? otpRes.error) != null && kDebugMode) {
+      debugPrint('[login] OTP request hint: ${challenge.error ?? otpRes.error}');
+    }
+
+    final greetFuture = InAppOtpHandoff.fetchGreeting(isAr: _isAr);
+    final codeFuture = otpRes.ok
+        ? InAppOtpHandoff.pollLatestCode(requestedAtUtc: requestedAt)
+        : Future<String?>.value(null);
+    final greet = await greetFuture;
+    final prefetchedCode = await codeFuture;
 
     if (!mounted) return;
 
-    // أغلق نافذة التحميل ثم انتقل لرمز التحقق مباشرة (بلا شاشة بيضاء).
-    final rootNav = Navigator.of(context, rootNavigator: true);
-    if (rootNav.canPop()) rootNav.pop();
+    // أغلق نافذة التحميل فقط — لا تُسقط شاشة الدخول/الجلسة بـ canPop إضافي.
+    dismissLoginOverlay();
 
-    // أبقِ نافذة «جاري تسجيل الدخول» فوق شاشة الدخول — بلا شاشة بيضاء وسيطة.
+    final handoffName = (greet.displayName ?? prefetchFullName ?? '').trim();
+    if (handoffName.isNotEmpty) {
+      args['fullName'] = handoffName;
+    }
+    if (greet.lastLogin != null) {
+      args['lastLogin'] = greet.lastLogin!.toUtc().toIso8601String();
+    }
+    if ((greet.avatarUrl ?? '').isNotEmpty) {
+      args['avatarUrl'] = greet.avatarUrl;
+    }
+    final code = (prefetchedCode ?? otpRes.devCode ?? challenge.devCode ?? '')
+        .trim();
+    if (code.length >= InAppOtpHandoff.otpLen) {
+      args['code'] = code.substring(0, InAppOtpHandoff.otpLen);
+    }
+
     Navigator.of(context).pushReplacement(
       PageRouteBuilder<void>(
-        settings: RouteSettings(name: '/verify', arguments: args),
+        settings: RouteSettings(
+          name: '/verify',
+          arguments: {
+            ...args,
+            'otpAlreadyRequested': otpRes.ok,
+            if (otpRes.error != null) 'otpPrefetchError': otpRes.error,
+            if (otpRes.expiresAt != null)
+              'otpExpiresAt': otpRes.expiresAt!.toUtc().toIso8601String(),
+          },
+        ),
         pageBuilder: (context, animation, secondaryAnimation) =>
             const VerifyScreen(),
         transitionDuration: const Duration(milliseconds: 120),
@@ -1467,175 +1366,92 @@ class _LoginScreenState extends State<LoginScreen>
     final username = (_getRealUsername() ?? '').trim();
     final nationalId =
         _normalizeNumbers(username).replaceAll(RegExp(r'\D'), '');
-    if (!_looksLikeUsername10Digits(nationalId)) {
-      _showLoginError(
-        _isAr
-            ? 'أدخل رقم الهوية أو الإقامة من 10 أرقام قبل الدخول عبر نفاذ.'
-            : 'Enter your 10-digit ID before using Nafath.',
-      );
-      return;
-    }
 
     setState(() => _nafathBusy = true);
     try {
-      final r = await NafathAuthService(Supabase.instance.client)
-          .startLogin(locale: _isAr ? 'ar' : 'en', nationalId: nationalId);
-      if (!mounted) return;
-
-      switch (r.mode) {
-        case NafathSessionMode.redirect:
-          final u = r.authorizationUrl?.trim() ?? '';
-          if (u.isEmpty) {
-            _showNafathResult(r);
-            return;
-          }
-          final uri = Uri.tryParse(u);
-          if (uri == null ||
-              !(uri.hasScheme &&
-                  (uri.scheme == 'https' || uri.scheme == 'http'))) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  _isAr ? 'رابط نفاذ غير صالح' : 'Invalid Nafath URL',
-                ),
-              ),
-            );
-            return;
-          }
-          final launched = await launchUrl(
-            uri,
-            mode: LaunchMode.externalApplication,
-          );
-          if (!launched && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  _isAr
-                      ? 'تعذر فتح المتصفح. جرّب لاحقاً.'
-                      : 'Could not open browser.',
-                ),
-              ),
-            );
-          }
-          return;
-        case NafathSessionMode.notConfigured:
-        case NafathSessionMode.error:
-          _showNafathResult(r);
-          return;
-        case NafathSessionMode.polling:
-          await _showAndPollNafath(r);
-          return;
-      }
+      await NafathLoginSheet.show(
+        context,
+        isAr: _isAr,
+        initialNationalId: nationalId,
+        rememberMe: rememberMe,
+      );
     } finally {
       if (mounted) setState(() => _nafathBusy = false);
     }
   }
 
-  Future<void> _showAndPollNafath(NafathSessionResult initial) async {
-    final requestId = (initial.requestId ?? '').trim();
-    final random = (initial.random ?? '').trim();
-    if (requestId.isEmpty) {
-      _showNafathResult(initial);
-      return;
-    }
-
-    _showNafathResult(initial);
-    if (random.isNotEmpty) {
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          title: Text(_isAr ? 'تحقق نفاذ' : 'Nafath verification'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                _isAr
-                    ? 'افتح تطبيق نفاذ واختر الرقم التالي:'
-                    : 'Open Nafath app and choose this number:',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 14),
-              SelectableText(
-                random,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                _isAr
-                    ? 'سيتم إكمال الدخول تلقائياً بعد الموافقة.'
-                    : 'Sign-in will continue automatically after approval.',
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-            ),
-          ],
-        ),
+  Future<void> _switchToAnotherUser() async {
+    if (_busy) return;
+    try {
+      await FastLoginService.clearAll();
+      try {
+        if (Supabase.instance.client.auth.currentSession != null) {
+          await AuthLocalSignOut.signOutLocal(Supabase.instance.client);
+        }
+      } catch (_) {}
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('username');
+      await prefs.remove('rememberDisplayName');
+      await prefs.setBool('rememberMe', false);
+    } catch (_) {}
+    LoginMethodSnapshot snap;
+    try {
+      snap = await LoginMethodPolicy.resolve(hasKnownUser: false);
+    } catch (_) {
+      snap = _methodSnapshot.copyWith(
+        hasKnownUser: false,
+        hasSession: false,
+        trustedThisInstall: false,
+        firstPasswordDone: false,
+        pinEnabled: false,
+        faceEnabled: false,
+        fingerprintEnabled: false,
       );
     }
-
-    final svc = NafathAuthService(Supabase.instance.client);
-    for (var i = 0; i < 30 && mounted; i++) {
-      await Future<void>.delayed(const Duration(seconds: 3));
-      final r = await svc.pollStatus(requestId);
-      if (!mounted) return;
-      if (r.mode == NafathSessionMode.polling) continue;
-      if (r.mode == NafathSessionMode.redirect) {
-        final u = (r.authorizationUrl ?? '').trim();
-        final uri = Uri.tryParse(u);
-        if (uri != null && uri.hasScheme) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-          return;
-        }
-      }
-      _showNafathResult(r);
-      return;
-    }
-
     if (!mounted) return;
-    _showLoginError(
-      _isAr
-          ? 'لم يصل تأكيد نفاذ بعد. حاول مرة أخرى.'
-          : 'Nafath confirmation was not received yet. Try again.',
-    );
+    setState(() {
+      rememberMe = false;
+      _storedUsername = null;
+      _rememberDisplayName = null;
+      _showRememberedIdentityChip = false;
+      _maskedPrefillActive = false;
+      _usernameEdited = false;
+      _showQuickLoginEntry = false;
+      _methodSnapshot = snap;
+      _usernameController.clear();
+      _passwordController.clear();
+      _syncAutofillUsernameMirror();
+      _resetDbFlags();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _usernameFocus.requestFocus();
+    });
   }
 
-  void _showNafathResult(NafathSessionResult r) {
-    final msg = _isAr
-        ? (r.messageAr ?? r.messageEn ?? r.rawError ?? '')
-        : (r.messageEn ?? r.messageAr ?? r.rawError ?? '');
-    final hasTechnicalSetupMessage =
-        msg.contains('NAFATH_INTEGRATION_ENABLED') ||
-            msg.contains('handler is not implemented') ||
-            msg.contains('منطق الربط لم يُكمَل');
-    final text = hasTechnicalSetupMessage
-        ? (_isAr
-            ? 'خدمة الدخول عبر نفاذ قيد التفعيل حالياً. الرجاء استخدام تسجيل الدخول برقم الهوية وكلمة المرور.'
-            : 'Nafath sign-in is being activated. Please use ID/password sign-in for now.')
-        : msg.isEmpty
-            ? (_isAr
-                ? 'تعذر إكمال طلب نفاذ.'
-                : 'Could not complete Nafath request.')
-            : msg;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(text),
-        duration: const Duration(seconds: 8),
-      ),
-    );
+  Future<void> _onLoginMethodSelected(LoginMethodKind kind) async {
+    switch (kind) {
+      case LoginMethodKind.password:
+        await FastLoginService.setPreferPasswordSurface(true);
+        break;
+      case LoginMethodKind.nafath:
+        await _startNafathLogin();
+        break;
+      case LoginMethodKind.pin:
+      case LoginMethodKind.face:
+      case LoginMethodKind.fingerprint:
+        await FastLoginService.setPreferPasswordSurface(false);
+        await _openQuickLogin();
+        break;
+      case LoginMethodKind.anotherUser:
+        await _switchToAnotherUser();
+        break;
+    }
   }
+
+  bool get _knownUserReady =>
+      _showRememberedIdentityChip &&
+      (_rememberDisplayName ?? '').trim().isNotEmpty &&
+      (_storedUsername ?? '').isNotEmpty;
 
   // =======================
   // UI
@@ -1646,13 +1462,14 @@ class _LoginScreenState extends State<LoginScreen>
 
     return Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
-      child: ValueListenableBuilder<ThemeMode>(
-        valueListenable: themeModeNotifier,
-        builder: (context, _, __) {
+      child: ListenableBuilder(
+        listenable: Listenable.merge([langNotifier, themeModeNotifier]),
+        builder: (context, _) {
           return Scaffold(
             backgroundColor: _pageBg,
-            resizeToAvoidBottomInset: true,
-            body: SafeArea(
+            resizeToAvoidBottomInset: false,
+            body: AppKeyboardStableScope(
+              child: SafeArea(
               child: LayoutBuilder(
                 builder: (context, c) {
                   final w = c.maxWidth;
@@ -1705,44 +1522,59 @@ class _LoginScreenState extends State<LoginScreen>
                     );
                   }
 
-                  // هاتف / ويب جوال: البطاقة بعرض الشاشة تقريباً؛ سطح المكتب يبقى ممركزاً.
-                  final phoneLike = w < 720;
-                  final padH = phoneLike ? (w < 360 ? 4.0 : 8.0) : 18.0;
-                  final padV = phoneLike ? 6.0 : 18.0;
-                  final cardMax = phoneLike
-                      ? (w - padH * 2).clamp(280.0, w)
-                      : 600.0;
-                  final kb = MediaQuery.viewInsetsOf(context).bottom;
+                  final surface = AppSurfaceScope.maybeOf(context);
+                  final host = LoginMethodPolicy.detectHost();
+                  final fillScreen = surface?.isPhone ??
+                      (host == LoginHostKind.nativeMobile ||
+                          host == LoginHostKind.webMobile);
+                  final padH = fillScreen ? 8.0 : (w < 560 ? 8.0 : 18.0);
+                  final padV = fillScreen ? 8.0 : 18.0;
+                  final cardMax = fillScreen
+                      ? (w - padH * 2).clamp(260.0, w)
+                      : (surface?.formMaxWidth ??
+                              (w < 560
+                                  ? (w - padH * 2).clamp(260.0, 900.0)
+                                  : 600.0))
+                          .clamp(260.0, 720.0);
 
-                  return ScrollConfiguration(
-                    behavior: const _LoginScrollBehavior(),
-                    child: SingleChildScrollView(
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      physics: const ClampingScrollPhysics(),
-                      padding: EdgeInsets.fromLTRB(
-                        padH,
-                        padV,
-                        padH,
-                        padV + kb + 16,
-                      ),
-                      child: Align(
-                        alignment: Alignment.topCenter,
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(padH, padV, padH, 6),
                         child: ConstrainedBox(
                           constraints: BoxConstraints(maxWidth: cardMax),
-                          child: _loginCard(
-                            maxWidth: cardMax,
-                            borderRadius: phoneLike ? 14 : 18,
-                            t: t,
-                            // التمرير الخارجي يرفع الحقول فوق لوحة المفاتيح.
-                            allowVerticalScroll: false,
+                          child: _topBarUnified(),
+                        ),
+                      ),
+                      Expanded(
+                        child: ScrollConfiguration(
+                          behavior: const _LoginScrollBehavior(),
+                          child: SingleChildScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            physics: const ClampingScrollPhysics(),
+                            padding: EdgeInsets.fromLTRB(padH, 0, padH, padV + 16),
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(maxWidth: cardMax),
+                                child: _loginCard(
+                                  maxWidth: cardMax,
+                                  borderRadius: fillScreen ? 14 : 18,
+                                  t: t,
+                                  allowVerticalScroll: false,
+                                  includeTopBar: false,
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                   );
                 },
               ),
+            ),
             ),
           );
         },
@@ -1756,6 +1588,7 @@ class _LoginScreenState extends State<LoginScreen>
     required double borderRadius,
     required AppLocalizations t,
     required bool allowVerticalScroll,
+    bool includeTopBar = true,
   }) {
     final cardColor = _isLight
         ? Colors.white.withValues(alpha: 0.95)
@@ -1776,8 +1609,10 @@ class _LoginScreenState extends State<LoginScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _topBarUnified(t: t),
-          const SizedBox(height: 10),
+          if (includeTopBar) ...[
+            _topBarUnified(),
+            const SizedBox(height: 10),
+          ],
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -1795,74 +1630,76 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          LayoutBuilder(
-            builder: (context, lc) {
-              final dim = AppBranding.loginHeroLogoSize(context);
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Center(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _bankColor.withValues(alpha: 0.14),
-                          blurRadius: 28,
-                          spreadRadius: 1,
-                        ),
-                      ],
+          const SizedBox(height: 2),
+          const LoginBrandHero(),
+          if (_knownUserReady) ...[
+            const SizedBox(height: 2),
+            LoginKnownUserHero(
+              isAr: _isAr,
+              displayName: _rememberDisplayName!,
+              accent: _bankColor,
+              compact: _isSmallUi(context),
+            ),
+            const SizedBox(height: 14),
+          ] else ...[
+            if (AppBranding.prefersAppVisuals(context)) ...[
+              const SizedBox(height: 6),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    AppBranding.welcomeHeadline(context, isAr: _isAr),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                      color: _textPrimary,
+                      height: 1.15,
                     ),
-                    child: BrandingLogoImage(
-                      width: dim,
-                      height: dim,
-                      fit: BoxFit.contain,
-                      filterQuality: FilterQuality.high,
-                      errorIcon: Icons.apartment_rounded,
-                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                AppBranding.welcomeHeadline(context, isAr: _isAr),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  color: _textPrimary,
-                  height: 1.2,
+              ),
+            ],
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  t.signInToContinue,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _textSecondary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  softWrap: false,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.visible,
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                t.signInToContinue,
-                style: TextStyle(
-                  fontSize: 14,
-                  color: _textSecondary,
-                  fontWeight: FontWeight.w800,
+            if (kIsOpsDesktopSurface) ...[
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  t.opsDeskLoginHint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: _textSecondary,
+                    height: 1.35,
+                  ),
                 ),
-                textAlign: TextAlign.center,
-                maxLines: 1,
               ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          // هوية الجلسة المفعّلة تُعرض في شاشة «مستخدم / ضيف» فقط — ليس فوق حقول الدخول.
+            ],
+            const SizedBox(height: 12),
+          ],
           AnimatedBuilder(
             animation: _shakeAnim,
             builder: (context, child) => Transform.translate(
@@ -1870,7 +1707,9 @@ class _LoginScreenState extends State<LoginScreen>
               child: child,
             ),
             child: FieldGroupFrame(
-              title: t.fieldGroupCredentialsTitle,
+              title: _knownUserReady
+                  ? (_isAr ? 'كلمة المرور' : 'Password')
+                  : t.fieldGroupCredentialsTitle,
               titleTextAlign: TextAlign.center,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
               child: AutofillGroup(
@@ -1879,13 +1718,22 @@ class _LoginScreenState extends State<LoginScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      if (!_knownUserReady) ...[
+                        FocusTraversalOrder(
+                          order: const NumericFocusOrder(1),
+                          child: _buildUsernameField(t: t),
+                        ),
+                        const SizedBox(height: 10),
+                      ] else
+                        Offstage(
+                          offstage: true,
+                          child: AqarTextField(
+                            controller: _autofillUsernameMirror,
+                            autofillHints: const [AutofillHints.username],
+                          ),
+                        ),
                       FocusTraversalOrder(
-                        order: const NumericFocusOrder(1),
-                        child: _buildUsernameField(t: t),
-                      ),
-                      const SizedBox(height: 10),
-                      FocusTraversalOrder(
-                        order: const NumericFocusOrder(2),
+                        order: NumericFocusOrder(_knownUserReady ? 1 : 2),
                         child: _buildPasswordField(t: t),
                       ),
                     ],
@@ -1901,91 +1749,6 @@ class _LoginScreenState extends State<LoginScreen>
           const SizedBox(height: 8),
           _buildForgotRememberRow(t: t),
           const SizedBox(height: 10),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (_showQuickLoginEntry) ...[
-                const SizedBox(height: 10),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: _busy ? null : _openQuickLogin,
-                    borderRadius: BorderRadius.circular(16),
-                    child: Ink(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        gradient: LinearGradient(
-                          begin: AlignmentDirectional.topStart,
-                          end: AlignmentDirectional.bottomEnd,
-                          colors: [
-                            _bankColor.withValues(alpha: 0.14),
-                            _bankColor.withValues(alpha: 0.04),
-                          ],
-                        ),
-                        border: Border.all(
-                          color: _bankColor.withValues(alpha: 0.35),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _bankColor.withValues(alpha: 0.16),
-                              ),
-                              child: const Icon(
-                                Icons.fingerprint_rounded,
-                                color: _bankColor,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    t.quickLogin,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: _font(context, 15, 14),
-                                      color: _textPrimary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    t.quickLoginSubtitle,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: _font(context, 12, 11),
-                                      color: _textSecondary,
-                                      height: 1.25,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Icon(
-                              Icons.chevron_right_rounded,
-                              color: _textSecondary.withValues(alpha: 0.85),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
           SizedBox(
             width: double.infinity,
             height: 52,
@@ -2017,8 +1780,7 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          _buildNafathLoginButton(),
+          if (!kIsOpsDesktopSurface) ...[
           const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
@@ -2067,7 +1829,7 @@ class _LoginScreenState extends State<LoginScreen>
             child: OutlinedButton(
               style: OutlinedButton.styleFrom(
                 foregroundColor: _bankColor,
-                backgroundColor: Colors.white,
+                backgroundColor: _fieldFill,
                 side: BorderSide(color: _fieldOutline, width: 1.8),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -2109,6 +1871,7 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
+          ],
           const SizedBox(height: 10),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -2118,8 +1881,8 @@ class _LoginScreenState extends State<LoginScreen>
                     ? const SizedBox.shrink()
                     : SelectableText(
                         _isAr
-                            ? '${kIsWeb ? 'منصّة ويب' : 'تطبيق جوّال'} — الإصدار: $_packageVersionLine'
-                            : '${kIsWeb ? 'Web' : 'Mobile app'} — Version: $_packageVersionLine',
+                            ? '${kIsWeb ? 'منصّة ويب' : kIsOpsDesktopSurface ? 'تطبيق سطح المكتب' : 'تطبيق جوّال'} — الإصدار: $_packageVersionLine'
+                            : '${kIsWeb ? 'Web' : kIsOpsDesktopSurface ? 'Desktop app' : 'Mobile app'} — Version: $_packageVersionLine',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
@@ -2158,16 +1921,14 @@ class _LoginScreenState extends State<LoginScreen>
       padding: const EdgeInsets.all(18),
       child: allowVerticalScroll
           ? ScrollConfiguration(
-              behavior: _LoginScrollBehavior(),
+              behavior: const _LoginScrollBehavior(),
               child: SingleChildScrollView(
                 controller: _loginScrollCtrl,
                 keyboardDismissBehavior:
                     ScrollViewKeyboardDismissBehavior.onDrag,
                 physics: const ClampingScrollPhysics(),
                 clipBehavior: Clip.hardEdge,
-                padding: EdgeInsets.only(
-                  bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
-                ),
+                padding: const EdgeInsets.only(bottom: 20),
                 child: content,
               ),
             )
@@ -2194,531 +1955,119 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _topBarUnified({required AppLocalizations t}) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final langShort = (langNotifier.value == 'en') ? 'EN' : 'AR';
-        final themeShort = _currentTheme == ThemeMode.light ? '☀' : '🌙';
-
-        return Row(
-          children: [
-            Expanded(
-              child: _topChipCompact(
-                icon: Icons.language_rounded,
-                value: langShort,
-                onTap: () => _showLanguageSheet(t: t),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _topChipCompact(
-                icon: Icons.color_lens_outlined,
-                value: themeShort,
-                onTap: () => _showThemeSheet(t: t),
-              ),
-            ),
-          ],
-        );
-      },
+  Widget _topBarUnified() {
+    return AuthTopChrome(
+      snapshot: _methodSnapshot.copyWith(hasKnownUser: _knownUserReady),
+      busy: _busy,
+      onSelect: (kind) => unawaited(_onLoginMethodSelected(kind)),
     );
   }
 
-  Widget _topChipCompact({
-    required IconData icon,
-    required String value,
-    required VoidCallback onTap,
-  }) {
-    final bg = _isLight ? Colors.white : const Color(0xFF0F1425);
-    final border = _fieldOutline;
+  Widget _buildForgotRememberRow({required AppLocalizations t}) {
+    Future<void> onRememberChanged(bool? v) async {
+      final newVal = v ?? false;
+      setState(() => rememberMe = newVal);
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsetsDirectional.fromSTEB(10, 6, 10, 6),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                color: _bankColor.withValues(alpha: _isLight ? 0.10 : 0.18),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: _bankColor, size: 18),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: _font(context, 13, 12.2),
-                    letterSpacing: 0.2,
-                  ),
-                ),
-              ),
-            ),
-            Icon(Icons.expand_more_rounded, color: _iconColor),
-          ],
-        ),
-      ),
-    );
-  }
+      if (!newVal) {
+        await _savePreferences();
+        return;
+      }
 
-  void _showLanguageSheet({required AppLocalizations t}) {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) {
-        return Dialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-          backgroundColor: Colors.transparent,
-          child: ValueListenableBuilder<String>(
-            valueListenable: langNotifier,
-            builder: (_, __, ___) {
-              final isLight = themeModeNotifier.value == ThemeMode.light;
-              final bg = isLight ? Colors.white : const Color(0xFF0F1425);
-              final border =
-                  isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
+      final curU = (_getRealUsername() ?? '').trim();
+      _storedUsername = curU.isEmpty ? null : curU;
+      _syncAutofillUsernameMirror();
 
-              return ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: bg,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: border),
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 24,
-                        color: Colors.black.withValues(alpha: 0.22),
-                        offset: const Offset(0, 14),
-                      ),
-                    ],
-                  ),
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _sheetHeader(
-                          title: t.language,
-                          subtitle: _isAr
-                              ? 'اختر لغة التطبيق'
-                              : 'Choose app language',
-                        ),
-                        const SizedBox(height: 12),
-                        _radioTile(
-                          title: t.languageArabic,
-                          subtitle: 'العربية',
-                          selected: langNotifier.value != 'en',
-                          onTap: () async {
-                            await _setLanguage('ar');
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        _radioTile(
-                          title: t.languageEnglish,
-                          subtitle: 'English',
-                          selected: langNotifier.value == 'en',
-                          onTap: () async {
-                            await _setLanguage('en');
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
+      if ((_storedUsername ?? '').isNotEmpty) {
+        if ((_rememberDisplayName ?? '').isNotEmpty) {
+          _showRememberedIdentityChip = true;
+          _maskedPrefillActive = true;
+          _usernameController.clear();
+        } else {
+          _applyMaskedUsernamePrefill();
+        }
+      }
+      await _savePreferences();
+      _checkUsernameExistsDebounced();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _passwordFocus.requestFocus();
+      });
+    }
 
-  void _showThemeSheet({required AppLocalizations t}) {
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) {
-        return Dialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-          backgroundColor: Colors.transparent,
-          child: ValueListenableBuilder<ThemeMode>(
-            valueListenable: themeModeNotifier,
-            builder: (_, __, ___) {
-              final isLight = themeModeNotifier.value == ThemeMode.light;
-              final bg = isLight ? Colors.white : const Color(0xFF0F1425);
-              final border =
-                  isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
-
-              return ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: bg,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: border),
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 24,
-                        color: Colors.black.withValues(alpha: 0.22),
-                        offset: const Offset(0, 14),
-                      ),
-                    ],
-                  ),
-                  child: SingleChildScrollView(
-                    physics: const ClampingScrollPhysics(),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _sheetHeader(
-                          title: t.theme,
-                          subtitle: _isAr
-                              ? 'اختر مظهر التطبيق'
-                              : 'Choose app appearance',
-                        ),
-                        const SizedBox(height: 12),
-                        _radioTile(
-                          title: t.themeLight,
-                          subtitle: _isAr ? 'نهاري' : 'Light',
-                          selected: themeModeNotifier.value == ThemeMode.light,
-                          onTap: () async {
-                            await _setTheme(ThemeMode.light);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        _radioTile(
-                          title: t.themeDark,
-                          subtitle: _isAr ? 'ليلي' : 'Dark',
-                          selected: themeModeNotifier.value == ThemeMode.dark,
-                          onTap: () async {
-                            await _setTheme(ThemeMode.dark);
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _sheetHeader({required String title, required String subtitle}) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: _textPrimary,
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        final okNet = await _ensureInternetOrAlert();
+                        if (!mounted) return;
+                        ConnectivityGuard.showOfflineSnackIfNeeded(
+                            context, okNet);
+                        if (!okNet) return;
+                        Navigator.pushNamed(context, '/resetPassword');
+                      },
+                child: Text(
+                  t.forgotUsernameOrPassword,
+                  maxLines: 1,
+                  overflow: TextOverflow.visible,
+                  softWrap: false,
+                  textAlign: TextAlign.start,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: _font(context, 13.5, 12),
+                    color: _bankColor,
+                    height: 1.1,
+                  ),
                 ),
               ),
-              const SizedBox(height: 2),
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerEnd,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Checkbox(
+                value: rememberMe,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onChanged: _busy ? null : onRememberChanged,
+              ),
               Text(
-                subtitle,
+                t.rememberMe,
+                maxLines: 1,
+                softWrap: false,
                 style: TextStyle(
-                  color: _textSecondary,
-                  fontWeight: FontWeight.w800,
+                  color: _textPrimary,
+                  fontSize: _font(context, 13, 12),
+                  fontWeight: FontWeight.w900,
+                  height: 1.1,
                 ),
               ),
             ],
           ),
-        ),
-        IconButton(
-          onPressed: () => Navigator.pop(context),
-          icon: Icon(Icons.close_rounded, color: _iconColor),
-          tooltip: _isAr ? 'إغلاق' : 'Close',
         ),
       ],
     );
   }
 
-  Widget _radioTile({
-    required String title,
-    required String subtitle,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    final bg = selected
-        ? _bankColor.withValues(alpha: _isLight ? 0.10 : 0.18)
-        : Colors.transparent;
-
-    final border = selected
-        ? _bankColor.withValues(alpha: 0.6)
-        : (_isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A));
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsetsDirectional.fromSTEB(12, 12, 12, 12),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: border),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              selected
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_off_rounded,
-              color: selected ? _bankColor : _iconColor,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: _textPrimary,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: _textSecondary,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12.5,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildForgotRememberRow({required AppLocalizations t}) {
-    return LayoutBuilder(
-      builder: (context, c) {
-        final narrow = c.maxWidth < 340;
-        final remember = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Checkbox(
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              value: rememberMe,
-              onChanged: _busy
-                  ? null
-                  : (v) async {
-                      final newVal = v ?? false;
-                      setState(() => rememberMe = newVal);
-
-                      if (!newVal) {
-                        _maskedPrefillActive = false;
-                        _storedUsername = null;
-                        _rememberDisplayName = null;
-                        _showRememberedIdentityChip = false;
-                        _usernameEdited = false;
-                        _usernameController.clear();
-                        _syncAutofillUsernameMirror();
-                        _resetDbFlags();
-                        await _savePreferences();
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) _usernameFocus.requestFocus();
-                        });
-                        return;
-                      }
-
-                      final curU = (_getRealUsername() ?? '').trim();
-                      _storedUsername = curU.isEmpty ? null : curU;
-                      _syncAutofillUsernameMirror();
-
-                      if ((_storedUsername ?? '').isNotEmpty) {
-                        if ((_rememberDisplayName ?? '').isNotEmpty) {
-                          _showRememberedIdentityChip = true;
-                          _maskedPrefillActive = true;
-                          _usernameController.clear();
-                        } else {
-                          _applyMaskedUsernamePrefill();
-                        }
-                      }
-                      await _savePreferences();
-                      _checkUsernameExistsDebounced();
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) _passwordFocus.requestFocus();
-                      });
-                    },
-            ),
-            Text(
-              t.rememberMe,
-              style: TextStyle(
-                color: _textPrimary,
-                fontSize: _font(context, 13, 12),
-                fontWeight: FontWeight.w900,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        );
-
-        final forgot = TextButton(
-          style: TextButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            minimumSize: Size.zero,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            visualDensity: VisualDensity.compact,
-          ),
-          onPressed: _busy
-              ? null
-              : () async {
-                  final okNet = await _ensureInternetOrAlert();
-                  if (!mounted) return;
-                  ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
-                  if (!okNet) return;
-                  Navigator.pushNamed(context, '/resetPassword');
-                },
-          child: Text(
-            t.forgotUsernameOrPassword,
-            maxLines: 1,
-            softWrap: false,
-            overflow: TextOverflow.visible,
-            textAlign: TextAlign.end,
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: _font(context, 13.5, 11.5),
-              color: _bankColor,
-              height: 1.15,
-            ),
-          ),
-        );
-
-        if (narrow) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              remember,
-              const SizedBox(height: 4),
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: forgot,
-                ),
-              ),
-            ],
-          );
-        }
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            remember,
-            const SizedBox(width: 8),
-            Expanded(
-              child: Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: AlignmentDirectional.centerEnd,
-                  child: forgot,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// زر نفاذ — عرض كامل، خلفية بيضاء (تحت تسجيل الدخول).
-  Widget _buildNafathLoginButton() {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: OutlinedButton(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: _bankColor,
-          backgroundColor: Colors.white,
-          side: BorderSide(color: _fieldOutline, width: 1.8),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        onPressed: (isBusy || _nafathBusy) ? null : _startNafathLogin,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: _nafathBusy
-              ? Row(
-                  key: const ValueKey('nafath_loading'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: AppLogoLoading(compact: true, size: 20),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      _isAr ? 'جاري الاتصال…' : 'Connecting…',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ],
-                )
-              : Row(
-                  key: const ValueKey('nafath_idle'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.verified_user_outlined, color: _bankColor),
-                    const SizedBox(width: 8),
-                    Text(
-                      _isAr ? 'نفاذ' : 'Nafath',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-      ),
-    );
-  }
-
-  // ✅ حقل الهوية / الإقامة — أو بطاقة الاسم الرباعي عند «تذكرني».
+  // ✅ حقل الهوية / الإقامة — أو بطاقة الاسم الرباعي عند الجهاز المعتمد.
   Widget _buildUsernameField({required AppLocalizations t}) {
     if (_showRememberedIdentityChip &&
         (_rememberDisplayName ?? '').trim().isNotEmpty &&
@@ -2729,7 +2078,7 @@ class _LoginScreenState extends State<LoginScreen>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Material(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
+            color: cs.primaryContainer.withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(14),
             child: InkWell(
               borderRadius: BorderRadius.circular(14),
@@ -2745,34 +2094,31 @@ class _LoginScreenState extends State<LoginScreen>
                       });
                     },
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+                padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
                 child: Row(
                   children: [
+                    Icon(Icons.person_rounded, color: cs.primary),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            DashboardGreeting.partnerSalutationLine(
-                              isAr: _isAr,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            _isAr ? 'مرحباً بعودتك' : 'Welcome back',
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 11.5,
                               fontWeight: FontWeight.w800,
                               color: cs.onSurfaceVariant,
                             ),
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
                           Text(
                             _rememberDisplayName!,
-                            maxLines: 2,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 16,
-                              height: 1.2,
+                              fontSize: 15.5,
                             ),
                           ),
                         ],
@@ -2862,11 +2208,16 @@ class _LoginScreenState extends State<LoginScreen>
           textAlign: _isAr ? TextAlign.right : TextAlign.left,
           inputFormatters: [
             const _EnglishDigitsOnlyFormatter(),
+            const StrictMaxLengthFormatter(10),
             LengthLimitingTextInputFormatter(10),
           ],
           maxLength: 10,
           textInputAction: TextInputAction.next,
-          onSubmitted: (_) => _passwordFocus.requestFocus(),
+          onSubmitted: (_) {
+            if (_sanitizeUsernameInput(_usernameController.text).length == 10) {
+              _advanceToPasswordAfterUsernameComplete();
+            }
+          },
           autofillHints: const [AutofillHints.username],
           cursorColor: _bankColor,
           style: TextStyle(
@@ -2910,190 +2261,43 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // ✅ كلمة المرور
+  // كلمة المرور — Caps Lock من CapsAwarePasswordField فقط.
   Widget _buildPasswordField({required AppLocalizations t}) {
-    final rtl = Directionality.of(context) == TextDirection.rtl;
-    // ويب سطح المكتب العريض: نص تحت الحقل. جوال/ضيق/تطبيق: سهم فقط بجانب القفل.
-    final useCapsText = _useCapsTextUnderField(context);
-    final showCapsGlyph = _capsLockPassword && !useCapsText;
-    final showCapsText = _capsLockPassword && useCapsText;
-    final capsColor =
-        _isLight ? const Color(0xFFB45309) : const Color(0xFFFBBF24);
-
-    Widget eyeButton() => IconButton(
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-          icon: Icon(
-            obscurePassword ? Icons.visibility : Icons.visibility_off,
-            color: _iconColor,
-          ),
-          onPressed: () => setState(() => obscurePassword = !obscurePassword),
-          tooltip: obscurePassword
-              ? (_isAr ? 'إظهار' : 'Show')
-              : (_isAr ? 'إخفاء' : 'Hide'),
-        );
-
-    Widget capsGlyph() => Tooltip(
-          message: _isAr ? 'أحرف كبيرة مفعّلة (Caps Lock)' : 'Caps Lock is on',
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2),
-            child: Material(
-              color: capsColor.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(8),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: () {},
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: capsColor.withValues(alpha: 0.6)),
-                  ),
-                  child: Icon(
-                    Icons.arrow_upward_rounded,
-                    size: 18,
-                    color: capsColor,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-
-    final lockIcon = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      child: Icon(Icons.lock_outline, color: _iconColor),
-    );
-
-    // العين في جهة، والقفل + السهم في الجهة المقابلة (لا يتكرّر السهم).
-    late final Widget prefixIcon;
-    late final Widget suffixIcon;
-    late final BoxConstraints prefixConstraints;
-    late final BoxConstraints suffixConstraints;
-
-    if (rtl) {
-      // العين يمين (prefix)، القفل/السهم يسار (suffix).
-      prefixIcon = eyeButton();
-      prefixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
-      if (showCapsGlyph) {
-        suffixIcon = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [capsGlyph(), lockIcon],
-        );
-        suffixConstraints = const BoxConstraints(minWidth: 78, minHeight: 46);
-      } else {
-        suffixIcon = lockIcon;
-        suffixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
-      }
-    } else {
-      // القفل/السهم يسار، العين يمين.
-      if (showCapsGlyph) {
-        prefixIcon = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [lockIcon, capsGlyph()],
-        );
-        prefixConstraints = const BoxConstraints(minWidth: 78, minHeight: 46);
-      } else {
-        prefixIcon = lockIcon;
-        prefixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
-      }
-      suffixIcon = eyeButton();
-      suffixConstraints = const BoxConstraints(minWidth: 46, minHeight: 46);
-    }
-
     return Column(
       key: _passwordFieldKey,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Focus(
-          onKeyEvent: (node, event) {
-            final inferred = _capsFromKeyEvent(event);
-            if (inferred != null) {
-              _lastLatinWasUpper = inferred;
-              _applyCapsLockState(inferred, clearLatch: true);
-            } else {
-              _syncCapsLockFromHardware();
-            }
-            return KeyEventResult.ignored;
-          },
-          child: AqarTextField(
-            controller: _passwordController,
-            focusNode: _passwordFocus,
-            obscureText: obscurePassword,
-            keyboardType:
-                kIsWeb ? TextInputType.text : TextInputType.visiblePassword,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _login(),
-            autofillHints: const [AutofillHints.password],
-            enableSuggestions: false,
-            autocorrect: false,
-            cursorColor: _bankColor,
-            inputFormatters: passwordArabicGuardFormatters(
+        CapsAwarePasswordField(
+          controller: _passwordController,
+          focusNode: _passwordFocus,
+          obscureText: obscurePassword,
+          onToggleObscure: () =>
+              setState(() => obscurePassword = !obscurePassword),
+          isAr: _isAr,
+          iconColor: _iconColor,
+          cursorColor: _bankColor,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _login(),
+          autofillHints: const [AutofillHints.password],
+          inputFormatters: [
+            PasswordLeadingDigitBleedGuard(
+              isActive: () => _passwordBleedGuardActive,
+            ),
+            ...passwordArabicGuardFormatters(
               onArabicScriptBlocked: _schedulePasswordArabicDialog,
             ),
-            style: TextStyle(
-              color: _textPrimary,
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-            ),
-            decoration: _loginFieldDecoration(
-              labelText: t.loginPasswordFieldShortLabel,
-              hintText: null,
-              hintFontSize: 16,
-              prefixIcon: prefixIcon,
-              suffixIcon: suffixIcon,
-              prefixIconConstraints: prefixConstraints,
-              suffixIconConstraints: suffixConstraints,
-            ),
-            onTap: () {
-              if (!_passwordFocus.hasFocus) {
-                _passwordFocus.requestFocus();
-              }
-              _syncCapsLockFromHardware(preferHardware: true);
-              _scheduleCapsResync();
-              _scrollLoginFieldIntoView(_passwordFieldKey);
-            },
-            onChanged: (v) {
-              _notePasswordLatinCase(v);
-              // ويب ويندوز/سطح المكتب: يظهر تنبيه Caps مع حرف كبير ويختفي مع صغير.
-              // الجوال: السهم يتبع نفس المنطق مع تفضيل مصدر العتاد عند التعارض.
-              if (_lastLatinWasUpper == true) {
-                _applyCapsLockState(true, clearLatch: true);
-              } else if (_lastLatinWasUpper == false) {
-                final shift = HardwareKeyboard.instance.isShiftPressed;
-                if (shift) {
-                  // Shift + حرف صغير ⇒ Caps Lock مفعّل.
-                  _applyCapsLockState(true, clearLatch: true);
-                } else {
-                  // حرف صغير بدون Shift ⇒ Caps OFF (نص ويندوز أو سهم الجوال).
-                  _applyCapsLockState(false, clearLatch: true);
-                }
-              } else {
-                _syncCapsLockFromHardware();
-              }
-            },
+          ],
+          style: TextStyle(
+            color: _textPrimary,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+          ),
+          decoration: _loginFieldDecoration(
+            labelText: t.loginPasswordFieldShortLabel,
+            hintText: null,
+            hintFontSize: 16,
           ),
         ),
-        if (showCapsText) ...[
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsetsDirectional.only(start: 4, end: 4),
-            child: Text(
-              _isAr
-                  ? 'تنبيه: لوحة المفاتيح على أحرف كبيرة (Caps Lock).'
-                  : 'Note: Caps Lock is on.',
-              style: TextStyle(
-                color: capsColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                height: 1.25,
-              ),
-            ),
-          ),
-        ],
         if ((_passwordError ?? '').isNotEmpty) ...[
           const SizedBox(height: 6),
           Padding(
@@ -3112,6 +2316,7 @@ class _LoginScreenState extends State<LoginScreen>
       ],
     );
   }
+
 
   Widget _buildCaptchaSection({required AppLocalizations t}) {
     return Container(
@@ -3937,7 +3142,7 @@ class _PhoneMockup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isLight = theme == ThemeMode.light;
+    final isLight = UserAppearanceSession.resolvesLight(theme);
 
     final frame = isLight ? const Color(0xFF111827) : const Color(0xFF0B1220);
     final screen = isLight ? Colors.white : const Color(0xFF0F1425);

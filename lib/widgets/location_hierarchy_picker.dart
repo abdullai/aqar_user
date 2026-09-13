@@ -21,12 +21,14 @@
 // }
 // ```
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_stable.dart';
+import '../core/l10n/locale_content.dart';
 import '../services/location_hierarchy_service.dart';
+import 'app_page_close_button.dart';
 
 /// نتيجة الاختيار النهائي من [LocationHierarchyPicker].
 class LocationHierarchySelection {
@@ -65,7 +67,7 @@ Future<LocationHierarchySelection?> showLocationHierarchyPicker({
   String? initialDistrict,
   bool pickDistrict = true,
 }) {
-  return showModalBottomSheet<LocationHierarchySelection?>(
+  return showAppModalBottomSheet<LocationHierarchySelection?>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -232,7 +234,7 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
         }
         break;
       case _PickerStep.district:
-        _district = value;
+        _district = LocaleContent.toStored(value);
         _finish();
         break;
     }
@@ -287,7 +289,10 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
     final q = _searchQuery.trim().toLowerCase();
     if (q.isEmpty) return _items;
     return _items
-        .where((e) => e.toLowerCase().contains(q))
+        .where((e) {
+          final label = LocaleContent.forUi(e, isAr: _isAr).toLowerCase();
+          return e.toLowerCase().contains(q) || label.contains(q);
+        })
         .toList(growable: false);
   }
 
@@ -295,15 +300,16 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
   Widget build(BuildContext context) {
     final td = _isAr ? TextDirection.rtl : TextDirection.ltr;
     final cs = Theme.of(context).colorScheme;
-    final h = MediaQuery.sizeOf(context).height;
-    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    final vis = AppKeyboardInset.visibleHeightOf(context);
 
     return Directionality(
       textDirection: td,
       child: SizedBox(
-        height: math.max(h * 0.78, 460),
+        height: vis,
         child: Padding(
-          padding: EdgeInsets.only(bottom: bottomInset),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -335,10 +341,8 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
                         onPressed: _finish,
                         child: Text(_isAr ? 'تخطّي' : 'Skip'),
                       ),
-                    IconButton(
-                      tooltip: _isAr ? 'إغلاق' : 'Close',
+                    AppPageCloseButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close_rounded),
                     ),
                   ],
                 ),
@@ -355,7 +359,9 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
               const Divider(height: 1),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                child: AqarTextField(
+                child: AppKeyboardReveal(
+                  below: 220,
+                  child: AqarTextField(
                   controller: _searchCtrl,
                   onChanged: (v) => setState(() => _searchQuery = v),
                   textInputAction: TextInputAction.search,
@@ -369,6 +375,7 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
                       borderSide: BorderSide.none,
                     ),
                   ),
+                ),
                 ),
               ),
               Expanded(
@@ -449,7 +456,7 @@ class _LocationHierarchyPickerState extends State<LocationHierarchyPicker> {
                                     ),
                                   ),
                                   title: Text(
-                                    v,
+                                    LocaleContent.forUi(v, isAr: _isAr),
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w800,
                                     ),

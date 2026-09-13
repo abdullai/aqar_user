@@ -1,7 +1,7 @@
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+import 'date_helper.dart';
 
 /// مناطق عرض ثابتة (بدون حزمة timezone) — كافية للسعودية والإمارات (بدون DST).
 enum ListingDateDisplayZone {
@@ -69,19 +69,13 @@ abstract final class ListingDateDisplay {
     };
   }
 
-  /// تاريخ/وقت مختصر للبطاقات (يُستخدم تدريجياً في أنحاء التطبيق).
+  /// تاريخ/وقت للبطاقات: yyyy/MM/dd ثم فراغ واسع ثم HH:mm.
   static String formatCardDateTime(
     DateTime? value, {
     required bool isAr,
   }) {
     if (value == null) return '';
-    final loc = isAr ? 'ar' : 'en';
     final d = toDisplayDateTime(value);
-    try {
-      // تاريخ + ساعة:دقيقة:ثانية — إحساس فوري فعلي
-      return DateFormat.yMMMd(loc).add_Hms().format(d);
-    } catch (_) {
-      return d.toIso8601String();
-    }
+    return DateHelper.fmtCivilDateTime(d, isAr: isAr);
   }
 }

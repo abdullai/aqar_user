@@ -8,6 +8,7 @@ class SupabaseRuntimeOverrides {
 
   static String? webAnonKey;
   static String? webSupabaseUrl;
+  static String? webGoogleMapsKey;
 
   static void applyFromJson(Map<String, dynamic> m) {
     final k = (m['SUPABASE_ANON_KEY'] ?? m['supabase_anon_key'] ?? '')
@@ -26,5 +27,9 @@ class SupabaseRuntimeOverrides {
     } else {
       webSupabaseUrl = null;
     }
+    final maps = (m['GOOGLE_MAPS_WEB_KEY'] ?? m['google_maps_web_key'] ?? '')
+        .toString()
+        .trim();
+    webGoogleMapsKey = maps.isEmpty ? null : maps;
   }
 }

@@ -51,6 +51,16 @@ class MarketPropertyRequestRow {
   /// صورة الملف الشخصي للطالب (تُدمج من استعلام منفصل عند التحميل).
   final String? requesterAvatarUrl;
 
+  /// إظهار «متصل الآن / آخر ظهور» على بطاقة طلب السوق — من تفاصيل النشر.
+  bool get publishPresenceOnCards {
+    if (!details.containsKey('publisher_publish_presence')) return true;
+    final v = details['publisher_publish_presence'];
+    return v == true ||
+        v == 1 ||
+        (v is String &&
+            const {'true', 't', '1', 'yes'}.contains(v.toLowerCase()));
+  }
+
   const MarketPropertyRequestRow({
     required this.id,
     this.requestPublicCode,
@@ -120,21 +130,28 @@ class MarketPropertyRequestRow {
   double? get latitude =>
       _coordinateFromDetails('lat') ??
       _coordinateFromDetails('latitude') ??
-      _coordinateFromNestedLocation('lat') ??
-      _coordinateFromNestedLocation('latitude');
+      _coordinateFromDetails('selected_lat') ??
+      _coordinateFromNested('lat') ??
+      _coordinateFromNested('latitude');
 
   double? get longitude =>
       _coordinateFromDetails('lng') ??
       _coordinateFromDetails('longitude') ??
-      _coordinateFromNestedLocation('lng') ??
-      _coordinateFromNestedLocation('longitude');
+      _coordinateFromDetails('lon') ??
+      _coordinateFromDetails('selected_lng') ??
+      _coordinateFromNested('lng') ??
+      _coordinateFromNested('longitude') ??
+      _coordinateFromNested('lon');
 
   double? _coordinateFromDetails(String key) => _dbl(details[key]);
 
-  double? _coordinateFromNestedLocation(String key) {
-    final raw = details['location'];
-    if (raw is Map) {
-      return _dbl(raw[key]);
+  double? _coordinateFromNested(String key) {
+    for (final nest in const ['location', 'geo', 'map', 'coordinates']) {
+      final raw = details[nest];
+      if (raw is Map) {
+        final v = _dbl(raw[key]);
+        if (v != null) return v;
+      }
     }
     return null;
   }

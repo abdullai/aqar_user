@@ -24,6 +24,7 @@ abstract final class InAppDeepRoutes {
   static const String propertyDetails = 'property_details';
   static const String chat = 'chat';
   static const String subscriptionsHub = 'subscriptions_hub';
+  static const String photographerHub = 'photographer_hub';
 }
 
 /// أنواع شائعة لعمود type (يمكنك إضافة أي نص؛ الافتراضي يُعرض كإشعار عام).
@@ -52,6 +53,18 @@ abstract final class InAppNotifTypes {
   /// تجاوز عتبة بلاغات من مستخدمين مختلفين — إخفاء مؤقت من الرئيسية + مراجعة عاجلة.
   static const String listingReportEscalated = 'listing_report_escalated';
   static const String billingPaymentSuccess = 'billing_payment_success';
+  static const String billingAutoRenewFailed = 'billing_auto_renew_failed';
+  static const String billingPaymentFailed = 'billing_payment_failed';
+  static const String opsPush = 'ops_push';
+  static const String opsTeam = 'ops_team';
+  static const String photoShootRequested = 'photo_shoot_requested';
+  static const String photoShootAccepted = 'photo_shoot_accepted';
+  static const String photoShootRejected = 'photo_shoot_rejected';
+  static const String photoShootDelivered = 'photo_shoot_delivered';
+  static const String photoShootExpired = 'photo_shoot_expired';
+  static const String photographerVerified = 'photographer_verified';
+  static const String photographerRejected = 'photographer_rejected';
+  static const String photographerRated = 'photographer_rated';
 }
 
 /// كيانات شائعة لعمود entity_type.
@@ -184,7 +197,9 @@ abstract final class InAppNotificationCatalog {
         data[WorkflowNotificationKeys.mainTab] = WorkflowMainSections.reservations;
       }
     }
-    if (tl == InAppNotifTypes.billingPaymentSuccess) {
+    if (tl == InAppNotifTypes.billingPaymentSuccess ||
+        tl == InAppNotifTypes.billingAutoRenewFailed ||
+        tl == InAppNotifTypes.billingPaymentFailed) {
       setDeep(InAppDeepRoutes.subscriptionsHub);
     }
 
@@ -300,8 +315,15 @@ abstract final class InAppNotificationCatalog {
         return Icons.post_add_rounded;
       case InAppNotifTypes.permitPackageSubmitted:
         return Icons.fact_check_rounded;
-      case InAppNotifTypes.listingPublished:
-        return Icons.public_rounded;
+      case InAppNotifTypes.photoShootRequested:
+      case InAppNotifTypes.photoShootAccepted:
+      case InAppNotifTypes.photoShootRejected:
+      case InAppNotifTypes.photoShootDelivered:
+      case InAppNotifTypes.photoShootExpired:
+      case InAppNotifTypes.photographerVerified:
+      case InAppNotifTypes.photographerRejected:
+      case InAppNotifTypes.photographerRated:
+        return Icons.photo_camera_outlined;
       case InAppNotifTypes.listingReported:
         return Icons.flag_outlined;
       case InAppNotifTypes.listingReportEscalated:
@@ -327,6 +349,13 @@ abstract final class InAppNotificationCatalog {
         return Icons.payments_rounded;
       case InAppNotifTypes.billingPaymentSuccess:
         return Icons.receipt_long_rounded;
+      case InAppNotifTypes.billingAutoRenewFailed:
+      case InAppNotifTypes.billingPaymentFailed:
+        return Icons.credit_card_off_rounded;
+      case InAppNotifTypes.opsPush:
+        return Icons.campaign_rounded;
+      case InAppNotifTypes.opsTeam:
+        return Icons.groups_rounded;
       case InAppNotifTypes.system:
         return Icons.info_rounded;
       default:
@@ -340,6 +369,11 @@ abstract final class InAppNotificationCatalog {
   }) {
     final t = type.toLowerCase().trim();
     final et = entityType.toLowerCase().trim();
+
+    if (t == InAppNotifTypes.billingAutoRenewFailed ||
+        t == InAppNotifTypes.billingPaymentFailed) {
+      return const Color(0xFFDC2626);
+    }
 
     switch (et) {
       case InAppEntityTypes.billingTransaction:
@@ -395,6 +429,10 @@ abstract final class InAppNotificationCatalog {
         return const Color(0xFFDB2777);
       case InAppNotifTypes.billingPaymentSuccess:
         return const Color(0xFF059669);
+      case InAppNotifTypes.opsPush:
+        return const Color(0xFF7C3AED);
+      case InAppNotifTypes.opsTeam:
+        return const Color(0xFF2563EB);
       default:
         return const Color(0xFF0F766E);
     }

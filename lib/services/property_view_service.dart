@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/utils/date_helper.dart';
 import '../widgets/app_shimmer.dart';
 import '../widgets/listing_marketing_tracking_sheet.dart';
 
@@ -67,7 +68,7 @@ abstract final class PropertyViewService {
 
     if (!isOwner && !isPublishingMarketer) {
       if (hasTrack) {
-        await showModalBottomSheet<void>(
+        await showAppModalBottomSheet<void>(
           context: context,
           useRootNavigator: true,
           isScrollControlled: true,
@@ -107,7 +108,7 @@ abstract final class PropertyViewService {
       return;
     }
 
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
       isScrollControlled: true,
@@ -272,7 +273,6 @@ class _ViewsTabState extends State<_ViewsTab> {
   @override
   Widget build(BuildContext context) {
     final t = widget.isAr;
-    final df = DateFormat.yMMMd().add_Hm();
     final maxH = MediaQuery.sizeOf(context).height * 0.5;
 
     if (!widget.showBreakdown) {
@@ -355,7 +355,9 @@ class _ViewsTabState extends State<_ViewsTab> {
                     final at = rawAt != null
                         ? DateTime.tryParse(rawAt.toString())
                         : null;
-                    final when = at != null ? df.format(at.toLocal()) : '—';
+                    final when = at != null
+                        ? DateHelper.fmtCivilDateTime(at.toLocal(), isAr: t)
+                        : '—';
 
                     return ListTile(
                       contentPadding: EdgeInsets.zero,
@@ -420,7 +422,6 @@ class _OwnerViewersSheetState extends State<_OwnerViewersSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final df = DateFormat.yMMMd().add_Hm();
     final t = widget.isAr;
 
     final maxH = MediaQuery.sizeOf(context).height * 0.55;
@@ -480,7 +481,9 @@ class _OwnerViewersSheetState extends State<_OwnerViewersSheet> {
                   final at = rawAt != null
                       ? DateTime.tryParse(rawAt.toString())
                       : null;
-                  final when = at != null ? df.format(at.toLocal()) : '—';
+                  final when = at != null
+                      ? DateHelper.fmtCivilDateTime(at.toLocal(), isAr: t)
+                      : '—';
 
                   return ListTile(
                     contentPadding: EdgeInsets.zero,

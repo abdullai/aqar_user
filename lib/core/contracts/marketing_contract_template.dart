@@ -1,3 +1,5 @@
+import '../utils/date_helper.dart';
+
 /// نص اتفاقية التسويق المعروض للمعلن قبل التوقيع الإلكتروني (مع التاريخ).
 class MarketingContractTemplate {
   MarketingContractTemplate._();
@@ -29,8 +31,9 @@ class MarketingContractTemplate {
     double? listingCommissionRate, // مثال 0.025
     double? listingCommissionAmount, // عند fixed
   }) {
-    final date = signatureDateIso ??
-        DateTime.now().toUtc().toIso8601String().split('T').first;
+    final parsed = DateHelper.tryParse(signatureDateIso)?.toLocal() ??
+        DateTime.now().toLocal();
+    final date = DateHelper.civilDigits(parsed);
     final notes = (offerNotes ?? '').trim();
     final cId = (contractId ?? '').trim();
     final owner = (ownerName ?? '').trim();

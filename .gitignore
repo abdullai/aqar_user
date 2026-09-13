@@ -99,3 +99,5 @@ android/.gradle/
 node_modules/
 _screen_review.mp4
 android/*.hprof
+fal_backend/rega_debug.png
+fal_backend/rega_debug.html

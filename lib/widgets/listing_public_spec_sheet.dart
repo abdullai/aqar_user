@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 
 import '../models/property.dart';
 import 'listing_formatted_spec_panel.dart';
@@ -19,7 +20,7 @@ class ListingPublicSpecSheet extends StatelessWidget {
     required Property property,
     required bool isAr,
   }) {
-    return showModalBottomSheet<void>(
+    return showAppModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,

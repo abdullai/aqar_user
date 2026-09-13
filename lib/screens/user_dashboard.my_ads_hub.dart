@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element, unused_element_parameter, unnecessary_null_comparison
+
 part of 'user_dashboard.dart';
 
 /// واجهة تبويبات «صفحتي» (مسوّق/معلن): راجع `docs/MARKETING_FULL_FLOW_USER_SPEC_AR.md` لربط المراحل.
@@ -471,9 +473,20 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   bool _ownerRequestRowShowsInSubmittedOffersTab(Map<String, dynamic> r) {
-    if (!_ownerRequestRowInWaitingMarketersBucket(r)) return false;
     if (_ownerRequestRowShowsInInactive72hTab(r)) return false;
+    final decision = ListingPostPublishUiHelper.decideFromRequestRow(
+      Map<String, dynamic>.from(r),
+    );
+    if (decision.kind == ListingUiEntityKind.publishedProperty) return false;
+    if (const {
+      ListingWorkflowStage.published,
+      ListingWorkflowStage.reserved,
+      ListingWorkflowStage.archived,
+    }.contains(decision.stage)) {
+      return false;
+    }
     if (_ownerRequestRowHasPendingMarketerOffers(r)) return true;
+    if (!_ownerRequestRowInWaitingMarketersBucket(r)) return false;
     return false;
   }
 
@@ -1092,9 +1105,27 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     if (!hasReq && !hasProp) {
-      return _buildOwnerPublishedPropertiesList(
-        items: propertyItems,
-        emptyText: emptyText,
+      // تبويبات التسويق الفارغة = حالة طبيعية، لا تخلطها بفشل جلب «إعلاناتي».
+      final mineFailedCompletely =
+          _errorMine != null && _mine.isEmpty && !_loadingMine;
+      if (mineFailedCompletely && ownerMarketingFeedScope == 0) {
+        return _simpleErrorBox(
+          title: widget.isAr
+              ? 'تعذر تحميل إعلاناتي'
+              : 'Failed to load my listings',
+          err: _errorMine!,
+          onRetry: () => _loadMineAndOffers(force: true),
+        );
+      }
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            emptyText,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
       );
     }
 
@@ -1401,7 +1432,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         .whereType<Map>()
         .map((e) => Map<String, dynamic>.from(e))
         .where((e) => (e['id'] ?? '').toString().trim().isNotEmpty)
-        .take(8)
+        .take(6)
         .toList();
   }
 
@@ -1426,13 +1457,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         final asPublisher = ownerTabIndex != null;
         if (asPublisher) {
           if (mounted) {
-            setState(() => _setMarketerPublisherHubMode(1));
+            _ss(() => _setMarketerPublisherHubMode(1, resetSubTab: false));
           }
-          await Future.wait([
-            _loadOwnerRequestsBuckets(force: true),
-            _loadMarketerBuckets(force: true, silent: true),
-          ]);
-          if (!mounted) return;
           _ensureSubTabControllers();
           final ctrl = _ownerTabsCtrl;
           final idx = ownerTabIndex;
@@ -1441,17 +1467,16 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               idx >= 0 &&
               idx < ctrl.length &&
               ctrl.index != idx) {
-            ctrl.animateTo(idx);
+            ctrl.index = idx;
           }
+          unawaited(Future.wait([
+            _loadOwnerRequestsBuckets(force: true, silent: true),
+            _loadMarketerBuckets(force: true, silent: true),
+          ]));
         } else {
           if (mounted && marketerTabIndex != null) {
-            setState(() => _setMarketerPublisherHubMode(0));
+            _ss(() => _setMarketerPublisherHubMode(0, resetSubTab: false));
           }
-          await _loadMarketerBuckets(force: true);
-          if (_hasOwnerRequestsData) {
-            unawaited(_loadOwnerRequestsBuckets(force: true, silent: true));
-          }
-          if (!mounted) return;
           _ensureSubTabControllers();
           final ctrl = _marketerTabsCtrl;
           final idx = marketerTabIndex;
@@ -1460,13 +1485,14 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               idx >= 0 &&
               idx < ctrl.length &&
               ctrl.index != idx) {
-            ctrl.animateTo(idx);
+            ctrl.index = idx;
+          }
+          unawaited(_loadMarketerBuckets(force: true, silent: true));
+          if (_hasOwnerRequestsData) {
+            unawaited(_loadOwnerRequestsBuckets(force: true, silent: true));
           }
         }
       } else if (!_isGuest) {
-        await _loadOwnerRequestsBuckets(force: true);
-        if (mounted) await _loadMineAndOffers(force: true);
-        if (!mounted) return;
         _ensureSubTabControllers();
         final ctrl = _ownerTabsCtrl;
         final idx = ownerTabIndex;
@@ -1475,11 +1501,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             idx >= 0 &&
             idx < ctrl.length &&
             ctrl.index != idx) {
-          ctrl.animateTo(idx);
+          ctrl.index = idx;
         }
+        unawaited(_loadOwnerRequestsBuckets(force: true, silent: true));
+        if (mounted) unawaited(_loadMineAndOffers(force: true, silent: true));
       }
     } catch (_) {
-      if (mounted) setState(() {});
+      if (mounted) _ss(() {});
     }
   }
 
@@ -1511,7 +1539,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ? (widget.isAr
               ? 'تعذّر قبول العرض بسبب إعدادات الخادم. جرّب بعد تحديث النظام أو تواصل مع الدعم.'
               : 'Could not accept the offer due to a server configuration issue. Try again after a system update or contact support.')
-          : raw;
+          : ListingWorkflowCopy.rpcFailedFriendly(widget.isAr, e);
       _showNotification(
         widget.isAr ? 'تعذر القبول' : 'Could not accept',
         friendly,
@@ -1556,7 +1584,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       if (!mounted) return;
       _showNotification(
         widget.isAr ? 'تعذر الرفض' : 'Could not decline',
-        e.toString(),
+        ListingWorkflowCopy.rpcFailedFriendly(widget.isAr, e),
         isError: true,
       );
     } finally {
@@ -1626,6 +1654,42 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                               fontWeight: FontWeight.w900,
                               fontSize: 13,
                             ),
+                          ),
+                          Builder(
+                            builder: (_) {
+                              final note = OfferIdentityTag.parse(
+                                (o['notes'] ?? '').toString(),
+                              ).notes.trim();
+                              if (note.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Text(
+                                      ar ? 'رسالة العرض' : 'Offer message',
+                                      style: TextStyle(
+                                        color: cs.onSurfaceVariant,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 11.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      note,
+                                      style: TextStyle(
+                                        color: cs.onSurfaceVariant,
+                                        height: 1.35,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
                           ),
                           Builder(
                             builder: (_) {
@@ -2133,6 +2197,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ),
           ],
           _hubMarketerListingIdRow(merged, cs, listingIdGreen: true),
+          _hubMarketerPriceStrip(merged, cs),
           if (showMarketingRequestRow) ...[
             const SizedBox(height: 6),
             Builder(
@@ -2317,11 +2382,14 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                     constraints: BoxConstraints(maxWidth: mw),
                     child: Text(
                       widget.isAr
-                          ? 'نشر الطلب: ${_timeAgo(propPublished, widget.isAr)}'
-                          : 'Request published: ${_timeAgo(propPublished, widget.isAr)}',
+                          ? 'نشر الطلب: ${DateHelper.fmtCivilDateTime(propPublished, isAr: true)}'
+                          : 'Request published: ${DateHelper.fmtCivilDateTime(propPublished, isAr: false)}',
                       maxLines: 1,
                       softWrap: false,
                       overflow: TextOverflow.ellipsis,
+                      textDirection: DateHelper.calendarTextDirection(
+                        isAr: widget.isAr,
+                      ),
                       style: TextStyle(
                         fontSize: 11,
                         color: cs.onSurfaceVariant,
@@ -2399,7 +2467,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               );
             },
           ),
-          _hubMarketerPriceStrip(merged, cs),
         ],
       ),
     );
@@ -2956,7 +3023,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   Future<void> _openOwnerOffersForRequest(String requestId) async {
     if (requestId.isEmpty) return;
     final h = MediaQuery.sizeOf(context).height;
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -2978,7 +3045,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   Future<void> _openOwnerContractChat(String contractId) async {
     if (contractId.isEmpty) return;
-    await Navigator.of(context, rootNavigator: true).push<void>(
+    await _pushRootOverlay<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
         settings: const RouteSettings(name: AppRoutes.listingContractChat),
@@ -3000,7 +3067,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (!_ownerRowShowsRelistAction(row)) return;
 
     var allowPreviousMarketersRetry = false;
-    final confirm = await showDialog<bool>(
+    final confirm = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) {
@@ -3210,17 +3277,51 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final roomsText = bedsRaw != null && bedsRaw > 0
         ? (widget.isAr ? '$bedsRaw غرف' : '$bedsRaw bd')
         : '';
-    final districtText = '';
-    final locationParts = _marketingLocationHierarchyParts(r);
+    final m = _mergedJsonPayloadForRow(r);
+    String pickAny(Iterable<String> keys) {
+      for (final k in keys) {
+        final v = (r[k] ?? m[k] ?? '').toString().trim();
+        if (v.isNotEmpty) return _normalizeAdministrativeLocationPart(v);
+      }
+      return '';
+    }
+
+    final regionText = pickAny(const [
+      'preview_region',
+      'region',
+      'region_name',
+      'preview_region_name',
+    ]);
+    final cityText = pickAny(const [
+      'preview_city',
+      'request_city',
+      'city',
+    ]);
+    var districtText = pickAny(const [
+      'preview_district',
+      'preview_neighborhood',
+      'district',
+      'neighborhood',
+      'preview_area_name',
+    ]);
+    if (districtText.isEmpty) {
+      districtText = _normalizeAdministrativeLocationPart(
+        _marketingDistrictFromPayload(r),
+      );
+    }
     final purposeAccent = PropertyListingDisplay.accentForRequestRow(r);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
-      child: UnifiedCardSpecRow(
-        bankColor: purposeAccent,
-        areaText: areaText,
-        roomsText: roomsText,
-        districtText: districtText,
-        locationParts: locationParts,
+      child: SizedBox(
+        width: double.infinity,
+        child: UnifiedCardSpecRow(
+          bankColor: purposeAccent,
+          areaText: areaText,
+          roomsText: roomsText,
+          regionText: regionText,
+          cityText: cityText,
+          districtText: districtText,
+        ),
       ),
     );
   }
@@ -3540,6 +3641,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   bool _marketerRowHasContract(Map<String, dynamic> row) {
+    final selected = (row['selected_marketer_id'] ??
+            row['request_selected_marketer_id'] ??
+            '')
+        .toString()
+        .trim();
+    if (selected.isNotEmpty && selected != _uid) return false;
     if ((row['contract_id'] ?? '').toString().trim().isNotEmpty) return true;
     final requestId = _marketingRequestIdFromRow(row);
     if (requestId.isEmpty) return false;
@@ -3784,7 +3891,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (offerId.isEmpty) return;
 
     bool showInMarket = true;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
@@ -3914,7 +4021,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         r['last_call_at'] = DateTime.now().toUtc().toIso8601String();
         r['last_call_count'] =
             ((r['last_call_count'] as num?)?.toInt() ?? 0) + 1;
-        if (mounted) setState(() {});
+        if (mounted) _ss(() {});
         unawaited(_loadMarketerBuckets(force: true));
       } catch (_) {}
     } else {
@@ -4005,7 +4112,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final ar = widget.isAr;
 
     bool allowSame = false;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) {
         return StatefulBuilder(
@@ -4078,7 +4185,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           notifyHub: true,
         );
       } catch (_) {
-        if (mounted) setState(() {});
+        if (mounted) _ss(() {});
       }
     }
 
@@ -4150,7 +4257,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final key = _marketerCancelledDismissKey(r);
     if (key.isEmpty) return;
     final ar = widget.isAr;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ar ? 'حذف من صفحتي' : 'Remove from My page'),
@@ -4172,7 +4279,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       ),
     );
     if (ok != true || !mounted) return;
-    setState(() => _marketerDismissedCancelledIds.add(key));
+    _ss(() => _marketerDismissedCancelledIds.add(key));
     try {
       final prefs = await SharedPreferences.getInstance();
       final uid = _uid.trim();
@@ -4208,7 +4315,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       if (n >= OpportunityGrantStore.maxGrants) out.add(id);
     }
     if (!mounted) return;
-    setState(() {
+    _ss(() {
       _exhaustedOpportunityRequestIds = out;
       _opportunityGrantCountsByRequestId = counts;
     });
@@ -4233,7 +4340,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             : 'All 4 chances were used — this request no longer appears in the 72h inactive tab.',
         isError: false,
       );
-      setState(() => _exhaustedOpportunityRequestIds.add(reqId));
+      _ss(() => _exhaustedOpportunityRequestIds.add(reqId));
       return;
     }
     final used = await OpportunityGrantStore.countFor(
@@ -4242,7 +4349,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
     final next = used + 1;
     final ordinal = OpportunityGrantStore.ordinalLabel(next, isAr: ar);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ar ? 'إتاحة فرصة' : 'Grant another chance'),
@@ -4288,7 +4395,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       r['_owner_offers_all_expired_by_deadline'] = false;
       r['_owner_offers_need_relist'] = false;
       r['_hub_opportunity_grant'] = true;
-      setState(() {
+      _ss(() {
         _opportunityGrantCountsByRequestId = {
           ..._opportunityGrantCountsByRequestId,
           reqId: granted,
@@ -4307,7 +4414,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
       if (!mounted) return;
       if (granted >= OpportunityGrantStore.maxGrants) {
-        setState(() => _exhaustedOpportunityRequestIds.add(reqId));
+        _ss(() => _exhaustedOpportunityRequestIds.add(reqId));
       }
     }
 
@@ -4354,7 +4461,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ? 'استُنفدت الفرص الأربع — لن يظهر هذا الطلب في تبويب بدون إجراء 72 ساعة.'
             : 'All 4 chances used — this item leaves the 72h inactive tab.',
       );
-      setState(() => _exhaustedOpportunityRequestIds.add(reqId));
+      _ss(() => _exhaustedOpportunityRequestIds.add(reqId));
       return;
     }
     final used = await OpportunityGrantStore.countFor(
@@ -4363,7 +4470,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
     final next = used + 1;
     final ordinal = OpportunityGrantStore.ordinalLabel(next, isAr: ar);
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ar ? 'إتاحة فرصة' : 'Grant another chance'),
@@ -4396,16 +4503,21 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (granted == null) return;
 
     final offerId = (r['id'] ?? r['offer_id'] ?? '').toString().trim();
-    final svc = MarketingWorkflowAutomationService(Supabase.instance.client);
     var ok = false;
+    try {
+      final res =
+          await MarketingFlowService(_sb).marketerGrant72hOpportunity(reqId);
+      ok = res['ok'] == true;
+    } catch (_) {}
+    final svc = MarketingWorkflowAutomationService(Supabase.instance.client);
     if (offerId.isNotEmpty && RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(offerId)) {
       final res = await svc.sendLastCall(offerId);
-      ok = res['ok'] == true;
+      ok = ok || res['ok'] == true;
     }
     r['_hub_inactive_72h'] = false;
     r['_owner_offers_all_expired_by_deadline'] = false;
     r['_hub_opportunity_grant'] = true;
-    setState(() {
+    _ss(() {
       _opportunityGrantCountsByRequestId = {
         ..._opportunityGrantCountsByRequestId,
         reqId: granted,
@@ -4427,14 +4539,14 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     _showNotification(
       ar ? 'تمت إتاحة الفرصة' : 'Chance granted',
       ar
-          ? 'الفرصة ${OpportunityGrantStore.ordinalLabel(granted, isAr: true)}. راجع تبويب عروضي.'
-          : 'Chance ${OpportunityGrantStore.ordinalLabel(granted, isAr: false)}. Check My offers.',
+          ? 'الفرصة ${OpportunityGrantStore.ordinalLabel(granted, isAr: true)}. افتح السوق العقاري وقدّم عرضاً جديداً.'
+          : 'Chance ${OpportunityGrantStore.ordinalLabel(granted, isAr: false)}. Open the market and submit a new offer.',
     );
     if (granted >= OpportunityGrantStore.maxGrants) {
-      setState(() => _exhaustedOpportunityRequestIds.add(reqId));
+      _ss(() => _exhaustedOpportunityRequestIds.add(reqId));
     }
     await _refreshMyPageHubAfterAction(
-      marketerTabIndex: 1,
+      marketerTabIndex: 0,
       notifyHub: false,
     );
   }
@@ -4466,9 +4578,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       if (!mounted) return;
       _showNotification(
         widget.isAr ? 'تعذر الإلغاء' : 'Could not cancel',
-        widget.isAr
-            ? 'تعذر تنفيذ الطلب. حاول لاحقاً أو راجع الاتصال.'
-            : e.toString(),
+        ListingWorkflowCopy.rpcFailedFriendly(widget.isAr, e),
         isError: true,
       );
     }
@@ -5181,11 +5291,18 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     }
     if (_errorMarketing != null && rows.isEmpty) {
-      return _simpleErrorBox(
-        title: ar ? 'تعذر تحميل الموافقات' : 'Failed to load',
-        err: _errorMarketing!,
-        onRetry: () => _loadMarketerBuckets(force: true),
-      );
+      final anyMarketingData = _mkInvites.isNotEmpty ||
+          _mkOffers.isNotEmpty ||
+          _mkContracts.isNotEmpty ||
+          _mkPermits.isNotEmpty ||
+          _mkPublished.isNotEmpty;
+      if (!anyMarketingData) {
+        return _simpleErrorBox(
+          title: ar ? 'تعذر تحميل الموافقات' : 'Failed to load',
+          err: _errorMarketing!,
+          onRetry: () => _loadMarketerBuckets(force: true),
+        );
+      }
     }
     if (rows.isEmpty) {
       return ListView(
@@ -5324,13 +5441,21 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     if (_errorMarketing != null && rows.isEmpty) {
-      return _simpleErrorBox(
-        title: widget.isAr
-            ? 'تعذر تحميل بيانات التسويق'
-            : 'Failed to load marketing data',
-        err: _errorMarketing!,
-        onRetry: () => _loadMarketerBuckets(force: true),
-      );
+      // خطأ فقط إذا لم تصل أي بيانات تسويق؛ التبويب الفارغ يعرض emptyText.
+      final anyMarketingData = _mkInvites.isNotEmpty ||
+          _mkOffers.isNotEmpty ||
+          _mkContracts.isNotEmpty ||
+          _mkPermits.isNotEmpty ||
+          _mkPublished.isNotEmpty;
+      if (!anyMarketingData) {
+        return _simpleErrorBox(
+          title: widget.isAr
+              ? 'تعذر تحميل بيانات التسويق'
+              : 'Failed to load marketing data',
+          err: _errorMarketing!,
+          onRetry: () => _loadMarketerBuckets(force: true),
+        );
+      }
     }
 
     return _buildSimpleRowsList(
@@ -5887,30 +6012,16 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return parts.join(' — ');
   }
 
-  /// محافظة/منطقة — مدينة — حي (للبطاقات العربية: الأبعد إدارياً أولاً).
+  /// منطقة - مدينة - حي (حسب المتوفر).
   String _propertyCardLocationLine(Property p) {
-    final reg = (p.region ?? '').trim();
-    final prov = (p.province ?? '').trim();
-    final city = p.city.trim();
-    var hood = (p.location ?? '').trim();
-    if (hood.contains(' - ')) {
-      final bits = hood
-          .split(' - ')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-      if (bits.length > 1 && city.isNotEmpty) {
-        hood = bits.where((x) => x != city).join(' — ');
-      }
-    }
-    final line = _orderedLocationParts(
-      region: reg,
-      province: prov,
-      city: city,
-      district: hood,
-    );
+    final line = PropertyListingDisplay.addressLine(
+      p,
+      isAr: _isArabic,
+      separator: ' — ',
+    ).trim();
     if (line.isNotEmpty) return line;
-    return PropertyListingDisplay.cityLine(p);
+    final city = PropertyListingDisplay.cityLine(p);
+    return city == '-' ? '' : city;
   }
 
   String _marketingLocationText(Map<String, dynamic> r) {
@@ -5958,11 +6069,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final district =
         districtRaw.isNotEmpty ? districtRaw : _marketingDistrictFromPayload(r);
 
-    final ordered = _orderedLocationParts(
+    final ordered = PropertyListingDisplay.addressLineFromParts(
       region: region,
-      province: province,
       city: city,
       district: district,
+      governorate: province,
+      isAr: widget.isAr,
+      separator: ' — ',
     );
     if (ordered.isNotEmpty) return ordered;
 
@@ -6157,7 +6270,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   void _showMarketRelistReasonDialog(Map<String, dynamic> r) {
     if (!mounted) return;
     final reason = _marketRelistReasonText(r);
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(widget.isAr ? 'سبب الإعادة للسوق' : 'Why relisted?'),
@@ -6289,12 +6402,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   String _formatListingRequestCreatedFull(DateTime local) {
-    try {
-      // أرقام لاتينية دائماً (ويب جوال / تطبيق / ويندوز).
-      return DateFormat('yyyy/MM/dd HH:mm', 'en').format(local);
-    } catch (_) {
-      return local.toIso8601String();
-    }
+    return DateHelper.fmtCivilDateTime(local, isAr: _isArabic);
   }
 
   String _hubAsciiDigits(String input) {
@@ -6360,13 +6468,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
     if (raw == null) return '';
     if (raw is DateTime) {
-      return DateFormat('yyyy/MM/dd', 'en').format(raw.toLocal());
+      return DateHelper.fmtCivilDate(raw.toLocal(), isAr: _isArabic);
     }
     final s = raw.toString().trim();
     if (s.isEmpty) return '';
     final dt = DateTime.tryParse(s);
     if (dt != null) {
-      return DateFormat('yyyy/MM/dd', 'en').format(dt.toLocal());
+      return DateHelper.fmtCivilDate(dt.toLocal(), isAr: _isArabic);
     }
     return _hubAsciiDigits(s);
   }
@@ -6564,7 +6672,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   void _showMarketingListingViewsDialog(int? views) {
     if (!mounted) return;
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (ctx) {
         final ar = widget.isAr;
@@ -6701,23 +6809,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     }
 
-    chips.add(
-      _miniStatChip(
-        icon: Icons.payments_outlined,
-        content: _buildMarketingPriceLine(
-          r,
-          style: const TextStyle(
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
-            height: 1.2,
-          ),
-          // — السعر داخل بطاقات «إعلاناتي/طلباتي» للمسوّق يعرض السعر الأساسي
-          //   فقط. تفصيل الفاتورة يظهر داخل صفحة تفاصيل الإعلان.
-          displayListingTotalIncVatAndFee: false,
-        ),
-      ),
-    );
-
     final type = (r['preview_type'] ?? r['request_property_type'] ?? '')
         .toString()
         .trim();
@@ -6823,8 +6914,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           icon: Icons.publish_outlined,
           content: Text(
             widget.isAr
-                ? 'نشر الطلب ${_timeAgo(pubDt, widget.isAr)}'
-                : 'Published ${_timeAgo(pubDt, widget.isAr)}',
+                ? 'نشر الطلب ${DateHelper.fmtCivilDateTime(pubDt, isAr: true)}'
+                : 'Published ${DateHelper.fmtCivilDateTime(pubDt, isAr: false)}',
+            textDirection: DateHelper.calendarTextDirection(isAr: widget.isAr),
             style: const TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 12,
@@ -6839,8 +6931,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           icon: Icons.schedule_outlined,
           content: Text(
             widget.isAr
-                ? 'إنشاء الطلب ${_timeAgo(creDt, widget.isAr)}'
-                : 'Request ${_timeAgo(creDt, widget.isAr)}',
+                ? 'إنشاء الطلب ${DateHelper.fmtCivilDateTime(creDt, isAr: true)}'
+                : 'Request ${DateHelper.fmtCivilDateTime(creDt, isAr: false)}',
+            textDirection: DateHelper.calendarTextDirection(isAr: widget.isAr),
             style: const TextStyle(
               fontWeight: FontWeight.w800,
               fontSize: 12,
@@ -7069,7 +7162,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final requestId = _marketingRequestIdFromRow(r);
     if (requestId.isEmpty) return;
 
-    final ok = await Navigator.of(context, rootNavigator: true).push<bool>(
+    final ok = await _pushRootOverlay<bool>(
       MaterialPageRoute<bool>(
         fullscreenDialog: true,
         settings:
@@ -7199,7 +7292,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   Future<void> _rpcCancelListingContract(String contractId) async {
     final ar = widget.isAr;
     final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ListingWorkflowCopy.btnCancelContract(ar)),
@@ -7796,7 +7889,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           }
         },
       );
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         barrierDismissible: true,
         builder: (ctx) {
@@ -8108,7 +8201,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
     if (!mounted) return;
     final ar = widget.isAr;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(ar ? 'بلاغ عدم مطابقة' : 'Report mismatch'),
@@ -8265,25 +8358,28 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   String _marketingOfferFeeBreakdownText(double propertyBaseSar,
       {required bool ar}) {
     if (propertyBaseSar <= 0) return '';
-    final fmt = NumberFormat('#,##0.##', ar ? 'ar' : 'en');
     final pv = MarketingOfferFee.propertyVatAmount(propertyBaseSar);
     final sub = MarketingOfferFee.propertySubtotalWithVat(propertyBaseSar);
     final fee = MarketingOfferFee.marketingFeeAmount(propertyBaseSar);
     final t = MarketingOfferFee.totalDue(propertyBaseSar);
     final pct = MarketingOfferFee.commissionPercentLabel(isAr: ar);
+    String money(double value) => AppMoney.formatWithCurrencyCode(
+          value,
+          isAr: ar,
+          maxFractionDigits: 2,
+        );
     if (ar) {
-      final riyal = AppMoney.saudiRiyalSignUnicode;
-      return 'قيمة العقار: ${fmt.format(propertyBaseSar)} $riyal\n'
-          'ضريبة 5٪ على العقار: ${fmt.format(pv)} $riyal\n'
-          'المجموع شامل ضريبة القيمة المضافة 5٪: ${fmt.format(sub)} $riyal\n'
-          'نسبة التسويق $pct من المجموع الإجمالي المستحق: ${fmt.format(fee)} $riyal\n'
-          'الإجمالي المستحق: ${fmt.format(t)} $riyal';
+      return 'قيمة العقار: ${money(propertyBaseSar)}\n'
+          'ضريبة 5٪ على العقار: ${money(pv)}\n'
+          'المجموع شامل ضريبة القيمة المضافة 5٪: ${money(sub)}\n'
+          'نسبة التسويق $pct من المجموع الإجمالي المستحق: ${money(fee)}\n'
+          'الإجمالي المستحق: ${money(t)}';
     }
-    return 'Property value: ${fmt.format(propertyBaseSar)} SAR\n'
-        '5% VAT on property: ${fmt.format(pv)} SAR\n'
-        'Subtotal incl. 5% VAT: ${fmt.format(sub)} SAR\n'
-        'Marketing rate $pct of total due: ${fmt.format(fee)} SAR\n'
-        'Total due: ${fmt.format(t)} SAR';
+    return 'Property value: ${money(propertyBaseSar)}\n'
+        '5% VAT on property: ${money(pv)}\n'
+        'Subtotal incl. 5% VAT: ${money(sub)}\n'
+        'Marketing rate $pct of total due: ${money(fee)}\n'
+        'Total due: ${money(t)}';
   }
 
   Future<void> _openMarketerMarketOfferHub(Map<String, dynamic> row) async {
@@ -8446,9 +8542,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         : requestStatusId.trim();
     if (rid.isEmpty) return;
     if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push<void>(
+    await _pushRootOverlay<void>(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
+        settings: const RouteSettings(name: '/listing/request-status'),
         builder: (_) => ListingRequestStatusPage(
           requestId: rid,
           lang: widget.isAr ? 'ar' : 'en',
@@ -8722,7 +8819,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   /// شريط مراحل التسويق + أزرار واضحة + سبب الرفض داخل بطاقة «إعلاناتي المنشورة».
   Future<void> _showOwnerHubListingFullSpecs(Property p) async {
     final ar = widget.isAr;
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -8777,7 +8874,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   /// كل بيانات طلب التسويق (صك / مرافق / موقع…) لنقلها للجهات دون مراسلة المعلن.
   Future<void> _showMarketingRequestFullSpecs(Map<String, dynamic> r) async {
     final ar = widget.isAr;
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -9033,7 +9130,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     }
 
-    if (_errorMine != null && items.isEmpty) {
+    // خطأ التحميل فقط عند فشل الجلب بالكامل (لا عند تبويب مفلتر فارغ).
+    if (_errorMine != null && _mine.isEmpty && items.isEmpty) {
       return _simpleErrorBox(
         title:
             widget.isAr ? 'تعذر تحميل إعلاناتي' : 'Failed to load my listings',
@@ -9502,6 +9600,26 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }) {
     final cs = Theme.of(context).colorScheme;
     final actions = <Widget>[];
+    if (marketerMyOffersTabLayout && type == 'offer') {
+      final offerMsg = OfferIdentityTag.parse(
+        (r['notes'] ?? '').toString(),
+      ).notes.trim();
+      if (offerMsg.isNotEmpty) {
+        actions.add(
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Text(
+              '${widget.isAr ? 'رسالة العرض' : 'Offer message'}: $offerMsg',
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+        );
+      }
+    }
     // ملاحظة: زر «دردشة مع المالك» نُقل إلى أيقونة بجوار رقم الجوال داخل البطاقة
     // (راجع `_canShowMarketerChatIconForRow` و`_buildMarketerInviteUnifiedListCard`).
 
@@ -9968,8 +10086,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ),
           ],
           _hubUnifiedCardSpecRow(r, cs),
-          _hubMarketerPriceStrip(r, cs),
           _hubMarketerListingIdRow(r, cs),
+          _hubMarketerPriceStrip(r, cs),
           if (marketerInvitesTabLayout || !_marketerOwnerChatUnlocked(r))
             _hubRequestCreatedDateTimeRow(r, cs),
           _hubPeerPresenceStrip(
@@ -10677,6 +10795,24 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               );
             },
           ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: FittedBox(
+              alignment: AlignmentDirectional.centerStart,
+              fit: BoxFit.scaleDown,
+              child: _buildMarketingPriceLine(
+                r,
+                style: const TextStyle(
+                  color: Color(0xFF0A4235),
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  height: 1.2,
+                  fontFamily: 'Cairo',
+                ),
+                displayListingTotalIncVatAndFee: false,
+              ),
+            ),
+          ),
           _hubPeerPresenceStrip(
             r,
             marketerView: true,
@@ -10858,23 +10994,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ],
           ),
           const SizedBox(height: 6),
-          FittedBox(
-            alignment: AlignmentDirectional.centerStart,
-            fit: BoxFit.scaleDown,
-            child: _buildMarketingPriceLine(
-              r,
-              style: const TextStyle(
-                color: Color(0xFF0A4235),
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
-                height: 1.2,
-                fontFamily: 'Cairo',
-              ),
-              // — البطاقة هنا تعرض السعر الأساسي فقط (دون ضريبة أو عمولة).
-              //   كل تفصيل الفاتورة يظهر داخل صفحة تفاصيل الإعلان.
-              displayListingTotalIncVatAndFee: false,
-            ),
-          ),
           if (!compact)
             Builder(
               builder: (_) {
@@ -11495,9 +11614,9 @@ class _PublishMarketingListingDialogState
                         ),
                       ),
                     ),
-                    IconButton(
-                      onPressed: _busy ? null : _closeAndClear,
-                      icon: const Icon(Icons.close_rounded),
+                    AppPageCloseButton(
+                      enabled: !_busy,
+                      onPressed: _closeAndClear,
                     ),
                   ],
                 ),

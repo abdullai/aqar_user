@@ -1,3 +1,4 @@
+import '../core/geo/saudi_official_admin.dart';
 import '../models/saudi_location.dart';
 
 /// هرم منطقة → محافظة → مدينة من [SaudiLocation] (نفس منطق إضافة الإعلان).
@@ -23,8 +24,19 @@ class SaudiLocationHierarchy {
     final governoratesByRegion = <String, Set<String>>{};
     final citiesByGovernorate = <String, Set<String>>{};
 
+    for (final r in SaudiOfficialAdmin.officialRegionNames(isAr: isAr)) {
+      regions.add(r);
+      governoratesByRegion.putIfAbsent(r, () => <String>{}).addAll(
+            SaudiOfficialAdmin.governorates(region: r, isAr: isAr),
+          );
+    }
+
     for (final item in all) {
-      final region = isAr ? item.regionAr.trim() : item.regionEn.trim();
+      final region = SaudiOfficialAdmin.canonicalRegionName(
+            isAr ? item.regionAr : item.regionEn,
+            isAr: isAr,
+          ) ??
+          '';
       final governorate = isAr
           ? (item.governorateAr?.trim() ?? '')
           : (item.governorateEn?.trim() ?? '');
@@ -33,19 +45,32 @@ class SaudiLocationHierarchy {
       if (region.isEmpty || city.isEmpty) continue;
 
       regions.add(region);
+      final officialGovs = SaudiOfficialAdmin.governorates(
+        region: region,
+        isAr: isAr,
+      );
+      if (officialGovs.isNotEmpty) {
+        governoratesByRegion.putIfAbsent(region, () => <String>{}).addAll(officialGovs);
+      }
 
-      if (governorate.isNotEmpty) {
-        governoratesByRegion
-            .putIfAbsent(region, () => <String>{})
-            .add(governorate);
-        citiesByGovernorate
-            .putIfAbsent(governorate, () => <String>{})
-            .add(city);
-      } else {
-        governoratesByRegion
-            .putIfAbsent(region, () => <String>{})
-            .add(region);
-        citiesByGovernorate.putIfAbsent(region, () => <String>{}).add(city);
+      var gov = governorate;
+      if (gov.isEmpty ||
+          !SaudiOfficialAdmin.isOfficialGovernorate(
+            region: region,
+            governorate: gov,
+          )) {
+        if (SaudiOfficialAdmin.isOfficialGovernorate(
+          region: region,
+          governorate: city,
+        )) {
+          gov = city;
+        } else {
+          gov = '';
+        }
+      }
+      if (gov.isNotEmpty) {
+        governoratesByRegion.putIfAbsent(region, () => <String>{}).add(gov);
+        citiesByGovernorate.putIfAbsent(gov, () => <String>{}).add(city);
       }
     }
 

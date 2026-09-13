@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../core/utils/app_money.dart';
@@ -25,7 +26,7 @@ Future<CancellationConfirmation?> showSubscriptionCancellationDialog(
 
   if (!context.mounted) return null;
 
-  return showDialog<CancellationConfirmation>(
+  return showAppDialog<CancellationConfirmation>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => _SubscriptionCancellationDialog(

@@ -77,27 +77,25 @@ enum ListingWorkflowStage {
     // مرحلة workflow صريحة «بانتظار المسوقين» تسبق legacy status قديم (active/published)
     // بعد إعادة طرح الطلب في السوق — كان يُعرض «منشور» ويُحظر تقديم العرض خطأً.
     final wsEarly = tryParse(workflowStage);
-    if (wsEarly == ListingWorkflowStage.waitingMarketers ||
-        wsEarly == ListingWorkflowStage.addedByOwner) {
-      return wsEarly!;
+    // مرحلة تسويق صريحة تسبق status=active (مسودة/معاينة) حتى لا يظهر الإعلان في الرئيسية قبل النشر.
+    if (wsEarly != null &&
+        wsEarly != ListingWorkflowStage.published &&
+        wsEarly != ListingWorkflowStage.reserved) {
+      if (publishedAt == null) return wsEarly;
+      if (wsEarly != ListingWorkflowStage.permitIssued) return wsEarly;
     }
 
     final st = (legacyStatus ?? '').trim().toLowerCase();
-    final publishedLike = publishedAt != null ||
-        const {
-          'published',
-          'active',
-          'approved',
-          'live',
-          'available',
-          'listed',
-          'open',
-          'visible',
-          'for_sale',
-          'for_rent',
-          'forsale',
-          'forrent',
-        }.contains(st);
+    // لا تُعتبر `published_at` وحدها نشراً عاماً: صفوف المعاينة/التسويق
+    // غالباً status=active مع تاريخ قديم فتتسرّب للرئيسية بعد إرسال عرض.
+    // `live`/`active` وحدهما ليسا نشراً عاماً — صفوف المعاينة التسويقية
+    // غالباً status=live مع تاريخ قديم فتتسرّب للرئيسية بعد إرسال عرض.
+    final publishedLike = st == 'published' ||
+        (publishedAt != null &&
+            (wsEarly == ListingWorkflowStage.published ||
+                wsEarly == ListingWorkflowStage.reserved ||
+                wsEarly == ListingWorkflowStage.permitIssued ||
+                st == 'reserved'));
 
     if (st == 'reserved') {
       return ListingWorkflowStage.reserved;
@@ -147,6 +145,11 @@ enum ListingWorkflowStage {
     if (const {'archived', 'deleted', 'closed', 'sold', 'completed'}
         .contains(st)) {
       return ListingWorkflowStage.archived;
+    }
+
+    // status=active دون مرحلة نشر صريحة = مسار تسويق/معاينة، ليس إعلاناً عاماً.
+    if (st == 'active' || st == 'available') {
+      return ListingWorkflowStage.waitingMarketers;
     }
 
     // Legacy marketing path

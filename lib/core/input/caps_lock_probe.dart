@@ -1,10 +1,32 @@
 import 'caps_lock_probe_stub.dart'
+    if (dart.library.js_interop) 'caps_lock_probe_web.dart'
     if (dart.library.html) 'caps_lock_probe_web.dart' as impl;
 
-/// قراءة حالة Caps Lock من المتصفح عند توفرها (ويب).
-bool? probeBrowserCapsLock() => impl.probeBrowserCapsLock();
+import 'caps_lock_signal.dart';
 
-/// تجهيز مستمع DOM قبل التركيز على حقل كلمة المرور.
+/// قراءة Caps Lock من المتصفح عند توفرها (ويب). وإلا [CapsLockSignal.unknown].
+CapsLockSignal probeBrowserCapsLock() {
+  try {
+    return capsLockSignalFromBool(impl.probeBrowserCapsLock());
+  } catch (_) {
+    return CapsLockSignal.unknown;
+  }
+}
+
+/// تجهيز مستمع DOM (ويب) — آمن للاستدعاء المتكرر.
+void retainBrowserCapsLockProbe() {
+  try {
+    impl.retainBrowserCapsLockProbe();
+  } catch (_) {}
+}
+
+void releaseBrowserCapsLockProbe() {
+  try {
+    impl.releaseBrowserCapsLockProbe();
+  } catch (_) {}
+}
+
+/// توافق مع الاستدعاءات القديمة — لا يزيد مرجع المستمع.
 void refreshBrowserCapsLockCache() {
   try {
     impl.refreshBrowserCapsLockCache();

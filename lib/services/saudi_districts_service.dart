@@ -60,6 +60,7 @@ class SaudiDistrictsService {
         if (listAr != null &&
             listAr.isNotEmpty &&
             (listEn == null || listEn.isEmpty)) {
+          // مدينة إنجليزية بلا قائمة: أظهر العربية حتى لا تختفي الأحياء.
           base[en] = List<String>.from(listAr);
         }
         // EN → AR (ملف الأحياء غالباً بمفاتيح إنجليزية فقط)

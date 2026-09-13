@@ -1,21 +1,30 @@
-// lib/screens/fast_login_screen.dart
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart' hide TextDirection;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../main.dart' show langNotifier, setAppLang, themeModeNotifier;
+import '../main.dart' show langNotifier, themeModeNotifier;
+import '../core/session/user_appearance_session.dart';
 import '../core/session/return_after_auth.dart';
-import '../core/theme/app_text_scale.dart';
 import '../services/auth_service.dart';
 import '../services/fast_login_service.dart';
 import '../services/account_completion_service.dart';
 import '../core/auth/auth_local_sign_out.dart';
+import '../core/auth/inactivity_auth_landing.dart';
+import '../core/auth/auth_challenge_service.dart';
+import '../core/auth/login_success_banner.dart';
+import '../core/auth/post_login_security_guard.dart';
 import '../services/session_tracking_service.dart';
-import '../core/branding/branding_logo_image.dart';
-import '../widgets/session_identity_panel.dart';
+import '../core/gestures/app_keyboard_stable.dart';
+import '../core/theme/app_text_scale.dart';
+import '../widgets/auth_top_chrome.dart';
+import '../widgets/login_known_user_hero.dart';
+import '../widgets/nafath_login_sheet.dart';
+import '../widgets/caps_aware_password_field.dart';
+import '../core/auth/login_method_policy.dart';
 import '../core/haptics/app_haptics.dart';
 import '../theme.dart' show AqarAuthScrollBehavior;
 
@@ -37,13 +46,25 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   bool _showBio = false;
   bool _pinEnabled = true;
   bool _passwordMode = false;
+  FastUnlockMode _unlockMode = FastUnlockMode.password;
   int _pinLen = 6;
   int _pinLockSec = 0;
 
   String _pin = '';
   String _displayName = '';
-  String _maskedId = '';
   String? _username;
+  LoginMethodSnapshot _methodSnapshot = LoginMethodSnapshot(
+    host: LoginMethodPolicy.detectHost(),
+    trustedThisInstall: true,
+    firstPasswordDone: true,
+    hasSession: true,
+    hasKnownUser: true,
+    pinEnabled: false,
+    faceEnabled: false,
+    fingerprintEnabled: false,
+    preferPassword: false,
+    unlockMode: FastUnlockMode.password,
+  );
 
   final _passwordCtrl = TextEditingController();
   final _passwordFocus = FocusNode();
@@ -66,35 +87,60 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       duration: const Duration(milliseconds: 380),
     );
 
-    final hasSession = Supabase.instance.client.auth.currentSession != null;
-    if (!hasSession) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        Navigator.pushReplacementNamed(context, '/login');
-      });
-      return;
-    }
-
-    FastLoginService.clearRuntimeUnlock();
-
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (kIsWeb) {
+        Navigator.pushReplacementNamed(context, '/login');
+        return;
+      }
+      final hasSession = Supabase.instance.client.auth.currentSession != null;
+      if (!hasSession) {
+        final stay = InactivityAuthLanding.isActive ||
+            await FastLoginService.canSoftLockSession();
+        if (!stay) {
+          if (!mounted) return;
+          Navigator.pushReplacementNamed(context, '/login');
+          return;
+        }
+      }
+
+      FastLoginService.clearRuntimeUnlock();
       await _loadIdentity();
       await _loadPinConfig();
       await _initBiometricsAndMaybeAutoAuth();
+      await _refreshMethodSnapshot();
       if (_passwordMode && mounted) {
         _passwordFocus.requestFocus();
       }
     });
   }
 
+  Future<void> _refreshMethodSnapshot() async {
+    final snap = await LoginMethodPolicy.resolve(
+      hasKnownUser:
+          _displayName.trim().isNotEmpty || (_username ?? '').isNotEmpty,
+    );
+    if (!mounted) return;
+    setState(() => _methodSnapshot = snap.copyWith(
+          hasKnownUser:
+              _displayName.trim().isNotEmpty || (_username ?? '').isNotEmpty,
+        ));
+  }
+
   Future<void> _loadIdentity() async {
-    final name = (await FastLoginService.getDisplayName() ?? '').trim();
-    final uid = await FastLoginService.getUsernameNationalId();
+    var name = (await FastLoginService.getDisplayName() ?? '').trim();
+    var uid = await FastLoginService.getUsernameNationalId();
+    if (name.isEmpty || (uid ?? '').trim().isEmpty) {
+      try {
+        final resume = await FastLoginService.getResumeAccount();
+        if (name.isEmpty) name = (resume.displayName ?? '').trim();
+        if ((uid ?? '').trim().isEmpty) uid = resume.username;
+      } catch (_) {}
+    }
     if (!mounted) return;
     setState(() {
       _displayName = name;
       _username = uid;
-      _maskedId = FastLoginService.maskNationalId(uid);
     });
   }
 
@@ -124,26 +170,52 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   Future<void> _initBiometricsAndMaybeAutoAuth() async {
     if (!_isMobile) {
       if (!mounted) return;
-      setState(() => _showBio = false);
+      setState(() {
+        _showBio = false;
+        _unlockMode = _pinEnabled
+            ? FastUnlockMode.pinOnly
+            : FastUnlockMode.password;
+        if (!_pinEnabled) _passwordMode = true;
+      });
       return;
     }
 
     try {
-      final enabled = await FastLoginService.hasAnyBiometricUnlockConfigured();
+      final mode = await FastLoginService.resolveUnlockMode();
+      final enabled = mode == FastUnlockMode.faceOnly ||
+          mode == FastUnlockMode.fingerprintOnly ||
+          mode == FastUnlockMode.biometricOnly ||
+          mode == FastUnlockMode.pinWithBiometric;
+      final preferPassword = await FastLoginService.preferPasswordSurface();
 
       if (!mounted) return;
       setState(() {
+        _unlockMode = mode;
         _showBio = enabled;
-        if (enabled && !_pinEnabled) {
+        if (preferPassword) {
+          _passwordMode = true;
+        } else if (mode == FastUnlockMode.faceOnly ||
+            mode == FastUnlockMode.fingerprintOnly ||
+            mode == FastUnlockMode.biometricOnly) {
           _passwordMode = false;
+          _pinEnabled = false;
+        } else if (mode == FastUnlockMode.pinOnly ||
+            mode == FastUnlockMode.pinWithBiometric) {
+          _passwordMode = false;
+        } else {
+          _passwordMode = true;
         }
       });
 
-      if (_showBio) {
+      if (_showBio && !_passwordMode) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          await Future<void>.delayed(const Duration(milliseconds: 280));
           if (!mounted) return;
           await _tryBiometric(fromAuto: true);
         });
+      } else if (_passwordMode && mounted) {
+        _passwordFocus.requestFocus();
       }
     } catch (_) {
       if (!mounted) return;
@@ -158,7 +230,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
 
   Future<void> _showBioRetryDialog() async {
     if (!mounted) return;
-    final retry = await showDialog<bool>(
+    final retry = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
@@ -208,19 +280,44 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   }
 
   Future<void> _goUnlockedHome({required String loginMethod}) async {
+    final confirmed = await AuthChallengeService.confirmTrustedNativeUnlock();
+    if (!confirmed.fullyAuthenticated) {
+      if (!mounted) return;
+      Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
     FastLoginService.markRuntimeUnlocked();
-    // دخول سريع = تسجيل دخول جديد من منظور بوابة الاستكمال.
     await AccountCompletionService.clearEnrollmentDeferred();
     if (!mounted) return;
-    await SessionTrackingService.recordLoginStart(
-      Supabase.instance.client,
-      loginMethod: loginMethod,
-    );
+    final isAr = langNotifier.value != 'en';
+    await LoginSuccessBanner.showOrQueue(null, isAr: isAr);
     if (!mounted) return;
     await ReturnAfterAuth.navigatePostAuthOrDefault(
       Navigator.of(context),
       '/userDashboard',
     );
+
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    final username = (_username ?? '').trim();
+    if (uid.isNotEmpty) {
+      unawaited(
+        PostLoginSecurityGuard.run(
+          uid: uid,
+          usernameNationalId: username,
+          displayName: _displayName,
+          loginMethod: loginMethod,
+          isAr: isAr,
+          authEntryRoute: '/fastLogin',
+        ),
+      );
+    } else {
+      unawaited(
+        SessionTrackingService.recordLoginStart(
+          Supabase.instance.client,
+          loginMethod: loginMethod,
+        ),
+      );
+    }
   }
 
   void _pressDigit(String d) async {
@@ -329,10 +426,50 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     }
   }
 
+  Future<void> _switchToPasswordSurface() async {
+    if (_busy) return;
+    try {
+      await FastLoginService.setPreferPasswordSurface(true);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _passwordMode = true;
+      _err = false;
+      _pin = '';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _passwordFocus.requestFocus();
+    });
+  }
+
+  Future<void> _switchToBiometricSurface() async {
+    if (_busy) return;
+    try {
+      await FastLoginService.setPreferPasswordSurface(false);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _passwordMode = false;
+      _err = false;
+    });
+    if (_showBio) {
+      await _tryBiometric(fromAuto: true);
+    }
+  }
+
+  Future<void> _startNafathFromLock() async {
+    if (_busy) return;
+    await NafathLoginSheet.show(
+      context,
+      isAr: _isAr,
+      initialNationalId: (_username ?? '').trim(),
+    );
+  }
+
   Future<void> _forgotPasscode() async {
     if (_busy) return;
 
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'تسجيل الدخول بالحساب' : 'Sign in with password'),
@@ -358,7 +495,8 @@ class _FastLoginScreenState extends State<FastLoginScreen>
 
     setState(() => _busy = true);
     try {
-      await FastLoginService.clearAll();
+      await FastLoginService.clearSecretsKeepResume();
+      await FastLoginService.setPreferPasswordSurface(true);
       try {
         final auth = Supabase.instance.client.auth;
         if (auth.currentSession != null) {
@@ -372,36 +510,21 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
   }
 
-  Future<void> _signOutCompletely() async {
+  Future<void> _leaveForAnotherUser() async {
     if (_busy) return;
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_isAr ? 'تسجيل الخروج' : 'Sign out'),
-        content: Text(
-          _isAr
-              ? 'هل تريد الخروج من الحساب بالكامل؟'
-              : 'Sign out completely?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_isAr ? 'خروج' : 'Sign out'),
-          ),
-        ],
-      ),
-    );
-    if (confirm != true || !mounted) return;
-
     setState(() => _busy = true);
     try {
       await FastLoginService.clearAll();
       try {
-        await Supabase.instance.client.auth.signOut();
+        if (Supabase.instance.client.auth.currentSession != null) {
+          await AuthLocalSignOut.signOutLocal(Supabase.instance.client);
+        }
+      } catch (_) {}
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('username');
+        await prefs.remove('rememberDisplayName');
+        await prefs.setBool('rememberMe', false);
       } catch (_) {}
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -414,7 +537,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   Color _sub(bool isLight) =>
       isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
   Color _bg(bool isLight) =>
-      isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
 
   Widget _dot({
     required bool filled,
@@ -471,20 +594,47 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   }
 
   IconData _bioIcon() {
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return Icons.face_rounded;
+    switch (_unlockMode) {
+      case FastUnlockMode.faceOnly:
+        return Icons.face_retouching_natural_rounded;
+      case FastUnlockMode.fingerprintOnly:
+        return Icons.fingerprint_rounded;
+      case FastUnlockMode.biometricOnly:
+      case FastUnlockMode.pinWithBiometric:
+        if (defaultTargetPlatform == TargetPlatform.iOS) {
+          return Icons.face_rounded;
+        }
+        return Icons.fingerprint_rounded;
+      default:
+        return Icons.fingerprint_rounded;
     }
-    return Icons.fingerprint_rounded;
   }
 
-  String _dateLine(String localeName) {
-    final now = DateTime.now();
-    try {
-      final day = DateFormat.EEEE(localeName).format(now);
-      final md = DateFormat.MMMd(localeName).format(now);
-      return '$day، $md';
-    } catch (_) {
-      return DateFormat.yMMMEd().format(now);
+  String _bioPrimaryLabel() {
+    switch (_unlockMode) {
+      case FastUnlockMode.faceOnly:
+        return _isAr ? 'فتح ببصمة الوجه' : 'Unlock with Face ID';
+      case FastUnlockMode.fingerprintOnly:
+        return _isAr ? 'فتح ببصمة الإصبع' : 'Unlock with fingerprint';
+      default:
+        return _isAr ? 'التحقق بالبصمة أو الوجه' : 'Use biometrics';
+    }
+  }
+
+  String _bioHint() {
+    switch (_unlockMode) {
+      case FastUnlockMode.faceOnly:
+        return _isAr
+            ? 'انظر إلى الجهاز — يتم الدخول تلقائياً بعد التعرف'
+            : 'Look at the device — you will sign in automatically';
+      case FastUnlockMode.fingerprintOnly:
+        return _isAr
+            ? 'مرّر إصبعك على المستشعر للدخول مباشرة'
+            : 'Place your finger on the sensor to sign in';
+      default:
+        return _isAr
+            ? 'استخدم البصمة أو الوجه للدخول مباشرة'
+            : 'Use fingerprint or face to sign in';
     }
   }
 
@@ -493,7 +643,8 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     return ListenableBuilder(
       listenable: Listenable.merge([langNotifier, themeModeNotifier]),
       builder: (context, _) {
-        final isLight = themeModeNotifier.value == ThemeMode.light;
+        final isLight =
+            UserAppearanceSession.resolvesLight(themeModeNotifier.value);
         final size = MediaQuery.sizeOf(context);
         final shortest = size.shortestSide;
         final width = size.width;
@@ -510,18 +661,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
         final bg = _bg(isLight);
         final onBg = _onBg(isLight);
         final sub = _sub(isLight);
-        final localeName = _isAr ? 'ar' : 'en';
         final errColor = Theme.of(context).colorScheme.error;
-
-        final statusLine = _pinEnabled
-            ? (_pinLockSec > 0
-                ? (_isAr
-                    ? 'محظور مؤقتاً ($_pinLockSec ث)'
-                    : 'Temporarily locked (${_pinLockSec}s)')
-                : (_isAr ? 'أدخل رمز PIN' : 'Enter PIN'))
-            : (_showBio
-                ? (_isAr ? 'بصمة / وجه' : 'Biometrics')
-                : (_isAr ? 'أدخل كلمة المرور' : 'Enter password'));
 
         final keypad = Directionality(
           textDirection: TextDirection.ltr,
@@ -578,16 +718,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
               );
             },
           ),
-        );
-
-        final identity = SessionIdentityPanel(
-          isAr: _isAr,
-          displayName: _displayName,
-          maskedId: _maskedId,
-          statusLabel: statusLine,
-          accent: _brand,
-          compact: isNarrow,
-          tableOnly: true,
         );
 
         final dotsRow = _pinEnabled
@@ -673,30 +803,19 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                         color: isLight ? Colors.white : const Color(0xFF141722),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: TextField(
+                      child: CapsAwarePasswordField(
                         controller: _passwordCtrl,
                         focusNode: _passwordFocus,
                         obscureText: _obscure,
+                        onToggleObscure: () =>
+                            setState(() => _obscure = !_obscure),
                         enabled: !_busy,
+                        isAr: _isAr,
                         textInputAction: TextInputAction.done,
                         onSubmitted: (_) => _submitPassword(),
-                        inputFormatters: const [
-                          // keep password as typed
-                        ],
                         decoration: InputDecoration(
                           border: InputBorder.none,
-                          hintText:
-                              _isAr ? 'كلمة المرور' : 'Password',
-                          prefixIcon: const Icon(Icons.lock_outline_rounded),
-                          suffixIcon: IconButton(
-                            onPressed: () =>
-                                setState(() => _obscure = !_obscure),
-                            icon: Icon(
-                              _obscure
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
+                          hintText: _isAr ? 'كلمة المرور' : 'Password',
                         ),
                       ),
                     ),
@@ -740,24 +859,65 @@ class _FastLoginScreenState extends State<FastLoginScreen>
 
         final bioOnlyBlock = (!_pinEnabled && _showBio && !_passwordMode)
             ? Padding(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _accentBio,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 14,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(28),
+                        onTap: _busy
+                            ? null
+                            : () => _tryBiometric(fromAuto: false),
+                        child: Container(
+                          width: 120,
+                          height: 120,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _accentBio.withValues(alpha: 0.12),
+                            border: Border.all(
+                              color: _accentBio.withValues(alpha: 0.55),
+                              width: 2.2,
+                            ),
+                          ),
+                          child: Icon(
+                            _bioIcon(),
+                            size: 56,
+                            color: _accentBio,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  onPressed:
-                      _busy ? null : () => _tryBiometric(fromAuto: false),
-                  icon: Icon(_bioIcon()),
-                  label: Text(
-                    _isAr
-                        ? 'التحقق بالبصمة أو الوجه'
-                        : 'Use biometrics',
-                  ),
+                    const SizedBox(height: 14),
+                    Text(
+                      _bioHint(),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: sub,
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _accentBio,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(48),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 14,
+                        ),
+                      ),
+                      onPressed:
+                          _busy ? null : () => _tryBiometric(fromAuto: false),
+                      icon: Icon(_bioIcon()),
+                      label: Text(
+                        _bioPrimaryLabel(),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ],
                 ),
               )
             : const SizedBox.shrink();
@@ -781,127 +941,107 @@ class _FastLoginScreenState extends State<FastLoginScreen>
               behavior: const AqarAuthScrollBehavior(),
               child: Scaffold(
                 backgroundColor: bg,
-                body: SafeArea(
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.fromLTRB(
-                      hPad,
-                      8,
-                      hPad,
-                      20 + bottomInset,
-                    ),
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(maxWidth: maxCard),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                TextButton(
-                                  onPressed: _busy
-                                      ? null
-                                      : () => setAppLang(
-                                            _isAr ? 'en' : 'ar',
-                                          ),
-                                  child: Text(
-                                    _isAr ? 'English' : 'العربية',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: _brand,
-                                    ),
-                                  ),
-                                ),
-                                const Spacer(),
-                                IconButton(
-                                  tooltip: _isAr ? 'خروج' : 'Sign out',
-                                  onPressed:
-                                      _busy ? null : _signOutCompletely,
-                                  icon: const Icon(Icons.logout_rounded),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            BrandingLogoImage(
-                              size: shortest < 360 ? 88 : 112,
-                              fit: BoxFit.contain,
-                            ),
-                            const SizedBox(height: 10),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                _dateLine(localeName),
-                                maxLines: 1,
-                                softWrap: false,
-                                style: TextStyle(
-                                  color: sub,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 12.5,
-                                ),
+                resizeToAvoidBottomInset: false,
+                body: AppKeyboardStableScope(
+                  child: SafeArea(
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 6),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: maxCard),
+                            child: AuthTopChrome(
+                              snapshot: _methodSnapshot.copyWith(
+                                hasKnownUser:
+                                    _displayName.trim().isNotEmpty ||
+                                        (_username ?? '').isNotEmpty,
+                                preferPassword: _passwordMode,
                               ),
+                              busy: _busy,
+                              onSelect: (kind) {
+                                switch (kind) {
+                                  case LoginMethodKind.password:
+                                    unawaited(_switchToPasswordSurface());
+                                    break;
+                                  case LoginMethodKind.nafath:
+                                    unawaited(_startNafathFromLock());
+                                    break;
+                                  case LoginMethodKind.pin:
+                                  case LoginMethodKind.face:
+                                  case LoginMethodKind.fingerprint:
+                                    unawaited(_switchToBiometricSurface());
+                                    break;
+                                  case LoginMethodKind.anotherUser:
+                                    unawaited(_leaveForAnotherUser());
+                                    break;
+                                }
+                              },
                             ),
-                            const SizedBox(height: 16),
-                            identity,
-                            busyBar,
-                            const SizedBox(height: 14),
-                            if (_pinEnabled) ...[
-                              dotsRow,
-                              const SizedBox(height: 12),
-                              keypad,
-                            ] else if (_passwordMode) ...[
-                              passwordBlock,
-                            ] else ...[
-                              bioOnlyBlock,
-                            ],
-                            const SizedBox(height: 4),
-                            if (_pinEnabled || _showBio)
-                              TextButton(
-                                onPressed: _busy ? null : _forgotPasscode,
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _isAr
-                                        ? 'نسيت رمز الدخول؟'
-                                        : 'Forgot passcode?',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: _brand,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            if (_passwordMode && (_username ?? '').isNotEmpty)
-                              TextButton(
-                                onPressed: _busy
-                                    ? null
-                                    : () {
-                                        setState(() {
-                                          _passwordMode = false;
-                                          // إذا لا يوجد قفل، العودة لكلمة المرور فقط
-                                          if (!_pinEnabled && !_showBio) {
-                                            _passwordMode = true;
-                                          }
-                                        });
-                                        _forgotPasscode();
-                                      },
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    _isAr
-                                        ? 'حساب آخر / استعادة'
-                                        : 'Another account / recover',
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                      color: sub,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
+                          ),
                         ),
-                      ),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: EdgeInsets.fromLTRB(
+                              hPad,
+                              0,
+                              hPad,
+                              20 + bottomInset,
+                            ),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(maxWidth: maxCard),
+                                child: Column(
+                                  children: [
+                                    const LoginBrandHero(),
+                                    const SizedBox(height: 12),
+                                    LoginKnownUserHero(
+                                      isAr: _isAr,
+                                      displayName: _displayName,
+                                      accent: _brand,
+                                      compact: isNarrow,
+                                      showPasswordPrompt: _passwordMode,
+                                    ),
+                                    busyBar,
+                                    const SizedBox(height: 14),
+                                    if (_passwordMode) ...[
+                                      passwordBlock,
+                                    ] else if (_pinEnabled) ...[
+                                      dotsRow,
+                                      const SizedBox(height: 12),
+                                      keypad,
+                                    ] else ...[
+                                      bioOnlyBlock,
+                                    ],
+                                    const SizedBox(height: 4),
+                                    if (!_passwordMode &&
+                                        (_pinEnabled || _showBio))
+                                      TextButton(
+                                        onPressed:
+                                            _busy ? null : _forgotPasscode,
+                                        child: FittedBox(
+                                          fit: BoxFit.scaleDown,
+                                          child: Text(
+                                            _isAr
+                                                ? 'نسيت رمز الدخول؟'
+                                                : 'Forgot passcode?',
+                                            maxLines: 1,
+                                            softWrap: false,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w800,
+                                              color: _brand,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

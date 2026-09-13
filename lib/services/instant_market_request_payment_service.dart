@@ -1,12 +1,34 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// دفع «طلب فوري» — 30 ر.س لكل طلب.
+import '../core/payment/platform_fee_catalog.dart';
+
+/// دفع «طلب فوري» — السعر من كتالوج الخادم لا من ثابت في الواجهة.
 class InstantMarketRequestPaymentService {
   InstantMarketRequestPaymentService(this._sb);
 
   final SupabaseClient _sb;
 
-  static const double priceSar = 30.0;
+  static double priceFromCheckout(Map<String, dynamic> checkout) {
+    final raw = checkout['amount_sar'];
+    if (raw is num && raw.toDouble() > 0) return raw.toDouble();
+    return double.tryParse('${raw ?? ''}') ?? 0;
+  }
+
+  Future<double> catalogAmountSar() async {
+    final cached = PlatformFeeCatalog.instance
+        ?.amountOf(PlatformFeeCatalog.instantMarketRequest);
+    if (cached != null && cached > 0) return cached;
+    try {
+      final row = await _sb
+          .from('platform_fee_catalog')
+          .select('amount_sar')
+          .eq('fee_key', PlatformFeeCatalog.instantMarketRequest)
+          .maybeSingle();
+      final raw = row?['amount_sar'];
+      if (raw is num && raw.toDouble() > 0) return raw.toDouble();
+    } catch (_) {}
+    return 0;
+  }
 
   Future<Map<String, dynamic>> createCheckout() async {
     try {
@@ -41,7 +63,7 @@ class InstantMarketRequestPaymentService {
       final rows = await _sb
           .from('market_request_instant_credits')
           .select(
-            'id, amount_sar, status, created_at, activated_at, consumed_at, refunded_at, market_request_id',
+            'id, amount_sar, status, created_at, activated_at, consumed_at, refunded_at, market_request_id, billing_transaction_id',
           )
           .order('created_at', ascending: false)
           .limit(limit);
@@ -95,13 +117,14 @@ class InstantMarketRequestPaymentService {
 
   Future<Map<String, dynamic>> refundUnusedCredit(String creditId) async {
     try {
-      final res = await _sb.rpc(
-        'refund_unused_instant_market_request_credit',
-        params: {'p_credit_id': creditId},
+      final res = await _sb.functions.invoke(
+        'moyasar-refund',
+        body: {'credit_id': creditId},
       );
-      if (res is Map) {
+      final data = res.data;
+      if (data is Map) {
         return Map<String, dynamic>.from(
-          res.map((k, v) => MapEntry(k.toString(), v)),
+          data.map((k, v) => MapEntry(k.toString(), v)),
         );
       }
       return {'ok': false, 'error': 'unexpected_response'};

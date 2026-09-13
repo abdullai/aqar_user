@@ -7,17 +7,9 @@
     "supabase/functions/**/*.ts": "typescript",
     "**/supabase/**/*.sql": "postgres"
   },
-  "C_Cpp.errorSquiggles": "disabled",
-  "C_Cpp.intelliSenseEngine": "disabled",
-  "C_Cpp.files.exclude": {
-    "**/windows/**": true,
-    "**/linux/**": true,
-    "**/macos/**": true
-  },
-  "files.exclude": {},
-  "clangd.enable": false,
-  "clangd.arguments": [
-    "--compile-commands-dir=${workspaceFolder}/windows"
-  ],
-  "clangd.fallbackFlags": []
+  "editor.formatOnSave": true,
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "Dart-Code.dart-code"
+  }
 }

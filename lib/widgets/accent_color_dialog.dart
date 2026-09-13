@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_accent.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../core/config/app_config.dart';
 import '../l10n/app_localizations.dart';
+import 'app_page_close_button.dart';
 
 /// حوار اختيار لون التميّز — لا يُغلق إلا بزر الإغلاق (X).
 /// اختيار اللون يطبّق فوراً على حساب المستخدم الحالي دون إغلاق الحوار.
@@ -17,7 +19,7 @@ Future<void> showAccentColorFirstRunDialog(BuildContext context) async {
 
   if (!context.mounted) return;
 
-  await showDialog<void>(
+  await showAppDialog<void>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) {
@@ -94,10 +96,9 @@ class _AccentColorPickerDialogState extends State<_AccentColorPickerDialog> {
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
-            IconButton(
+            AppPageCloseButton(
               tooltip: widget.closeLabel,
               onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.close_rounded),
             ),
           ],
         ),

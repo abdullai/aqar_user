@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
-import '../services/communication_hub_service.dart';
 import '../services/marketing_flow_service.dart';
 import '../widgets/app_page_close_button.dart';
 import 'chat_page.dart';
@@ -36,11 +35,12 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
   late final TabController _tabCtrl;
   int _inboxUnread = 0;
   int _chatUnread = 0;
+  int _campaignUnread = 0;
 
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 2, vsync: this)
+    _tabCtrl = TabController(length: 3, vsync: this)
       ..addListener(() {
         if (!mounted) return;
         if (!_tabCtrl.indexIsChanging) setState(() {});
@@ -63,11 +63,23 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
 
   Future<void> _refreshInboxUnreadBadge() async {
     try {
-      final n = await MarketingFlowService(Supabase.instance.client)
-          .unreadInAppNotificationCount();
-      if (mounted) setState(() => _inboxUnread = n);
+      final rows = await MarketingFlowService(Supabase.instance.client)
+          .myInAppNotificationsInbox();
+      if (mounted) {
+        setState(() {
+          _inboxUnread =
+              rows.where(MarketingFlowService.countsForGeneralInboxBadge).length;
+          _campaignUnread =
+              rows.where(MarketingFlowService.countsForCampaignInboxBadge).length;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _inboxUnread = 0);
+      if (mounted) {
+        setState(() {
+          _inboxUnread = 0;
+          _campaignUnread = 0;
+        });
+      }
     }
   }
 
@@ -89,38 +101,6 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
     } catch (_) {
       if (mounted) setState(() => _chatUnread = 0);
     }
-  }
-
-  Future<void> _markEverythingRead() async {
-    await CommunicationHubService.markEverythingRead(Supabase.instance.client);
-    if (mounted) await _refreshBadges();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          widget.isAr
-              ? 'تمت قراءة كل الإشعارات والدردشات'
-              : 'All notifications and chats marked read',
-        ),
-      ),
-    );
-  }
-
-  Widget _globalActionsRow() {
-    return Padding(
-      padding: const EdgeInsetsDirectional.fromSTEB(8, 4, 8, 0),
-      child: Align(
-        alignment: AlignmentDirectional.centerEnd,
-        child: TextButton.icon(
-          onPressed: _markEverythingRead,
-          icon: const Icon(Icons.mark_email_read_outlined, size: 18),
-          label: Text(
-            widget.isAr ? 'قراءة الكل' : 'Mark all read',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _outerTabLabel(
@@ -170,6 +150,8 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
       elevation: 0,
       child: TabBar(
         controller: _tabCtrl,
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
         tabs: [
           _outerTabLabel(
             l10n.communicationHubNotificationsTab,
@@ -179,6 +161,11 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
             l10n.communicationHubChatsTab,
             showUnreadBadge: true,
             badgeCount: _chatUnread,
+          ),
+          _outerTabLabel(
+            l10n.communicationHubCampaignsTab,
+            showUnreadBadge: true,
+            badgeCount: _campaignUnread,
           ),
         ],
       ),
@@ -191,7 +178,7 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
       return AnimatedBuilder(
         animation: _tabCtrl,
         builder: (context, _) {
-          final i = _tabCtrl.index.clamp(0, 1);
+          final i = _tabCtrl.index.clamp(0, 2);
           if (i == 0) {
             return KeyedSubtree(
               key: const ValueKey('hub-inbox'),
@@ -202,11 +189,23 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
               ),
             );
           }
+          if (i == 2) {
+            return KeyedSubtree(
+              key: const ValueKey('hub-campaigns'),
+              child: InAppNotificationsPage(
+                lang: widget.lang,
+                embedMode: true,
+                campaignsOnly: true,
+                onInboxSurfaceChanged: _refreshBadges,
+              ),
+            );
+          }
           return KeyedSubtree(
             key: const ValueKey('hub-chats'),
             child: ChatPage(
               isAr: widget.isAr,
               embedInParentDashboardShell: true,
+              onInboxSurfaceChanged: _refreshBadges,
             ),
           );
         },
@@ -223,6 +222,13 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
         ChatPage(
           isAr: widget.isAr,
           embedInParentDashboardShell: true,
+          onInboxSurfaceChanged: _refreshBadges,
+        ),
+        InAppNotificationsPage(
+          lang: widget.lang,
+          embedMode: true,
+          campaignsOnly: true,
+          onInboxSurfaceChanged: _refreshBadges,
         ),
       ],
     );
@@ -242,7 +248,6 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _tabBarMaterial(context),
-              _globalActionsRow(),
               Expanded(child: _hubBody(context)),
             ],
           ),
@@ -259,21 +264,13 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
                   Navigator.canPop(context))
               ? AppPageCloseButton(
                   isArabic: widget.isAr,
-                  onPressed: () => Navigator.maybePop(context),
                 )
               : null,
           title: Text(l10n.communicationHubTitle),
-          actions: [
-            TextButton(
-              onPressed: _markEverythingRead,
-              child: Text(
-                widget.isAr ? 'قراءة الكل' : 'Mark all read',
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
           bottom: TabBar(
             controller: _tabCtrl,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
               _outerTabLabel(
                 l10n.communicationHubNotificationsTab,
@@ -283,6 +280,11 @@ class _CommunicationHubPageState extends State<CommunicationHubPage>
                 l10n.communicationHubChatsTab,
                 showUnreadBadge: true,
                 badgeCount: _chatUnread,
+              ),
+              _outerTabLabel(
+                l10n.communicationHubCampaignsTab,
+                showUnreadBadge: true,
+                badgeCount: _campaignUnread,
               ),
             ],
           ),

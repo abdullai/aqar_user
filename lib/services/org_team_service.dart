@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/utils/date_helper.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import 'auth_service.dart';
 
@@ -831,6 +832,132 @@ class OrgTeamService {
     }
   }
 
+  /// إعلانات وطلبات كل أعضاء المنشأة — RPC أولاً ثم استعلام مباشر إن لم يُنشر بعد.
+  Future<OrgTeamInventorySnapshot> fetchTeamInventory(String orgId) async {
+    final members = await listMembers(orgId);
+    final names = <String, String>{};
+    for (final m in members) {
+      final id = '${m['user_id'] ?? ''}'.trim();
+      if (id.isEmpty) continue;
+      names[id] = _memberDisplayName(m);
+    }
+    try {
+      final raw = await _sb.rpc(
+        'org_team_inventory',
+        params: {'p_org_id': orgId},
+      );
+      if (raw is Map && raw['ok'] == true) {
+        return OrgTeamInventorySnapshot(
+          listings: _asMapList(raw['listings']),
+          marketingRequests: _asMapList(raw['marketing_requests']),
+          marketRequests: _asMapList(raw['market_requests']),
+          memberNames: names,
+        );
+      }
+    } catch (_) {}
+    return _fetchTeamInventoryFallback(names);
+  }
+
+  Future<OrgTeamInventorySnapshot> _fetchTeamInventoryFallback(
+    Map<String, String> names,
+  ) async {
+    final ids = names.keys.toList();
+    if (ids.isEmpty) {
+      return OrgTeamInventorySnapshot(memberNames: names);
+    }
+    var listings = <Map<String, dynamic>>[];
+    var marketing = <Map<String, dynamic>>[];
+    var market = <Map<String, dynamic>>[];
+    try {
+      final rows = await _sb
+          .from('properties')
+          .select('id,title,status,views,price,created_at,type,owner_id,city')
+          .inFilter('owner_id', ids)
+          .neq('status', 'deleted')
+          .order('created_at', ascending: false)
+          .limit(200);
+      listings = _asMapList(rows)
+          .map(
+            (r) => {
+              ...r,
+              'kind': 'listing',
+              'member_user_id': r['owner_id'],
+              'type_key': r['type'],
+            },
+          )
+          .toList();
+    } catch (_) {}
+    try {
+      final rows = await _sb
+          .from('listing_requests')
+          .select(
+            'id,title,status,city,price,created_at,owner_id,workflow_stage',
+          )
+          .inFilter('owner_id', ids)
+          .order('created_at', ascending: false)
+          .limit(200);
+      marketing = _asMapList(rows)
+          .map(
+            (r) => {
+              ...r,
+              'kind': 'marketing_request',
+              'member_user_id': r['owner_id'],
+            },
+          )
+          .toList();
+    } catch (_) {}
+    try {
+      final rows = await _sb
+          .from('market_property_requests')
+          .select(
+            'id,title,status,city,created_at,requester_id,property_type,purpose',
+          )
+          .inFilter('requester_id', ids)
+          .order('created_at', ascending: false)
+          .limit(200);
+      market = _asMapList(rows)
+          .map(
+            (r) => {
+              ...r,
+              'kind': 'market_request',
+              'member_user_id': r['requester_id'],
+              'type_key': r['property_type'],
+            },
+          )
+          .toList();
+    } catch (_) {}
+    return OrgTeamInventorySnapshot(
+      listings: listings,
+      marketingRequests: marketing,
+      marketRequests: market,
+      memberNames: names,
+    );
+  }
+
+  static List<Map<String, dynamic>> _asMapList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  }
+
+  static String _memberDisplayName(Map<String, dynamic> member) {
+    final prof =
+        (member['profile'] as Map?)?.cast<String, dynamic>() ??
+        <String, dynamic>{};
+    for (final k in const [
+      'full_name_ar',
+      'full_name_en',
+      'full_name',
+      'username',
+    ]) {
+      final v = '${prof[k] ?? ''}'.trim();
+      if (v.isNotEmpty) return v;
+    }
+    return '${member['user_id'] ?? ''}'.trim();
+  }
+
   /// Sum of listings/ads created by each member (best-effort; depends on RLS).
   Future<Map<String, Map<String, int>>> fetchOrgMemberContribution(
     String orgId,
@@ -891,7 +1018,11 @@ class OrgTeamService {
         final uid = '${m['actor_user_id'] ?? ''}';
         if (uid.isEmpty || out.containsKey(uid)) continue;
         final a = '${m['action'] ?? ''}';
-        final t = '${m['created_at'] ?? ''}';
+        final t = DateHelper.fmtCivilDateTimeRaw(
+          m['created_at'],
+          isAr: true,
+          fallback: '${m['created_at'] ?? ''}',
+        );
         out[uid] = a.isEmpty ? t : '$a · $t';
       }
     } catch (_) {}
@@ -961,5 +1092,19 @@ class OrgTeamService {
     }
     return {'ok': false, 'error': 'bad_response'};
   }
+}
+
+class OrgTeamInventorySnapshot {
+  const OrgTeamInventorySnapshot({
+    this.listings = const [],
+    this.marketingRequests = const [],
+    this.marketRequests = const [],
+    this.memberNames = const {},
+  });
+
+  final List<Map<String, dynamic>> listings;
+  final List<Map<String, dynamic>> marketingRequests;
+  final List<Map<String, dynamic>> marketRequests;
+  final Map<String, String> memberNames;
 }
 

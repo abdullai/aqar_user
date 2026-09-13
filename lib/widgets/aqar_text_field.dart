@@ -2,23 +2,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_outside_unfocus.dart';
+import '../core/haptics/app_haptics.dart';
+import '../core/input/aqar_editable_defaults.dart';
+import '../core/input/aqar_field_keyboard.dart';
 import '../core/input/locale_text_input_guard.dart';
 import '../core/platform/viewport_scroll_policy.dart';
 import 'aqar_input_helpers.dart';
 
-/// هامش تمرير فوق لوحة المفاتيح — متوازن لتجنّب رعشة التحديد على ويب الجوال.
+/// هامش سفلي يكفي لإبقاء الحقل فوق الكيبورد مع بقاء التمرير في الخلفية.
 EdgeInsets aqarFieldScrollPadding(BuildContext context) {
-  final route = ModalRoute.of(context);
-  if (route is PopupRoute) {
-    // الحوارات/الشيتات لديها غلاف خاص لـ viewInsets — لا نضاعف الهامش.
-    return const EdgeInsets.fromLTRB(12, 12, 12, 28);
-  }
-  final inset = MediaQuery.viewInsetsOf(context).bottom;
-  final compact = ViewportScrollPolicy.isCompactTouchLike(context);
-  final base = compact ? (kIsWeb ? 160.0 : 180.0) : 100.0;
-  final bottom = (inset > 0 ? inset + (compact ? 72.0 : 56.0) : base)
-      .clamp(80.0, 320.0);
-  return EdgeInsets.fromLTRB(16, 16, 16, bottom);
+  final extra = AppKeyboardInset.scrollContentBottomOf(context);
+  final bottom = extra > 0 ? (extra * 0.35).clamp(24.0, 80.0) : 10.0;
+  return EdgeInsets.fromLTRB(8, 10, 8, bottom);
 }
 
 /// تحديد كامل للنص عند النقر المزدوج — بدون اعتراض إيماءات التحديد الجزئي.
@@ -103,34 +100,50 @@ class AqarTextField extends StatelessWidget {
   Widget build(BuildContext context) {
     void handleTap() {
       onTap?.call();
-      final node = focusNode;
-      if (node != null) {
-        if (!node.hasFocus) node.requestFocus();
-      }
     }
 
     final mergedDecoration = decoration != null
         ? aqarMergeInputDecoration(context, decoration)
         : decoration;
-    final formatters = aqarLocaleInputFormatters(
-      context,
+    final compact = ViewportScrollPolicy.isCompactTouchLike(context);
+    final multiline = AqarFieldKeyboard.isMultilineField(
+      maxLines: maxLines,
+      minLines: minLines,
+      obscureText: obscureText,
+    );
+    final resolvedKeyboard = AqarFieldKeyboard.keyboardForField(
+      requested: keyboardType,
+      compactTouch: compact,
+      multiline: multiline,
+    );
+    final resolvedAction = AqarFieldKeyboard.actionForField(
+      requested: textInputAction,
+      multiline: multiline,
+    );
+    final formatters = AqarFieldKeyboard.mergeNumericFormatters(
+      keyboardType: resolvedKeyboard,
+      existing: aqarLocaleInputFormatters(
+        context,
+        localeScript: localeScript,
+        existing: inputFormatters,
+      ),
+    );
+    final numeric = AqarFieldKeyboard.isNumericType(resolvedKeyboard);
+    final resolvedDirection = AqarEditableDefaults.directionFor(
+      obscureText: obscureText,
+      keyboardType: resolvedKeyboard,
+      requested: textDirection,
       localeScript: localeScript,
-      existing: inputFormatters,
     );
 
-    final baseStyle = Theme.of(context).textTheme.bodyLarge;
-    final effectiveStyle = (style ?? baseStyle)?.copyWith(
-      height: style?.height ?? 1.25,
-      fontSize: style?.fontSize ?? baseStyle?.fontSize ?? 16,
-      fontFamily: style?.fontFamily ?? 'Cairo',
-    );
+    final effectiveStyle = AqarEditableDefaults.styleFor(context, style);
 
     final field = TextField(
       controller: controller,
       focusNode: focusNode,
       decoration: mergedDecoration,
-      keyboardType: keyboardType,
-      textInputAction: textInputAction,
+      keyboardType: resolvedKeyboard,
+      textInputAction: resolvedAction,
       obscureText: obscureText,
       onSubmitted: onSubmitted,
       onTap: handleTap,
@@ -143,21 +156,46 @@ class AqarTextField extends StatelessWidget {
       maxLength: maxLength,
       inputFormatters: formatters,
       style: effectiveStyle,
+      strutStyle: AqarEditableDefaults.strutFor(effectiveStyle),
       textAlign: textAlign,
-      textAlignVertical: TextAlignVertical.center,
-      textDirection: textDirection,
+      textAlignVertical:
+          multiline ? TextAlignVertical.top : TextAlignVertical.center,
+      textDirection: resolvedDirection,
       autofillHints: autofillHints,
-      enableSuggestions: enableSuggestions,
-      autocorrect: autocorrect,
+      enableSuggestions: numeric || obscureText ? false : enableSuggestions,
+      autocorrect: numeric || obscureText ? false : autocorrect,
       cursorColor: cursorColor,
+      cursorHeight: AqarEditableDefaults.cursorHeightFor(effectiveStyle),
+      cursorRadius: const Radius.circular(1.2),
+      cursorOpacityAnimates: !kIsWeb,
       showCursor: showCursor,
       buildCounter: buildCounter,
       textCapitalization: textCapitalization,
-      onTapOutside: onTapOutside,
+      onTapOutside: onTapOutside ??
+          (_) => AppOutsideUnfocus.unfocusEditable(),
       enableInteractiveSelection: enableInteractiveSelection,
-      // السماح بتحديد النظام الأصلي (سحب/نقرتين) بلا GestureDetector يخطف الإيماءة.
       mouseCursor: SystemMouseCursors.text,
       scrollPadding: aqarFieldScrollPadding(context),
+      cursorWidth: AqarEditableDefaults.cursorWidth(context),
+      selectionHeightStyle: AqarEditableDefaults.heightStyle,
+      selectionWidthStyle: AqarEditableDefaults.widthStyle,
+      magnifierConfiguration: AqarEditableDefaults.magnifier(),
+      selectionControls: AqarEditableDefaults.selectionControls(),
+      smartDashesType: AqarEditableDefaults.dashes(
+        obscureText: obscureText,
+        numeric: numeric,
+      ),
+      smartQuotesType: AqarEditableDefaults.quotes(
+        obscureText: obscureText,
+        numeric: numeric,
+      ),
+      contextMenuBuilder: AqarEditableDefaults.contextMenu,
+      onEditingComplete: resolvedAction == TextInputAction.next
+          ? () {
+              AppHaptics.selection();
+              FocusScope.of(context).nextFocus();
+            }
+          : null,
     );
 
     return field;
@@ -206,26 +244,42 @@ class AqarTextFormField extends FormField<String> {
               ctx,
               decoration,
             );
-            final formatters = aqarLocaleInputFormatters(
-              ctx,
+            final compact = ViewportScrollPolicy.isCompactTouchLike(ctx);
+            final multiline = AqarFieldKeyboard.isMultilineField(
+              maxLines: maxLines,
+              minLines: minLines,
+              obscureText: obscureText,
+            );
+            final resolvedKeyboard = AqarFieldKeyboard.keyboardForField(
+              requested: keyboardType,
+              compactTouch: compact,
+              multiline: multiline,
+            );
+            final resolvedAction = AqarFieldKeyboard.actionForField(
+              requested: textInputAction,
+              multiline: multiline,
+            );
+            final formatters = AqarFieldKeyboard.mergeNumericFormatters(
+              keyboardType: resolvedKeyboard,
+              existing: aqarLocaleInputFormatters(
+                ctx,
+                localeScript: localeScript,
+                existing: inputFormatters,
+              ),
+            );
+            final numeric = AqarFieldKeyboard.isNumericType(resolvedKeyboard);
+            final resolvedDirection = AqarEditableDefaults.directionFor(
+              obscureText: obscureText,
+              keyboardType: resolvedKeyboard,
+              requested: textDirection,
               localeScript: localeScript,
-              existing: inputFormatters,
             );
 
             void handleTap() {
               onTap?.call();
-              final node = focusNode;
-              if (node != null) {
-                if (!node.hasFocus) node.requestFocus();
-              }
             }
 
-            final baseStyle = Theme.of(ctx).textTheme.bodyLarge;
-            final effectiveStyle = (style ?? baseStyle)?.copyWith(
-              height: style?.height ?? 1.25,
-              fontSize: style?.fontSize ?? baseStyle?.fontSize ?? 16,
-              fontFamily: style?.fontFamily ?? 'Cairo',
-            );
+            final effectiveStyle = AqarEditableDefaults.styleFor(ctx, style);
 
             return TextField(
               controller: state._effectiveController,
@@ -233,8 +287,8 @@ class AqarTextFormField extends FormField<String> {
               decoration: effectiveDecoration.copyWith(
                 errorText: field.errorText,
               ),
-              keyboardType: keyboardType,
-              textInputAction: textInputAction,
+              keyboardType: resolvedKeyboard,
+              textInputAction: resolvedAction,
               obscureText: obscureText,
               onSubmitted: onFieldSubmitted,
               onTap: handleTap,
@@ -250,16 +304,43 @@ class AqarTextFormField extends FormField<String> {
               maxLength: maxLength,
               inputFormatters: formatters,
               style: effectiveStyle,
+              strutStyle: AqarEditableDefaults.strutFor(effectiveStyle),
               textAlign: textAlign,
-              textAlignVertical: TextAlignVertical.center,
-              textDirection: textDirection,
+              textAlignVertical:
+                  multiline ? TextAlignVertical.top : TextAlignVertical.center,
+              textDirection: resolvedDirection,
               autofillHints: autofillHints,
-              enableSuggestions: enableSuggestions,
-              autocorrect: autocorrect,
+              enableSuggestions:
+                  numeric || obscureText ? false : enableSuggestions,
+              autocorrect: numeric || obscureText ? false : autocorrect,
               textCapitalization: textCapitalization,
               enableInteractiveSelection: true,
               mouseCursor: SystemMouseCursors.text,
               scrollPadding: aqarFieldScrollPadding(field.context),
+              cursorWidth: AqarEditableDefaults.cursorWidth(ctx),
+              cursorHeight: AqarEditableDefaults.cursorHeightFor(effectiveStyle),
+              cursorRadius: const Radius.circular(1.2),
+              cursorOpacityAnimates: !kIsWeb,
+              selectionHeightStyle: AqarEditableDefaults.heightStyle,
+              selectionWidthStyle: AqarEditableDefaults.widthStyle,
+              magnifierConfiguration: AqarEditableDefaults.magnifier(),
+              selectionControls: AqarEditableDefaults.selectionControls(),
+              smartDashesType: AqarEditableDefaults.dashes(
+                obscureText: obscureText,
+                numeric: numeric,
+              ),
+              smartQuotesType: AqarEditableDefaults.quotes(
+                obscureText: obscureText,
+                numeric: numeric,
+              ),
+              contextMenuBuilder: AqarEditableDefaults.contextMenu,
+              onTapOutside: (_) => AppOutsideUnfocus.unfocusEditable(),
+              onEditingComplete: resolvedAction == TextInputAction.next
+                  ? () {
+                      AppHaptics.selection();
+                      FocusScope.of(ctx).nextFocus();
+                    }
+                  : null,
             );
           },
         );

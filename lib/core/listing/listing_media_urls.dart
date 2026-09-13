@@ -21,6 +21,17 @@ abstract final class ListingMediaUrls {
     '.mpg',
   ];
 
+  static const _imageExt = [
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+    '.gif',
+    '.svg',
+    '.bmp',
+    '.heic',
+  ];
+
   static String get defaultThumbAsset => AppBranding.listingPlaceholderAsset;
 
   static bool isSmartDefaultCoverPath(String? path) {
@@ -36,6 +47,76 @@ abstract final class ListingMediaUrls {
     if (_videoExt.any(noQuery.endsWith)) return true;
     if (raw.contains('video/') || raw == 'video') return true;
     return false;
+  }
+
+  static bool _pathLooksLikeImage(String raw) {
+    final noQuery = raw.trim().toLowerCase().split('?').first.split('#').first;
+    return _imageExt.any(noQuery.endsWith);
+  }
+
+  static bool looksLikeEmbeddableVideoHost(String? raw) {
+    final u = Uri.tryParse((raw ?? '').trim());
+    if (u == null || u.host.isEmpty) return false;
+    final h = u.host.toLowerCase();
+    return h.contains('youtube.com') ||
+        h.contains('youtu.be') ||
+        h.contains('youtube-nocookie.com') ||
+        h.contains('vimeo.com') ||
+        h.contains('player.vimeo.com') ||
+        h.contains('loom.com');
+  }
+
+  static bool _looksLikeStoredVideoObject(String raw) {
+    final l = raw.toLowerCase();
+    return l.contains('property-video') ||
+        l.contains('/videos/') ||
+        l.contains('video/upload') ||
+        l.contains('/video/') ||
+        l.contains('feed-videos');
+  }
+
+  /// مرجع فيديو قابل للتشغيل فعلياً — ليس صورة أو كلمة «video» أو غلاف ذكي.
+  static bool looksLikePlayableVideoRef(String? raw) {
+    final v = (raw ?? '').trim();
+    if (v.isEmpty || isSmartDefaultCoverPath(v)) return false;
+    if (v.toLowerCase() == 'video') return false;
+    if (_pathLooksLikeImage(v)) return false;
+    if (looksLikeVideoPath(v)) return true;
+    if (looksLikeEmbeddableVideoHost(v)) return true;
+    if (_looksLikeStoredVideoObject(v)) return true;
+    final u = Uri.tryParse(v);
+    if (u != null &&
+        (u.isScheme('http') || u.isScheme('https')) &&
+        u.host.isNotEmpty) {
+      // رابط عام بلا امتداد فيديو: لا نُظهر تبويب الوسائط — غالباً صورة/موقع.
+      return false;
+    }
+    return false;
+  }
+
+  static bool isPlayableHttpUrl(String? raw) {
+    final u = Uri.tryParse((raw ?? '').trim());
+    if (u == null || u.host.isEmpty) return false;
+    return u.isScheme('http') || u.isScheme('https');
+  }
+
+  /// رابط جولة افتراضية قابل للفتح — ليس صورة ولا فيديو ولا أي موقع عشوائي.
+  static bool looksLikePlayableTourUrl(String? raw) {
+    final v = (raw ?? '').trim();
+    if (!isPlayableHttpUrl(v) || _pathLooksLikeImage(v)) return false;
+    if (looksLikeVideoPath(v)) return false;
+    if (looksLikeEmbeddableVideoHost(v)) return true;
+    final l = v.toLowerCase();
+    return l.contains('matterport') ||
+        l.contains('kuula') ||
+        l.contains('roundme') ||
+        l.contains('cloudpano') ||
+        l.contains('pano') ||
+        l.contains('360') ||
+        l.contains('/tour') ||
+        l.contains('virtualtour') ||
+        l.contains('virtual-tour') ||
+        l.contains('3d');
   }
 
   static bool rowLooksLikeVideo(Map<String, dynamic> row) {
@@ -63,7 +144,8 @@ abstract final class ListingMediaUrls {
 
   static bool propertyHasRealMedia(Property p) =>
       imagePathsExcludingVideo(p.images).isNotEmpty ||
-      (p.videoUrl ?? '').trim().isNotEmpty;
+      looksLikePlayableVideoRef(p.videoUrl) ||
+      looksLikePlayableTourUrl(p.virtualTourUrl);
 
   /// غلاف ذكي فقط إن لم توجد صورة ولا فيديو حقيقي — لا يُخفى الإعلام عند العلم وحده.
   static bool propertyUsesSmartDefaultCover(Property p) =>
@@ -159,8 +241,19 @@ abstract final class ListingMediaUrls {
     SupabaseClient sb,
   ) {
     final path = (r.coverImageStoragePath ?? '').trim();
-    if (path.isEmpty || isSmartDefaultCoverPath(path)) return null;
-    return storagePublicUrl(sb, path);
+    if (path.isNotEmpty && !isSmartDefaultCoverPath(path)) {
+      return storagePublicUrl(sb, path);
+    }
+    final fromDetails = imagePathsFromPayload(r.details);
+    for (final raw in fromDetails) {
+      final s = raw.trim();
+      if (s.isEmpty || isSmartDefaultCoverPath(s) || looksLikeVideoPath(s)) {
+        continue;
+      }
+      if (s.startsWith('http://') || s.startsWith('https://')) return s;
+      return storagePublicUrl(sb, s);
+    }
+    return null;
   }
 
   static String propertySharePreviewHttpUrl(Property p, SupabaseClient sb) =>
@@ -226,6 +319,13 @@ abstract final class ListingMediaUrls {
 
   static List<String> imagePathsFromPayload(Map<String, dynamic>? payload) {
     if (payload == null || payload.isEmpty) return const [];
+    final flat = Map<String, dynamic>.from(payload);
+    final lg = payload['listing_guidance'];
+    if (lg is Map) {
+      for (final e in Map<String, dynamic>.from(lg).entries) {
+        flat.putIfAbsent(e.key, () => e.value);
+      }
+    }
     for (final k in const [
       'request_image_paths',
       'image_paths',
@@ -236,7 +336,7 @@ abstract final class ListingMediaUrls {
       'property_images',
       'preview_image_urls',
     ]) {
-      final fromKey = _pathsFromDynamic(payload[k]);
+      final fromKey = _pathsFromDynamic(flat[k]);
       if (fromKey.isNotEmpty) return fromKey;
     }
     for (final k in const [
@@ -251,7 +351,7 @@ abstract final class ListingMediaUrls {
       'primary_image',
       'primaryImage',
     ]) {
-      final s = (payload[k] ?? '').toString().trim();
+      final s = (flat[k] ?? '').toString().trim();
       if (s.isEmpty || isSmartDefaultCoverPath(s) || looksLikeVideoPath(s)) {
         continue;
       }
@@ -262,13 +362,36 @@ abstract final class ListingMediaUrls {
 
   static String? videoPathFromPayload(Map<String, dynamic>? payload) {
     if (payload == null) return null;
+    final flat = Map<String, dynamic>.from(payload);
+    final lg = payload['listing_guidance'];
+    if (lg is Map) {
+      for (final e in Map<String, dynamic>.from(lg).entries) {
+        flat.putIfAbsent(e.key, () => e.value);
+      }
+    }
     for (final k in const [
       'request_video_path',
       'video_url',
       'video_path',
       'video',
     ]) {
-      final s = (payload[k] ?? '').toString().trim();
+      final s = (flat[k] ?? '').toString().trim();
+      if (s.isNotEmpty) return s;
+    }
+    return null;
+  }
+
+  static String? virtualTourFromPayload(Map<String, dynamic>? payload) {
+    if (payload == null) return null;
+    final flat = Map<String, dynamic>.from(payload);
+    final lg = payload['listing_guidance'];
+    if (lg is Map) {
+      for (final e in Map<String, dynamic>.from(lg).entries) {
+        flat.putIfAbsent(e.key, () => e.value);
+      }
+    }
+    for (final k in const ['virtual_tour_url', 'tour_url', 'virtualTourUrl']) {
+      final s = (flat[k] ?? '').toString().trim();
       if (s.isNotEmpty) return s;
     }
     return null;

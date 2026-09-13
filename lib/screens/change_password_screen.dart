@@ -1,13 +1,12 @@
 ﻿// lib/screens/change_password_screen.dart
 import 'package:flutter/material.dart';
-import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/input/password_arabic_script_guard.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier, themeModeNotifier, suspendAutoLock;
 import '../widgets/app_logo_loading.dart';
+import '../widgets/caps_aware_password_field.dart';
 import '../widgets/field_group_frame.dart';
 
 /// تغيير كلمة المرور للمستخدم المسجّل دخوله (بدون رابط استعادة).
@@ -43,7 +42,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   bool get _isLight => themeModeNotifier.value == ThemeMode.light;
 
   Color get _pageBg =>
-      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
   Color get _fieldFill => _isLight ? Colors.white : const Color(0xFF0F1425);
   Color get _fieldBorder =>
       _isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A);
@@ -178,11 +177,9 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
     }
   }
 
-  InputDecoration _dec(String hint, {Widget? suffix}) {
+  InputDecoration _dec(String hint) {
     return InputDecoration(
       hintText: hint,
-      prefixIcon: Icon(Icons.lock_outline, color: _iconColor),
-      suffixIcon: suffix,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
@@ -226,82 +223,53 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        AqarTextField(
+                        CapsAwarePasswordField(
                           controller: _current,
                           obscureText: _obscure1,
+                          onToggleObscure: () =>
+                              setState(() => _obscure1 = !_obscure1),
                           enabled: !_busy,
-                          enableSuggestions: false,
-                          autocorrect: false,
+                          isAr: _isAr,
+                          iconColor: _iconColor,
                           inputFormatters: passwordArabicGuardFormatters(
                             onArabicScriptBlocked:
                                 _schedulePasswordArabicDialog,
                           ),
-                          decoration: _dec(
-                            t.currentPasswordLabel,
-                            suffix: IconButton(
-                              icon: Icon(
-                                _obscure1
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: _iconColor,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscure1 = !_obscure1),
-                            ),
-                          ),
+                          decoration: _dec(t.currentPasswordLabel),
                         ),
                         const SizedBox(height: 14),
-                        AqarTextField(
+                        CapsAwarePasswordField(
                           controller: _next,
                           obscureText: _obscure2,
+                          onToggleObscure: () =>
+                              setState(() => _obscure2 = !_obscure2),
                           enabled: !_busy,
-                          enableSuggestions: false,
-                          autocorrect: false,
+                          isAr: _isAr,
+                          iconColor: _iconColor,
                           inputFormatters: passwordArabicGuardFormatters(
                             onArabicScriptBlocked:
                                 _schedulePasswordArabicDialog,
                           ),
-                          decoration: _dec(
-                            t.newPasswordLabel,
-                            suffix: IconButton(
-                              icon: Icon(
-                                _obscure2
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: _iconColor,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscure2 = !_obscure2),
-                            ),
-                          ),
+                          decoration: _dec(t.newPasswordLabel),
                         ),
                         const SizedBox(height: 14),
-                        AqarTextField(
+                        CapsAwarePasswordField(
                           controller: _confirm,
                           obscureText: _obscure3,
+                          onToggleObscure: () =>
+                              setState(() => _obscure3 = !_obscure3),
                           enabled: !_busy,
-                          enableSuggestions: false,
-                          autocorrect: false,
-                          inputFormatters: passwordArabicGuardFormatters(
-                            onArabicScriptBlocked:
-                                _schedulePasswordArabicDialog,
-                          ),
+                          isAr: _isAr,
+                          iconColor: _iconColor,
+                          textInputAction: TextInputAction.done,
                           onSubmitted: (_) {
                             if (!_busy) _submit();
                           },
-                          decoration: _dec(
-                            t.confirmNewPasswordLabel,
-                            suffix: IconButton(
-                              icon: Icon(
-                                _obscure3
-                                    ? Icons.visibility_off
-                                    : Icons.visibility,
-                                color: _iconColor,
-                              ),
-                              onPressed: () =>
-                                  setState(() => _obscure3 = !_obscure3),
-                            ),
+                          inputFormatters: passwordArabicGuardFormatters(
+                            onArabicScriptBlocked:
+                                _schedulePasswordArabicDialog,
                           ),
+                          decoration: _dec(t.confirmNewPasswordLabel),
                         ),
                         const SizedBox(height: 28),
                         SizedBox(

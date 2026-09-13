@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/app_branding.dart';
@@ -165,15 +166,15 @@ class TeamMembershipGate {
     required String accountType,
     String? organizationId,
   }) async {
-    final go = await showDialog<bool>(
+    final go = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         icon: Icon(Icons.group_add_outlined, color: Theme.of(ctx).colorScheme.primary),
         title: Text(isAr ? 'مقعد فريق إضافي' : 'Extra team seat'),
         content: Text(
           isAr
-              ? 'باقة المسوّق الفردي لا تشمل أعضاء فريق مجاناً.\n\nلإضافة مساعد أو شريك، ادفع رسوم مقعد إضافي من تبويب الاشتراكات ثم أعد دعوة العضو.'
-              : 'The solo marketer plan does not include free team seats.\n\nPay for an extra seat from Subscriptions, then invite your teammate.',
+              ? 'باقة المسوّق الفردي لا تشمل أعضاء فريق مجاناً، وإضافة المقاعد غير متاحة تجارياً (حساب واحد لكل باقة). رقِّ الباقة من الاشتراكات إن لزم.'
+              : 'The solo marketer plan does not include free team seats. Extra seats are not sold — one account per subscription. Upgrade the plan from Subscriptions if needed.',
           style: const TextStyle(height: 1.45),
         ),
         actions: [
@@ -210,7 +211,7 @@ class TeamMembershipGate {
     String? organizationId,
     required bool forApproveJoin,
   }) async {
-    final go = await showDialog<bool>(
+    final go = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         icon: Icon(Icons.workspace_premium_outlined, color: Theme.of(ctx).colorScheme.primary),
@@ -262,7 +263,7 @@ class TeamMembershipGate {
   }) async {
     final cap = OrgTeamCapacity.baseLimitLabelAr(accountType);
     final capEn = OrgTeamCapacity.baseLimitLabelEn(accountType);
-    final go = await showDialog<bool>(
+    final go = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         icon: Icon(Icons.group_off_outlined, color: Theme.of(ctx).colorScheme.error),

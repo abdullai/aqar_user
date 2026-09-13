@@ -1,10 +1,12 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier;
 import '../core/session/account_role_cache.dart';
+import '../core/utils/date_helper.dart';
 import '../services/chat_inbox_service.dart';
 import '../services/org_team_service.dart';
 import '../widgets/team_membership_gate.dart';
@@ -128,7 +130,7 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
     final reason = TextEditingController();
     var canJoin = true;
     var blocksApp = true;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
@@ -235,14 +237,8 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
   String _formatSuspendedUntil(dynamic raw) {
     final dt = DateTime.tryParse('${raw ?? ''}')?.toLocal();
     if (dt == null) return '';
-    final h = dt.hour.toString().padLeft(2, '0');
-    final min = dt.minute.toString().padLeft(2, '0');
-    final d = dt.day;
-    final mo = dt.month;
-    if (_isAr) {
-      return 'حتى $d/$mo $h:$min';
-    }
-    return 'Until $d/$mo $h:$min';
+    final stamp = DateHelper.fmtCivilDateTime(dt, isAr: _isAr);
+    return _isAr ? 'حتى $stamp' : 'Until $stamp';
   }
 
   Future<void> _suspendMemberFromTeamChat(
@@ -252,7 +248,7 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
   ) async {
     final reason = TextEditingController();
     var hours = 24;
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
@@ -627,7 +623,12 @@ class _ManageMembersScreenState extends State<ManageMembersScreen>
                   return Card(
                     child: ListTile(
                       title: Text('${r['user_id']}'),
-                      subtitle: Text('${r['left_at']}'),
+                      subtitle: Text(
+                        DateHelper.fmtCivilDateTimeRaw(
+                          r['left_at'],
+                          isAr: _isAr,
+                        ),
+                      ),
                       trailing: IconButton(
                         icon: const Icon(Icons.delete_outline),
                         onPressed: () async {

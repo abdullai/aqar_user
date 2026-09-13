@@ -1,4 +1,6 @@
-﻿import 'dart:async' show unawaited;
+﻿// ignore_for_file: unused_element
+
+import 'dart:async' show unawaited;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -6,14 +8,21 @@ import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/deals/deal_messaging_gate.dart';
+import '../core/deals/deal_completion_inbox.dart';
+import '../core/deals/deal_inventory_policy.dart';
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../core/haptics/app_haptics.dart';
 import '../core/utils/chat_display_initials.dart';
 import '../core/input/saudi_input_formatters.dart';
-import '../core/listing/property_type_catalog.dart';
+import '../core/listing/property_listing_display.dart';
 import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../core/workflow/app_role_helper.dart';
 import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
+import '../core/market/market_request_detail_facts.dart';
 import '../l10n/app_localizations.dart';
 import '../models/market_property_request_priority.dart';
 import '../models/market_property_request_row.dart';
@@ -24,8 +33,10 @@ import '../services/market_request_offers_service.dart';
 import '../services/reservations_service.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import 'guest_participation_gate.dart';
+import 'deal_completion_flow.dart';
 import 'instant_market_request_badge.dart';
 import 'marketer_policy_notice_card.dart';
+import 'specified_budget_display.dart';
 
 /// تفاصيل طلب السوق من الرئيسية + عروض + محادثة (بعد تطبيق SQL v20260411).
 Future<void> showMarketRequestHomeSheet({
@@ -41,12 +52,14 @@ Future<void> showMarketRequestHomeSheet({
   Future<bool> Function()? onSubscriptionRequiredForOffer,
   String? accountType,
   String? organizationId,
+  bool useRootNavigator = false,
 }) {
-  return showModalBottomSheet<void>(
+  return showAppModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
+    useRootNavigator: useRootNavigator,
     builder: (ctx) {
       return _MarketRequestSheetBody(
         row: row,
@@ -258,6 +271,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
 
   Future<bool> _ensureRequestInMyDeals({String? message}) async {
     if (_guest || _isOwner) return false;
+    final used = await DealCompletionInbox.activeDealCount(widget.sb);
+    if (!mounted) return false;
+    if (DealInventoryPolicy.dealsAtCap(used)) {
+      await showDealSlotCapDialog(
+        context: context,
+        used: used,
+        max: DealInventoryPolicy.maxActiveDeals,
+      );
+      return false;
+    }
     // قبل تسجيل العرض/المراسلة نتحقق أن لدى المستخدم اشتراكاً بحصة كافية.
     final allowed = await _ensureOfferAllowanceOrPaywall();
     if (!allowed || !mounted) return false;
@@ -298,24 +321,53 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     }
   }
 
+  bool _ownerMayMessageOfferer(String offererId) {
+    final peer = offererId.trim();
+    if (peer.isEmpty) return false;
+    final selected = (widget.row.selectedOfferId ?? '').trim();
+    for (final o in _offers) {
+      if ((o['offerer_id'] ?? '').toString().trim() != peer) continue;
+      final oid = (o['id'] ?? '').toString().trim();
+      if (selected.isNotEmpty && oid == selected) return true;
+      return DealMessagingGate.offerApprovedByOwner(
+        (o['status'] ?? '').toString(),
+      );
+    }
+    return false;
+  }
+
   Future<void> _openChat({String? counterpartyId}) async {
     if (_guest) return;
     try {
-      // لغير المالك: لا تُفتح المراسلة إلا بعد اختيار صاحب الطلب لعرضك.
-      if (!_isOwner) {
-        if (!_canContactRequester) {
+      if (_isOwner) {
+        final peer = (counterpartyId ?? '').trim();
+        if (!_ownerMayMessageOfferer(peer)) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                widget.isAr
-                    ? 'المراسلة ورقم التواصل يظهران بعد اختيار صاحب الطلب لعرضك.'
-                    : 'Chat and contact appear after the requester selects your offer.',
+                AppLocalizations.of(context)?.dealWaitingOwnerAccept ??
+                    (widget.isAr
+                        ? 'المراسلة تظهر بعد اختيار الشريك لإتمام الصفقة.'
+                        : 'Messaging appears after you select a partner to complete the deal.'),
               ),
             ),
           );
           return;
         }
+      } else if (!_canContactRequester) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLocalizations.of(context)?.dealWaitingOwnerAccept ??
+                  (widget.isAr
+                      ? 'المراسلة ورقم التواصل يظهران بعد اختيار صاحب الطلب لعرضك.'
+                      : 'Chat and contact appear after the requester selects your offer.'),
+            ),
+          ),
+        );
+        return;
       }
       final cid =
           await ReservationsService.getOrCreateMarketRequestConversation(
@@ -393,7 +445,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   }
 
   Future<void> _withdrawMyOffer() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: Text(widget.isAr ? 'حذف عرضي' : 'Withdraw my offer'),
@@ -443,23 +495,27 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   }
 
   Future<void> _submitOfferDialog() async {
+    if (!_hasMyActiveOffer) {
+      final used = await DealCompletionInbox.activeDealCount(widget.sb);
+      if (!mounted) return;
+      if (DealInventoryPolicy.dealsAtCap(used)) {
+        await showDealSlotCapDialog(
+          context: context,
+          used: used,
+          max: DealInventoryPolicy.maxActiveDeals,
+        );
+        return;
+      }
+    }
     final allowed = await _ensureOfferAllowanceOrPaywall();
     if (!allowed || !mounted) return;
     final msgCtrl = TextEditingController();
     final priceCtrl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) {
-        final bottomInset = MediaQuery.viewInsetsOf(dCtx).bottom;
-        return AnimatedPadding(
-          padding: EdgeInsets.only(bottom: bottomInset),
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          child: AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 24,
-            ),
+        return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
             content: SingleChildScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
@@ -468,13 +524,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                 children: [
                   AqarTextField(
                     controller: msgCtrl,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
                     decoration: InputDecoration(
                       labelText: widget.isAr
                           ? 'رسالة (اختياري)'
                           : 'Message (optional)',
+                      alignLabelWithHint: true,
                     ),
-                    minLines: 2,
-                    maxLines: 4,
+                    minLines: 3,
+                    maxLines: 8,
                   ),
                   const SizedBox(height: 10),
                   AqarTextField(
@@ -483,12 +542,12 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                       decimal: true,
                     ),
                     inputFormatters: [
-                      ArabicDigitsToLatinFormatter(),
+                      const ArabicDigitsToLatinFormatter(),
                       FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                     ],
                     decoration: InputDecoration(
                       labelText: widget.isAr
-                          ? 'سعر مقترح (${AppMoney.saudiRiyalSignUnicode})'
+                          ? 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})'
                           : 'Suggested price (SAR)',
                     ),
                   ),
@@ -505,7 +564,6 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                 child: Text(widget.isAr ? 'إرسال' : 'Send'),
               ),
             ],
-          ),
         );
       },
     );
@@ -542,7 +600,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     );
     if (!mounted) return;
     if (!sent) {
-      await showDialog<void>(
+      await showAppDialog<void>(
         context: context,
         builder: (dCtx) {
           return AlertDialog(
@@ -564,25 +622,6 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
         },
       );
     } else {
-      if (message.isNotEmpty) {
-        try {
-          final cid =
-              await ReservationsService.getOrCreateMarketRequestConversation(
-            marketRequestId: widget.row.id,
-          );
-          final requesterId = widget.row.requesterId.trim();
-          if (requesterId.isNotEmpty && requesterId != widget.currentUserId) {
-            await widget.sb.from('messages').insert({
-              'sender_id': widget.currentUserId,
-              'receiver_id': requesterId,
-              'conversation_id': cid,
-              'content': message,
-            });
-          }
-        } catch (_) {
-          // The offer itself is already saved; chat sync is best-effort.
-        }
-      }
       widget.onDidChange?.call();
       AppHaptics.medium();
       await _reloadOffers();
@@ -606,13 +645,14 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   }
 
   Future<void> _editRequestDialog() async {
-    final changed = await Navigator.of(context).push<bool>(
+    final changed = await Navigator.of(context, rootNavigator: true).push<bool>(
       MaterialPageRoute<bool>(
         fullscreenDialog: true,
         builder: (_) => CreateMarketPropertyRequestPage(
           userId: widget.currentUserId,
           lang: widget.isAr ? 'ar' : 'en',
           initialRequest: widget.row,
+          embedAppBar: false,
         ),
       ),
     );
@@ -623,7 +663,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   }
 
   Future<void> _requestDeletion() async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: Text(widget.isAr ? 'رفع طلب حذف' : 'Request deletion'),
@@ -667,7 +707,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   }
 
   Future<void> _completeRequest({String? offerId}) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
         title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
@@ -689,10 +729,13 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       ),
     );
     if (ok != true || !mounted) return;
+    final note = await showDealCompletionNoteSheet(context: context);
+    if (note == null || note.trim().isEmpty || !mounted) return;
     try {
       await MarketRequestOffersService(widget.sb).completeRequest(
         requestId: widget.row.id,
         offerId: offerId,
+        note: note.trim(),
       );
       widget.onDidChange?.call();
       await _reloadOffers();
@@ -827,59 +870,18 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
         requestStatus == 'delete_requested' || row.deletionRequestedAt != null;
     final remainingEdits =
         (row.maxEdits - row.editCount).clamp(0, row.maxEdits);
-    String acceptedOfferId = '';
-    for (final o in _offers) {
-      final st = (o['status'] ?? '').toString().trim().toLowerCase();
-      if (st == 'accepted' || st == 'approved' || st == 'selected') {
-        acceptedOfferId = (o['id'] ?? '').toString().trim();
-        break;
+    String acceptedOfferId = (row.selectedOfferId ?? '').trim();
+    if (acceptedOfferId.isEmpty) {
+      for (final o in _offers) {
+        final st = (o['status'] ?? '').toString().trim().toLowerCase();
+        if (DealMessagingGate.offerApprovedByOwner(st)) {
+          acceptedOfferId = (o['id'] ?? '').toString().trim();
+          break;
+        }
       }
     }
     final hasAcceptedOffer = acceptedOfferId.isNotEmpty;
-    final purposeLabel = switch (row.purpose) {
-      'rent' => widget.isAr ? 'إيجار' : 'Rent',
-      _ => widget.isAr ? 'شراء' : 'Purchase',
-    };
-    final typeLabel = PropertyTypeCatalog.label(row.propertyType, widget.isAr);
-    final districts = row.districts.isEmpty
-        ? (widget.isAr ? 'غير محدد' : 'Not specified')
-        : row.districts.join(widget.isAr ? '، ' : ', ');
-
-    String? budgetLine;
-    if (row.budgetMin != null || row.budgetMax != null) {
-      final a = row.budgetMin;
-      final b = row.budgetMax;
-      if (a != null && b != null) {
-        final sa = AppMoney.formatWithCurrencyCode(
-          a,
-          isAr: widget.isAr,
-          maxFractionDigits: 0,
-        );
-        final sMax = AppMoney.formatWithCurrencyCode(
-          b,
-          isAr: widget.isAr,
-          maxFractionDigits: 0,
-        );
-        budgetLine =
-            widget.isAr ? 'المبلغ المحدد: $sa – $sMax' : 'Specified amount: $sa – $sMax';
-      } else {
-        final v = (a ?? b)!;
-        final sv = AppMoney.formatWithCurrencyCode(
-          v,
-          isAr: widget.isAr,
-          maxFractionDigits: 0,
-        );
-        budgetLine =
-            widget.isAr ? 'المبلغ المحدد: $sv' : 'Specified amount: $sv';
-      }
-    }
-
-    String? areaLine;
-    if (row.areaMinM2 != null) {
-      areaLine = widget.isAr
-          ? 'المساحة من: ${row.areaMinM2!.toStringAsFixed(0)} م²'
-          : 'Area from: ${row.areaMinM2!.toStringAsFixed(0)} m²';
-    }
+    final headline = PropertyListingDisplay.displayRequestTitle(row, widget.isAr);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -887,7 +889,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
         right: 20,
         top: 8,
         bottom: MediaQuery.of(context).viewPadding.bottom +
-            MediaQuery.of(context).viewInsets.bottom +
+            AppKeyboardInset.bottomOf(context) +
             20,
       ),
       child: SingleChildScrollView(
@@ -896,9 +898,13 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              row.title,
+              headline,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.w900,
+                    fontFamily: 'Cairo',
+                    height: 1.25,
                   ),
             ),
             const SizedBox(height: 10),
@@ -930,33 +936,6 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
               ),
               const SizedBox(height: 10),
             ],
-            Material(
-              color: cs.primaryContainer.withValues(alpha: 0.4),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.forum_outlined, color: cs.primary, size: 22),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        widget.isAr
-                            ? 'يمكن لعدة مهتمين إتمام الصفقة. تُنشأ لكل طرف محادثة خاصة مع صاحب الطلب عبر «دردشة» — وليست غرفة جماعية واحدة.'
-                            : 'Multiple people can complete deals. Each party gets a private chat with the requester via «Chat» — there is no single group room.',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          height: 1.35,
-                          color: cs.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
             if (_guest && !_isOwner && !isCompleted && !deletionRequested) ...[
               const SizedBox(height: 12),
               FilledButton.icon(
@@ -1004,52 +983,39 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
               ),
             ],
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (row.isInstantPaid)
-                  InstantMarketRequestBadge(isAr: widget.isAr, compact: true),
-                Chip(
-                  label: Text(
-                    _priorityLabel(context, row.requestPriority),
-                  ),
+            if (row.isInstantPaid) ...[
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: InstantMarketRequestBadge(
+                  isAr: widget.isAr,
+                  compact: true,
                 ),
-                Chip(label: Text(purposeLabel)),
-                Chip(label: Text(typeLabel)),
-                Chip(label: Text(row.city)),
-              ],
-            ),
-            if (row.showRequesterName &&
-                (row.requesterPublicName ?? '').trim().isNotEmpty) ...[
+              ),
               const SizedBox(height: 10),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.person_outline, color: cs.primary),
-                title: Text(widget.isAr ? 'منشئ الطلب' : 'Request creator'),
-                subtitle: Text(row.requesterPublicName!.trim()),
-              ),
             ],
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.location_on_outlined, color: cs.primary),
-              title: Text(widget.isAr ? 'الأحياء' : 'Districts'),
-              subtitle: Text(districts),
+            _MarketRequestFactsGrid(
+              isAr: widget.isAr,
+              rows: [
+                for (final f in MarketRequestDetailFacts.build(
+                  row,
+                  isAr: widget.isAr,
+                  l10n: AppLocalizations.of(context),
+                ))
+                  _MarketRequestFact(
+                    icon: f.icon,
+                    label: f.label,
+                    value: f.value,
+                    copyText: f.copyText,
+                  ),
+              ],
+              amount: ((row.budgetMin ?? 0) > 0 || (row.budgetMax ?? 0) > 0)
+                  ? _MarketRequestSpecifiedAmountCard(
+                      isAr: widget.isAr,
+                      min: row.budgetMin,
+                      max: row.budgetMax,
+                    )
+                  : null,
             ),
-            if (budgetLine != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.payments_outlined, color: cs.primary),
-                title: Text(widget.isAr ? 'المبلغ المحدد' : 'Specified amount'),
-                subtitle: Text(budgetLine),
-              ),
-            if (areaLine != null)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.square_foot_outlined, color: cs.primary),
-                title: Text(widget.isAr ? 'المساحة' : 'Area'),
-                subtitle: Text(areaLine),
-              ),
             if ((row.description ?? '').trim().isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
@@ -1125,19 +1091,6 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   icon: const Icon(Icons.local_offer_outlined),
                   label: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
                 ),
-                if (_allowance != null && _allowance!.hasSubscription) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.isAr
-                        ? _allowance!.shortStatusAr()
-                        : _allowance!.shortStatusEn(),
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: cs.onSurfaceVariant,
-                    ),
-                  ),
-                ],
               ] else if (!isCompleted &&
                   (_hasMyActiveOffer || _mySelectedForDeal)) ...[
                 const SizedBox(height: 8),
@@ -1338,16 +1291,20 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   final localCreated = createdAt?.toLocal();
                   final createdDate = localCreated == null
                       ? ''
-                      : MaterialLocalizations.of(context)
-                          .formatShortDate(localCreated);
+                      : DateHelper.fmtCivilDate(
+                          localCreated,
+                          isAr: widget.isAr,
+                        );
                   final createdTime = localCreated == null
                       ? ''
-                      : MaterialLocalizations.of(context).formatTimeOfDay(
-                          TimeOfDay.fromDateTime(localCreated),
-                        );
-                  final accepted = st.toLowerCase() == 'accepted' ||
-                      st.toLowerCase() == 'approved' ||
-                      st.toLowerCase() == 'selected';
+                      : DateHelper.fmtClock(localCreated);
+                  final accepted =
+                      DealMessagingGate.offerApprovedByOwner(st) ||
+                          (acceptedOfferId.isNotEmpty &&
+                              oid.trim() == acceptedOfferId);
+                  final pending = st.toLowerCase() == 'submitted' ||
+                      st.toLowerCase() == 'pending' ||
+                      st.trim().isEmpty;
                   final rejected = st.toLowerCase() == 'rejected' ||
                       st.toLowerCase() == 'declined';
                   final nameLine = disp.isNotEmpty
@@ -1476,15 +1433,30 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                               child: Padding(
                                 padding: const EdgeInsets.all(10),
                                 child: Text(
-                                  widget.isAr
-                                      ? 'تم اختيار هذا العرض لإتمام الصفقة. ستختفي إجراءات القبول من بقية العروض.'
-                                      : 'This offer was selected to complete the deal. Accept actions are hidden for other offers.',
+                                  AppLocalizations.of(context)
+                                          ?.dealOwnerAcceptedPartner ??
+                                      (widget.isAr
+                                          ? 'تم اختيار هذا العرض لإتمام الصفقة. ستختفي إجراءات القبول من بقية العروض.'
+                                          : 'This offer was selected to complete the deal. Accept actions are hidden for other offers.'),
                                   style: TextStyle(
                                     color: Colors.green.shade800,
                                     fontWeight: FontWeight.w900,
                                     height: 1.35,
                                   ),
                                 ),
+                              ),
+                            )
+                          else if (pending && hasAcceptedOffer)
+                            Text(
+                              AppLocalizations.of(context)
+                                      ?.dealStayPendingUntilCancel ??
+                                  (widget.isAr
+                                      ? 'تم اختيار شريك آخر. تبقى هذه الصفقة معلّقة حتى تلغيها أو حتى يتم إتمام البيع.'
+                                      : 'Another partner was selected. This deal stays pending until cancelled or the sale completes.'),
+                              style: TextStyle(
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w800,
+                                height: 1.35,
                               ),
                             ),
                           if (rejected)
@@ -1502,34 +1474,30 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                             builder: (context, c) {
                               final narrow = c.maxWidth < 420;
                               final buttons = <Widget>[
-                                OutlinedButton.icon(
-                                  onPressed: () => unawaited(
-                                    _openChat(counterpartyId: offerer),
+                                if (accepted)
+                                  OutlinedButton.icon(
+                                    onPressed: () => unawaited(
+                                      _openChat(counterpartyId: offerer),
+                                    ),
+                                    icon: const Icon(Icons.chat_bubble_outline),
+                                    label: Text(
+                                      widget.isAr ? 'مراسلة' : 'Message',
+                                    ),
                                   ),
-                                  icon: const Icon(Icons.chat_bubble_outline),
-                                  label: Text(widget.isAr ? 'محادثة' : 'Chat'),
-                                ),
                                 if (!isCompleted &&
                                     !deletionRequested &&
-                                    (st.toLowerCase() == 'submitted' ||
-                                        st.toLowerCase() == 'pending')) ...[
+                                    pending &&
+                                    !hasAcceptedOffer) ...[
                                   FilledButton.icon(
                                     onPressed: () =>
                                         unawaited(_respondOffer(oid, true)),
                                     icon:
                                         const Icon(Icons.check_circle_outline),
-                                    label:
-                                        Text(widget.isAr ? 'قبول' : 'Accept'),
-                                  ),
-                                  FilledButton.icon(
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: cs.errorContainer,
-                                      foregroundColor: cs.onErrorContainer,
+                                    label: Text(
+                                      AppLocalizations.of(context)
+                                              ?.dealOwnerAcceptPartner ??
+                                          (widget.isAr ? 'قبول' : 'Accept'),
                                     ),
-                                    onPressed: () =>
-                                        unawaited(_respondOffer(oid, false)),
-                                    icon: const Icon(Icons.close),
-                                    label: Text(widget.isAr ? 'رفض' : 'Reject'),
                                   ),
                                 ] else if (!isCompleted &&
                                     !deletionRequested &&
@@ -1539,12 +1507,19 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                                       _completeRequest(offerId: oid),
                                     ),
                                     icon: const Icon(Icons.done_all_outlined),
-                                    label: Text(widget.isAr
-                                        ? 'إتمام الصفقة'
-                                        : 'Complete deal'),
+                                    label: Text(
+                                      AppLocalizations.of(context)
+                                              ?.dealCompleteWithPartner ??
+                                          (widget.isAr
+                                              ? 'إتمام الصفقة'
+                                              : 'Complete deal'),
+                                    ),
                                   ),
                                 ],
                               ];
+                              if (buttons.isEmpty) {
+                                return const SizedBox.shrink();
+                              }
                               if (narrow) {
                                 return Column(
                                   crossAxisAlignment:
@@ -1588,3 +1563,231 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     );
   }
 }
+
+class _MarketRequestFact {
+  const _MarketRequestFact({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.copyText,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final String? copyText;
+}
+
+class _MarketRequestSpecifiedAmountCard extends StatelessWidget {
+  const _MarketRequestSpecifiedAmountCard({
+    required this.isAr,
+    required this.min,
+    required this.max,
+  });
+
+  final bool isAr;
+  final double? min;
+  final double? max;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+          color: cs.surface.withValues(alpha: 0.55),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.payments_outlined, size: 18, color: cs.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isAr ? 'المبلغ المحدد' : 'Specified amount',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12.5,
+                        height: 1.2,
+                        color: cs.onSurfaceVariant,
+                        fontFamily: 'Cairo',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SpecifiedBudgetLine(
+                min: min,
+                max: max,
+                isAr: isAr,
+                showCaption: false,
+                alignEnd: true,
+                fontSize: 18,
+                color: cs.onSurface,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MarketRequestFactsGrid extends StatelessWidget {
+  const _MarketRequestFactsGrid({
+    required this.isAr,
+    required this.rows,
+    required this.amount,
+  });
+
+  final bool isAr;
+  final List<_MarketRequestFact> rows;
+  final Widget? amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final w = MediaQuery.sizeOf(context).width;
+    final twoCol = w >= 720;
+    final cells = [
+      if (amount != null) amount!,
+      ...rows.map((r) => _factCell(context, r)),
+    ];
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.45)),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              isAr ? 'تفاصيل الطلب' : 'Request details',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.primary,
+                    fontFamily: 'Cairo',
+                  ),
+            ),
+            const SizedBox(height: 10),
+            if (!twoCol)
+              ...cells
+            else
+              ..._pairs(cells).map(
+                (pair) => Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: pair.$1),
+                    const SizedBox(width: 8),
+                    Expanded(child: pair.$2 ?? const SizedBox.shrink()),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<(Widget, Widget?)> _pairs(List<Widget> items) {
+    final out = <(Widget, Widget?)>[];
+    for (var i = 0; i < items.length; i += 2) {
+      out.add((items[i], i + 1 < items.length ? items[i + 1] : null));
+    }
+    return out;
+  }
+
+  Widget _factCell(BuildContext context, _MarketRequestFact fact) {
+    final cs = Theme.of(context).colorScheme;
+    final canCopy = (fact.copyText ?? '').trim().isNotEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
+          color: cs.surface.withValues(alpha: 0.55),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 8, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(fact.icon, size: 16, color: cs.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 5,
+                child: Text(
+                  fact.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                    height: 1.3,
+                    color: cs.onSurfaceVariant,
+                    fontFamily: 'Cairo',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 7,
+                child: Text(
+                  fact.value,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: isAr ? TextAlign.right : TextAlign.left,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                    height: 1.35,
+                    fontFamily: 'Cairo',
+                  ),
+                ),
+              ),
+              if (canCopy)
+                IconButton(
+                  tooltip: isAr ? 'نسخ' : 'Copy',
+                  visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 32, height: 32),
+                  padding: EdgeInsets.zero,
+                  iconSize: 16,
+                  icon: Icon(Icons.copy_rounded, color: cs.primary),
+                  onPressed: () async {
+                    await Clipboard.setData(
+                      ClipboardData(text: fact.copyText!.trim()),
+                    );
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        behavior: SnackBarBehavior.floating,
+                        content: Text(isAr ? 'تم النسخ' : 'Copied'),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

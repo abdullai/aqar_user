@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/in_app_notification_hub.dart';
 import '../services/in_app_notification_router.dart';
+import '../widgets/app_page_close_button.dart';
 
 /// يركّب فوق [child] شريط إشعار علوي يختفي تلقائياً أو بالضغط.
 class InAppNotificationToastHost extends StatefulWidget {
@@ -193,11 +194,9 @@ class _InAppToastCard extends StatelessWidget {
                               label: Text(isAr ? 'فتح' : 'Open'),
                             ),
                             const Spacer(),
-                            IconButton(
-                              tooltip: isAr ? 'إغلاق' : 'Close',
-                              onPressed: onDismiss,
-                              icon: const Icon(Icons.close_rounded),
+                            AppPageCloseButton(
                               visualDensity: VisualDensity.compact,
+                              onPressed: onDismiss,
                             ),
                           ],
                         ),

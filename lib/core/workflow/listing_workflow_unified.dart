@@ -117,23 +117,16 @@ class ListingWorkflowUnified {
     return false;
   }
 
-  static bool _stageIsPrePublishPostApproval(ListingWorkflowStage stage) {
-    return const {
-      ListingWorkflowStage.marketerSelected,
-      ListingWorkflowStage.contractPending,
-      ListingWorkflowStage.contractSent,
-      ListingWorkflowStage.contractReturned,
-      ListingWorkflowStage.contractSigned,
-      ListingWorkflowStage.permitPending,
-      ListingWorkflowStage.permitIssued,
-    }.contains(stage);
-  }
-
   static ListingWorkflowStage _applyPublishDeadlineExpiry(
     ListingWorkflowStage stage,
     Map<String, dynamic> r,
   ) {
-    if (!_stageIsPrePublishPostApproval(stage)) return stage;
+    // مهلة 72 ساعة تُحسب بعد بدء إصدار التصريح — لا تُسقط البطاقة من
+    // «إصدار التصريح» إن وُجدت مهلة قديمة من قبول العرض.
+    if (stage != ListingWorkflowStage.permitPending &&
+        stage != ListingWorkflowStage.permitIssued) {
+      return stage;
+    }
     if (!_permitDeadlineExpired(r)) return stage;
     return ListingWorkflowStage.inactive72h;
   }
@@ -154,11 +147,30 @@ class ListingWorkflowUnified {
         .toString()
         .trim()
         .toLowerCase();
+    if (const {
+      'inactive_72h',
+      'inactive72h',
+      'owner_action_required',
+      'published',
+      'reserved',
+      'cancelled',
+      'terminated',
+      'archived',
+    }.contains(ws)) {
+      return false;
+    }
     if (ws == 'waiting_marketers' || ws == 'added_by_owner') return true;
     final st = (r['status'] ?? r['listing_request_status'] ?? r['request_status'] ?? '')
         .toString()
         .trim()
         .toLowerCase();
+    if (const {
+      'inactive_72h',
+      'inactive72h',
+      'owner_action_required',
+    }.contains(st)) {
+      return false;
+    }
     return const {
       'waiting_marketers',
       'new',

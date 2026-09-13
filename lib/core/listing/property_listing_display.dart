@@ -1,11 +1,13 @@
+// ignore_for_file: unused_element
+
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/market_property_request_row.dart';
 import '../../models/property.dart';
+import '../l10n/locale_content.dart';
 import 'listing_media_urls.dart';
 import 'property_type_catalog.dart';
 
@@ -23,32 +25,177 @@ abstract final class PropertyListingDisplay {
 
   static String cityLine(Property p) {
     final city = p.city.trim();
-    if (city.isNotEmpty) return city;
+    if (city.isEmpty) return '-';
     final loc = (p.location ?? '').trim();
-    if (loc.isEmpty) return '-';
-    final i = loc.indexOf(' - ');
-    if (i > 0) return loc.substring(0, i).trim();
-    return loc;
+    // لا تستبدل المدينة بالحي إن تطابقا خطأً أو إن كان الحقل فارغاً من قبل.
+    if (loc.isNotEmpty && city.toLowerCase() == loc.toLowerCase()) {
+      // المدينة والحي نفس النص — ما زال نعرضه كمدينة إن لم توجد منطقة أوضح.
+      return city;
+    }
+    return city;
+  }
+
+  /// سطر العنوان للعرض: منطقة - مدينة - حي (حسب المتوفر). المحافظة فقط إن غابت المدينة.
+  static String addressLine(
+    Property p, {
+    required bool isAr,
+    String separator = ' - ',
+  }) {
+    final parts = cardLocationLinePartsForProperty(p, isAr: isAr);
+    if (parts.isEmpty) return '';
+    return parts.join(separator);
+  }
+
+  /// نفس [addressLine] من حقول خام (طلبات/خرائط).
+  static String addressLineFromParts({
+    required String region,
+    required String city,
+    required String district,
+    String governorate = '',
+    required bool isAr,
+    String separator = ' - ',
+  }) {
+    final parts = cardLocationLineParts(
+      region: region,
+      city: city,
+      district: district,
+      governorate: governorate,
+      isAr: isAr,
+    );
+    if (parts.isEmpty) return '';
+    return parts.join(separator);
   }
 
   /// ترتيب أنيق: منطقة → محافظة → مدينة → حي (بدون فراغات/تكرار).
   static List<String> locationHierarchyParts(Property p) {
     final seen = <String>{};
     final out = <String>[];
-    void add(String? raw) {
-      final v = (raw ?? '').trim();
-      if (v.isEmpty) return;
-      final key = v.toLowerCase();
-      if (seen.contains(key)) return;
-      seen.add(key);
-      out.add(v);
+    _addAdminLocationPart(p.region, seen, out);
+    _addAdminLocationPart(p.province, seen, out);
+    _addAdminLocationPart(p.city, seen, out);
+    _addAdminLocationPart(p.location, seen, out);
+    return out;
+  }
+
+  /// مكان يُحقَن في عنوان البطاقة فقط عند نقص التسلسل الإداري.
+  /// إذا توفرت المنطقة والمدينة معاً يُتركان لسطر الموقع (لا يُكرَّران في العنوان).
+  /// الحي لا يدخل العنوان — يظهر في سطر الموقع عند توفره.
+  static String? cardTitlePlace({
+    required String region,
+    required String city,
+    required String district,
+  }) {
+    final r = _normalizeAdminLocationToken(region);
+    final c = _normalizeAdminLocationToken(city);
+    final hasR = r.isNotEmpty;
+    final hasC = c.isNotEmpty && c != '-';
+    if (hasR && hasC) return null;
+    if (hasC) return c;
+    if (hasR) return r;
+    return null;
+  }
+
+  /// سطر البطاقة: منطقة · مدينة · حي — حسب المتوفر (بدون محافظة إن وُجدت المدينة).
+  static List<String> cardLocationLineParts({
+    required String region,
+    required String city,
+    required String district,
+    String governorate = '',
+    bool isAr = true,
+  }) {
+    final seen = <String>{};
+    final out = <String>[];
+    _addAdminLocationPart(region, seen, out);
+    final cityTok = _normalizeAdminLocationToken(city);
+    if (cityTok.isEmpty) {
+      _addAdminLocationPart(governorate, seen, out);
+    }
+    _addAdminLocationPart(city, seen, out);
+    _addAdminLocationPart(district, seen, out);
+    return LocaleContent.parts(out, isAr: isAr);
+  }
+
+  static List<String> cardLocationLinePartsForProperty(
+    Property p, {
+    bool isAr = true,
+  }) {
+    final city = cityLine(p);
+    return cardLocationLineParts(
+      region: (p.region ?? '').trim(),
+      city: city == '-' ? '' : city,
+      district: (p.location ?? '').trim(),
+      governorate: (p.province ?? '').trim(),
+      isAr: isAr,
+    );
+  }
+
+  static List<String> cardLocationLinePartsForRequest(
+    MarketPropertyRequestRow r, {
+    bool isAr = true,
+  }) {
+    return cardLocationLineParts(
+      region: r.regionLabel,
+      city: r.city,
+      district: r.districts
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .join(isAr ? '، ' : ', '),
+      governorate: r.governorateLabel,
+      isAr: isAr,
+    );
+  }
+
+  /// منطقة / محافظة / مدينة / حي من صف العقار والحمولة والطلب — بدون خلط إعلان آخر.
+  static ({
+    String region,
+    String governorate,
+    String city,
+    String district,
+  }) locationSlotsFromMaps({
+    Map<String, dynamic>? property,
+    Map<String, dynamic>? payload,
+    Map<String, dynamic>? request,
+  }) {
+    String pick(List<String> keys) {
+      for (final src in [property, payload, request]) {
+        if (src == null) continue;
+        for (final k in keys) {
+          final v = (src[k] ?? '').toString().trim();
+          if (v.isNotEmpty) return v;
+        }
+      }
+      return '';
     }
 
-    add(p.region);
-    add(p.province);
-    add(p.city);
-    add(p.location);
-    return out;
+    final region = pick(const ['region', 'region_label', 'request_region']);
+    final governorate = pick(const [
+      'governorate',
+      'province',
+      'governorate_label',
+      'request_governorate',
+    ]);
+    final city = pick(const [
+      'city',
+      'preview_city',
+      'request_city',
+    ]);
+    var district = pick(const [
+      'district',
+      'district_label',
+      'neighborhood',
+      'location',
+    ]);
+    if (district.isNotEmpty &&
+        city.isNotEmpty &&
+        district.toLowerCase() == city.toLowerCase()) {
+      district = '';
+    }
+    return (
+      region: region,
+      governorate: governorate,
+      city: city,
+      district: district,
+    );
   }
 
   static List<String> locationHierarchyPartsForRequest(
@@ -56,22 +203,52 @@ abstract final class PropertyListingDisplay {
   ) {
     final seen = <String>{};
     final out = <String>[];
-    void add(String? raw) {
-      final v = (raw ?? '').trim();
-      if (v.isEmpty) return;
-      final key = v.toLowerCase();
-      if (seen.contains(key)) return;
-      seen.add(key);
-      out.add(v);
-    }
-
-    add(r.regionLabel);
-    add(r.governorateLabel);
-    add(r.city);
+    _addAdminLocationPart(r.regionLabel, seen, out);
+    _addAdminLocationPart(r.governorateLabel, seen, out);
+    _addAdminLocationPart(r.city, seen, out);
     for (final d in r.districts) {
-      add(d);
+      _addAdminLocationPart(d, seen, out);
     }
     return out;
+  }
+
+  static String _normalizeAdminLocationToken(String raw) {
+    var t = raw.trim();
+    if (t.isEmpty) return '';
+    for (final prefix in const ['محافظة ', 'منطقة ', 'مدينة ', 'حي ']) {
+      if (t.startsWith(prefix)) {
+        final stripped = t.substring(prefix.length).trim();
+        if (stripped.isNotEmpty) t = stripped;
+        break;
+      }
+    }
+    return t;
+  }
+
+  static void _addAdminLocationPart(
+    String? raw,
+    Set<String> seen,
+    List<String> out,
+  ) {
+    final v = (raw ?? '').trim();
+    if (v.isEmpty) return;
+    if (v.contains(' - ')) {
+      for (final piece in v.split(' - ')) {
+        _addAdminLocationPart(piece, seen, out);
+      }
+      return;
+    }
+    if (v.contains('،')) {
+      for (final piece in v.split('،')) {
+        _addAdminLocationPart(piece, seen, out);
+      }
+      return;
+    }
+    final t = _normalizeAdminLocationToken(v);
+    if (t.isEmpty) return;
+    final key = t.toLowerCase();
+    if (!seen.add(key)) return;
+    out.add(t);
   }
 
   /// رمز الغرض للفلترة: sale | rent | auction | investment
@@ -264,7 +441,8 @@ abstract final class PropertyListingDisplay {
   }
 
   static String purposeCodeFromRequestRow(Map<String, dynamic> row) {
-    final fromPreview = (row['preview_purpose'] ?? '').toString().trim().toLowerCase();
+    final fromPreview =
+        (row['preview_purpose'] ?? '').toString().trim().toLowerCase();
     if (fromPreview.isNotEmpty) return fromPreview;
     final raw = row['payload_json'];
     if (raw != null) {
@@ -357,7 +535,8 @@ abstract final class PropertyListingDisplay {
     bool showFullLegalNameOnCard = false,
   }) {
     if (suppressPublicOwnerIdentity && !viewingAsPropertyOwner) {
-      return '';
+      // الرئيسية: لا يُعرض الاسم الرباعي القانوني، ويظهر الاسم الذي اختار الناشر عرضه.
+      return p.visibleAdvertiserName;
     }
     if (viewingAsPropertyOwner) {
       final raw = (p.ownerDisplayName ?? '').trim();
@@ -369,13 +548,15 @@ abstract final class PropertyListingDisplay {
       if (raw.isEmpty) return isAr ? 'معلن' : 'Advertiser';
       return raw;
     }
-    if (!p.canShowAdvertiserName) {
-      return isAr ? 'معلن' : 'Advertiser';
+    // السوق العقاري: الاسم يظهر فقط إذا اختار الناشر إظهاره (معتمد أو مستعار).
+    if (suppressPublicOwnerIdentity || !p.canShowAdvertiserName) {
+      if (!p.canShowAdvertiserName) return '';
+      final pub = p.visibleAdvertiserName;
+      return pub;
     }
-    final raw = (p.ownerDisplayName ?? '').trim();
-    if (raw.isEmpty) return isAr ? 'معلن' : 'Advertiser';
-    // الاسم كاملاً على البطاقة (فرد / جهة) — الواجهة تُقلّص بالتفاف حتى 3 أسطر.
-    return raw;
+    final pub = p.visibleAdvertiserName;
+    if (pub.isNotEmpty) return pub;
+    return '';
   }
 
   /// اسم المالك: كلمة واحدة / ثنتان / ثلاث حسب عرض البطاقة.
@@ -436,7 +617,8 @@ abstract final class PropertyListingDisplay {
     }
   }
 
-  static IconData _areaIconForPurposeCode(String code, {required bool isAuction}) {
+  static IconData _areaIconForPurposeCode(String code,
+      {required bool isAuction}) {
     if (isAuction || code == 'auction') return Icons.gavel_outlined;
     switch (code) {
       case 'rent':
@@ -557,13 +739,34 @@ abstract final class PropertyListingDisplay {
   }
 
   static String typeLabelForProperty(Property p, bool isAr) {
-    final key = p.listingTypeKey.trim().isNotEmpty
-        ? p.listingTypeKey
-        : p.type.name;
+    final key =
+        p.listingTypeKey.trim().isNotEmpty ? p.listingTypeKey : p.type.name;
     return PropertyTypeCatalog.label(key, isAr);
   }
 
-  /// «فيلا للبيع بجدة» / «Villa for sale in Jeddah».
+  /// عنوان تفاصيل الإعلان: «فيلا للبيع في جازان».
+  static String detailsHeadline(Property p, bool isAr) {
+    return displayListingTitle(p, isAr);
+  }
+
+  /// المدينة الرئيسية الحقيقية — لا تُستبدل بالحي أو المركز أو القرية.
+  static String mainCityLabel(Property p) {
+    final city = p.city.trim();
+    if (city.isEmpty) return '';
+    final loc = (p.location ?? '').trim();
+    if (loc.isNotEmpty && city.toLowerCase() == loc.toLowerCase()) {
+      return '';
+    }
+    return city;
+  }
+
+  /// سطر الموقع: المنطقة — المدينة — الحي دون تكرار.
+  static String locationLineForDetails(Property p) {
+    return addressLine(p, isAr: true, separator: ' — ');
+  }
+
+  /// «فيلا للبيع في جازان» / «Villa for sale in Jazan».
+  /// الحي لا يُضمَّن في العنوان — يظهر في سطر الموقع تحت البطاقة.
   static String composeListingHeadline({
     required String typeLabel,
     required String purposeBit,
@@ -571,63 +774,110 @@ abstract final class PropertyListingDisplay {
     String? district,
     required bool isAr,
     bool asRequest = false,
+    bool includeCity = true,
   }) {
     final type = typeLabel.trim();
     final purpose = purposeBit.trim();
-    final cityT = city.trim();
-    final dist = (district ?? '').trim();
-    final place = dist.isNotEmpty &&
-            dist.toLowerCase() != cityT.toLowerCase()
-        ? (cityT.isEmpty ? dist : '$cityT — $dist')
-        : cityT;
+    final cityT = LocaleContent.forUi(city.trim(), isAr: isAr);
+    final cityOk = includeCity &&
+        cityT.isNotEmpty &&
+        cityT != '-' &&
+        cityT.toLowerCase() != 'null';
     if (isAr) {
       final core = [
         if (asRequest) 'مطلوب',
         if (type.isNotEmpty) type,
         if (purpose.isNotEmpty) purpose,
       ].join(' ');
-      if (place.isEmpty) return core.trim();
-      return '$core ${placeWithBi(place)}'.trim();
+      if (!cityOk) return core.trim();
+      return '$core في $cityT'.trim();
     }
     final core = [
       if (asRequest) 'Wanted:',
       if (type.isNotEmpty) type,
       if (purpose.isNotEmpty) purpose,
     ].join(' ');
-    if (place.isEmpty) return core.trim();
-    return '$core in $place'.trim();
+    if (!cityOk) return core.trim();
+    return '$core in $cityT'.trim();
   }
 
-  /// عنوان بطاقة إعلان: يفضّل العنوان المخزَّن إن كان واضحاً، وإلا تركيباً مرتّباً.
+  /// حقيقة ظاهرة أصلاً في العنوان المركّب (مدينة/غرض/نوع) — لا تُعاد في الجدول.
+  static bool headlineContainsFact(String headline, String fact) {
+    final h = headline.trim();
+    final f = fact.trim();
+    if (h.isEmpty || f.isEmpty || f == '-') return false;
+    return h.contains(f);
+  }
+
+  /// سطر قصير للتصفح السريع: «فيلا للبيع بجدة» / «مطلوب شقة للبيع بالدمام».
+  static String shortsHeadline({
+    required bool isAr,
+    Property? property,
+    MarketPropertyRequestRow? request,
+  }) {
+    if (property != null) {
+      return composeListingHeadline(
+        typeLabel: typeLabelForProperty(property, isAr),
+        purposeBit: purposeBitShort(property, isAr),
+        city: cityLine(property) == '-' ? '' : cityLine(property),
+        isAr: isAr,
+      );
+    }
+    if (request != null) return displayRequestTitle(request, isAr);
+    return '';
+  }
+
+  /// عنوان بطاقة إعلان: نوع + غرض. المكان في العنوان فقط إن نقصت المنطقة أو المدينة.
   static String displayListingTitle(Property p, bool isAr) {
     final type = typeLabelForProperty(p, isAr);
     final purpose = purposeBitShort(p, isAr);
     final city = cityLine(p);
-    final district = (p.location ?? '').trim();
+    final place = cardTitlePlace(
+      region: (p.region ?? '').trim(),
+      city: city == '-' ? '' : city,
+      district: (p.location ?? '').trim(),
+    );
     final composed = composeListingHeadline(
       typeLabel: type,
       purposeBit: purpose,
-      city: city == '-' ? '' : city,
-      district: district.isNotEmpty &&
-              district.toLowerCase() != city.toLowerCase()
-          ? district
-          : null,
+      city: place ?? '',
+      isAr: isAr,
+      includeCity: place != null,
+    );
+    if (composed.trim().isNotEmpty) return composed.trim();
+    final raw =
+        sanitizeListingTitle(p.title.trim(), typeLabel: type, isAr: isAr);
+    if (raw.isEmpty) {
+      return [type, purpose].where((s) => s.trim().isNotEmpty).join(' ').trim();
+    }
+    return LocaleContent.forUi(
+      normalizePlacePrepositions(raw, isAr: isAr),
       isAr: isAr,
     );
-    final raw = sanitizeListingTitle(p.title.trim(), typeLabel: type, isAr: isAr);
-    if (raw.isEmpty) return composed;
-    if (type.isEmpty) return normalizePlacePrepositions(raw, isAr: isAr);
-    // عنوان خام يخلط المدينة بين النوع والغرض → استبدل بالتركيب الأنيق.
-    if (_titleLooksScrambled(raw, type: type, city: city, isAr: isAr)) {
-      return composed.isNotEmpty
-          ? composed
-          : normalizePlacePrepositions(raw, isAr: isAr);
-    }
-    // إن تعارض النوع المخزَّن مع كلمات العنوان (فيلا…أرض) أبقِ العنوان المنقّى.
-    if (_titleConflictsWithType(raw, type, isAr: isAr) && raw.isNotEmpty) {
-      return normalizePlacePrepositions(raw, isAr: isAr);
-    }
-    return normalizePlacePrepositions(raw, isAr: isAr);
+  }
+
+  /// عنوان مضغوط للدبوس/الشاشات الضيقة: نوع + غرض بلا مدينة أو حي.
+  static String compactListingTitle(Property p, bool isAr) {
+    return composeListingHeadline(
+      typeLabel: typeLabelForProperty(p, isAr),
+      purposeBit: purposeBitShort(p, isAr),
+      city: '',
+      isAr: isAr,
+      includeCity: false,
+    );
+  }
+
+  static String compactRequestTitle(MarketPropertyRequestRow r, bool isAr) {
+    return composeListingHeadline(
+      typeLabel: PropertyTypeCatalog.label(r.propertyType, isAr),
+      purposeBit: r.purpose == 'rent'
+          ? (isAr ? 'للإيجار' : 'for rent')
+          : (isAr ? 'للبيع' : 'for sale'),
+      city: '',
+      isAr: isAr,
+      asRequest: true,
+      includeCity: false,
+    );
   }
 
   /// ينظّف لاحقات النوع المكررة مثل «فيلا للبيع - ارض».
@@ -642,7 +892,8 @@ abstract final class PropertyListingDisplay {
     final type = typeLabel.trim();
     if (type.isNotEmpty) {
       final esc = RegExp.escape(type);
-      t = t.replaceFirst(RegExp('\\s*-\\s*$esc\\s*\$', caseSensitive: false), '');
+      t = t.replaceFirst(
+          RegExp('\\s*-\\s*$esc\\s*\$', caseSensitive: false), '');
       t = t.replaceFirst(RegExp('^$esc\\s*-\\s*', caseSensitive: false), '');
     }
     // أزل لاحقة نوع شائعة لا تطابق بقية العنوان (أو مرادف مثل فله↔فيلا).
@@ -668,25 +919,6 @@ abstract final class PropertyListingDisplay {
     return t.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
   }
 
-  static bool _titleConflictsWithType(
-    String raw,
-    String typeLabel, {
-    required bool isAr,
-  }) {
-    final t = raw.toLowerCase();
-    final type = typeLabel.trim().toLowerCase();
-    if (t.isEmpty || type.isEmpty) return false;
-    if (isAr) {
-      final saysVilla = t.contains('فيلا') || t.contains('فله');
-      final saysLand = t.contains('أرض') || t.contains('ارض');
-      final typeIsLand = type.contains('أرض') || type.contains('ارض') || type == 'land';
-      final typeIsVilla = type.contains('فيلا') || type.contains('فله') || type == 'villa';
-      if (saysVilla && typeIsLand) return true;
-      if (saysLand && typeIsVilla) return true;
-    }
-    return false;
-  }
-
   static String displayRequestTitle(
     MarketPropertyRequestRow r,
     bool isAr,
@@ -698,69 +930,29 @@ abstract final class PropertyListingDisplay {
     );
     final purpose = r.purpose == 'rent'
         ? (isAr ? 'للإيجار' : 'for rent')
-        : (isAr ? 'للشراء' : 'to buy');
-    final city = r.city.trim();
-    String? district;
-    for (final d in r.districts) {
-      final t = d.trim();
-      if (t.isNotEmpty) {
-        district = t;
-        break;
-      }
-    }
-    final raw = sanitizeListingTitle(
-      r.title.trim(),
-      typeLabel: type,
-      isAr: isAr,
+        : (isAr ? 'للبيع' : 'for sale');
+    final district =
+        r.districts.map((e) => e.trim()).where((e) => e.isNotEmpty).join('، ');
+    final place = cardTitlePlace(
+      region: r.regionLabel,
+      city: r.city.trim(),
+      district: district,
     );
-    if (raw.isNotEmpty &&
-        (raw.contains(purpose) || raw.length >= 8) &&
-        !_titleConflictsWithType(raw, type, isAr: isAr)) {
-      return normalizePlacePrepositions(raw, isAr: isAr);
-    }
     return composeListingHeadline(
       typeLabel: type,
       purposeBit: purpose,
-      city: city,
-      district: district,
+      city: place ?? '',
       isAr: isAr,
       asRequest: true,
+      includeCity: place != null,
     );
   }
 
-  /// استبدال «في المدينة» بـ «بالمدينة» عند العرض العربي.
+  /// يُبقي «في جازان» كما هي — لا تُحوَّل إلى «بجازان».
   static String normalizePlacePrepositions(String title, {required bool isAr}) {
     var t = title.trim();
-    if (!isAr || t.isEmpty) return t;
-    t = t.replaceAllMapped(
-      RegExp(r'\s+في\s+(\S+)'),
-      (m) => ' ${placeWithBi(m.group(1)!)}',
-    );
+    if (t.isEmpty) return t;
     return t.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
-  }
-
-  static bool _titleLooksScrambled(
-    String raw, {
-    required String type,
-    required String city,
-    required bool isAr,
-  }) {
-    if (!isAr) return false;
-    final c = city.trim();
-    if (c.isEmpty || c == '-' || type.isEmpty) return false;
-    final lower = raw;
-    final ti = lower.indexOf(type);
-    final ci = lower.indexOf(c);
-    if (ti < 0 || ci < 0) return false;
-    // نوع … مدينة … غرض (المدينة بين النوع والغرض).
-    final purposeMarks = ['للبيع', 'للإيجار', 'للمزاد', 'للاستثمار', 'للشراء'];
-    var purposeIdx = -1;
-    for (final m in purposeMarks) {
-      final i = lower.indexOf(m);
-      if (i >= 0 && (purposeIdx < 0 || i < purposeIdx)) purposeIdx = i;
-    }
-    if (purposeIdx < 0) return false;
-    return ti < ci && ci < purposeIdx;
   }
 
   /// أجزاء الموقع مع استبعاد ما يظهر أصلاً في العنوان (تفادي التكرار).
@@ -854,7 +1046,8 @@ abstract final class PropertyListingDisplay {
   static bool marketRequestUsesSmartDefaultCover(MarketPropertyRequestRow r) =>
       ListingMediaUrls.marketRequestUsesSmartDefaultCover(r);
 
-  static String get defaultListingThumbAsset => ListingMediaUrls.defaultThumbAsset;
+  static String get defaultListingThumbAsset =>
+      ListingMediaUrls.defaultThumbAsset;
 
   static String? propertyHeroNetworkUrl(Property p, SupabaseClient sb) =>
       ListingMediaUrls.propertyImageNetworkUrl(p, sb);

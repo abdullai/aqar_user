@@ -19,18 +19,18 @@ abstract final class CompoundDisplayName {
     'اب',
     'أم',
     'ام',
-    'ابن',
-    'بن',
-    'بنت',
-    'ابنة',
-    'إبن',
   };
 
-  /// بادئات عربية تبقى مع الكلمة التالية كمساحة داخل الوحدة.
+  /// بادئات نسب تبقى مفصولة بمسافة: «مؤيد بن عبدالله» لا «بنعبدالله».
   static const Set<String> _arSpacePrefixes = {
     'آل',
     'ال',
     'عبد',
+    'بن',
+    'ابن',
+    'إبن',
+    'بنت',
+    'ابنة',
   };
 
   static const Set<String> _enGluePrefixes = {
@@ -60,6 +60,14 @@ abstract final class CompoundDisplayName {
   static String _normWs(String s) =>
       s.replaceAll(RegExp(r'\s+'), ' ').trim();
 
+  /// يفكّ النسب الملصوق: «بنعبدالله» → «بن عبدالله».
+  static String _splitGluedNasab(String s) {
+    return s.replaceAllMapped(
+      RegExp(r'(^|\s)(ابنة|إبن|ابن|بنت|بن)(?=[\u0600-\u06FF])'),
+      (m) => '${m[1]}${m[2]} ',
+    );
+  }
+
   static bool _isArGlue(String t) => _arGluePrefixes.contains(t);
   static bool _isArSpace(String t) => _arSpacePrefixes.contains(t);
 
@@ -76,7 +84,7 @@ abstract final class CompoundDisplayName {
 
   /// وحدات الاسم بعد دمج المركّبات (كل عنصر = جزء منطقي واحد).
   static List<String> units(String fullName) {
-    final raw = _normWs(fullName);
+    final raw = _normWs(_splitGluedNasab(fullName));
     if (raw.isEmpty) return const [];
 
     final tokens = raw.split(' ').where((e) => e.isNotEmpty).toList();
@@ -134,7 +142,7 @@ abstract final class CompoundDisplayName {
     return out;
   }
 
-  /// الاسم كاملاً بعد تطبيع المركّبات (أبوحيه بدل أبو حيه).
+  /// الاسم كاملاً بعد تطبيع المركّبات (أبوحيه، و«بن عبدالله» بمسافة).
   static String normalize(String fullName) {
     final u = units(fullName);
     return u.join(' ');

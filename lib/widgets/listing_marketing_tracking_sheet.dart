@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../core/utils/app_money.dart';
+import '../core/listing/offer_identity_tag.dart';
+import '../core/l10n/locale_content.dart';
+import '../core/profile/publisher_identity_prefs.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../core/workflow/listing_stage_ui_helper.dart';
 import '../core/workflow/listing_workflow_copy.dart';
 import '../core/workflow/listing_workflow_stage.dart';
 import '../core/workflow/listing_workflow_unified.dart';
 import '../core/workflow/workflow_display_texts.dart';
+import '../l10n/app_localizations.dart';
 import '../services/marketing_flow_service.dart';
 import 'app_logo_loading.dart';
 import 'listing/request_summary_table.dart';
@@ -32,7 +35,7 @@ Future<void> showListingMarketingTrackingSheet({
 }) async {
   final rid = requestId.trim();
   if (rid.isEmpty) return;
-  await showModalBottomSheet<void>(
+  await showAppModalBottomSheet<void>(
     context: context,
     useRootNavigator: true,
     isScrollControlled: true,
@@ -40,9 +43,9 @@ Future<void> showListingMarketingTrackingSheet({
     builder: (ctx) {
       return DraggableScrollableSheet(
         expand: false,
-        initialChildSize: 0.72,
-        minChildSize: 0.35,
-        maxChildSize: 0.95,
+        initialChildSize: 0.94,
+        minChildSize: 0.45,
+        maxChildSize: 0.98,
         builder: (_, scrollCtrl) {
           return ListingMarketingTrackingBody(
             sb: sb,
@@ -181,34 +184,23 @@ class _ListingMarketingTrackingBodyState
     );
   }
 
-  String _money(num? v) {
-    final n = (v is num) ? v.toDouble() : double.tryParse('$v') ?? 0;
-    if (n <= 0) return '—';
-    final t = AppMoney.formatNumber(n, isAr: widget.isAr);
-    return widget.isAr ? '$t ريال' : 'SAR $t';
-  }
-
   Widget _ownerBody(Map<String, dynamic> bundle) {
     final ar = widget.isAr;
     final req = bundle['request'] as Map<String, dynamic>?;
-    final offers = ((bundle['offers'] as List?) ?? const [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
     final invites = ((bundle['invites'] as List?) ?? const [])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
-    final contracts = ((bundle['contracts'] as List?) ?? const [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _maybeLoadSelectedMarketer(req);
+      final c = widget.scrollController;
+      if (c != null && c.hasClients) c.jumpTo(0);
     });
 
     final st = (req?['status'] ?? '').toString();
     final resolvedStage = req != null
         ? ListingWorkflowUnified.fromMergedOwnerHubRow(
-            Map<String, dynamic>.from(req!),
+            Map<String, dynamic>.from(req),
           )
         : ListingWorkflowStage.waitingMarketers;
     final stageLabel = ar
@@ -255,18 +247,6 @@ class _ListingMarketingTrackingBodyState
               label: ar ? 'المسوق المختار' : 'Selected marketer',
               value: selName,
             ),
-            RequestSummaryRow(
-              label: ar ? 'تاريخ بدء التعاقد' : 'Contract started',
-              value: _formatTrackDate(_parseDt(req?['contract_started_at']), ar),
-            ),
-            RequestSummaryRow(
-              label: ar ? 'تاريخ إرسال العقد' : 'Contract sent',
-              value: _formatTrackDate(_parseDt(req?['contract_sent_at']), ar),
-            ),
-            RequestSummaryRow(
-              label: ar ? 'تاريخ توقيع العقد' : 'Contract signed',
-              value: _formatTrackDate(_parseDt(req?['contract_signed_at']), ar),
-            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -306,130 +286,16 @@ class _ListingMarketingTrackingBodyState
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                       const SizedBox(height: 6),
-                      _line(ar ? 'المسوّق' : 'Marketer', name.isEmpty ? '—' : name),
-                      if (phone.isNotEmpty) _line(ar ? 'الجوال' : 'Phone', phone),
-                      _line(ar ? 'نوع الحساب' : 'Account type', acc),
                       _line(
                         ar ? 'الحالة' : 'Status',
                         WorkflowDisplayTexts.inviteStatus(invSt, ar),
                       ),
+                      _line(ar ? 'المسوّق' : 'Marketer', name.isEmpty ? '—' : name),
+                      if (phone.isNotEmpty) _line(ar ? 'الجوال' : 'Phone', phone),
+                      _line(ar ? 'نوع الحساب' : 'Account type', acc),
                       _line(
                         ar ? 'تاريخ الإنشاء' : 'Created',
                         _formatTrackDate(_parseDt(i['created_at']), ar),
-                      ),
-                      _line(
-                        ar ? 'آخر تحديث' : 'Updated',
-                        _formatTrackDate(_parseDt(i['updated_at']), ar),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-        _sectionTitle(ar ? 'عروض المسوقين' : 'Marketer offers'),
-        if (offers.isEmpty)
-          Text(
-            ar ? 'لا توجد عروض بعد.' : 'No offers yet.',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          )
-        else
-          ...offers.asMap().entries.map((e) {
-            final o = e.value;
-            final idx = e.key + 1;
-            final name = (o['_marketer_display_name'] ?? '').toString().trim();
-            final phone = (o['_marketer_phone'] ?? '').toString().trim();
-            final ost = (o['status'] ?? '').toString();
-            final amt = o['offer_amount'] ?? o['price'];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Material(
-                color: Theme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest
-                    .withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        ar ? 'عرض رقم $idx' : 'Offer #$idx',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 6),
-                      _line(ar ? 'المسوّق' : 'Marketer', name.isEmpty ? '—' : name),
-                      if (phone.isNotEmpty) _line(ar ? 'الجوال' : 'Phone', phone),
-                      _line(
-                        ar ? 'الحالة' : 'Status',
-                        WorkflowDisplayTexts.offerStatus(ost, ar),
-                      ),
-                      _line(ar ? 'المبلغ المقترح' : 'Offer amount', _money(amt as num?)),
-                      _line(
-                        ar ? 'تاريخ الإرسال' : 'Submitted',
-                        _formatTrackDate(_parseDt(o['created_at']), ar),
-                      ),
-                      _line(
-                        ar ? 'تاريخ رد المالك' : 'Owner responded',
-                        _formatTrackDate(_parseDt(o['owner_responded_at']), ar),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          }),
-        _sectionTitle(ar ? 'العقود' : 'Contracts'),
-        if (contracts.isEmpty)
-          Text(
-            ar ? 'لا يوجد عقد بعد.' : 'No contract yet.',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          )
-        else
-          ...contracts.asMap().entries.map((e) {
-            final c = e.value;
-            final idx = e.key + 1;
-            final mk = (c['_marketer_display_name'] ?? '').toString().trim();
-            final cst = (c['status'] ?? '').toString();
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Material(
-                color: Theme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest
-                    .withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        ar ? 'عقد رقم $idx' : 'Contract #$idx',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      const SizedBox(height: 6),
-                      if (mk.isNotEmpty) _line(ar ? 'المسوّق' : 'Marketer', mk),
-                      _line(
-                        ar ? 'الحالة' : 'Status',
-                        WorkflowDisplayTexts.contractStatus(cst, ar),
-                      ),
-                      _line(
-                        ar ? 'تاريخ الإنشاء' : 'Created',
-                        _formatTrackDate(_parseDt(c['created_at']), ar),
-                      ),
-                      _line(
-                        ar ? 'تاريخ الإرسال' : 'Sent',
-                        _formatTrackDate(_parseDt(c['sent_at']), ar),
-                      ),
-                      _line(
-                        ar ? 'توقيع المالك' : 'Owner signed',
-                        _formatTrackDate(_parseDt(c['owner_signed_at']), ar),
-                      ),
-                      _line(
-                        ar ? 'توقيع المسوّق' : 'Marketer signed',
-                        _formatTrackDate(_parseDt(c['marketer_signed_at']), ar),
                       ),
                     ],
                   ),
@@ -443,12 +309,25 @@ class _ListingMarketingTrackingBodyState
 
   Widget _marketerBody(Map<String, dynamic> bundle) {
     final ar = widget.isAr;
+    final l10n = AppLocalizations.of(context);
     final req = bundle['request'] as Map<String, dynamic>?;
     final offers = ((bundle['offers'] as List?) ?? const [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
     final latest = offers.isNotEmpty ? offers.first : null;
     final ost = (latest?['status'] ?? '').toString().trim().toLowerCase();
+    final identity = OfferIdentityTag.parse(
+      (latest?['notes'] ?? '').toString(),
+    );
+    final offerNotes = identity.notes.trim();
+    final senderName = identity.displayName.trim();
+    final senderRole = identity.source == PublicNameSource.display
+        ? (l10n?.trackingOfferRoleDisplay ??
+            (ar ? 'الاسم المستعار للتسويق' : 'Marketing display name'))
+        : identity.source == PublicNameSource.official
+            ? (l10n?.trackingOfferRoleOfficial ??
+                (ar ? 'الاسم الرباعي المعتمد' : 'Official registered name'))
+            : '';
 
     final stage = req != null
         ? ListingWorkflowUnified.fromMergedOwnerHubRow(
@@ -476,22 +355,6 @@ class _ListingMarketingTrackingBodyState
       ListingWorkflowStage.contractSigned,
       ListingWorkflowStage.permitPending,
       ListingWorkflowStage.permitIssued,
-    }.contains(stage);
-    final sentOrLater = const {
-      ListingWorkflowStage.contractSent,
-      ListingWorkflowStage.contractReturned,
-      ListingWorkflowStage.contractSigned,
-      ListingWorkflowStage.permitPending,
-      ListingWorkflowStage.permitIssued,
-      ListingWorkflowStage.published,
-      ListingWorkflowStage.reserved,
-    }.contains(stage);
-    final signedOrLater = const {
-      ListingWorkflowStage.contractSigned,
-      ListingWorkflowStage.permitPending,
-      ListingWorkflowStage.permitIssued,
-      ListingWorkflowStage.published,
-      ListingWorkflowStage.reserved,
     }.contains(stage);
     final permitOrLater = const {
       ListingWorkflowStage.permitIssued,
@@ -574,7 +437,7 @@ class _ListingMarketingTrackingBodyState
               value: stageLabel,
             ),
             RequestSummaryRow(
-              label: ar ? 'حالة الطلب (تقنية)' : 'Request status (system)',
+              label: ar ? 'حالة الطلب' : 'Request status',
               value: WorkflowDisplayTexts.requestStatus(
                 (req?['status'] ?? '').toString(),
                 ar,
@@ -587,9 +450,22 @@ class _ListingMarketingTrackingBodyState
           title: ar ? 'ملخص العرض' : 'Offer summary',
           rows: [
             RequestSummaryRow(
-              label: ar ? 'تاريخ إتمام الصفقة' : 'Deal completed',
+              label: l10n?.trackingOfferSentAt ??
+                  (ar ? 'تاريخ إرسال العرض' : 'Offer sent date'),
               value: _formatTrackDate(_parseDt(latest?['created_at']), ar),
             ),
+            if (senderName.isNotEmpty)
+              RequestSummaryRow(
+                label: l10n?.trackingOfferSender ??
+                    (ar ? 'مرسل العرض' : 'Offer sender'),
+                value: senderName,
+              ),
+            if (senderRole.isNotEmpty)
+              RequestSummaryRow(
+                label: l10n?.trackingOfferSenderRole ??
+                    (ar ? 'صفة المرسل' : 'Sender role'),
+                value: senderRole,
+              ),
             RequestSummaryRow(
               label: ar ? 'حالة العرض' : 'Offer status',
               value: WorkflowDisplayTexts.offerStatus(ost, ar),
@@ -602,6 +478,20 @@ class _ListingMarketingTrackingBodyState
               label: ar ? 'تاريخ رد المالك على عرضك' : 'Owner response on your offer',
               value: _formatTrackDate(_parseDt(latest?['owner_responded_at']), ar),
             ),
+            if (offerNotes.isNotEmpty)
+              RequestSummaryRow(
+                label: l10n?.trackingOfferDetails ??
+                    (ar ? 'تفاصيل العرض' : 'Offer details'),
+                value: LocaleContent.forUi(offerNotes, isAr: ar),
+              ),
+            if ((latest?['owner_decline_reason'] ?? '')
+                .toString()
+                .trim()
+                .isNotEmpty)
+              RequestSummaryRow(
+                label: ar ? 'سبب رفض المالك' : 'Owner decline reason',
+                value: (latest?['owner_decline_reason'] ?? '').toString().trim(),
+              ),
           ],
         ),
         const SizedBox(height: 12),
@@ -617,19 +507,11 @@ class _ListingMarketingTrackingBodyState
           ownerViewed || ownerResponded || accepted || contractFlow,
         ),
         step(
-          ar ? '(بعد القبول) إنشاء العقد وإرساله' : '(If accepted) Create & send contract',
-          accepted || sentOrLater,
-        ),
-        step(
-          ar ? '(بعد القبول) توقيع العقد' : '(If accepted) Contract signing',
-          signedOrLater,
-        ),
-        step(
-          ar ? '(بعد القبول) إصدار التصريح' : '(If accepted) Permit issuance',
+          ar ? 'إصدار التصريح' : 'Permit issuance',
           permitOrLater,
         ),
         step(
-          ar ? '(بعد القبول) نشر الإعلان' : '(If accepted) Publish listing',
+          ar ? 'نشر الإعلان' : 'Publish listing',
           publishedLike,
         ),
       ],

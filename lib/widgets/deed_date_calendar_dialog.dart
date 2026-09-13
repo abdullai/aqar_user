@@ -1,6 +1,8 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:hijri/hijri_calendar.dart';
 
+import '../core/gestures/app_keyboard_popups.dart';
+
 /// منتقي تاريخ الصك: ميلادي (تقويم) أو هجري (سنة/شهر/يوم) عبر حزمة [hijri].
 Future<DateTime?> showDeedDateCalendarDialog({
   required BuildContext context,
@@ -15,7 +17,7 @@ Future<DateTime?> showDeedDateCalendarDialog({
   if (g.isBefore(first)) g = first;
   if (g.isAfter(last)) g = last;
 
-  return showDialog<DateTime>(
+  return showAppDialog<DateTime>(
     context: context,
     builder: (ctx) => _DeedDateCalendarDialog(
       isAr: isAr,

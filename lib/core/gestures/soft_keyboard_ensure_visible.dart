@@ -3,18 +3,58 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../platform/viewport_scroll_policy.dart';
+import 'app_keyboard_inset.dart';
+import 'app_keyboard_popups.dart';
 
-/// حل مركزي: عند التركيز على أي حقل نصي على الجوال / ويب الجوال،
-/// يُمرَّر المحتوى ليبقي الحقل فوق لوحة المفاتيح.
-///
-/// لا يُمرَّر أثناء تحديد النص (يمنع رعشة الشاشة على ويب الجوال).
+/// حساب إزاحة التمرير لحقل فوق الكيبورد دون قفزة خارج الحارة الظاهرة.
+abstract final class AppKeyboardFieldLane {
+  /// موجبة = الحقل منخفض (مرّر للأسفل في المحتوى). `null` = لا تحرّك.
+  static double? scrollDelta({
+    required double fieldTop,
+    required double fieldHeight,
+    required double visibleTop,
+    required double visibleBottom,
+    required bool webSafe,
+  }) {
+    final fieldBottom = fieldTop + fieldHeight;
+    if (visibleBottom <= visibleTop + 36) return null;
+
+    final fullyVisible =
+        fieldTop >= visibleTop - 0.5 && fieldBottom <= visibleBottom + 0.5;
+    // ويب الجوال: إعادة التوسيط لحقل ظاهر أصلاً تُمرّر المستند مرتين فيطير للأعلى.
+    if (fullyVisible) return null;
+
+    var targetCenter = (visibleTop + visibleBottom) / 2;
+    final fieldCenter = fieldTop + fieldHeight / 2;
+    var delta = fieldCenter - targetCenter;
+
+    var nextTop = fieldTop - delta;
+    var nextBottom = nextTop + fieldHeight;
+    if (nextTop < visibleTop) {
+      delta -= visibleTop - nextTop;
+      nextTop = fieldTop - delta;
+      nextBottom = nextTop + fieldHeight;
+    }
+    if (nextBottom > visibleBottom) {
+      delta += nextBottom - visibleBottom;
+    }
+
+    if (webSafe && delta < 0 && fieldTop >= visibleTop) {
+      return null;
+    }
+    if (delta.abs() < 8) return null;
+    return delta;
+  }
+}
+
+/// سياسة عالمية: الصفحة لا تُرفع مع الكيبورد.
+/// التمرير يضع الحقل في المساحة فوق اللوحة، أو يكشف القائمة أسفله.
+/// حقل ملتصق بشريط سفلي (دردشة / تعليق) لا يُسحب لمنتصف الشاشة.
 abstract final class AppSoftKeyboardEnsureVisible {
   static WidgetsBindingObserver? _observer;
   static VoidCallback? _focusListener;
   static int _scheduleGen = 0;
   static bool _installed = false;
-  static Size? _lastViewSize;
   static DateTime? _lastScrollAt;
 
   static void install() {
@@ -36,7 +76,6 @@ abstract final class AppSoftKeyboardEnsureVisible {
     if (!_installed) return;
     _installed = false;
     _scheduleGen++;
-    _lastViewSize = null;
     _lastScrollAt = null;
 
     final obs = _observer;
@@ -53,44 +92,22 @@ abstract final class AppSoftKeyboardEnsureVisible {
 
   static void scheduleEnsureVisible({bool fromMetrics = false}) {
     final focus = FocusManager.instance.primaryFocus;
-    final ctx = focus?.context;
-    if (ctx == null || !ctx.mounted) return;
     if (!_isEditableFocus(focus)) return;
-    // أثناء سحب التحديد: أي تمرير يسبب رعشة ويقطع التحديد.
     if (_hasActiveTextSelection(focus)) return;
 
-    final mq = MediaQuery.of(ctx);
-    final inset = mq.viewInsets.bottom;
-    final compact = ViewportScrollPolicy.isCompactTouchLike(ctx);
-    final sizeShrunk = _didViewportShrink(mq.size);
-
-    // سطح مكتب عريض بدون كيبورد ظاهر: لا شيء.
-    if (!compact && inset < 8 && !sizeShrunk) return;
-
     final gen = ++_scheduleGen;
-
-    // ويب الجوال: تأخيرات أقل وأدق — التكرار الطويل كان يهز الشاشة.
     final delays = kIsWeb
         ? (fromMetrics
-            ? const <int>[48, 160]
-            : const <int>[70, 200])
-        : (fromMetrics
-            ? const <int>[16, 120]
-            : const <int>[40, 160]);
+            ? const <int>[40, 120, 240, 400]
+            : const <int>[60, 180, 320])
+        : (fromMetrics ? const <int>[20, 100, 200] : const <int>[36, 140]);
 
     for (final ms in delays) {
       Future<void>.delayed(Duration(milliseconds: ms), () {
         if (gen != _scheduleGen) return;
-        _ensureFocusedEditableVisible();
+        _revealIfCovered();
       });
     }
-  }
-
-  static bool _didViewportShrink(Size size) {
-    final prev = _lastViewSize;
-    _lastViewSize = size;
-    if (prev == null) return false;
-    return (prev.height - size.height) > 80;
   }
 
   static bool _isEditableFocus(FocusNode? node) {
@@ -99,8 +116,7 @@ abstract final class AppSoftKeyboardEnsureVisible {
   }
 
   static bool _hasActiveTextSelection(FocusNode? node) {
-    final state =
-        node?.context?.findAncestorStateOfType<EditableTextState>();
+    final state = node?.context?.findAncestorStateOfType<EditableTextState>();
     if (state == null) return false;
     try {
       final sel = state.widget.controller.selection;
@@ -110,77 +126,23 @@ abstract final class AppSoftKeyboardEnsureVisible {
     }
   }
 
-  static void _ensureFocusedEditableVisible() {
+  static void _revealIfCovered() {
     final focus = FocusManager.instance.primaryFocus;
     final ctx = focus?.context;
     if (ctx == null || !ctx.mounted) return;
     if (!_isEditableFocus(focus)) return;
     if (_hasActiveTextSelection(focus)) return;
 
-    final route = ModalRoute.of(ctx);
-    final inPopup = route is PopupRoute;
-    // داخل حوار بدون Scrollable: لا تحرّك الـ Scaffold خلف الحوار (رعشة).
-    if (inPopup && Scrollable.maybeOf(ctx) == null) return;
-
     final now = DateTime.now();
     final last = _lastScrollAt;
-    if (last != null && now.difference(last).inMilliseconds < 280) {
-      return;
-    }
+    if (last != null && now.difference(last).inMilliseconds < 120) return;
 
-    final mq = MediaQuery.of(ctx);
-    final inset = mq.viewInsets.bottom;
-    final compact = ViewportScrollPolicy.isCompactTouchLike(ctx);
-
-    if (_scrollIfObscured(ctx, mq)) {
+    if (_scrollFieldIntoLane(ctx)) {
       _lastScrollAt = now;
-      return;
-    }
-
-    if (compact && inset > 8 && _fieldInLowerHalf(ctx, mq)) {
-      try {
-        Scrollable.ensureVisible(
-          ctx,
-          alignment: inPopup ? 0.08 : 0.14,
-          alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-        );
-        _lastScrollAt = now;
-        return;
-      } catch (_) {}
-    }
-
-    if (!compact && inset < 8) return;
-
-    if (inset > 40) {
-      try {
-        Scrollable.ensureVisible(
-          ctx,
-          alignment: inPopup ? 0.1 : 0.16,
-          alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOutCubic,
-        );
-        _lastScrollAt = now;
-      } catch (_) {}
     }
   }
 
-  static bool _fieldInLowerHalf(BuildContext ctx, MediaQueryData mq) {
-    final renderObject = ctx.findRenderObject();
-    if (renderObject is! RenderBox || !renderObject.hasSize) return false;
-    if (!renderObject.attached) return false;
-    try {
-      final top = renderObject.localToGlobal(Offset.zero).dy;
-      final mid = top + renderObject.size.height / 2;
-      return mid > mq.size.height * 0.48;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static bool _scrollIfObscured(BuildContext ctx, MediaQueryData mq) {
+  static bool _scrollFieldIntoLane(BuildContext ctx) {
     final renderObject = ctx.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.hasSize) return false;
     if (!renderObject.attached) return false;
@@ -192,62 +154,65 @@ abstract final class AppSoftKeyboardEnsureVisible {
       return false;
     }
 
-    final fieldBottom = globalTopLeft.dy + renderObject.size.height;
-    final screenBottom = mq.size.height;
-    final compact = ViewportScrollPolicy.isCompactTouchLike(ctx);
-    // لا نفترض كيبورداً وهمياً أثناء التحديد/بدون inset حقيقي — كان يمرّر باستمرار.
-    final effectiveInset = mq.viewInsets.bottom > 8
-        ? mq.viewInsets.bottom
-        : 0.0;
-    if (effectiveInset <= 0 && !compact) return false;
-    if (effectiveInset <= 0) {
-      // ويب جوال بدون inset: مرّر فقط إن كان الحقل تحت خط الأمان السفلي.
-      // عتبة أعلى تقلّل الرعشة أثناء الكتابة العادية.
-      final safe = screenBottom - (compact ? 160.0 : 48.0);
-      if (fieldBottom <= safe) return false;
-      final scrollable = Scrollable.maybeOf(ctx);
-      if (scrollable == null) return false;
-      final delta = fieldBottom - safe + 16;
-      if (delta < 12) return false;
-      try {
-        scrollable.position.animateTo(
-          (scrollable.position.pixels + delta)
-              .clamp(0.0, scrollable.position.maxScrollExtent),
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOutCubic,
-        );
-        return true;
-      } catch (_) {
-        return false;
-      }
-    }
+    final fieldH = renderObject.size.height;
+    final fieldTop = globalTopLeft.dy;
+    final fieldBottom = fieldTop + fieldH;
+    final keyboardTop = AppKeyboardInset.keyboardTopOf(ctx);
+    final padTop = MediaQuery.paddingOf(ctx).top;
+    final extra = AppKeyboardReveal.extraBelowOf(ctx) +
+        AppKeyboardInset.accessoryHeightOf(ctx);
+    const comfort = 16.0;
+    final visibleTop = padTop + 8;
+    final visibleBottom = keyboardTop - comfort - extra;
+    if (visibleBottom <= visibleTop + 36) return false;
 
-    final keyboardTop = screenBottom - effectiveInset;
-    final comfort = compact ? 48.0 : 28.0;
-    final overlap = fieldBottom + comfort - keyboardTop;
-    if (overlap <= 2) return false;
+    final overlap = fieldBottom + extra + comfort - keyboardTop;
+    final dockedAboveKeyboard = overlap <= 2 &&
+        fieldBottom >= keyboardTop - 120 &&
+        fieldTop >= visibleTop;
+    if (dockedAboveKeyboard) return false;
+
+    final delta = AppKeyboardFieldLane.scrollDelta(
+      fieldTop: fieldTop,
+      fieldHeight: fieldH,
+      visibleTop: visibleTop,
+      visibleBottom: visibleBottom,
+      webSafe: kIsWeb,
+    );
+    if (delta == null && overlap <= 1) return false;
+    final move = delta ?? (overlap > 1 ? overlap : 0.0);
+    if (move.abs() < 8 && overlap <= 1) return false;
 
     final scrollable = Scrollable.maybeOf(ctx);
-    if (scrollable == null) {
+    if (scrollable != null) {
       try {
-        Scrollable.ensureVisible(
-          ctx,
-          alignment: 0.14,
-          alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOutCubic,
-        );
-        return true;
-      } catch (_) {
-        return false;
-      }
+        final pos = scrollable.position;
+        final maxExtent = pos.maxScrollExtent < 0 ? 0.0 : pos.maxScrollExtent;
+        final next = (pos.pixels + move).clamp(0.0, maxExtent);
+        if ((next - pos.pixels).abs() >= 2) {
+          pos.animateTo(
+            next,
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+          );
+          return true;
+        }
+      } catch (_) {}
     }
+
+    if (kIsWeb || overlap <= 1) return false;
     try {
-      scrollable.position.animateTo(
-        (scrollable.position.pixels + overlap)
-            .clamp(0.0, scrollable.position.maxScrollExtent),
-        duration: const Duration(milliseconds: 220),
+      final fieldCenter = fieldTop + fieldH / 2;
+      final alignment = fieldH >= (visibleBottom - visibleTop)
+          ? 0.0
+          : ((fieldCenter - visibleTop) / (visibleBottom - visibleTop))
+              .clamp(0.0, 1.0);
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 1.0 - alignment,
+        duration: const Duration(milliseconds: 160),
         curve: Curves.easeOutCubic,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.explicit,
       );
       return true;
     } catch (_) {

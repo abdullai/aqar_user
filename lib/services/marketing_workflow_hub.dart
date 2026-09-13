@@ -9,8 +9,22 @@ abstract final class MarketingWorkflowHub {
   static final ValueNotifier<String?> hubHighlightRequestId =
       ValueNotifier<String?>(null);
 
+  static int? _pendingMarketerTabIndex;
+
   static void notifyBucketsChanged() {
     bucketsRevision.value = bucketsRevision.value + 1;
+  }
+
+  /// بعد إرسال عرض من خارج «صفحتي» (تفاصيل الإعلان): افتح تبويب «عروضي».
+  static void requestMarketerHubTab(int index) {
+    if (index < 0) return;
+    _pendingMarketerTabIndex = index;
+  }
+
+  static int? takePendingMarketerTab() {
+    final v = _pendingMarketerTabIndex;
+    _pendingMarketerTabIndex = null;
+    return v;
   }
 
   static void requestHubHighlight(String? requestId) {

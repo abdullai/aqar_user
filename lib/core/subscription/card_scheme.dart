@@ -1,6 +1,14 @@
 /// تلميح عرض فقط — التحقق النهائي عند الربط ببوابة معتمدة.
 String detectCardSchemeFromPan(String panDigits) {
-  final d = panDigits.replaceAll(RegExp(r'\D'), '');
+  const from = '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹';
+  const to = '01234567890123456789';
+  final buf = StringBuffer();
+  for (final ch in panDigits.runes) {
+    final c = String.fromCharCode(ch);
+    final i = from.indexOf(c);
+    buf.write(i >= 0 ? to[i] : c);
+  }
+  final d = buf.toString().replaceAll(RegExp(r'\D'), '');
   if (d.length < 6) return 'unknown';
   const mada6 = <String>{
     '400861', '401607', '405454', '406136', '407197', '407395', '409201',
@@ -25,5 +33,34 @@ String detectCardSchemeFromPan(String panDigits) {
     return 'mastercard';
   }
   if (d.startsWith('4')) return 'visa';
+  if (d.startsWith('62')) return 'unionpay';
   return 'unknown';
+}
+
+String cardSchemeDisplayLabel(String scheme, {required bool isAr}) {
+  switch (scheme) {
+    case 'visa':
+      return 'Visa';
+    case 'mastercard':
+      return 'Mastercard';
+    case 'mada':
+      return isAr ? 'مدى' : 'mada';
+    case 'amex':
+      return 'American Express';
+    case 'unionpay':
+      return 'UnionPay';
+    default:
+      return '';
+  }
+}
+
+int cardSchemeMaxPanDigits(String scheme) {
+  switch (scheme) {
+    case 'amex':
+      return 15;
+    case 'visa':
+      return 19;
+    default:
+      return 16;
+  }
 }

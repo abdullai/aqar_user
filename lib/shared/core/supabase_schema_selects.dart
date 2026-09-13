@@ -58,6 +58,24 @@ property_images(sort_order,path,file_name)
 property_images(path,file_name,sort_order)
 ''';
 
+  static const String listingRequestsLookupMedia = '''
+id,
+owner_id,
+listing_request_public_code,
+title,
+city,
+price,
+description,
+status,
+created_at,
+updated_at,
+payload,
+payload_json,
+preview_property_id,
+workflow_stage,
+default_cover_used
+''';
+
   /// دمج طلبات listing_requests للوحة المسوق/المالك.
   ///
   /// `request_price` / `preview_price`: لحساب أتعاب التسويق (نسبة ثابتة في التطبيق من المجموع بعد ضريبة 5٪ على العقار).

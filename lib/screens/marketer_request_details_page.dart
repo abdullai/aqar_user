@@ -4,8 +4,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
 import '../navigation/chat_navigation.dart';
 import '../core/marketing/marketer_owner_chat_intro_ar.dart';
 import '../core/marketing/listing_request_marketing_price.dart';
@@ -16,7 +16,9 @@ import '../core/workflow/listing_workflow_ui_context.dart';
 import '../core/workflow/workflow_display_texts.dart';
 import '../services/marketing_flow_service.dart';
 import '../core/listing/property_listing_display.dart';
-import '../core/utils/app_money.dart';
+import '../core/listing/property_type_catalog.dart';
+import '../core/utils/date_helper.dart';
+import '../core/utils/display_ids.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../theme.dart';
 import '../widgets/app_logo_loading.dart';
@@ -24,8 +26,9 @@ import '../widgets/app_page_close_button.dart';
 import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_marketing_tracking_sheet.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
-import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/marketing_offer_submit_sheet.dart';
+import '../widgets/my_page_cover_gallery.dart';
+import '../core/listing/listing_media_urls.dart';
 import 'chat_page.dart';
 
 class MarketerRequestDetailsPage extends StatefulWidget {
@@ -36,12 +39,16 @@ class MarketerRequestDetailsPage extends StatefulWidget {
   /// داخل لوحة المستخدم بعرض ≥580: شريط [UserDashboard] يعرض العنوان والرجوع — لا نكرر AppBar هنا.
   final bool embedAppBar;
 
+  /// تبويب صفحتي الذي فُتحت منه الصفحة — يمنع إرسال عرض من «بدون إجراء 72 ساعة».
+  final String? hubKind;
+
   const MarketerRequestDetailsPage({
     super.key,
     required this.lang,
     required this.inviteId,
     required this.requestId,
     this.embedAppBar = false,
+    this.hubKind,
   });
 
   @override
@@ -196,79 +203,56 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
   String _formatRowDateTime(dynamic v) {
     final dt = DateTime.tryParse((v ?? '').toString());
     if (dt == null) return _t('غير محدد', 'Not set');
-    final local = dt.toLocal();
-    final y = local.year;
-    final mo = local.month.toString().padLeft(2, '0');
-    final d = local.day.toString().padLeft(2, '0');
-    final h = local.hour.toString().padLeft(2, '0');
-    final mi = local.minute.toString().padLeft(2, '0');
-    return '$y-$mo-$d  $h:$mi';
+    return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: _isAr);
   }
 
-  String _summaryPriceLabel() {
+  bool get _ownerNameVisibleToMarketer {
+    final uid = (Supabase.instance.client.auth.currentUser?.id ?? '').trim();
+    if (uid.isEmpty || _request == null) return false;
+    final sel = (_request!['selected_marketer_id'] ?? '').toString().trim();
+    if (sel.isEmpty || sel != uid) return false;
+    final wf =
+        (_request!['workflow_stage'] ?? '').toString().trim().toLowerCase();
+    return wf == 'marketer_selected' ||
+        wf == 'selected' ||
+        _isContractStageOrLater;
+  }
+
+  String _listingNumberLabel() {
     final r = _request ?? const <String, dynamic>{};
     final p = _previewProperty;
-    final amount = effectivePropertyPriceSarForMarketingFee(r, p);
-    if (amount <= 0) return _t('غير محدد', 'Not set');
-    return AppMoney.formatWithCurrencyCode(
-      amount,
-      isAr: _isAr,
-      currencyCode: 'SAR',
+    final raw = _safeText(
+      r['listing_request_public_code'] ??
+          r['listing_public_code'] ??
+          r['preview_listing_public_code'] ??
+          p?['listing_public_code'] ??
+          p?['public_code'] ??
+          r['listing_code'] ??
+          r['request_listing_code'],
+      fallback: '',
     );
+    if (raw.isEmpty || raw == '-') return '';
+    return DisplayIds.tenDigit(raw);
   }
 
-  Widget _summaryMetricCell({
-    required String label,
-    required String value,
-    required ColorScheme cs,
-    IconData? icon,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.55)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 14, color: cs.primary),
-                const SizedBox(width: 6),
-              ],
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: cs.onSurfaceVariant,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w800,
-              color: cs.onSurface,
-              height: 1.25,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
+  String _composedHeadline(bool la) {
+    final r = _request ?? const <String, dynamic>{};
+    final p = _previewProperty;
+    final typeCode = _safeText(
+      p?['property_type'] ?? r['property_type'] ?? r['preview_property_type'],
+      fallback: '',
     );
+    final typeLabel = typeCode.isEmpty || typeCode == '-'
+        ? ''
+        : PropertyTypeCatalog.label(typeCode, la);
+    final purpose = PropertyListingDisplay.purposeLabelForRequestRow(r, la);
+    final city = _safeText(r['city'] ?? p?['city'], fallback: '');
+    return PropertyListingDisplay.composeListingHeadline(
+      typeLabel: typeLabel == '-' ? '' : typeLabel,
+      purposeBit: purpose,
+      city: city == '-' ? '' : city,
+      isAr: la,
+    ).trim();
   }
 
   Widget _buildRequestSummaryGrid(BuildContext context) {
@@ -280,58 +264,54 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     final distanceKm = _invite?['distance_km'];
     final area = (p?['area'] as num?)?.toDouble() ??
         (r['area'] as num?)?.toDouble();
-    final propertyType = _safeText(
-      p?['property_type'] ?? r['property_type'] ?? r['preview_property_type'],
-      fallback: '',
-    );
-    final listingCode = _safeText(
-      r['listing_code'] ?? r['request_listing_code'] ?? p?['listing_code'],
-      fallback: '',
-    );
+    final listingNo = _listingNumberLabel();
+    final headline = _composedHeadline(la);
+    final city = _safeText(r['city'] ?? p?['city'], fallback: '');
     final location = _safeText(
       p?['location'] ?? r['location'] ?? r['address_line'],
-      fallback: _safeText(r['address_line'], fallback: ''),
+      fallback: '',
     );
+    final priceAmt = effectivePropertyPriceSarForMarketingFee(r, p);
 
     final rows = <RequestSummaryRow>[
-      RequestSummaryRow(
-        label: _t('اسم المالك', 'Owner name'),
-        value: _ownerDisplayName(),
-      ),
+      if (listingNo.isNotEmpty)
+        RequestSummaryRow(
+          label: _t('رقم الإعلان', 'Listing no.'),
+          value: listingNo,
+          emphasize: true,
+        ),
       RequestSummaryRow(
         label: _t('تاريخ ووقت الإعلان', 'Listing date & time'),
         value: _formatRowDateTime(r['created_at']),
       ),
-      RequestSummaryRow(
-        label: _t('السعر', 'Price'),
-        value: _summaryPriceLabel(),
-        emphasize: true,
-      ),
-      RequestSummaryRow(
-        label: _t('العنوان', 'Title'),
-        value: _safeText(r['title'], fallback: _t('طلب تسويق', 'Marketing request')),
-      ),
-      RequestSummaryRow(
-        label: _t('المدينة', 'City'),
-        value: _safeText(r['city'] ?? p?['city']),
-      ),
-      RequestSummaryRow(
-        label: _t('الموقع', 'Location'),
-        value: location.isEmpty ? _t('غير محدد', 'Not set') : location,
-      ),
+      if (priceAmt > 0)
+        RequestSummaryRow(
+          label: _t('السعر', 'Price'),
+          emphasize: true,
+          valueWidget: RequestSummaryMoneyValue(
+            amount: priceAmt,
+            isAr: la,
+            currencyCode: 'SAR',
+          ),
+        )
+      else
+        RequestSummaryRow(
+          label: _t('السعر', 'Price'),
+          value: _t('غير محدد', 'Not set'),
+          emphasize: true,
+        ),
+      if (location.isNotEmpty &&
+          location != '-' &&
+          location != city &&
+          !PropertyListingDisplay.headlineContainsFact(headline, location))
+        RequestSummaryRow(
+          label: _t('العنوان التفصيلي', 'Street address'),
+          value: location,
+        ),
       if (area != null)
         RequestSummaryRow(
           label: _t('المساحة', 'Area'),
           value: '${area.toStringAsFixed(0)} ${_t('م²', 'm²')}',
-        ),
-      RequestSummaryRow(
-        label: _t('الغرض', 'Purpose'),
-        value: PropertyListingDisplay.purposeLabelForRequestRow(r, la),
-      ),
-      if (propertyType.isNotEmpty)
-        RequestSummaryRow(
-          label: _t('نوع العقار', 'Property type'),
-          value: propertyType,
         ),
       RequestSummaryRow(
         label: _t('حالة الطلب', 'Request status'),
@@ -356,16 +336,32 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
           label: _t('المسافة', 'Distance'),
           value: '${distanceKm.toString()} km',
         ),
-      if (listingCode.isNotEmpty && listingCode != '-')
+      if (_ownerNameVisibleToMarketer)
         RequestSummaryRow(
-          label: _t('رمز الإعلان', 'Listing code'),
-          value: listingCode,
+          label: _t('اسم المالك', 'Owner name'),
+          value: _ownerDisplayName(),
         ),
     ];
 
-    return RequestSummaryTable(
-      title: _t('ملخص الطلب', 'Request summary'),
-      rows: rows,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (headline.isNotEmpty) ...[
+          Text(
+            headline,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              height: 1.25,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+        RequestSummaryTable(
+          title: _t('ملخص الطلب', 'Request summary'),
+          rows: rows,
+        ),
+      ],
     );
   }
 
@@ -457,6 +453,32 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     return out;
   }
 
+  String _heroVideoUrl() {
+    final p = _previewProperty;
+    final raw = (p?['video_url'] ??
+            p?['videoUrl'] ??
+            _request?['request_video_path'] ??
+            _request?['video_url'] ??
+            '')
+        .toString()
+        .trim();
+    if (raw.isEmpty) return '';
+    return ListingMediaUrls.videoPlayableUrl(
+          Supabase.instance.client,
+          raw,
+        ) ??
+        '';
+  }
+
+  bool _coverPrefersVideo() {
+    final p = _previewProperty;
+    final g = p?['listing_guidance'] ?? _request?['listing_guidance'];
+    if (g is Map) {
+      return (g['cover_primary'] ?? '').toString().toLowerCase() == 'video';
+    }
+    return _heroUrlsForBanner().isEmpty && _heroVideoUrl().isNotEmpty;
+  }
+
   String get _resolvedInviteId {
     final fromRow = (_invite?['id'] ?? '').toString().trim();
     if (fromRow.isNotEmpty) return fromRow;
@@ -487,10 +509,25 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
 
   bool get _shouldShowOfferPanel {
     if (_request == null) return false;
+    final hub = (widget.hubKind ?? '').trim().toLowerCase();
+    if (hub == 'inactive72h' ||
+        hub == 'inactive_72h' ||
+        hub == 'cancelled' ||
+        hub == 'published' ||
+        hub == 'permit') {
+      return false;
+    }
+    if (ListingWorkflowUnified.marketerHubRowInactive72h(_request!)) {
+      return false;
+    }
+    final ctx = _wfCtx;
+    if (ctx?.stage == ListingWorkflowStage.inactive72h) return false;
+    if (ctx?.showMarketerSubmitOffer != true && !_hasLiveOfferThisRound) {
+      return false;
+    }
     if (_hasLiveOfferThisRound) return true;
     if (!_inviteAllowsOffer) return false;
     if (_isContractStageOrLater) return false;
-    final ctx = _wfCtx;
     return ctx?.showMarketerSubmitOffer == true;
   }
 
@@ -635,12 +672,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     } catch (_) {}
   }
 
-  String get _contractIdStr =>
-      (_request?['contract_id'] ?? '').toString().trim();
-
-  String get _contractPdfStr =>
-      (_request?['contract_pdf_url'] ?? '').toString().trim();
-
   bool get _showMarketerOwnerChatAction {
     if (!_marketerOwnerChatUnlocked) return false;
     final r = _request;
@@ -695,32 +726,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
         },
       }),
     );
-  }
-
-  Future<void> _openContractPdfUrl() async {
-    final raw = _contractPdfStr;
-    if (raw.isEmpty) return;
-    final uri = Uri.tryParse(raw);
-    if (uri == null || !(uri.isScheme('http') || uri.isScheme('https'))) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_t('رابط غير صالح', 'Invalid link'))),
-      );
-      return;
-    }
-    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _t(
-              'تعذّر فتح الملف. جرّب من المتصفح.',
-              'Could not open the file.',
-            ),
-          ),
-        ),
-      );
-    }
   }
 
   Future<void> _openOwnerChatAction() async {
@@ -819,16 +824,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
         ),
       );
     }
-    if (_contractPdfStr.isNotEmpty) {
-      chips.add(
-        OutlinedButton.icon(
-          onPressed: () => unawaited(_openContractPdfUrl()),
-          icon: const Icon(Icons.picture_as_pdf_outlined),
-          label: Text(_t('عقد PDF', 'Contract PDF')),
-        ),
-      );
-    }
-
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 4),
       child: LayoutBuilder(
@@ -866,7 +861,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
                 automaticallyImplyLeading: false,
                 leading: AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () => Navigator.of(context).maybePop(),
                 ),
                 title: Text(_t('تفاصيل طلب التسويق', 'Marketing Request Details')),
                 actions: [
@@ -917,7 +911,7 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     );
 
     final bottomPad =
-        24.0 + MediaQuery.paddingOf(context).bottom + MediaQuery.viewInsetsOf(context).bottom;
+        24.0 + MediaQuery.paddingOf(context).bottom + AppKeyboardInset.bottomOf(context);
 
     final heroUrls = _heroUrlsForBanner();
 
@@ -952,43 +946,19 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
                 ),
               ),
             ),
-          if (heroUrls.isNotEmpty) ...[
+          if (heroUrls.isNotEmpty || _heroVideoUrl().isNotEmpty) ...[
             RepaintBoundary(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: AspectRatio(
-                  aspectRatio: 16 / 10,
-                  child: Image.network(
-                    heroUrls.first,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => ColoredBox(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .surfaceContainerHighest,
-                      child: Center(
-                        child: Icon(
-                          Icons.image_not_supported_outlined,
-                          color: Theme.of(context).colorScheme.outline,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              child: MyPageCoverGallery(
+                imageUrls: heroUrls,
+                videoUrl: _heroVideoUrl(),
+                coverPrefersVideo: _coverPrefersVideo(),
+                isAr: _isAr,
+                borderRadius: 14,
               ),
             ),
             const SizedBox(height: 16),
           ],
-          _sectionTitle(_t('ملخص', 'Summary')),
           _buildRequestSummaryGrid(context),
-          if (_previewProperty != null) ...[
-            const SizedBox(height: 12),
-            _sectionTitle(_t('تفاصيل العقار', 'Property details')),
-            _propertyPreviewCard(
-              _previewProperty!,
-              showLeadImage: heroUrls.isEmpty,
-            ),
-          ],
-
           if (notesOwner.isNotEmpty) ...[
             const SizedBox(height: 12),
             _sectionTitle(_t('ملاحظات المالك', 'Owner notes')),
@@ -1027,15 +997,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
           ],
 
           const SizedBox(height: 20),
-          _sectionTitle(_t('إجراءات', 'Actions')),
-          _noticeCard(
-            context: context,
-            text: _t(
-              'لا يلزم قبول يدوي للدعوة. يكفي إرسال العرض وسيتم تحديث حالة الدعوة تلقائيًا.',
-              'Manual invite acceptance is not required. Sending an offer updates invite status automatically.',
-            ),
-            tone: _NoticeTone.info,
-          ),
           _buildMarketerDetailsQuickActions(context),
 
           // قسم العرض: نُبقي اللوحة مرئية كي تستطيع عرض «حالة عرضك» وزر
@@ -1124,152 +1085,7 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     );
   }
 
-  Widget _propertyPreviewCard(
-    Map<String, dynamic> p, {
-    bool showLeadImage = true,
-  }) {
-    final imgs = ((p['property_images'] as List?) ?? const <dynamic>[])
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList()
-      ..sort((a, b) =>
-          ((a['sort_order'] as num?)?.toInt() ?? 0).compareTo((b['sort_order'] as num?)?.toInt() ?? 0));
-    final path = imgs.isEmpty
-        ? ''
-        : ((imgs.first['path'] ?? imgs.first['file_name'] ?? '') as String)
-            .toString()
-            .trim();
-    final imgUrl = path.isEmpty
-        ? ''
-        : Supabase.instance.client.storage.from('property-images').getPublicUrl(path);
 
-    final title = _safeText(p['title'], fallback: _t('عقار بدون عنوان', 'Untitled listing'));
-    final city = _safeText(p['city']);
-    final location = _safeText(p['location'], fallback: _safeText(p['address_line']));
-    final area = (p['area'] as num?)?.toDouble();
-    final price = (p['price'] as num?)?.toDouble();
-    final dt = DateTime.tryParse((p['created_at'] ?? '').toString());
-    final listedAt = dt == null
-        ? '-'
-        : '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (showLeadImage && imgUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(
-                  imgUrl,
-                  height: 180,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            if (showLeadImage && imgUrl.isNotEmpty) const SizedBox(height: 10),
-            _kv(_t('العنوان', 'Title'), title),
-            _kv(_t('المدينة', 'City'), city),
-            _kv(_t('الموقع', 'Location'), location),
-            if (area != null) _kv(_t('المساحة', 'Area'), '${area.toStringAsFixed(0)} ${_t('م²', 'm²')}'),
-            if (price != null) _kv(_t('السعر', 'Price'), '${price.toStringAsFixed(0)} SAR'),
-            _kv(_t('تاريخ الطرح', 'Listed at'), listedAt),
-
-            // — فاتورة الإعلان (الأساسي + الضريبة + العمولة + الإجمالي
-            //   المستحق) مأخوذة من إعدادات المعلن نفسه. تظهر دائماً داخل
-            //   تفاصيل الطلب — حتى يَعلم المسوّق المبلغ الفعلي قبل تقديم
-            //   عرضه. متكيّفة مع الشاشات الصغيرة (لا التفاف للنصوص).
-            if (price != null && price > 0) ...[
-              const SizedBox(height: 12),
-              _listingInvoiceCard(price),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// بطاقة الفاتورة (الأساسي + الضريبة + العمولة + المجموع النهائي) المشتقّة
-  /// من إعدادات المعلن في الإعلان نفسه (v9). تَستخدم الويدجت الموحّد
-  /// [ListingPricingBreakdown] الذي يتكيّف مع الشاشات الضيّقة تلقائياً
-  /// (يضع التسمية فوق المبلغ بدل صفّ واحد ملتفّ).
-  Widget _listingInvoiceCard(double enteredPrice) {
-    final r = _request ?? const <String, dynamic>{};
-
-    bool toB(Object? v, {bool fallback = true}) {
-      if (v is bool) return v;
-      if (v is num) return v != 0;
-      if (v is String) {
-        final s = v.trim().toLowerCase();
-        if (s == 'true' || s == '1' || s == 'yes') return true;
-        if (s == 'false' || s == '0' || s == 'no') return false;
-      }
-      return fallback;
-    }
-
-    double toD(Object? v, double fallback) {
-      if (v is num) return v.toDouble();
-      if (v is String) {
-        final s = v.trim();
-        if (s.isEmpty) return fallback;
-        return double.tryParse(s) ?? fallback;
-      }
-      return fallback;
-    }
-
-    final inv = ListingInvoiceModel(
-      enteredPrice: enteredPrice,
-      priceIncludesVat: toB(r['price_includes_vat'], fallback: true),
-      vatRate: toD(r['vat_rate'], 0.05),
-      commissionKind: () {
-        final raw =
-            (r['marketing_commission_kind'] ?? 'none').toString().trim().toLowerCase();
-        return const {'none', 'percent', 'fixed'}.contains(raw) ? raw : 'none';
-      }(),
-      commissionRate: toD(r['marketing_commission_rate'], 0.025),
-      commissionAmount: toD(r['marketing_commission_amount'], 0.0),
-      currencyCode: 'SAR',
-    );
-
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.30),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            _t('الإجمالي المستحق والفاتورة', 'Total due & invoice'),
-            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          ListingPricingBreakdown(
-            invoice: inv,
-            isAr: _isAr,
-            showTitle: false,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _kv(String k, String v) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 140, child: Text(k, style: TextStyle(color: Colors.grey.shade700))),
-          Expanded(child: Text(v)),
-        ],
-      ),
-    );
-  }
 
   Widget _noticeCard({
     required BuildContext context,

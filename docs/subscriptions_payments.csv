@@ -1,0 +1,43 @@
+القسم,البند,النوع_أو_المنصة,القيمة,ماذا_يظهر_للمستخدم,الملف
+أنواع الحسابات,مالك فرد / معلن,ownerIndividual,مجاني بلا باقات,تبويب الطلب الفوري + وسائل الدفع + السجل,lib/screens/subscriptions/subscriptions_root_screen.dart
+أنواع الحسابات,مستخدم عام,publicUser,مجاني بلا باقات,نفس تبويبات المالك,lib/screens/subscriptions/subscriptions_root_screen.dart
+أنواع الحسابات,مسوّق فرد,marketer,باقات 1 و4 و11-13 و21-23,الباقات + الدفع + السجل + الفريق + الاستخدام,lib/services/subscription_service.dart
+أنواع الحسابات,مكتب عقاري,realEstateOffice,باقات 2 و4 و11-13 و21-23,تبويبات المسوّق + ترقية + تجديد فال,lib/services/subscription_service.dart
+أنواع الحسابات,مؤسسة عقارية,realEstateInstitution,باقات 2 و4 و11-13 و21-23,مثل المكتب,lib/services/subscription_service.dart
+أنواع الحسابات,وكالة,agency,باقات 2 و4 و11-13 و21-23,مثل المكتب,lib/services/subscription_service.dart
+أنواع الحسابات,شركة عقارية,realEstateCompany,باقات 3 و4 و11-13,بدون توب-أب طلبات 21-23 + ترقية + فال,lib/services/subscription_service.dart
+البابات,الأساسية,sort_order=1,مسوّق فرد — رئيسية,نشر إعلانات وطلبات ضمن حد الباقة,lib/core/subscription/plan_display_copy.dart
+البابات,الاحترافية,sort_order=2,مكتب/مؤسسة/وكالة — رئيسية,إدارة إعلانات وطلبات وصفقات للفريق,lib/core/subscription/plan_display_copy.dart
+البابات,المميّزة,sort_order=3,شركة — رئيسية,حدود أعلى للمنشأة,lib/core/subscription/plan_display_copy.dart
+البابات,الشامل,sort_order=4,كل أدوار التسويق — ترقية,حصة إتمام صفقة أعلى من الأساسية,lib/core/subscription/plan_display_copy.dart
+البابات,توب-أب عروض السوق,sort_order=11/12/13,رصيد لمرة واحدة,إتمام صفقات على طلبات الرئيسية — بلا تجديد تلقائي,lib/services/subscription_service.dart
+البابات,توب-أب طلبات عقارية,sort_order=21/22/23,رصيد لمرة واحدة,نشر طلبات إضافية من الرئيسية,lib/services/subscription_service.dart
+البابات,تجريبية,is_trial_plan,مرة واحدة لكل مستخدم,لا تُدرج في قائمة الباقات — بانر منفصل,lib/screens/subscriptions/subscription_plans_screen.dart
+المالك,طلب فوري,30 ر.س,أسبوع أولوية في المنطقة و72 ساعة خارجها,يظهر في تبويب الطلب الفوري فقط,lib/screens/subscriptions/owner_instant_payments_hub_screen.dart
+المالك,إضافة إعلان,مجاني,بدون اشتراك,يُرسل غالباً لسوق المسوّقين إن لم تكتمل رخصة REGA,lib/core/subscription/app_subscription_gate.dart
+المالك,طلب عقاري عادي,مجاني,بدون اشتراك,30 ر.س فقط عند اختيار فوري,lib/core/subscription/app_subscription_gate.dart
+المالك,إتمام صفقة,مجاني,بدون اشتراك,مجاني لغير المسوّق,lib/core/subscription/app_subscription_gate.dart
+المسوّق,إضافة إعلان,يلزم اشتراك,marketingFeatureAccess,بوابة قبل النشر,lib/core/subscription/app_subscription_gate.dart
+المسوّق,طلب عقاري,حصة الباقة,listingRequestsAllowance,يُمنع عند نفاد الحصة,lib/core/subscription/app_subscription_gate.dart
+المسوّق,إتمام صفقة,حصة عروض السوق,marketOfferAllowance,زر اشترك بدل إتمام عند النفاد,lib/core/subscription/app_subscription_gate.dart
+طرق الدفع,بطاقة محفوظة,كل البيئات عند Moyasar,savedCard,تظهر أولاً إن وُجدت بطاقة جاهزة,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,بطاقة جديدة,كل البيئات,newCardMoyasar,دائماً ظاهرة,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,مدى,كل البيئات,mada,دائماً عند تفعيل الدفع,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,Google Pay,أندرويد أصلي أو Chrome/Edge ويب,googlePay,ويندوز ويب نعم إن كان Chromium,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,Apple Pay,iOS أصلي أو Safari,applePay,لا على ويندوز ولا Chrome,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,STC Pay,أندرويد أصلي أو ويب جوال أندرويد Chrome,stcPay,لا iOS ولا ويندوز سطح مكتب,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,Tabby,تطبيق أصلي فقط + Moyasar حي,tabby,لا ويب,lib/core/payment/payment_platform_detector.dart
+طرق الدفع,Tamara,تطبيق أصلي فقط + Moyasar حي,tamara,لا ويب,lib/core/payment/payment_platform_detector.dart
+مسار الدفع,اختيار باقة,تسويق,SubscriptionPlansScreen,بعدها الدفع,lib/screens/subscriptions/subscription_plans_screen.dart
+مسار الدفع,الدفع,Moyasar,PaymentCheckoutScreen / MoyasarSubscriptionPaymentScreen,حسب نوع العملية,lib/screens/subscriptions/payment_checkout_screen.dart
+مسار الدفع,حفظ بطاقة,كل المستخدمين,PaymentMethodsScreen / AddPaymentCardScreen,إدارة البطاقات,lib/screens/subscriptions/payment_methods_screen.dart
+مسار الدفع,السجل,كل المستخدمين,PaymentHistoryScreen,سجل العمليات,lib/screens/subscriptions/payment_history_screen.dart
+مسار الدفع,فاتورة,كل المستخدمين,InvoiceDetailScreen / PaymentReceiptScreen,تفاصيل الفاتورة,lib/screens/subscriptions/invoice_detail_screen.dart
+مسار الدفع,الفوري,مالك/مستخدم,InstantMarketRequestPaymentService,30 ر.س,lib/services/instant_market_request_payment_service.dart
+ملفات,الخدمة,خلفية,subscription_service.dart,كتالوج الباقات والحصص,lib/services/subscription_service.dart
+ملفات,البوابة,خلفية,app_subscription_gate.dart,ماذا يُسمح لكل دور,lib/core/subscription/app_subscription_gate.dart
+ملفات,الدفع,خلفية,payment_service.dart,Moyasar الحي,lib/services/payment_service.dart
+ملفات,الجذر,واجهة,subscriptions_root_screen.dart,تبويبات حسب الدور,lib/screens/subscriptions/subscriptions_root_screen.dart
+ملفات,الفريق,منشأة/مسوّق,manage_team_subscription_screen.dart,المقاعد,lib/screens/subscriptions/manage_team_subscription_screen.dart
+ملفات,الاستخدام,تسويق,subscription_details_screen.dart / plan_details_screen.dart,الحصص المستهلكة,lib/screens/subscriptions/subscription_details_screen.dart
+ملفات,خصم التجديد,سياسة العرض,10٪ شهري تلقائي و20٪ سنوي بدون تجديد,سطر السياسة تحت البطاقة,lib/core/subscription/plan_display_copy.dart

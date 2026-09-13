@@ -1,4 +1,6 @@
-﻿// lib/screens/settings_page.dart
+﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field
+
+// lib/screens/settings_page.dart
 import 'dart:async' show unawaited;
 import 'dart:convert' show jsonDecode;
 import 'dart:typed_data';
@@ -6,19 +8,24 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:app_settings/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/navigation/safe_overlay_pop.dart';
+import '../core/navigation/support_overlay_route.dart';
+import '../widgets/app_page_close_button.dart';
 
+import '../core/utils/date_helper.dart';
 import '../core/utils/search_normalize.dart';
 import '../core/utils/compound_display_name.dart';
 import '../core/config/app_config.dart';
@@ -48,8 +55,6 @@ import '../core/haptics/app_haptics.dart';
 import '../core/notifications/in_app_notification_sound.dart';
 import '../core/notifications/chat_message_sound.dart';
 import '../core/theme/app_accent.dart';
-import '../core/session/user_appearance_session.dart';
-import '../core/theme/app_appearance_bridge.dart';
 import '../core/compliance/platform_compliance_config.dart';
 import '../routes.dart';
 import '../core/onboarding/device_first_run_prefs.dart';
@@ -59,7 +64,6 @@ import 'browse_organizations_screen.dart';
 import '../services/fast_login_service.dart';
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
-import '../widgets/app_page_close_button.dart';
 import '../widgets/app_confirm_dialog.dart';
 import '../models/saudi_location.dart';
 import '../services/saudi_locations_service.dart';
@@ -67,6 +71,7 @@ import 'map_picker_page.dart';
 import '../widgets/field_group_frame.dart';
 import '../core/input/input_normalizers.dart';
 import '../services/account_completion_service.dart';
+import '../services/profile_compliance_service.dart';
 import '../services/chat_notification_prefs.dart';
 import '../core/profile/publisher_identity_prefs.dart';
 import '../widgets/publisher_identity_options_card.dart';
@@ -79,7 +84,7 @@ import 'consent_preferences_screen.dart';
 import 'platform_policies_screen.dart';
 import 'profile_enrollment_gate_screen.dart';
 import 'regulatory_operator_checklist_screen.dart';
-import 'support_page.dart';
+import '../widgets/support_hub_tabs.dart';
 
 /// أقسام الإعدادات — ويب: تبويب لكل قسم، جوال: صف يفتح الشاشة الفرعية.
 enum _SettingsSection {
@@ -159,15 +164,15 @@ class _SettingsPageState extends State<SettingsPage> {
   /// الرقم الوطني الموحّد (700…) إن وُجد في الملف
   String _unifiedNationalDisplay = '';
 
-  /// الرقم العمومي 10 أرقام (public_member_id) — فرق/مكاتب
-  String _publicMemberId = '';
+  /// رخصة فال / رقم الرخصة
+  String _licenseNo = '';
+  String? _falExpiresAtRaw;
+  bool _falHold = false;
+
+  /// معرّف الهوية (username — 10 أرقام)
+  String _identityUsername = '';
+
   String _accountTypeRaw = '';
-
-  /// حفظ لغة الواجهة مع حساب المستخدم (وليس الجهاز فقط).
-  bool _syncLangWithAccount = true;
-
-  /// حفظ وضع الفاتح/الداكن مع حساب المستخدم.
-  bool _syncThemeWithAccount = true;
 
   bool _unifiedNationalObscured = true;
   bool _chatLastSeenHidden = false;
@@ -241,6 +246,18 @@ class _SettingsPageState extends State<SettingsPage> {
     _settingsContentEpoch++;
   }
 
+  Future<void> _openSupportHub() async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    await SupportOverlay.push<void>(
+      context,
+      page: SupportHubScreen(
+        userId: uid,
+        isAr: _isAr,
+        accentColor: Theme.of(context).colorScheme.primary,
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -261,17 +278,16 @@ class _SettingsPageState extends State<SettingsPage> {
     unawaited(_loadPreferredExploreCity());
     unawaited(_loadLocalReportStats());
     _listingDateZone = ListingDateDisplay.zone;
-    unawaited(_loadSyncLangPref());
-    unawaited(_loadSyncThemePref());
     unawaited(_loadPresenceDisplayPrefs());
-    if (widget.focusPresenceDisplay || widget.focusProfileCompletion) {
+    if (widget.focusPresenceDisplay) {
+      _mobileDetail = _SettingsSection.notificationsPreferences;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToPresenceDisplay();
+      });
+    } else if (widget.focusProfileCompletion) {
       _mobileDetail = _SettingsSection.profile;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (widget.focusPresenceDisplay) {
-          _scrollToPresenceDisplay();
-        } else if (widget.focusProfileCompletion) {
-          _scrollToProfileCompletion();
-        }
+        _scrollToProfileCompletion();
       });
     }
   }
@@ -358,9 +374,33 @@ class _SettingsPageState extends State<SettingsPage> {
     Widget? trailing,
     VoidCallback? onEdit,
     String? editLabel,
+    VoidCallback? onCopy,
+    TextDirection? valueDirection,
   }) {
     final cs = Theme.of(context).colorScheme;
     final narrow = MediaQuery.sizeOf(context).width < 420;
+    const valueStyle = TextStyle(
+      fontSize: 15,
+      fontWeight: FontWeight.w900,
+      height: 1.25,
+    );
+    final valueChild = Text(
+      value.isEmpty ? '—' : value,
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      textDirection: valueDirection,
+      style: valueStyle,
+    );
+    final copyBtn = onCopy == null
+        ? null
+        : IconButton(
+            tooltip: _isAr ? 'نسخ' : 'Copy',
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onPressed: onCopy,
+            icon: Icon(Icons.copy_outlined, size: 18, color: cs.primary),
+          );
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
       child: Material(
@@ -386,19 +426,13 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        value.isEmpty ? '—' : value,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w900,
-                          height: 1.25,
-                        ),
-                      ),
-                      if (onEdit != null || trailing != null) ...[
+                      valueChild,
+                      if (onEdit != null || trailing != null || copyBtn != null) ...[
                         const SizedBox(height: 6),
                         Row(
                           children: [
                             if (trailing != null) trailing,
+                            if (copyBtn != null) copyBtn,
                             const Spacer(),
                             if (onEdit != null)
                               TextButton(
@@ -434,18 +468,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                       const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          value.isEmpty ? '—' : value,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w900,
-                            height: 1.25,
-                          ),
-                        ),
-                      ),
+                      Expanded(child: valueChild),
+                      if (copyBtn != null) copyBtn,
                       if (trailing != null) trailing,
                       if (onEdit != null)
                         TextButton(
@@ -469,7 +493,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _keyboardAwareDialogBody(Widget child) {
     return Builder(
       builder: (ctx) {
-        final inset = MediaQuery.viewInsetsOf(ctx).bottom;
+        final inset = AppKeyboardInset.bottomOf(ctx);
         return AnimatedPadding(
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOutCubic,
@@ -503,7 +527,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ? digitsOnly(normalizeAsciiDigits(_secondaryPhone))
           : digitsOnly(normalizeAsciiDigits(_phone)),
     );
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(
@@ -593,7 +617,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final c = TextEditingController(
       text: _displayAlias.isNotEmpty ? _displayAlias : _fullDisplayName,
     );
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'اسم الظهور المستعار' : 'Display alias'),
@@ -708,18 +732,6 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  Future<void> _loadSyncLangPref() async {
-    final v = await UserAppearanceSession.readSyncLangWithAccount();
-    if (!mounted) return;
-    setState(() => _syncLangWithAccount = v);
-  }
-
-  Future<void> _loadSyncThemePref() async {
-    final v = await UserAppearanceSession.readSyncThemeWithAccount();
-    if (!mounted) return;
-    setState(() => _syncThemeWithAccount = v);
-  }
-
   Future<void> _loadLocalReportStats() async {
     final s = await UserListingPreferencesService.reportStatsSummary();
     if (!mounted) return;
@@ -731,7 +743,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _pickListingDateZone() async {
-    final picked = await showModalBottomSheet<ListingDateDisplayZone>(
+    final picked = await showAppModalBottomSheet<ListingDateDisplayZone>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -876,7 +888,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }) async {
     final tc = TextEditingController();
     try {
-      return await showModalBottomSheet<T>(
+      return await showAppModalBottomSheet<T>(
         context: context,
         showDragHandle: true,
         isScrollControlled: true,
@@ -1019,7 +1031,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _pickPreferredExploreCity() async {
-    final mode = await showModalBottomSheet<String>(
+    final mode = await showAppModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (ctx) => SafeArea(
@@ -1082,7 +1094,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _isAr
               ? 'تصفّح المكاتب والمؤسسات وطلب الانضمام'
               : 'Browse offices & institutions and request to join',
-          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         trailing: Text(_isAr ? 'فتح' : 'Open'),
         onTap: () {
@@ -1113,7 +1125,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle,
           style: TextStyle(
             fontSize: 12,
-            color: Colors.grey.shade600,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ),
         trailing: Text(_isAr ? 'تغيير' : 'Change'),
@@ -1423,14 +1435,11 @@ class _SettingsPageState extends State<SettingsPage> {
     if (s.isEmpty) return '—';
     final dt = DateTime.tryParse(s);
     if (dt != null) {
-      final d = dt.toLocal();
-      final hh = d.hour.toString().padLeft(2, '0');
-      final mm = d.minute.toString().padLeft(2, '0');
-      final ss = d.second.toString().padLeft(2, '0');
-      if (_isAr) {
-        return '${d.year}/${d.month.toString().padLeft(2, '0')}/${d.day.toString().padLeft(2, '0')}  $hh:$mm:$ss';
-      }
-      return '${DateFormat.yMMMd('en').format(d)}  $hh:$mm:$ss';
+      return DateHelper.fmtCivilDateTime(
+        dt.toLocal(),
+        isAr: _isAr,
+        withSeconds: true,
+      );
     }
     return s;
   }
@@ -1451,7 +1460,8 @@ class _SettingsPageState extends State<SettingsPage> {
               'avatar_url,phone,secondary_phone,role,status,created_at,account_type,'
               'unified_national_number,public_name_source,public_phone_source,'
               'publish_presence_on_cards,'
-              'public_member_id,chat_last_seen_hidden,username,license_no',
+              'public_member_id,chat_last_seen_hidden,username,license_no,'
+              'fal_license_expires_at,fal_compliance_hold',
             )
             .eq('user_id', u.id)
             .maybeSingle();
@@ -1463,7 +1473,8 @@ class _SettingsPageState extends State<SettingsPage> {
               'first_name_en,second_name_en,third_name_en,fourth_name_en,'
               'full_name_ar,full_name_en,full_name,office_name,'
               'avatar_url,phone,role,status,created_at,account_type,unified_national_number,'
-              'public_member_id,chat_last_seen_hidden,username,license_no',
+              'public_member_id,chat_last_seen_hidden,username,license_no,'
+              'fal_license_expires_at,fal_compliance_hold',
             )
             .eq('user_id', u.id)
             .maybeSingle();
@@ -1491,7 +1502,6 @@ class _SettingsPageState extends State<SettingsPage> {
           _roleKey = 'user';
           _accountStatus = 'active';
           _createdAt = '—';
-          _publicMemberId = '';
         });
         return;
       }
@@ -1556,8 +1566,15 @@ class _SettingsPageState extends State<SettingsPage> {
             ? 'active'
             : _pickStr(map, 'status');
         _createdAt = _formatProfileDate(map['created_at']);
-        _publicMemberId = _pickStr(map, 'public_member_id');
         _chatLastSeenHidden = map['chat_last_seen_hidden'] == true;
+        _identityUsername = digitsOnly(
+          normalizeAsciiDigits(_pickStr(map, 'username')),
+        );
+        _licenseNo = digitsOnly(
+          normalizeAsciiDigits(_pickStr(map, 'license_no')),
+        );
+        _falExpiresAtRaw = map['fal_license_expires_at']?.toString();
+        _falHold = map['fal_compliance_hold'] == true;
       });
       _maybePopWhenProfileCompletionDone();
     } catch (e) {
@@ -1598,11 +1615,267 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _copyDistinguishedNational() async {
     final unn = digitsOnly(normalizeAsciiDigits(_unifiedNationalDisplay));
     if (unn.length != 10) return;
-    await Clipboard.setData(ClipboardData(text: unn));
+    await _copyPlain(unn);
+  }
+
+  Future<void> _copyPlain(String text) async {
+    final v = text.trim();
+    if (v.isEmpty || v == '—') return;
+    await Clipboard.setData(ClipboardData(text: v));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_isAr ? 'تم النسخ' : 'Copied')),
+    _showTempSnack(_isAr ? 'تم النسخ' : 'Copied');
+  }
+
+  String _formatPrimaryPhoneDisplay() {
+    final d = digitsOnly(normalizeAsciiDigits(_phone));
+    if (d.isEmpty) return '';
+    var local = d;
+    if (local.startsWith('966') && local.length >= 12) {
+      local = '0${local.substring(3)}';
+    }
+    return '$local +';
+  }
+
+  String _phoneDigitsForCopy() => digitsOnly(normalizeAsciiDigits(_phone));
+
+  bool get _needsFalLicense =>
+      ProfileComplianceService.accountTypeNeedsFal(_accountTypeRaw) ||
+      AccountCompletionService.accountTypeNeedsUnifiedNational(_accountTypeRaw);
+
+  bool get _needsUnifiedNational =>
+      AccountCompletionService.accountTypeNeedsUnifiedNational(_accountTypeRaw);
+
+  String _falStatusLabel() {
+    final row = <String, dynamic>{
+      'account_type': _accountTypeRaw,
+      'license_no': _licenseNo,
+      'fal_license_expires_at': _falExpiresAtRaw,
+      'fal_compliance_hold': _falHold,
+    };
+    if (_licenseNo.isEmpty) {
+      return _isAr ? 'غير مضافة' : 'Not set';
+    }
+    final level = ProfileComplianceService.evaluateFal(row);
+    switch (level) {
+      case FalComplianceLevel.blockedExpired:
+        return _isAr ? 'منتهية أو موقوفة' : 'Expired / on hold';
+      case FalComplianceLevel.warnWeek:
+        return _isAr ? 'تنتهي خلال أسبوع' : 'Expires within a week';
+      case FalComplianceLevel.ok:
+        if ((_falExpiresAtRaw ?? '').trim().isNotEmpty) {
+          final d = DateTime.tryParse(_falExpiresAtRaw!);
+          if (d != null) {
+            final day = DateHelper.fmtCivilDate(d.toLocal(), isAr: _isAr);
+            return _isAr ? 'سارية — حتى $day' : 'Valid — until $day';
+          }
+        }
+        return _isAr ? 'سارية (بانتظار الربط الحكومي)' : 'Valid (gov link pending)';
+    }
+  }
+
+  Future<void> _showReportActivitySheet() async {
+    final events = await UserListingPreferencesService.listReportActivity();
+    if (!mounted) return;
+    final cs = Theme.of(context).colorScheme;
+    await showAppModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: events.isEmpty ? 0.38 : 0.58,
+          minChildSize: 0.32,
+          maxChildSize: 0.92,
+          builder: (_, scroll) {
+            if (events.isEmpty) {
+              return ListView(
+                controller: scroll,
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
+                children: [
+                  Text(
+                    _isAr ? 'سجل البلاغات' : 'Report log',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 17,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _isAr
+                        ? 'لا توجد بلاغات محفوظة على هذا الجهاز بعد.'
+                        : 'No reports stored on this device yet.',
+                    style: TextStyle(
+                      height: 1.4,
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              );
+            }
+            return ListView.separated(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 28),
+              itemCount: events.length + 1,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (_, i) {
+                if (i == 0) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                    child: Text(
+                      _isAr
+                          ? 'سجل البلاغات على هذا الجهاز'
+                          : 'Reports on this device',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 17,
+                      ),
+                    ),
+                  );
+                }
+                final e = events[i - 1];
+                final when = DateTime.fromMillisecondsSinceEpoch(e.ts);
+                final kind = e.kind == 'request'
+                    ? (_isAr ? 'طلب سوق' : 'Market request')
+                    : (_isAr ? 'إعلان عقاري' : 'Listing');
+                return ListTile(
+                  leading: Icon(
+                    e.kind == 'request'
+                        ? Icons.handshake_outlined
+                        : Icons.home_work_outlined,
+                    color: cs.primary,
+                  ),
+                  title: Text(
+                    kind,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    '${DateHelper.fmtCivilDateTime(when.toLocal(), isAr: _isAr)}\n'
+                    '${_isAr ? 'المعرف' : 'ID'}: ${e.id}',
+                    style: const TextStyle(height: 1.35),
+                  ),
+                  isThreeLine: true,
+                );
+              },
+            );
+          },
+        );
+      },
     );
+  }
+
+  Future<void> _showEditLicenseDialog() async {
+    final c = TextEditingController(text: _licenseNo);
+    final ok = await showAppDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_isAr ? 'رقم رخصة فال' : 'FAL license number'),
+        content: _keyboardAwareDialogBody(
+          AqarTextField(
+            controller: c,
+            keyboardType: TextInputType.number,
+            maxLength: 16,
+            inputFormatters: [
+              ArabicDigitsToLatinFormatter(),
+              FilteringTextInputFormatter.digitsOnly,
+            ],
+            decoration: InputDecoration(
+              counterText: '',
+              hintText: _isAr ? 'أدخل رقم الرخصة' : 'Enter license number',
+              helperText: _isAr
+                  ? 'يُحفظ الآن يدوياً. التحقق الحكومي سيُربط لاحقاً.'
+                  : 'Saved manually now. Government verification comes later.',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(_isAr ? 'حفظ' : 'Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) {
+      c.dispose();
+      return;
+    }
+    final raw = c.text;
+    c.dispose();
+    try {
+      await AccountCompletionService.saveLicenseNo(sb: _sb, licenseRaw: raw);
+      if (!mounted) return;
+      await _loadUser();
+      if (!mounted) return;
+      _showTempSnack(_isAr ? 'تم حفظ رقم رخصة فال' : 'FAL license saved');
+    } catch (_) {
+      if (!mounted) return;
+      _showTempSnack(
+        _isAr ? 'تعذر الحفظ — تحقق من رقم الرخصة' : 'Could not save license',
+      );
+    }
+  }
+
+  Future<void> _showEditIdentityUsernameDialog() async {
+    final existing = _identityUsername;
+    if (existing.length == 10) return;
+    final c = TextEditingController(text: existing);
+    final ok = await showAppDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_isAr ? 'رقم الهوية (المعرّف)' : 'Identity ID'),
+        content: _keyboardAwareDialogBody(
+          AqarTextField(
+            controller: c,
+            keyboardType: TextInputType.number,
+            maxLength: 10,
+            inputFormatters: [
+              ArabicDigitsToLatinFormatter(),
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(10),
+            ],
+            decoration: InputDecoration(
+              counterText: '',
+              hintText: _isAr ? '10 أرقام' : '10 digits',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(_isAr ? 'حفظ' : 'Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) {
+      c.dispose();
+      return;
+    }
+    final raw = c.text;
+    c.dispose();
+    try {
+      await AccountCompletionService.saveIdentityUsername(
+        sb: _sb,
+        tenDigits: raw,
+      );
+      if (!mounted) return;
+      await _loadUser();
+      if (!mounted) return;
+      _showTempSnack(_isAr ? 'تم الحفظ' : 'Saved');
+    } catch (_) {
+      if (!mounted) return;
+      _showTempSnack(_isAr ? 'تعذر الحفظ' : 'Could not save');
+    }
   }
 
   Future<void> _showEditUnifiedNationalDialog() async {
@@ -1610,7 +1883,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final c = TextEditingController(
       text: existing.length == 10 ? existing : '',
     );
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(AppLocalizations.of(ctx)!.settingsEditDistinguishedNumber),
@@ -1725,7 +1998,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!ok || !mounted) return null;
     }
     if (kIsWeb) {
-      final choice = await showModalBottomSheet<String>(
+      final choice = await showAppModalBottomSheet<String>(
         context: context,
         builder: (ctx) {
           return SafeArea(
@@ -1884,7 +2157,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final c1 = TextEditingController();
     final c2 = TextEditingController();
 
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -2206,8 +2479,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _formatSessionTs(dynamic raw) {
     final dt = DateTime.tryParse('${raw ?? ''}');
     if (dt == null) return '—';
-    final loc = _isAr ? 'ar' : 'en';
-    return DateFormat.yMMMd(loc).add_Hm().format(dt.toLocal());
+    return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: _isAr);
   }
 
   /// عنوان قريب من حافة البداية (يمين في العربية) والتفاصيل في المقابل.
@@ -2484,7 +2756,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 _profileFactRow(
                   label: _isAr ? 'الجوال الأساسي' : 'Primary phone',
-                  value: _phone.isEmpty ? '—' : _phone,
+                  value: _phone.isEmpty ? '—' : _formatPrimaryPhoneDisplay(),
+                  valueDirection: TextDirection.ltr,
+                  onCopy: _phoneDigitsForCopy().isEmpty
+                      ? null
+                      : () => _copyPlain(_phoneDigitsForCopy()),
                   editLabel: _phone.isEmpty
                       ? (_isAr ? 'إضافة' : 'Add')
                       : null,
@@ -2497,8 +2773,34 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: _secondaryPhone.isEmpty
                       ? (_isAr ? '— غير مضاف —' : '— not set —')
                       : _secondaryPhone,
+                  valueDirection: _secondaryPhone.isEmpty
+                      ? null
+                      : TextDirection.ltr,
+                  onCopy: digitsOnly(normalizeAsciiDigits(_secondaryPhone)).isEmpty
+                      ? null
+                      : () => _copyPlain(
+                            digitsOnly(normalizeAsciiDigits(_secondaryPhone)),
+                          ),
                   onEdit: _showEditPhoneDialog,
                   editLabel: _secondaryPhone.isEmpty
+                      ? (_isAr ? 'إضافة' : 'Add')
+                      : (_isAr ? 'تعديل' : 'Edit'),
+                ),
+                _profileFactRow(
+                  label: _isAr ? 'رقم الهوية (المعرّف)' : 'Identity ID',
+                  value: _identityUsername.isEmpty
+                      ? (_isAr ? '— غير مضاف —' : '— not set —')
+                      : _identityUsername,
+                  valueDirection: _identityUsername.isEmpty
+                      ? null
+                      : TextDirection.ltr,
+                  onCopy: _identityUsername.length == 10
+                      ? () => _copyPlain(_identityUsername)
+                      : null,
+                  onEdit: _identityUsername.length == 10
+                      ? null
+                      : _showEditIdentityUsernameDialog,
+                  editLabel: _identityUsername.isEmpty
                       ? (_isAr ? 'إضافة' : 'Add')
                       : (_isAr ? 'تعديل' : 'Edit'),
                 ),
@@ -2578,21 +2880,36 @@ class _SettingsPageState extends State<SettingsPage> {
                 _reportCountLast30d,
               ),
             ),
+            trailing: _mobileChevron(),
+            onTap: _showReportActivitySheet,
           ),
-          if (_publicMemberId.isNotEmpty)
-            ListTile(
-              title: SelectableText(
-                _publicMemberId,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
+          if (_needsFalLicense)
+            _profileFactRow(
+              label: _isAr ? 'رقم رخصة فال' : 'FAL license number',
+              value: _licenseNo.isEmpty
+                  ? (_isAr ? '— غير مضاف —' : '— not set —')
+                  : _licenseNo,
+              valueDirection:
+                  _licenseNo.isEmpty ? null : TextDirection.ltr,
+              onCopy:
+                  _licenseNo.isEmpty ? null : () => _copyPlain(_licenseNo),
+              trailing: Padding(
+                padding: const EdgeInsetsDirectional.only(end: 4),
+                child: Text(
+                  _falStatusLabel(),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                 ),
               ),
-              subtitle: Text(t.settingsPublicMemberIdSubtitle),
+              onEdit: _showEditLicenseDialog,
+              editLabel: _licenseNo.isEmpty
+                  ? (_isAr ? 'إضافة' : 'Add')
+                  : (_isAr ? 'تحديث' : 'Update'),
             ),
-          if (AccountCompletionService.accountTypeNeedsUnifiedNational(
-            _accountTypeRaw,
-          )) ...[
+          if (_needsUnifiedNational)
             ListTile(
               title: Row(
                 children: [
@@ -2636,135 +2953,6 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               onTap: _showEditUnifiedNationalDialog,
             ),
-            SwitchListTile(
-              value: _chatLastSeenHidden,
-              onChanged: (v) async {
-                await OrgTeamService(_sb).setChatLastSeenHidden(v);
-                if (mounted) setState(() => _chatLastSeenHidden = v);
-              },
-              title: Text(t.settingsLastSeenPrivacyTitle),
-              subtitle: Text(t.settingsLastSeenPrivacySubtitle),
-            ),
-            const Divider(height: 1),
-            KeyedSubtree(
-              key: _presenceDisplayKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: Text(
-                      _isAr
-                          ? 'عرض الظهور على البطاقات'
-                          : 'Presence on cards',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 14.5,
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: Text(
-                      _isAr
-                          ? 'تحكم بما تراه أنت من «متصل الآن / آخر ظهور» على بطاقات الإعلانات والطلبات والدردشة. يمكنك إخفاء العرض مؤقتاً حتى وقت محدد.'
-                          : 'Control what you see for online/last-seen on listing cards, request cards, and chat. You can hide it temporarily until a chosen time.',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        height: 1.35,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  SwitchListTile(
-                    value: _presenceShowListing,
-                    onChanged: !_presencePrefsLoaded
-                        ? null
-                        : (v) async {
-                            await PresenceDisplayPrefs.instance
-                                .setShowOnListingCards(v);
-                            if (mounted) {
-                              setState(() => _presenceShowListing = v);
-                            }
-                          },
-                    title: Text(
-                      _isAr
-                          ? 'على بطاقات الإعلانات'
-                          : 'On listing cards',
-                    ),
-                  ),
-                  SwitchListTile(
-                    value: _presenceShowRequest,
-                    onChanged: !_presencePrefsLoaded
-                        ? null
-                        : (v) async {
-                            await PresenceDisplayPrefs.instance
-                                .setShowOnRequestCards(v);
-                            if (mounted) {
-                              setState(() => _presenceShowRequest = v);
-                            }
-                          },
-                    title: Text(
-                      _isAr
-                          ? 'على بطاقات الطلبات العقارية'
-                          : 'On request cards',
-                    ),
-                  ),
-                  SwitchListTile(
-                    value: _presenceShowChat,
-                    onChanged: !_presencePrefsLoaded
-                        ? null
-                        : (v) async {
-                            await PresenceDisplayPrefs.instance
-                                .setShowOnChat(v);
-                            if (mounted) {
-                              setState(() => _presenceShowChat = v);
-                            }
-                          },
-                    title: Text(
-                      _isAr ? 'في الدردشة' : 'In chat',
-                    ),
-                  ),
-                  ListTile(
-                    title: Text(
-                      _isAr
-                          ? 'إخفاء مؤقت حتى تاريخ/وقت'
-                          : 'Hide temporarily until',
-                    ),
-                    subtitle: Text(
-                      _presenceHideUntil == null
-                          ? (_isAr ? 'غير مفعّل' : 'Off')
-                          : DateFormat.yMMMd(_isAr ? 'ar' : 'en')
-                              .add_Hm()
-                              .format(_presenceHideUntil!.toLocal()),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_presenceHideUntil != null)
-                          TextButton(
-                            onPressed: () async {
-                              await PresenceDisplayPrefs.instance
-                                  .clearTemporaryHide();
-                              if (mounted) {
-                                setState(() => _presenceHideUntil = null);
-                              }
-                            },
-                            child: Text(_isAr ? 'إلغاء' : 'Clear'),
-                          ),
-                        IconButton(
-                          tooltip: _isAr ? 'اختيار وقت' : 'Pick time',
-                          onPressed: _pickPresenceHideUntil,
-                          icon: const Icon(Icons.schedule_rounded),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
           ListTile(
             title: Text(t.profileChangePhoto),
             trailing: Text(_isAr ? 'تغيير' : 'Change',
@@ -2792,18 +2980,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: TextStyle(
                     color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.w700)),
-            onTap: () {
-              final uid = _sb.auth.currentUser?.id ?? '';
-              Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => SupportPage(
-                    userId: uid,
-                    isAr: _isAr,
-                    bankColor: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              );
-            },
+            onTap: () => unawaited(_openSupportHub()),
           ),
         ],
       ),
@@ -2891,7 +3068,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   : (_isAr
                       ? 'غير متاح على هذا الجهاز'
                       : 'Not available on this device'),
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _faceOn,
             onChanged: (!_canBio || !_faceHw)
@@ -2909,7 +3086,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   : (_isAr
                       ? 'غير متاح على هذا الجهاز'
                       : 'Not available on this device'),
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _fpOn,
             onChanged: (!_canBio || !_fpHw)
@@ -2954,7 +3131,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr
                   ? 'القيمة الافتراضية 15 دقيقة. تُستخدم عند إرسال التطبيق للخلفية مع تفعيل الدخول السريع أو البصمة.'
                   : 'Default is 15 minutes. Used after backgrounding when PIN or biometrics lock is enabled.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
           Slider(
@@ -3022,7 +3199,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr
                   ? 'تظهر الحالة كما يراها النظام. يمكن فتح إعدادات النظام لتعديلها.'
                   : 'Status as reported by the system. Open system settings to change.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 10),
             for (final line in _permissionLines) ...[
@@ -3383,11 +3560,136 @@ class _SettingsPageState extends State<SettingsPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SwitchListTile(
+            value: _chatLastSeenHidden,
+            onChanged: (v) async {
+              await OrgTeamService(_sb).setChatLastSeenHidden(v);
+              if (mounted) setState(() => _chatLastSeenHidden = v);
+            },
+            title: Text(t.settingsLastSeenPrivacyTitle),
+            subtitle: Text(t.settingsLastSeenPrivacySubtitle),
+          ),
+          const Divider(height: 1),
+          KeyedSubtree(
+            key: _presenceDisplayKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    _isAr
+                        ? 'عرض الظهور على البطاقات'
+                        : 'Presence on cards',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14.5,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    _isAr
+                        ? 'تحكم بما تراه أنت من «متصل الآن / آخر ظهور» على بطاقات الإعلانات والطلبات والدردشة. يمكنك إخفاء العرض مؤقتاً حتى وقت محدد.'
+                        : 'Control what you see for online/last-seen on listing cards, request cards, and chat. You can hide it temporarily until a chosen time.',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.35,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  value: _presenceShowListing,
+                  onChanged: !_presencePrefsLoaded
+                      ? null
+                      : (v) async {
+                          await PresenceDisplayPrefs.instance
+                              .setShowOnListingCards(v);
+                          if (mounted) {
+                            setState(() => _presenceShowListing = v);
+                          }
+                        },
+                  title: Text(
+                    _isAr ? 'على بطاقات الإعلانات' : 'On listing cards',
+                  ),
+                ),
+                SwitchListTile(
+                  value: _presenceShowRequest,
+                  onChanged: !_presencePrefsLoaded
+                      ? null
+                      : (v) async {
+                          await PresenceDisplayPrefs.instance
+                              .setShowOnRequestCards(v);
+                          if (mounted) {
+                            setState(() => _presenceShowRequest = v);
+                          }
+                        },
+                  title: Text(
+                    _isAr
+                        ? 'على بطاقات الطلبات العقارية'
+                        : 'On request cards',
+                  ),
+                ),
+                SwitchListTile(
+                  value: _presenceShowChat,
+                  onChanged: !_presencePrefsLoaded
+                      ? null
+                      : (v) async {
+                          await PresenceDisplayPrefs.instance.setShowOnChat(v);
+                          if (mounted) {
+                            setState(() => _presenceShowChat = v);
+                          }
+                        },
+                  title: Text(_isAr ? 'في الدردشة' : 'In chat'),
+                ),
+                ListTile(
+                  title: Text(
+                    _isAr
+                        ? 'إخفاء مؤقت حتى تاريخ/وقت'
+                        : 'Hide temporarily until',
+                  ),
+                  subtitle: Text(
+                    _presenceHideUntil == null
+                        ? (_isAr ? 'غير مفعّل' : 'Off')
+                        : DateHelper.fmtCivilDateTime(
+                            _presenceHideUntil!.toLocal(),
+                            isAr: _isAr,
+                          ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_presenceHideUntil != null)
+                        TextButton(
+                          onPressed: () async {
+                            await PresenceDisplayPrefs.instance
+                                .clearTemporaryHide();
+                            if (mounted) {
+                              setState(() => _presenceHideUntil = null);
+                            }
+                          },
+                          child: Text(_isAr ? 'إلغاء' : 'Clear'),
+                        ),
+                      IconButton(
+                        tooltip: _isAr ? 'اختيار وقت' : 'Pick time',
+                        onPressed: _pickPresenceHideUntil,
+                        icon: const Icon(Icons.schedule_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          SwitchListTile(
             secondary: const Icon(Icons.notifications_active_outlined),
             title: Text(t.settingsInAppNotificationSoundTitle),
             subtitle: Text(
               t.settingsInAppNotificationSoundSubtitle,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _inAppSoundEnabled,
             onChanged: (v) async {
@@ -3410,7 +3712,7 @@ class _SettingsPageState extends State<SettingsPage> {
             title: Text(t.settingsChatMessageSoundTitle),
             subtitle: Text(
               t.settingsChatMessageSoundSubtitle,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _chatMessageSoundEnabled,
             onChanged: (v) async {
@@ -3438,7 +3740,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _isAr
                     ? 'إعداد مؤقت — سيُربط لاحقاً بالرسائل النصية/الإشعارات. عند وصول رسالة أثناء استخدام التطبيق.'
                     : 'Temporary setting — later linked to SMS/push. When a message arrives while the app is open.',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               value: _chatNotificationsEnabled,
               onChanged: (v) async {
@@ -3463,7 +3765,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _isAr
                     ? 'تنبيهات الدردشة والرسائل النصية على الويب مؤقتة حالياً؛ راجع إعدادات المتصفح. الربط الكامل بالرسائل قادم.'
                     : 'Web chat/SMS alerts are temporary for now; check browser settings. Full SMS linking is coming.',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
         ],
@@ -3499,67 +3801,45 @@ class _SettingsPageState extends State<SettingsPage> {
                     if (v == null) return;
                     await setAppLang(v);
                     if (!mounted) return;
-                    await _loadUser();
-                    if (!mounted) return;
                     setState(() {});
                   },
                 ),
               ),
-              SwitchListTile(
-                secondary: const Icon(Icons.cloud_sync_outlined),
-                title: Text(
-                  _isAr
-                      ? 'ربط اللغة بهذا الحساب'
-                      : 'Save language for this account',
-                ),
+              ListTile(
+                leading: const Icon(Icons.brightness_auto_outlined),
+                title: Text(t.theme),
                 subtitle: Text(
-                  _isAr
-                      ? 'عند التفعيل تُحفظ لغة الواجهة مع المستخدم عند تسجيل الدخول من أجهزة أخرى.'
-                      : 'When on, UI language is stored per account for sign-in on other devices.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  t.settingsThemeModeSubtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
-                value: _syncLangWithAccount,
-                onChanged: (v) async {
-                  await UserAppearanceSession.writeSyncLangWithAccount(v);
-                  await syncSessionAppearanceNotifiers?.call();
-                  if (!mounted) return;
-                  setState(() => _syncLangWithAccount = v);
-                },
               ),
-              SwitchListTile(
-                secondary: const Icon(Icons.palette_outlined),
-                title: Text(
-                  _isAr
-                      ? 'ربط الثيم بهذا الحساب'
-                      : 'Save theme for this account',
-                ),
-                subtitle: Text(
-                  _isAr
-                      ? 'عند التفعيل يُحفظ الوضع الفاتح/الداكن مع المستخدم عند الدخول من أجهزة أخرى.'
-                      : 'When on, light/dark mode is stored per account for sign-in on other devices.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                value: _syncThemeWithAccount,
+              RadioGroup<ThemeMode>(
+                groupValue: themeModeNotifier.value,
                 onChanged: (v) async {
-                  await UserAppearanceSession.writeSyncThemeWithAccount(v);
-                  await syncSessionAppearanceNotifiers?.call();
-                  if (!mounted) return;
-                  setState(() => _syncThemeWithAccount = v);
-                },
-              ),
-              SwitchListTile(
-                secondary: const Icon(Icons.dark_mode_outlined),
-                title: Text(t.themeDark),
-                subtitle: Text(
-                  t.settingsDarkModeSubtitle,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                value: themeModeNotifier.value == ThemeMode.dark,
-                onChanged: (v) async {
-                  await setAppTheme(v ? ThemeMode.dark : ThemeMode.light);
+                  if (v == null) return;
+                  await setAppTheme(v);
                   if (!mounted) return;
                   setState(() {});
                 },
+                child: Column(
+                  children: [
+                    RadioListTile<ThemeMode>(
+                      title: Text(t.themeSystem),
+                      value: ThemeMode.system,
+                    ),
+                    RadioListTile<ThemeMode>(
+                      title: Text(t.themeLight),
+                      value: ThemeMode.light,
+                    ),
+                    RadioListTile<ThemeMode>(
+                      title: Text(t.themeDark),
+                      value: ThemeMode.dark,
+                    ),
+                  ],
+                ),
               ),
               ValueListenableBuilder<Color>(
                 valueListenable: accentSeedNotifier,
@@ -3578,7 +3858,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             t.settingsAccentSubtitle,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey.shade600,
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -3723,7 +4003,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   _isAr
                       ? 'يُحفظ على الجهاز ويُستخدم تدريجياً في البطاقات والتفاصيل.'
                       : 'Saved on device; used gradually in cards and details.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 trailing: Icon(Icons.chevron_right_rounded,
                     color: Theme.of(context).colorScheme.outline),
@@ -3753,7 +4033,7 @@ class _SettingsPageState extends State<SettingsPage> {
               title: Text(t.settingsHapticsTitle),
               subtitle: Text(
                 t.settingsHapticsSubtitle,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               value: _hapticsEnabled,
               onChanged: (v) async {
@@ -3776,7 +4056,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr
                   ? 'تكبير أيقونة التبويب المحدد وانتقالات أسلس. يمكن إيقافها للسرعة القصوى.'
                   : 'Subtle selected-tab scale and smoother transitions. Turn off for maximum speed.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _motionEnabled,
             onChanged: (v) async {
@@ -3974,7 +4254,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _platformComplianceCard() {
     final t = AppLocalizations.of(context)!;
     final cs = Theme.of(context).colorScheme;
-    final uid = _sb.auth.currentUser?.id ?? '';
     return Card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4040,7 +4319,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ListTile(
             leading: Icon(Icons.shield_outlined, color: cs.primary),
-            title: Text(_isAr ? 'MFA (قريباً)' : 'MFA (coming soon)'),
+            title: Text(_isAr ? 'MFA' : 'MFA'),
             subtitle: Text(
               _isAr
                   ? 'المصادقة متعددة العوامل — جاهزية تشغيلية بعد ربط مزوّد الهوية'
@@ -4082,17 +4361,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr ? 'الدعم الفني واستقبال الشكاوى' : 'Support & complaints intake',
             ),
             trailing: Icon(Icons.open_in_new_rounded, color: cs.primary),
-            onTap: () {
-              Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => SupportPage(
-                    userId: uid,
-                    isAr: _isAr,
-                    bankColor: cs.primary,
-                  ),
-                ),
-              );
-            },
+            onTap: () => unawaited(_openSupportHub()),
           ),
           const Divider(height: 1),
           ListTile(
@@ -4351,20 +4620,37 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
           ),
+          if (_mobileDetail != null)
+            AppPageCloseButton(
+              onPressed: () => setState(() => _mobileDetail = null),
+            ),
         ],
       ),
     );
   }
 
   Widget _sectionPaneBody(_SettingsSection s) {
-    // ويب ويندوز والشاشات العريضة: عمود واحد داخل القسم (بدون شبكة بطاقات).
+    final compact = _useCompactSettingsHub;
     final children = _settingsSectionContent(s);
-    return ListView(
+    final list = ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
       children: [
         _sectionPaneHeader(s),
         ...children,
       ],
+    );
+    return LayoutBuilder(
+      builder: (ctx, c) {
+        final w = !compact && c.maxWidth > 760 ? 760.0 : c.maxWidth;
+        return Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: w,
+            height: c.maxHeight.isFinite ? c.maxHeight : null,
+            child: list,
+          ),
+        );
+      },
     );
   }
 
@@ -4428,7 +4714,10 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _webSettingsTabs(List<_SettingsSection> sections) {
     var initialIndex = 0;
-    if (widget.focusPresenceDisplay || widget.focusProfileCompletion) {
+    if (widget.focusPresenceDisplay) {
+      final i = sections.indexOf(_SettingsSection.notificationsPreferences);
+      if (i >= 0) initialIndex = i;
+    } else if (widget.focusProfileCompletion) {
       final i = sections.indexOf(_SettingsSection.profile);
       if (i >= 0) initialIndex = i;
     }
@@ -4494,17 +4783,14 @@ class _SettingsPageState extends State<SettingsPage> {
             return Directionality(
               textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
               child: PopScope(
-                // على الويب: اسمح بالرجوع داخل المسار بدل الخروج من التطبيق.
-                canPop: inHubDetail ? false : (!kIsWeb || canNavPop),
+                canPop: inHubDetail ? false : (!kIsWeb && canNavPop),
                 onPopInvokedWithResult: (didPop, _) {
                   if (didPop) return;
                   if (inHubDetail && mounted) {
                     setState(() => _mobileDetail = null);
                     return;
                   }
-                  if (canNavPop) {
-                    Navigator.of(context).maybePop();
-                  }
+                  SafeOverlayPop.pop(context);
                 },
                 child: Scaffold(
                   appBar: !widget.embedAppBar
@@ -4543,22 +4829,16 @@ class _SettingsPageState extends State<SettingsPage> {
                               ],
                             ],
                           ),
-                          leading: inHubDetail
-                              ? AppPageCloseButton(
-                                  isArabic: _isAr,
-                                  tooltip: _isAr
-                                      ? 'إغلاق / رجوع للقائمة'
-                                      : 'Close / Back to list',
-                                  onPressed: () =>
-                                      setState(() => _mobileDetail = null),
-                                )
-                              : (canNavPop
-                                  ? AppPageCloseButton(
-                                      isArabic: _isAr,
-                                      onPressed: () =>
-                                          Navigator.of(context).maybePop(),
-                                    )
-                                  : null),
+                          leading: AppPageCloseButton(
+                            isArabic: _isAr,
+                            onPressed: () {
+                              if (inHubDetail) {
+                                setState(() => _mobileDetail = null);
+                                return;
+                              }
+                              SafeOverlayPop.pop(context);
+                            },
+                          ),
                           automaticallyImplyLeading: false,
                         )
                       : null,

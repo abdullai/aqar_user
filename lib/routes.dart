@@ -29,4 +29,6 @@ class AppRoutes {
 
   /// محادثة عقد تسويق داخل لوحة المستخدم (عنوان الشريط الخارجي).
   static const String listingContractChat = '/dashboard/listing-contract-chat';
+  static const String photographerHub = '/photographerHub';
+  static const String photographerJoin = '/photographerJoin';
 }

@@ -3,10 +3,13 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ✅ Biometrics (يتطلب إضافة local_auth في pubspec.yaml إذا لم يكن موجوداً)
 import 'package:local_auth/local_auth.dart';
+
+import '../core/security/install_device_identity.dart';
 
 class FastLoginService {
   FastLoginService._();
@@ -59,6 +62,8 @@ class FastLoginService {
   static const _kCtxUsernameNationalId = 'fast_ctx_username_national_id';
 
   static const _kPinLength = 'fast_pin_length';
+  static const _kPinHashSecure = 'fast_pin_hash_v1';
+  static const _secure = FlutterSecureStorage();
 
   /// محاولات PIN الفاشلة + قفل مؤقت.
   static const _kPinFailCount = 'fast_pin_fail_count';
@@ -71,9 +76,61 @@ class FastLoginService {
   static const _kResumeDisplayName = 'fast_resume_display_name';
   static const _kResumeUsername = 'fast_resume_username';
 
+  /// المستخدم اختار الدخول بكلمة المرور بدل البصمة/الرمز في هذه الجلسة.
+  static const _kPreferPasswordSurface = 'login_prefer_password_surface';
+
+  /// آخر مسار دخول ناجح: `/login` أو `/fastLogin`.
+  static const _kLastAuthEntryRoute = 'last_auth_entry_route';
+  static const _kLastLoginMethod = 'last_login_method';
+
+  /// بعد قفل الخمول: لا تُحوِّل شاشة الدخول تلقائياً إلى الدخول السريع.
+  static const _kForcePasswordLoginOnce = 'inactivity_force_password_login_once';
+
+  /// ربط طريقة الدخول بهذا التثبيت بعد أول دخول ناجح بكلمة المرور/OTP.
+  static const _kTrustUid = 'login_trust_uid';
+  static const _kTrustInstallId = 'login_trust_install_id';
+  static const _kFirstPasswordDone = 'login_first_password_done';
+
+  /// ختم دخول ببيانات اعتماد حقيقية (كلمة مرور / PIN / بصمة / OTP) — ليس استعادة جلسة.
+  static const _kFreshCredentialAtMs = 'fresh_credential_login_at_ms';
+
   /// يطابق مفاتيح `main.dart` لمسار شاشة القفل عند فتح التطبيق.
   static const kPrefBootstrapFastEnabled = 'fast_login_enabled';
   static const kPrefBootstrapPinSet = 'fast_login_pin_set';
+
+  static Future<void> _migratePinHashToSecure(SharedPreferences p) async {
+    final legacy = p.getString(_kPinHash);
+    if (legacy == null || legacy.isEmpty) return;
+    try {
+      await _secure.write(key: _kPinHashSecure, value: legacy);
+      await p.remove(_kPinHash);
+    } catch (_) {}
+  }
+
+  static Future<String?> _readPinHash(SharedPreferences p) async {
+    await _migratePinHashToSecure(p);
+    try {
+      final secured = await _secure.read(key: _kPinHashSecure);
+      if (secured != null && secured.isNotEmpty) return secured;
+    } catch (_) {}
+    return p.getString(_kPinHash);
+  }
+
+  static Future<void> _writePinHash(String hash) async {
+    try {
+      await _secure.write(key: _kPinHashSecure, value: hash);
+    } catch (_) {}
+    final p = await _prefs();
+    await p.remove(_kPinHash);
+  }
+
+  static Future<void> _deletePinHash() async {
+    try {
+      await _secure.delete(key: _kPinHashSecure);
+    } catch (_) {}
+    final p = await _prefs();
+    await p.remove(_kPinHash);
+  }
 
   static Future<SharedPreferences> _prefs() => SharedPreferences.getInstance();
 
@@ -293,36 +350,41 @@ class FastLoginService {
   // PIN
   // -----------------------------
   static Future<bool> isPinEnabled() async {
+    if (kIsWeb) return false;
     final p = await _prefs();
     return p.getBool(_kPinEnabled) ?? false;
   }
 
   static Future<void> setPinEnabled(bool enabled) async {
+    if (kIsWeb) return;
     final p = await _prefs();
     await p.setBool(_kPinEnabled, enabled);
     await syncBootstrapRoutePrefs();
   }
 
   static Future<void> setPin(String pinRaw) async {
+    if (kIsWeb) {
+      throw Exception('PIN_FORBIDDEN_ON_WEB');
+    }
     final pin = normalizeDigits(pinRaw);
     if (pin.length < 4 || pin.length > 8) {
       throw Exception('PIN_TOO_SHORT');
     }
     final p = await _prefs();
-    await p.setString(_kPinHash, _hashPin(pin));
+    await _writePinHash(_hashPin(pin));
     await p.setInt(_kPinLength, pin.length);
     await p.setBool(_kPinEnabled, true);
 
-    // ✅ طالما المستخدم أنشأ PIN إذن الدخول السريع صار مفعلاً (لا داعي لعرض الرسالة لاحقاً)
     await markPromptDone();
     await syncBootstrapRoutePrefs();
   }
 
   static Future<bool> verifyPin(String pinRaw) async {
+    if (kIsWeb) return false;
     if (await isPinTemporarilyLocked()) return false;
     final pin = normalizeDigits(pinRaw);
     final p = await _prefs();
-    final hash = p.getString(_kPinHash);
+    final hash = await _readPinHash(p);
     if (hash == null || hash.isEmpty) return false;
     final ok = _hashPin(pin) == hash;
     if (ok) {
@@ -384,6 +446,7 @@ class FastLoginService {
   static final LocalAuthentication _auth = LocalAuthentication();
 
   static Future<bool> canCheckBiometrics() async {
+    if (kIsWeb) return false;
     try {
       final can = await _auth.canCheckBiometrics;
       final supported = await _auth.isDeviceSupported();
@@ -394,6 +457,7 @@ class FastLoginService {
   }
 
   static Future<bool> isBiometricEnabled() async {
+    if (kIsWeb) return false;
     await _ensureBioPrefsMigrated();
     final p = await _prefs();
     return (p.getBool(_kBioFaceEnabled) ?? false) ||
@@ -402,6 +466,7 @@ class FastLoginService {
   }
 
   static Future<void> setBiometricEnabled(bool enabled) async {
+    if (kIsWeb) return;
     final p = await _prefs();
     await p.setBool(_kBioEnabled, enabled);
     await p.setBool(_kBioFaceEnabled, enabled);
@@ -414,6 +479,7 @@ class FastLoginService {
   }
 
   static Future<void> setFaceLoginEnabled(bool enabled) async {
+    if (kIsWeb) return;
     await _ensureBioPrefsMigrated();
     final p = await _prefs();
     await p.setBool(_kBioFaceEnabled, enabled);
@@ -428,6 +494,7 @@ class FastLoginService {
   }
 
   static Future<void> setFingerprintLoginEnabled(bool enabled) async {
+    if (kIsWeb) return;
     await _ensureBioPrefsMigrated();
     final p = await _prefs();
     await p.setBool(_kBioFingerprintEnabled, enabled);
@@ -442,18 +509,29 @@ class FastLoginService {
   }
 
   static Future<bool> authenticateBiometric({required bool isAr}) async {
+    if (kIsWeb) return false;
     try {
       if (!await hasAnyBiometricUnlockConfigured()) return false;
       if (!await _auth.isDeviceSupported()) return false;
       if (!await _auth.canCheckBiometrics) return false;
 
       final pinFallback = await isPinEnabled();
-      // stickyAuth: يبقي نافذة البصمة عند تغيير التطبيق قليلاً.
-      // عند عدم وجود PIN نفضّل biometricOnly لتقوية مسار البصمة/الوجه فقط.
+      final faceOn = await isFaceLoginPreferred();
+      final fpOn = await isFingerprintLoginPreferred();
+      final reason = isAr
+          ? (faceOn && !fpOn
+              ? 'انظر إلى الجهاز لتأكيد الوجه وفتح التطبيق'
+              : (!faceOn && fpOn
+                  ? 'ضع إصبعك على مستشعر البصمة لفتح التطبيق'
+                  : 'أكد هويتك بالبصمة أو الوجه لفتح التطبيق'))
+          : (faceOn && !fpOn
+              ? 'Look at the device to confirm Face ID and unlock'
+              : (!faceOn && fpOn
+                  ? 'Place your finger on the sensor to unlock'
+                  : 'Confirm with fingerprint or face to unlock'));
+
       final ok = await _auth.authenticate(
-        localizedReason: isAr
-            ? 'تأكيد الهوية لفتح التطبيق'
-            : 'Confirm your identity to unlock the app',
+        localizedReason: reason,
         options: AuthenticationOptions(
           stickyAuth: true,
           biometricOnly: !pinFallback,
@@ -467,10 +545,32 @@ class FastLoginService {
     }
   }
 
+  /// الوضع الأساسي لشاشة القفل حسب ما فعّله المستخدم + دعم الجهاز.
+  static Future<FastUnlockMode> resolveUnlockMode() async {
+    final pin = await isPinEnabled();
+    final bio = await hasAnyBiometricUnlockConfigured();
+    if (!pin && !bio) return FastUnlockMode.password;
+    if (pin && bio) return FastUnlockMode.pinWithBiometric;
+    if (pin) return FastUnlockMode.pinOnly;
+    final faceOn = await isFaceLoginPreferred();
+    final fpOn = await isFingerprintLoginPreferred();
+    final types = await getAvailableBiometricTypes();
+    final hasFace = _typesHaveFace(types);
+    final hasFp = _typesHaveFingerprint(types);
+    if (faceOn && hasFace && !(fpOn && hasFp)) {
+      return FastUnlockMode.faceOnly;
+    }
+    if (fpOn && hasFp && !(faceOn && hasFace)) {
+      return FastUnlockMode.fingerprintOnly;
+    }
+    return FastUnlockMode.biometricOnly;
+  }
+
   // -----------------------------
   // Combined
   // -----------------------------
   static Future<bool> hasAnyLockEnabled() async {
+    if (kIsWeb) return false;
     final pin = await isPinEnabled();
     final bio = await hasAnyBiometricUnlockConfigured();
     return pin || bio;
@@ -600,6 +700,178 @@ class FastLoginService {
     await p.remove(_kResumeUid);
     await p.remove(_kResumeDisplayName);
     await p.remove(_kResumeUsername);
+    await p.remove(_kTrustUid);
+    await p.remove(_kTrustInstallId);
+    await p.remove(_kFirstPasswordDone);
+    await p.remove(_kPreferPasswordSurface);
+  }
+
+  static Future<void> setPreferPasswordSurface(bool value) async {
+    final p = await _prefs();
+    await p.setBool(_kPreferPasswordSurface, value);
+  }
+
+  static Future<bool> preferPasswordSurface() async {
+    final p = await _prefs();
+    return p.getBool(_kPreferPasswordSurface) ?? false;
+  }
+
+  /// مسار شاشة الدخول حسب طريقة الدخول (دخول سريع / اسم مستخدم).
+  static String defaultEntryRouteForLoginMethod(String loginMethod) {
+    final m = loginMethod.trim().toLowerCase();
+    if (m.contains('pin') ||
+        m.contains('bio') ||
+        m.contains('face') ||
+        m.contains('finger') ||
+        m == 'password_unlock') {
+      return '/fastLogin';
+    }
+    return '/login';
+  }
+
+  static Future<void> rememberSuccessfulAuth({
+    required String loginMethod,
+    String? entryRoute,
+  }) async {
+    final p = await _prefs();
+    final route = (entryRoute ?? '').trim().isNotEmpty
+        ? entryRoute!.trim()
+        : defaultEntryRouteForLoginMethod(loginMethod);
+    await p.setString(_kLastAuthEntryRoute, route);
+    await p.setString(_kLastLoginMethod, loginMethod.trim());
+    await markFreshCredentialLogin();
+  }
+
+  static Future<void> markFreshCredentialLogin() async {
+    try {
+      final p = await _prefs();
+      await p.setInt(
+        _kFreshCredentialAtMs,
+        DateTime.now().millisecondsSinceEpoch,
+      );
+    } catch (_) {}
+  }
+
+  static Future<bool> isFreshCredentialLogin({
+    Duration maxAge = const Duration(minutes: 5),
+  }) async {
+    try {
+      final p = await _prefs();
+      final t = p.getInt(_kFreshCredentialAtMs) ?? 0;
+      if (t <= 0) return false;
+      return DateTime.now().millisecondsSinceEpoch - t <= maxAge.inMilliseconds;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> consumeFreshCredentialLogin({
+    Duration maxAge = const Duration(minutes: 5),
+  }) async {
+    try {
+      final ok = await isFreshCredentialLogin(maxAge: maxAge);
+      if (!ok) return false;
+      final p = await _prefs();
+      await p.remove(_kFreshCredentialAtMs);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<String> lastAuthEntryRoute() async {
+    final p = await _prefs();
+    final stored = (p.getString(_kLastAuthEntryRoute) ?? '').trim();
+    if (stored == '/fastLogin' || stored == '/login') return stored;
+    final method = (p.getString(_kLastLoginMethod) ?? '').trim();
+    if (method.isEmpty) return '';
+    return defaultEntryRouteForLoginMethod(method);
+  }
+
+  static Future<String> lastLoginMethod() async {
+    final p = await _prefs();
+    return (p.getString(_kLastLoginMethod) ?? '').trim();
+  }
+
+  static Future<void> markForcePasswordLoginOnce() async {
+    final p = await _prefs();
+    await p.setBool(_kForcePasswordLoginOnce, true);
+  }
+
+  static Future<bool> consumeForcePasswordLoginOnce() async {
+    final p = await _prefs();
+    final v = p.getBool(_kForcePasswordLoginOnce) ?? false;
+    if (v) await p.remove(_kForcePasswordLoginOnce);
+    return v;
+  }
+
+  /// بعد مهلة الخمول: أعد المستخدم لنفس سطح الدخول الذي دخل منه.
+  static Future<String> resolveInactivityLockRoute() async {
+    final entry = await lastAuthEntryRoute();
+    if (entry == '/fastLogin') {
+      if (await canSoftLockSession()) return '/fastLogin';
+      await markForcePasswordLoginOnce();
+      return '/login';
+    }
+    if (entry == '/login') {
+      await markForcePasswordLoginOnce();
+      return '/login';
+    }
+    if (await preferPasswordSurface()) {
+      await markForcePasswordLoginOnce();
+      return '/login';
+    }
+    if (await canSoftLockSession()) return '/fastLogin';
+    await markForcePasswordLoginOnce();
+    return '/login';
+  }
+
+  static Future<void> markTrustedInstall({required String uid}) async {
+    final id = uid.trim();
+    if (id.isEmpty) return;
+    try {
+      final install = await InstallDeviceIdentity.key();
+      if (install.length < 8) return;
+      final p = await _prefs();
+      await p.setString(_kTrustUid, id);
+      await p.setString(_kTrustInstallId, install);
+      await p.setBool(_kFirstPasswordDone, true);
+    } catch (_) {}
+  }
+
+  static Future<bool> isThisInstallTrusted({String? uid}) async {
+    try {
+      final p = await _prefs();
+      final storedUid = (p.getString(_kTrustUid) ?? '').trim();
+      final storedInstall = (p.getString(_kTrustInstallId) ?? '').trim();
+      if (storedUid.isEmpty || storedInstall.length < 8) return false;
+      if (uid != null && uid.trim().isNotEmpty && uid.trim() != storedUid) {
+        return false;
+      }
+      final resumeUid = (p.getString(_kResumeUid) ?? storedUid).trim();
+      if (resumeUid.isNotEmpty && resumeUid != storedUid) return false;
+      final current = await InstallDeviceIdentity.key();
+      return current == storedInstall;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> hasCompletedFirstPasswordLogin() async {
+    try {
+      final p = await _prefs();
+      if (p.getBool(_kFirstPasswordDone) != true) return false;
+      return isThisInstallTrusted();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> clearTrustedInstall() async {
+    final p = await _prefs();
+    await p.remove(_kTrustUid);
+    await p.remove(_kTrustInstallId);
+    await p.remove(_kFirstPasswordDone);
   }
 
   /// عند الخروج الكامل: أزل أسرار القفل لكن أبقِ لقطة الاستئناف (كلمة المرور).
@@ -612,7 +884,7 @@ class FastLoginService {
         p.getString(_kResumeUsername) ?? p.getString(_kCtxUsernameNationalId);
 
     await p.remove(_kPinEnabled);
-    await p.remove(_kPinHash);
+    await _deletePinHash();
     await p.remove(_kPinLength);
     await p.remove(_kBioEnabled);
     await p.remove(_kBioFaceEnabled);
@@ -661,7 +933,7 @@ class FastLoginService {
   static Future<void> clearAll() async {
     final p = await _prefs();
     await p.remove(_kPinEnabled);
-    await p.remove(_kPinHash);
+    await _deletePinHash();
     await p.remove(_kPinLength);
     await p.remove(_kBioEnabled);
     await p.remove(_kBioFaceEnabled);
@@ -682,6 +954,10 @@ class FastLoginService {
     await p.remove(_kResumeUid);
     await p.remove(_kResumeDisplayName);
     await p.remove(_kResumeUsername);
+    await p.remove(_kPreferPasswordSurface);
+    await p.remove(_kTrustUid);
+    await p.remove(_kTrustInstallId);
+    await p.remove(_kFirstPasswordDone);
 
     await p.setBool(kPrefBootstrapFastEnabled, false);
     await p.setBool(kPrefBootstrapPinSet, false);
@@ -704,4 +980,14 @@ class FastLoginService {
     print(
         'FastLogin: uid=$uid name=$name nid=$nid pin=$pin bio=$bio prompt=$st count=$cnt');
   }
+}
+
+/// وضع فتح القفل المعروض للمستخدم (جوال أصلي).
+enum FastUnlockMode {
+  password,
+  pinOnly,
+  pinWithBiometric,
+  faceOnly,
+  fingerprintOnly,
+  biometricOnly,
 }

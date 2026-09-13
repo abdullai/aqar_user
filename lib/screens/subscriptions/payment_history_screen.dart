@@ -1,21 +1,22 @@
 ﻿import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/branding/app_branding.dart';
+import '../../core/payment/invoice_copy.dart';
+import '../../core/payment/invoice_document.dart';
 import '../../core/utils/app_money.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/billing_transaction_repository.dart';
 import '../../services/invoice_service.dart';
 import '../../widgets/app_logo_loading.dart';
 import '../../widgets/aqar_primary_scroll_scope.dart';
+import 'invoice_detail_screen.dart';
 
-/// تبويبات سجل المدفوعات — 3 فقط (بدون «الكل»).
-enum PaymentTab { success, pending, failed }
+/// تبويبات سجل المدفوعات حسب الحالة الحقيقية للعملية.
+enum PaymentTab { success, oneTime, refunded, pending, failed }
 
 class PaymentHistoryScreen extends StatefulWidget {
   const PaymentHistoryScreen({super.key, required this.lang});
@@ -32,6 +33,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
   late final InvoiceService _invoices;
   late final TabController _tabs;
   final _search = TextEditingController();
+  RealtimeChannel? _billingCh;
 
   bool _loading = true;
   bool _exporting = false;
@@ -46,12 +48,30 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
     final sb = Supabase.instance.client;
     _repo = BillingTransactionRepository(sb);
     _invoices = InvoiceService(repository: _repo, isAr: _isAr, supabase: sb);
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: PaymentTab.values.length, vsync: this);
     _tabs.addListener(() {
       if (mounted && !_tabs.indexIsChanging) setState(() {});
     });
     _loadAll();
     unawaited(_invoices.loadPayerInfo());
+    final uid = sb.auth.currentUser?.id;
+    if (uid != null && uid.isNotEmpty) {
+      _billingCh = sb.channel('billing_history_$uid');
+      _billingCh!.onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'billing_transactions',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: uid,
+        ),
+        callback: (_) {
+          if (mounted) unawaited(_loadAll());
+        },
+      );
+      _billingCh!.subscribe();
+    }
   }
 
   String _formatLatinDate(DateTime? date) {
@@ -61,6 +81,9 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
 
   @override
   void dispose() {
+    try {
+      _billingCh?.unsubscribe();
+    } catch (_) {}
     _tabs.dispose();
     _search.dispose();
     super.dispose();
@@ -70,87 +93,72 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
     if (!mounted) return;
     setState(() => _loading = true);
     final search = _search.text.trim().isEmpty ? null : _search.text.trim();
-    final results = await Future.wait([
-      _repo.listTransactions(
-        status: 'success',
-        search: search,
-        dateFilter: _dateFilter,
-      ),
-      _repo.listTransactions(
-        status: 'pending',
-        search: search,
-        dateFilter: _dateFilter,
-      ),
-      _repo.listTransactions(
-        status: 'failed',
-        search: search,
-        dateFilter: _dateFilter,
-      ),
-    ]);
+    final all = await _repo.listTransactions(
+      search: search,
+      dateFilter: _dateFilter,
+      limit: 400,
+    );
+    PaymentTab tabFor(Map<String, dynamic> row) {
+      final st = BillingTransactionRepository.normalizedStatus(row);
+      if (st == 'refunded' || st == 'partially_refunded') {
+        return PaymentTab.refunded;
+      }
+      if (st == 'pending') return PaymentTab.pending;
+      if (st == 'failed') return PaymentTab.failed;
+      if (InvoiceCopy.isOneTimeRow(row)) return PaymentTab.oneTime;
+      return PaymentTab.success;
+    }
+
     if (!mounted) return;
     setState(() {
-      _rowsByTab[PaymentTab.success] = results[0];
-      _rowsByTab[PaymentTab.pending] = results[1];
-      _rowsByTab[PaymentTab.failed] = results[2];
+      for (final tab in PaymentTab.values) {
+        _rowsByTab[tab] = all.where((r) => tabFor(r) == tab).toList();
+      }
       _loading = false;
     });
   }
-
-  String _latinRef(Map<String, dynamic> row) =>
-      BillingTransactionRepository.latinReference(row);
 
   String _tabLabel(PaymentTab tab) {
     final t = AppLocalizations.of(context)!;
     final n = _rowsByTab[tab]?.length ?? 0;
     final label = switch (tab) {
-      PaymentTab.success =>
-        _isAr ? 'المكتملة' : t.subscriptionsFilterSuccess,
-      PaymentTab.pending =>
-        _isAr ? 'قيد المعالجة' : t.subscriptionsFilterPending,
-      PaymentTab.failed => _isAr ? 'الفاشلة' : t.subscriptionsFilterFailed,
+      PaymentTab.success => _isAr ? 'مكتملة' : t.subscriptionsFilterSuccess,
+      PaymentTab.oneTime => _isAr ? 'مرة واحدة' : 'One-time',
+      PaymentTab.refunded => _isAr ? 'مسترجعة' : 'Refunded',
+      PaymentTab.pending => _isAr ? 'معلقة' : t.subscriptionsFilterPending,
+      PaymentTab.failed => _isAr ? 'فاشلة' : t.subscriptionsFilterFailed,
     };
-    return '$label ($n)';
+    return '$label · $n';
   }
 
   IconData _tabIcon(PaymentTab tab) => switch (tab) {
         PaymentTab.success => Icons.check_circle_outline,
+        PaymentTab.oneTime => Icons.bolt_outlined,
+        PaymentTab.refunded => Icons.replay_outlined,
         PaymentTab.pending => Icons.hourglass_top_outlined,
         PaymentTab.failed => Icons.error_outline,
       };
 
   Color _tabColor(PaymentTab tab) => switch (tab) {
         PaymentTab.success => const Color(0xFF1B873F),
+        PaymentTab.oneTime => const Color(0xFF0F766E),
+        PaymentTab.refunded => const Color(0xFF6D28D9),
         PaymentTab.pending => const Color(0xFFCC8400),
         PaymentTab.failed => const Color(0xFFC62828),
       };
 
-  String _statusLabel(Map<String, dynamic> row) {
-    switch (BillingTransactionRepository.normalizedStatus(row)) {
-      case 'success':
-        return _isAr ? 'مكتملة' : 'Completed';
-      case 'pending':
-        return _isAr ? 'قيد المعالجة' : 'Pending';
-      case 'failed':
-        return _isAr ? 'فاشلة' : 'Failed';
-      default:
-        return _isAr ? 'غير معروف' : 'Unknown';
-    }
-  }
-
-  String _amountFor(Map<String, dynamic> row) {
+  Widget _amountWidget(Map<String, dynamic> row) {
     final raw = row['amount'];
     final v =
         raw is num ? raw.toDouble() : double.tryParse('${raw ?? ''}') ?? 0.0;
-    return AppMoney.formatWithCurrencyCode(
-      v,
-      isAr: _isAr,
+    return AppMoneyLine(
+      amount: v,
       currencyCode: '${row['currency'] ?? 'SAR'}'.toUpperCase(),
+      isAr: _isAr,
       maxFractionDigits: 2,
+      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
     );
   }
-
-  String _titleFor(Map<String, dynamic> row) =>
-      AppBranding.billingTitleFromRow(row, isAr: _isAr);
 
   PaymentTab get _currentTab => PaymentTab.values[_tabs.index];
 
@@ -161,26 +169,12 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
 
   String _tabExportTitle(PaymentTab tab) => switch (tab) {
         PaymentTab.success => _isAr ? 'فواتير مكتملة' : 'Completed invoices',
-        PaymentTab.pending => _isAr ? 'فواتير قيد المعالجة' : 'Pending invoices',
-        PaymentTab.failed => _isAr ? 'فواتير فاشلة' : 'Failed invoices',
+        PaymentTab.oneTime =>
+          _isAr ? 'عمليات لمرة واحدة' : 'One-time payments',
+        PaymentTab.refunded => _isAr ? 'عمليات مستردة' : 'Refunded payments',
+        PaymentTab.pending => _isAr ? 'عمليات معلقة' : 'Pending payments',
+        PaymentTab.failed => _isAr ? 'عمليات فاشلة' : 'Failed payments',
       };
-
-  String _paymentMethodLabel(String raw) {
-    final m = raw.trim().toLowerCase();
-    if (m.isEmpty) return '';
-    switch (m) {
-      case 'card':
-        return _isAr ? 'بطاقة' : 'Card';
-      case 'mada_pay':
-        return _isAr ? 'مدى' : 'mada';
-      case 'google_pay':
-        return 'Google Pay';
-      case 'apple_pay':
-        return 'Apple Pay';
-      default:
-        return raw;
-    }
-  }
 
   Future<void> _exportCsv() async {
     await _exportDelimited(mimeType: 'text/csv', extension: 'csv');
@@ -204,7 +198,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
         sectionTitle: _tabExportTitle(_currentTab),
       );
       final name =
-          '${_currentTab.name}_${DateTime.now().millisecondsSinceEpoch}.xlsx';
+          'Invoices_${DateTime.now().toUtc().year}-${DateTime.now().toUtc().month.toString().padLeft(2, '0')}.xlsx';
       await Share.shareXFiles([
         XFile.fromData(
           bytes,
@@ -297,232 +291,18 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
     );
   }
 
-  Future<void> _printPdf(Map<String, dynamic> row) async {
-    try {
-      await _invoices.printInvoice(row);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_isAr ? 'فشلت الطباعة' : 'Print failed')),
-      );
-    }
-  }
-
-  Future<void> _downloadPdf(Map<String, dynamic> row) async {
-    try {
-      await _invoices.downloadOrShare(row);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isAr ? 'تم تحميل الفاتورة' : 'Invoice ready'),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_isAr ? 'فشل التحميل' : 'Download failed')),
-      );
-    }
-  }
-
-  Future<void> _deleteInvoice(Map<String, dynamic> row) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(_isAr ? 'حذف الفاتورة؟' : 'Delete invoice?'),
-        content: Text(
-          _isAr
-              ? 'سيُحذف السجل نهائياً من قائمتك.'
-              : 'This record will be permanently removed.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_isAr ? 'حذف' : 'Delete'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final res = await _repo.deleteTransaction('${row['id']}');
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          res['ok'] == true
-              ? (_isAr ? 'تم الحذف' : 'Deleted')
-              : (_isAr ? 'تعذّر الحذف' : 'Delete failed'),
-        ),
-      ),
-    );
-    if (res['ok'] == true) await _loadAll();
-  }
-
-  void _showInvoiceActions(Map<String, dynamic> row) {
-    final cs = Theme.of(context).colorScheme;
-
-    showModalBottomSheet<void>(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                _isAr ? 'خيارات الفاتورة' : 'Invoice options',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _titleFor(row),
-                style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                    ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: _invoiceActionButton(
-                      icon: Icons.print_outlined,
-                      label: _isAr ? 'طباعة' : 'Print',
-                      color: cs.primary,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_printPdf(row));
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _invoiceActionButton(
-                      icon: Icons.picture_as_pdf_outlined,
-                      label: 'PDF',
-                      color: const Color(0xFF1B873F),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_downloadPdf(row));
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _invoiceActionButton(
-                      icon: Icons.table_chart_outlined,
-                      label: _isAr ? 'Excel' : 'Excel',
-                      color: const Color(0xFF1565C0),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_exportSingleRowExcel(row));
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _invoiceActionButton(
-                      icon: Icons.delete_outline,
-                      label: _isAr ? 'حذف' : 'Delete',
-                      color: cs.error,
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        unawaited(_deleteInvoice(row));
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _exportSingleRowExcel(Map<String, dynamic> row) async {
-    try {
-      final bytes = await _invoices.exportAllExcel(
-        [row],
-        sectionTitle: _titleFor(row),
-      );
-      final name = 'invoice_${_latinRef(row)}.xlsx';
-      await Share.shareXFiles([
-        XFile.fromData(
-          bytes,
-          mimeType:
-              'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          name: name,
-        ),
-      ]);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_isAr ? 'فشل التصدير' : 'Export failed')),
-      );
-    }
-  }
-
-  Widget _invoiceActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: color.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withValues(alpha: 0.25)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: color, size: 26),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
+  void _openInvoice(Map<String, dynamic> row) {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => InvoiceDetailScreen(
+          row: row,
+          lang: widget.lang,
+          invoices: _invoices,
+          onDeleted: () async {
+            final res = await _repo.hideFromLedger('${row['id']}');
+            if (!mounted) return;
+            if (res['ok'] == true) await _loadAll();
+          },
         ),
       ),
     );
@@ -554,12 +334,11 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
                 itemCount: rows.length,
                 itemBuilder: (_, i) {
                   final row = rows[i];
-                  final ref = _latinRef(row);
-                  final date = DateTime.tryParse('${row['created_at']}');
-                  final dateStr = _formatLatinDate(date);
-                  final method = _paymentMethodLabel(
-                    '${row['payment_method'] ?? ''}'.trim(),
+                  final doc = InvoiceDocument.fromRow(row, isAr: _isAr);
+                  final date = DateTime.tryParse(
+                    '${row['paid_at'] ?? row['completed_at'] ?? row['created_at']}',
                   );
+                  final dateStr = _formatLatinDate(date);
                   return Card(
                     margin: const EdgeInsets.only(bottom: 10),
                     elevation: 1,
@@ -569,49 +348,46 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
                     child: ListTile(
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
-                        vertical: 8,
+                        vertical: 10,
                       ),
                       leading: Icon(_tabIcon(tab), color: color),
                       title: Text(
-                        _titleFor(row),
-                        maxLines: 1,
+                        doc.title,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                        ),
                       ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            method.isNotEmpty ? '$method · #$ref' : '#$ref',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          Text(
-                            dateStr,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
+                      subtitle: Text(
+                        [
+                          if (doc.hasInvoiceNumber) doc.invoiceNumber,
+                          dateStr,
+                          doc.methodLabel,
+                        ].where((e) => e.isNotEmpty).join(' · '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade700,
+                          height: 1.35,
+                        ),
                       ),
                       trailing: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
+                          _amountWidget(row),
                           Text(
-                            _amountFor(row),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                          Text(
-                            _statusLabel(row),
+                            doc.statusLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 11, color: color),
                           ),
                         ],
                       ),
-                      onTap: () => _showInvoiceActions(row),
+                      onTap: () => _openInvoice(row),
                     ),
                   );
                 },
@@ -653,66 +429,86 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
               const SizedBox(height: 8),
               Row(
                 children: [
+                  Expanded(
+                    child: PopupMenuButton<String>(
+                      onSelected: (v) {
+                        setState(() => _dateFilter = v);
+                        unawaited(_loadAll());
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                          value: 'all',
+                          child: Text(_isAr ? 'كل الفترات' : 'All time'),
+                        ),
+                        PopupMenuItem(
+                          value: 'today',
+                          child: Text(_isAr ? 'اليوم' : 'Today'),
+                        ),
+                        PopupMenuItem(
+                          value: 'week',
+                          child: Text(_isAr ? 'هذا الأسبوع' : 'This week'),
+                        ),
+                        PopupMenuItem(
+                          value: 'month',
+                          child: Text(_isAr ? 'هذا الشهر' : 'This month'),
+                        ),
+                      ],
+                      child: ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.date_range_outlined),
+                        title: Text(
+                          switch (_dateFilter) {
+                            'today' => _isAr ? 'اليوم' : 'Today',
+                            'week' => _isAr ? 'هذا الأسبوع' : 'This week',
+                            'month' => _isAr ? 'هذا الشهر' : 'This month',
+                            _ => _isAr ? 'كل الفترات' : 'All time',
+                          },
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                  ),
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.filter_list),
-                    tooltip: _isAr ? 'فلتر التاريخ' : 'Date filter',
+                    tooltip: _isAr ? 'تصدير وطباعة' : 'Export and print',
                     onSelected: (v) {
-                      setState(() => _dateFilter = v);
-                      unawaited(_loadAll());
+                      if (v == 'csv') unawaited(_exportCsv());
+                      if (v == 'xlsx') unawaited(_exportExcel());
+                      if (v == 'pdf') unawaited(_exportTabPdf());
+                      if (v == 'print') unawaited(_printAll());
                     },
                     itemBuilder: (_) => [
                       PopupMenuItem(
-                        value: 'all',
-                        child: Text(_isAr ? 'كل الفترات' : 'All time'),
+                        value: 'print',
+                        child: Text(_isAr ? 'طباعة التبويب' : 'Print tab'),
                       ),
                       PopupMenuItem(
-                        value: 'today',
-                        child: Text(_isAr ? 'اليوم' : 'Today'),
+                        value: 'pdf',
+                        child: Text(_isAr ? 'تصدير PDF' : 'Export PDF'),
                       ),
-                      PopupMenuItem(
-                        value: 'week',
-                        child: Text(_isAr ? 'هذا الأسبوع' : 'This week'),
+                      const PopupMenuItem(
+                        value: 'xlsx',
+                        child: Text('Excel'),
                       ),
-                      PopupMenuItem(
-                        value: 'month',
-                        child: Text(_isAr ? 'هذا الشهر' : 'This month'),
+                      const PopupMenuItem(
+                        value: 'csv',
+                        child: Text('CSV'),
                       ),
                     ],
-                  ),
-                  IconButton(
-                    tooltip: _isAr ? 'تصدير CSV' : 'Export CSV',
-                    onPressed: _exporting ? null : _exportCsv,
-                    icon: _exporting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.upload_file_outlined),
-                  ),
-                  IconButton(
-                    tooltip: _isAr ? 'تصدير Excel' : 'Export Excel',
-                    onPressed: _exporting ? null : _exportExcel,
-                    icon: const Icon(Icons.table_view_outlined),
-                  ),
-                  IconButton(
-                    tooltip: _isAr ? 'تصدير PDF' : 'Export PDF',
-                    onPressed: _exporting ? null : _exportTabPdf,
-                    icon: const Icon(Icons.picture_as_pdf_outlined),
-                  ),
-                  IconButton(
-                    tooltip: _isAr ? 'طباعة التبويب' : 'Print tab',
-                    onPressed: _printAll,
-                    icon: const Icon(Icons.print_outlined),
-                  ),
-                  if (_dateFilter != 'all')
-                    TextButton(
-                      onPressed: () {
-                        setState(() => _dateFilter = 'all');
-                        unawaited(_loadAll());
-                      },
-                      child: Text(_isAr ? 'مسح الفلتر' : 'Clear'),
+                    child: Padding(
+                      padding: const EdgeInsetsDirectional.only(start: 8),
+                      child: _exporting
+                          ? const SizedBox(
+                              width: 28,
+                              height: 28,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              Icons.ios_share_outlined,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
                     ),
+                  ),
                 ],
               ),
             ],

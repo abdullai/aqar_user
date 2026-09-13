@@ -24,7 +24,13 @@ class MarketRequestFormDraft {
     required int? bedrooms,
     required int? bathrooms,
     required Map<String, bool> amenityToggles,
-    required bool preferNew,
+    required bool? preferNew,
+    bool? furnishedWanted,
+    int rentDays = 1,
+    int rentWeeks = 1,
+    int rentMonths = 1,
+    int rentYears = 1,
+    String? rentStartIso,
   }) {
     return {
       'step': step,
@@ -47,8 +53,18 @@ class MarketRequestFormDraft {
       'rent_term': rentTerm,
       'bedrooms': bedrooms,
       'bathrooms': bathrooms,
-      'amenities': amenityToggles,
+      'amenities': {
+        for (final e in amenityToggles.entries)
+          if (e.value == true) e.key: true,
+      },
       'prefer_new': preferNew,
+      'furnished': furnishedWanted,
+      'choice_tristate': true,
+      'rent_days': rentDays,
+      'rent_weeks': rentWeeks,
+      'rent_months': rentMonths,
+      'rent_years': rentYears,
+      'rent_start': rentStartIso,
     };
   }
 }

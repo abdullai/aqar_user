@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'support_whatsapp_config.dart';
+import '../gestures/app_keyboard_popups.dart';
 
 /// فتح واتساب لجميع خطوط الدعم دفعة واحدة (بدون اختيار رقم).
 ///
@@ -28,7 +29,7 @@ abstract final class SupportWhatsappLauncher {
     if (!context.mounted) return;
 
     final lines = SupportWhatsappConfig.lines;
-    final proceed = await showDialog<bool>(
+    final proceed = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {

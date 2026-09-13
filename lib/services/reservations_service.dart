@@ -76,7 +76,7 @@ class ReservationsService {
     required String userId,
     required String propertyId,
     required double basePrice,
-    bool createConversation = true,
+    bool createConversation = false,
     String? conversationTitle,
   }) async {
     try {
@@ -96,7 +96,6 @@ class ReservationsService {
               : _s(res));
 
       if (createConversation && reservationId.isNotEmpty) {
-        // best-effort: لا نكسر الحجز لو فشلت الدردشة
         try {
           await getOrCreatePropertyConversation(
             propertyId: propertyId,
@@ -122,6 +121,14 @@ class ReservationsService {
     } catch (_) {
       return false;
     }
+  }
+
+  /// موافقة المالك/المسوّق على حجز لإتمام الصفقة — يفتح المراسلة لذلك المستخدم فقط.
+  static Future<void> acceptListingReservation(String reservationId) async {
+    await _sb.rpc(
+      'accept_listing_reservation',
+      params: {'p_reservation_id': reservationId},
+    );
   }
 
   /// ✅ إلغاء الحجز (للمستخدم)
@@ -313,7 +320,29 @@ class ReservationsService {
           .select('id')
           .eq('user_id', uid)
           .eq('property_id', pid)
-          .inFilter('status', ['pending', 'paid'])
+          .inFilter('status', ['pending', 'paid', 'accepted'])
+          .limit(1);
+      return (res as List).isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// حجز وافق عليه المالك — شرط ظهور المراسلة في «صفقاتي» وتفاصيل الإعلان.
+  static Future<bool> userHasOwnerAcceptedReservationForProperty({
+    required String userId,
+    required String propertyId,
+  }) async {
+    final uid = userId.trim();
+    final pid = propertyId.trim();
+    if (uid.isEmpty || pid.isEmpty) return false;
+    try {
+      final res = await _sb
+          .from('reservations')
+          .select('id')
+          .eq('user_id', uid)
+          .eq('property_id', pid)
+          .eq('status', 'accepted')
           .limit(1);
       return (res as List).isNotEmpty;
     } catch (_) {
@@ -329,7 +358,7 @@ class ReservationsService {
           'id, property_id, status, expires_at, base_price, platform_fee_amount, extra_fee_amount, total_amount',
         )
         .eq('user_id', userId)
-        .inFilter('status', ['pending', 'paid']) // ✅ حسب CHECK constraint عندك
+        .inFilter('status', ['pending', 'paid', 'accepted']) // نشط: بانتظار أو وافق المالك
         .order('created_at', ascending: false);
 
     final rows = (res as List).cast<Map<String, dynamic>>();

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 
 import '../l10n/app_localizations.dart';
-import '../screens/in_app_notifications_page.dart';
+import '../navigation/chat_navigation.dart';
 import '../screens/listing_request_status_page.dart';
 
 /// خطوات مسار المسوّق — دعوة حتى النشر والإشعارات.
@@ -174,7 +177,7 @@ Future<void> _showScenarioBottomSheet(
   final isAr = lang.toLowerCase() != 'en';
   final rid = (linkedRequestId ?? '').trim();
 
-  return showModalBottomSheet<void>(
+  return showAppModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -256,11 +259,11 @@ Future<void> _showScenarioBottomSheet(
                   Navigator.of(ctx).pop();
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!context.mounted) return;
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => InAppNotificationsPage(lang: lang),
-                      ),
-                    );
+                    unawaited(CommunicationHubNavigation.push(
+                      context,
+                      lang: lang,
+                      isAr: lang != 'en',
+                    ));
                   });
                 },
                 icon: const Icon(Icons.notifications_outlined, size: 20),

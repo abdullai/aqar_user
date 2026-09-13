@@ -1,0 +1,26 @@
+---
+description: Every UI string and listing content must be bilingual AR/EN
+globs: lib/**/*.dart
+alwaysApply: true
+---
+
+# Bilingual UI (Arabic + English)
+
+This app ships Arabic and English. **Every new or changed user-visible string includes both languages in the same change.** Do not ship Arabic-only (or English-only) copy.
+
+## UI chrome (buttons, titles, errors, empty states)
+
+- Add keys to **both** `lib/l10n/app_ar.arb` and `lib/l10n/app_en.arb`, then regenerate `AppLocalizations`.
+- Prefer `AppLocalizations.of(context)` over `isAr ? '…' : '…'` for new strings.
+- If a ternary is unavoidable, both sides must exist in that same edit.
+
+## Data from the database (titles, cities, types, amenities, notices)
+
+- Pick `*_en` when the UI is English: `LocaleContent.pick` / `LocaleContent.fromMap`.
+- If only Arabic exists, run **`LocaleContent.forUi(raw, isAr: isAr)`** before display (cards, details, specs, notifications).
+- Do not translate person names (publisher / requester display names).
+- There is **no cloud translator**. Unknown free-form Arabic stays Arabic; extend `LocaleContent` / catalogs instead of inventing a paid API.
+
+## Prices and amounts
+
+- Never hardcode SAR amounts in copy. Read `platform_fee_catalog` / checkout `amount_sar`, then format with `AppMoney`.

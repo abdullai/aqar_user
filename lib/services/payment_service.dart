@@ -3,10 +3,9 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kIsWeb, kReleaseMode;
+    show TargetPlatform, defaultTargetPlatform, kDebugMode, kIsWeb, kReleaseMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:intl/intl.dart';
 import 'package:moyasar/moyasar.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -14,9 +13,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/app_branding.dart';
 import '../core/branding/branding_pdf.dart';
+import '../shared/core/app_flags.dart';
 import '../core/notifications/in_app_notification_catalog.dart';
 import '../core/notifications/in_app_notification_writer.dart';
+import '../core/payment/invoice_pdf_page.dart';
+import '../core/payment/payment_security.dart';
 import '../core/pdf/pdf_readable_qr.dart';
+import '../core/utils/date_helper.dart';
 import '../core/session/account_role_cache.dart';
 import '../core/subscription/card_scheme.dart';
 import '../core/workflow/listing_workflow.dart';
@@ -51,13 +54,15 @@ class PaymentService {
   }
 
   /// بوابة وهمية للتجربة المحلية حتى تفعيل ميسّر.
-  /// — مع مفتاح ميسّر: تُعطَّل تلقائياً.
-  /// — بدون مفتاح: مفعّلة (debug/release) ما لم يُضبط `ALLOW_PAYMENT_MOCK=false`.
+  /// إنتاج (`PROD` / release): ممنوعة دائماً. Debug فقط وبلا مفتاح ميسّر.
   static bool get allowMockGateway {
     if (useMoyasarLiveFlow) return false;
+    // إنتاج أو بناء إطلاق: ممنوع المحاكاة حتى لو غاب المفتاح.
+    if (kIsProd || kReleaseMode) return false;
     final v = (dotenv.env['ALLOW_PAYMENT_MOCK'] ?? '').trim().toLowerCase();
     if (v == '0' || v == 'false' || v == 'no') return false;
-    return true;
+    if (v == '1' || v == 'true' || v == 'yes') return kDebugMode;
+    return kDebugMode;
   }
 
   static Map<String, dynamic> get _mockGatewayBlocked =>
@@ -88,7 +93,7 @@ class PaymentService {
 
   static int amountToHalalas(double amountSar) => (amountSar * 100).round();
 
-  /// إنشاء سجل [billing_transactions] بحالة `pending` **قبل** بدء الدفع (ميسّر أو وهمي).
+  /// إنشاء سجل pending عبر الخادم فقط (لا مبلغ من العميل).
   Future<Map<String, dynamic>> createPendingBillingTransaction({
     required double amount,
     String currency = 'SAR',
@@ -97,32 +102,63 @@ class PaymentService {
     String? titleEn,
     required String paymentMethod,
     String? cardId,
+    String? purpose,
     Map<String, dynamic>? gatewayPendingMeta,
+    String? planId,
+    String? period,
+    bool withAutoPay = false,
+    String? upgradeSubscriptionId,
+    String? idempotencyKey,
+    String? promoCode,
   }) async {
     final uid = _user?.id;
     if (uid == null) {
       return {'ok': false, 'error': 'auth'};
     }
+    final purposeTrim =
+        (purpose ?? gatewayPendingMeta?['purpose']?.toString() ?? '').trim();
+    final pid = (planId ?? '').trim();
     try {
-      final row = await _sb.from(_tx).insert({
-        'user_id': uid,
-        'subscription_id': subscriptionId,
-        'amount': amount,
-        'currency': currency,
-        'status': 'pending',
-        'payment_method': paymentMethod,
-        'card_id': cardId,
-        'title_ar': titleAr,
-        'title_en': titleEn,
-        'gateway_response': {
-          'pending_gateway': 'moyasar',
-          'merchant_contact': billingAuthorizedContactName,
-          ...?gatewayPendingMeta,
-        },
-      }).select('id').single();
-      final id = '${row['id'] ?? ''}'.trim();
-      if (id.isEmpty) return {'ok': false, 'error': 'no_id'};
-      return {'ok': true, 'transaction_id': id, 'row': row};
+      if (pid.isNotEmpty) {
+        final res = await _sb.rpc(
+          'create_pending_billing_from_intent',
+          params: {
+            'p_plan_id': pid,
+            'p_period': (period ?? 'monthly').trim(),
+            'p_with_auto_pay': withAutoPay,
+            'p_upgrade_subscription_id': upgradeSubscriptionId,
+            'p_subscription_id': subscriptionId,
+            'p_payment_method': paymentMethod,
+            'p_card_id': cardId,
+            'p_purpose': purposeTrim.isEmpty ? 'subscribe' : purposeTrim,
+            'p_title_ar': titleAr,
+            'p_title_en': titleEn,
+            if ((idempotencyKey ?? '').trim().isNotEmpty)
+              'p_idempotency_key': idempotencyKey!.trim(),
+            if ((promoCode ?? '').trim().isNotEmpty)
+              'p_promo_code': promoCode!.trim(),
+          },
+        );
+        if (res is Map) {
+          return Map<String, dynamic>.from(res);
+        }
+        return {'ok': false, 'error': 'bad_response'};
+      }
+      if (purposeTrim == 'save_card_only' || purposeTrim == 'save_card_verify') {
+        final res = await _sb.rpc(
+          'create_pending_billing_catalog_fee',
+          params: {
+            'p_fee_key': 'save_card_verify',
+            'p_payment_method': paymentMethod,
+            'p_card_id': cardId,
+          },
+        );
+        if (res is Map) {
+          return Map<String, dynamic>.from(res);
+        }
+        return {'ok': false, 'error': 'bad_response'};
+      }
+      return {'ok': false, 'error': 'client_amount_forbidden'};
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
     }
@@ -223,6 +259,108 @@ class PaymentService {
       return 'moyasar_account_inactive';
     }
     return 'moyasar_cancelled_or_failed';
+  }
+
+  /// رسالة واجهة — لا تُعرض رموز داخلية مثل payment_gateway_not_configured.
+  static String userFacingError(dynamic code, {required bool isAr}) {
+    final c = '$code'.trim();
+    if (c.isEmpty || c == 'null') {
+      return isAr ? 'تعذّر إتمام العملية.' : 'Could not complete this action.';
+    }
+    switch (c) {
+      case 'payment_gateway_not_configured':
+      case 'moyasar_config_error':
+        return isAr
+            ? 'تعذّر تفعيل الدفع حالياً. حاول مرة أخرى لاحقاً أو تواصل مع الدعم.'
+            : 'Payments are unavailable right now. Try again later or contact support.';
+      case 'apple_pay_merchant_missing':
+        return isAr
+            ? 'Apple Pay غير متاح حالياً على هذا الجهاز. استخدم بطاقة أو طريقة أخرى.'
+            : 'Apple Pay is not available on this device. Use a card or another method.';
+      case 'google_pay_wallet_unavailable':
+        return isAr
+            ? 'Google Pay غير متاح حالياً على هذا الجهاز. استخدم بطاقة أو طريقة أخرى.'
+            : 'Google Pay is not available on this device. Use a card or another method.';
+      case 'luhn':
+        return isAr
+            ? 'رقم البطاقة غير صحيح — تحقق من الأرقام'
+            : 'Invalid card number — check the digits';
+      case 'expired':
+        return isAr ? 'تاريخ الانتهاء منتهٍ' : 'Card has expired';
+      case 'cvv':
+        return isAr ? 'رمز الأمان غير صحيح' : 'Invalid security code';
+      case 'max_cards_reached':
+        return isAr
+            ? 'الحد الأقصى $maxSavedCards بطاقات.'
+            : 'Maximum $maxSavedCards cards reached.';
+      case 'moyasar_widget_error':
+        return isAr
+            ? 'تعذّر فتح نموذج البطاقة. حدّث الصفحة وحاول مجدداً.'
+            : 'Could not open the card form. Refresh and try again.';
+      case 'moyasar_failed':
+      case 'moyasar_cancelled_or_failed':
+      case 'moyasar_rejected':
+      case 'moyasar_validation_error':
+        return isAr
+            ? 'رفض البنك أو بوابة الدفع العملية. تحقق من البيانات أو جرّب بطاقة أخرى.'
+            : 'The bank or payment gateway declined this charge. Check the details or try another card.';
+      case 'cors_or_function_unreachable':
+        return isAr
+            ? 'تعذّر الاتصال بخادم الدفع. تحقق من الشبكة ثم أعد المحاولة.'
+            : 'Could not reach the payment server. Check your network and retry.';
+      case 'moyasar_account_inactive':
+        return isAr
+            ? 'خدمة الدفع غير جاهزة حالياً. حاول لاحقاً أو تواصل مع الدعم.'
+            : 'The payment service is not ready yet. Try later or contact support.';
+      case 'moyasar_auth_error':
+        return isAr
+            ? 'تعذّر التحقق من بوابة الدفع. حاول لاحقاً أو تواصل مع الدعم.'
+            : 'Could not verify the payment gateway. Try later or contact support.';
+      case 'plan_account_mismatch':
+        return isAr
+            ? 'هذه الباقة غير متاحة لنوع حسابك.'
+            : 'This plan is not available for your account type.';
+      case 'amount_mismatch':
+        return isAr
+            ? 'المبلغ غير متطابق، تم إيقاف العملية للمراجعة.'
+            : 'The amount did not match. The payment was stopped for review.';
+      case 'webhook_timeout':
+        return isAr
+            ? 'تم استلام الدفع من البوابة، وجارٍ تأكيد السجل. أعد فتح الباقات خلال دقيقة.'
+            : 'The gateway accepted the payment. Confirming the ledger — reopen plans in a minute.';
+      case 'billing_not_paid':
+      case 'billing_not_success':
+        return isAr
+            ? 'تعذر إكمال الدفع، ولم يتم تفعيل الاشتراك.'
+            : 'Payment could not be completed, and the subscription was not activated.';
+      case 'partial_refund_unsupported':
+        return isAr
+            ? 'لا يمكن استرجاع رصيد مستخدم جزئياً.'
+            : 'A partially used credit cannot be refunded.';
+      case 'unmounted':
+        return isAr ? 'أُغلقت الشاشة قبل اكتمال العملية.' : 'The screen closed before finishing.';
+      case 'payment_failed':
+        return isAr ? 'تعذّر إتمام الدفع.' : 'Payment failed.';
+      default:
+        if (c.startsWith('moyasar_validation:') || c.startsWith('moyasar_api:')) {
+          final detail = c.contains(':') ? c.split(':').skip(1).join(':').trim() : '';
+          if (detail.isNotEmpty) {
+            return isAr
+                ? 'رفض البنك أو البوابة: $detail'
+                : 'Bank or gateway declined: $detail';
+          }
+          return isAr
+              ? 'بيانات الدفع مرفوضة من البنك أو البوابة.'
+              : 'The bank or payment gateway rejected these details.';
+        }
+        if (RegExp(r'^[a-z0-9_]+$', caseSensitive: false).hasMatch(c) &&
+            !c.contains(' ')) {
+          return isAr
+              ? 'تعذّر إتمام العملية. حاول مرة أخرى.'
+              : 'Could not complete this action. Try again.';
+        }
+        return c;
+    }
   }
 
   /// يحذف البطاقات الوهمية (mock_*) — لا تصلح للدفع عبر ميسّر.
@@ -346,6 +484,7 @@ class PaymentService {
   Future<List<Map<String, dynamic>>> getSavedCards() async {
     final uid = _user?.id;
     if (uid == null) return [];
+    await PaymentSecurity.isolateForUid(uid);
     try {
       final rows = await _sb
           .from(_cards)
@@ -406,87 +545,15 @@ class PaymentService {
   static bool canChargeSavedCard(Map<String, dynamic> row) =>
       isMoyasarReadyCardToken(row['card_token']) && !isCardExpired(row);
 
-  static String _lastFourFromMaskedNumber(String masked) {
-    final digits = masked.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 4) return digits.substring(digits.length - 4);
-    return digits.isEmpty ? '0000' : digits;
-  }
-
-  static String _schemeFromMoyasarCompany(CardCompany? company) {
-    if (company == null) return 'visa';
-    switch (company) {
-      case CardCompany.mada:
-        return 'mada';
-      case CardCompany.master:
-        return 'mastercard';
-      case CardCompany.amex:
-        return 'amex';
-      case CardCompany.visa:
-        return 'visa';
-    }
-  }
-
-  /// يحفظ أو يحدّث بطاقة من استجابة دفع ميسّر ناجحة (رمز token للخصم لاحقاً).
+  /// البطاقات تُحفظ من الـwebhook بعد تحقق Moyasar — لا إدراج من العميل.
   Future<Map<String, dynamic>> persistMoyasarCardFromPaymentResponse(
     PaymentResponse response, {
     bool setDefault = false,
   }) async {
-    final uid = _user?.id;
-    if (uid == null) return {'ok': false, 'error': 'auth'};
-    if (response.status != PaymentStatus.paid) {
+    if (!moyasarPaymentSucceeded(response)) {
       return {'ok': false, 'error': 'not_paid'};
     }
-    final src = response.source;
-    if (src is! CardPaymentResponseSource) {
-      return {'ok': false, 'error': 'not_card_source'};
-    }
-    final token = src.token?.trim() ?? '';
-    if (token.isEmpty || isMockCardToken(token)) {
-      return {'ok': false, 'error': 'no_token'};
-    }
-    final last4 = _lastFourFromMaskedNumber(src.number);
-    final scheme = _schemeFromMoyasarCompany(src.company);
-    final holder = src.name.trim();
-    try {
-      final existing = await _sb
-          .from(_cards)
-          .select('id')
-          .eq('user_id', uid)
-          .eq('card_token', token)
-          .maybeSingle();
-      if (existing != null) {
-        return {'ok': true, 'card_id': '${existing['id']}', 'duplicate': true};
-      }
-      final countRows =
-          await _sb.from(_cards).select('id').eq('user_id', uid);
-      if ((countRows as List).length >= maxSavedCards) {
-        return {'ok': false, 'error': 'max_cards_reached'};
-      }
-      await _sb
-          .from(_cards)
-          .delete()
-          .eq('user_id', uid)
-          .like('card_token', 'mock_%')
-          .eq('last_four', last4);
-      if (setDefault) {
-        await _sb.from(_cards).update({'is_default': false}).eq('user_id', uid);
-      }
-      final hasAny = await _sb.from(_cards).select('id').eq('user_id', uid).limit(1);
-      final makeDefault = setDefault || (hasAny as List).isEmpty;
-      final row = await _sb.from(_cards).insert({
-        'user_id': uid,
-        'card_token': token,
-        'last_four': last4,
-        'card_scheme': scheme,
-        'card_holder_name': holder.isEmpty ? null : holder,
-        'expiry_month': 12,
-        'expiry_year': 2099,
-        'is_default': makeDefault,
-      }).select().maybeSingle();
-      return {'ok': true, 'row': row};
-    } catch (e) {
-      return {'ok': false, 'error': e.toString()};
-    }
+    return const {'ok': true, 'deferred': true};
   }
 
   /// خصم مباشر عبر رمز البطاقة المحفوظة (ميسّر token API على الخادم).
@@ -1119,133 +1186,61 @@ class PaymentService {
   }
 
   /// تاريخ/وقت بأرقام لاتينية (للفواتير والتقارير).
-  static String formatLatinDateTime(DateTime dt) =>
-      DateFormat('dd/MM/yyyy HH:mm', 'en_US').format(dt.toLocal());
+  static String formatLatinDateTime(DateTime dt) {
+    final raw = DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: false);
+    return raw.replaceAll(RegExp(r'[\u200e\u200f\u2066-\u2069]'), '');
+  }
 
-  static PdfColor get _invoiceBrand => PdfColor.fromInt(0xFF1A237E);
-  static PdfColor get _invoiceBrandLight => PdfColor.fromInt(0xFFE8EAF6);
+  static PdfColor get _invoiceBrand => kDocumentBrandPdfColor;
+  static PdfColor get _invoiceBrandLight => PdfColor.fromInt(0xFFCCFBF1);
 
-  static Future<({pw.Font base, pw.Font bold})> _invoiceFonts() async {
-    pw.Font? arabicFont;
+  static Future<({pw.Font base, pw.Font bold, List<pw.Font> fallback})>
+      _invoiceFonts() async {
+    pw.Font? cairo;
+    pw.Font? cairoBold;
+    pw.Font? arabic;
     try {
-      final data = await rootBundle.load('assets/fonts/arabic_pdf_regular.ttf');
-      arabicFont = pw.Font.ttf(data);
-    } catch (_) {
-      arabicFont = null;
-    }
-    final base = arabicFont ?? pw.Font.helvetica();
-    return (base: base, bold: base);
+      cairo = pw.Font.ttf(await rootBundle.load('fonts/Cairo-Regular.ttf'));
+    } catch (_) {}
+    try {
+      cairoBold = pw.Font.ttf(await rootBundle.load('fonts/Cairo-Bold.ttf'));
+    } catch (_) {}
+    try {
+      arabic =
+          pw.Font.ttf(await rootBundle.load('assets/fonts/arabic_pdf_regular.ttf'));
+    } catch (_) {}
+    pw.Font? noto;
+    try {
+      noto = pw.Font.ttf(await rootBundle.load('fonts/NotoNaskhArabic_wght.ttf'));
+    } catch (_) {}
+    final helv = pw.Font.helvetica();
+    final helvBold = pw.Font.helveticaBold();
+    final fallback = <pw.Font>[
+      if (cairo != null) cairo,
+      if (cairoBold != null) cairoBold,
+      if (arabic != null) arabic,
+      if (noto != null) noto,
+      helv,
+      helvBold,
+    ];
+    final base = cairo ?? arabic ?? helv;
+    final bold = cairoBold ?? cairo ?? arabic ?? helvBold;
+    return (base: base, bold: bold, fallback: fallback);
+  }
+
+  static pw.ThemeData _invoiceTheme(
+    ({pw.Font base, pw.Font bold, List<pw.Font> fallback}) fonts,
+  ) {
+    return pw.ThemeData.withFont(
+      base: fonts.base,
+      bold: fonts.bold,
+      fontFallback: fonts.fallback,
+    );
   }
 
   static Future<pw.ImageProvider?> _invoiceLogo() => loadBrandingPdfLogo();
 
-  static pw.Widget _invoiceHeader({
-    required pw.Font base,
-    required pw.Font bold,
-    required pw.ImageProvider? logo,
-    required bool isAr,
-    required String invoiceRef,
-    required String issuedAt,
-    required String docTitle,
-  }) {
-    String t(String ar, String en) => isAr ? ar : en;
-    final platformName = AppBranding.legalName(isAr: isAr);
-    final shortBrand = AppBranding.brandName(isAr: isAr);
-    final contactLine = isAr
-        ? '${AppBranding.supportEmail} · ${AppBranding.supportPhone}'
-        : '${AppBranding.supportEmail} · ${AppBranding.supportPhone}';
-
-    final logoBox = pw.Container(
-      width: 76,
-      height: 76,
-      padding: const pw.EdgeInsets.all(6),
-      child: logo != null
-          ? pw.Image(logo, fit: pw.BoxFit.contain)
-          : pw.Center(
-              child: pw.Text(
-                shortBrand,
-                style: pw.TextStyle(
-                  font: bold,
-                  fontSize: 11,
-                  color: _invoiceBrand,
-                ),
-                textAlign: pw.TextAlign.center,
-              ),
-            ),
-    );
-
-    final metaColumn = pw.Column(
-      crossAxisAlignment: isAr
-          ? pw.CrossAxisAlignment.start
-          : pw.CrossAxisAlignment.end,
-      children: [
-        pw.Text(
-          docTitle,
-          style: pw.TextStyle(font: bold, fontSize: 12, color: _invoiceBrand),
-          textAlign: isAr ? pw.TextAlign.start : pw.TextAlign.end,
-        ),
-        pw.SizedBox(height: 4),
-        pw.Text(
-          '${t('رقم الفاتورة', 'Invoice No.')}: $invoiceRef',
-          style: pw.TextStyle(font: base, fontSize: 9, color: PdfColors.grey800),
-          textAlign: isAr ? pw.TextAlign.start : pw.TextAlign.end,
-        ),
-        pw.Text(
-          '${t('التاريخ', 'Date')}: $issuedAt',
-          style: pw.TextStyle(font: base, fontSize: 9, color: PdfColors.grey800),
-          textAlign: isAr ? pw.TextAlign.start : pw.TextAlign.end,
-        ),
-      ],
-    );
-
-    final brandColumn = pw.Column(
-      crossAxisAlignment: isAr
-          ? pw.CrossAxisAlignment.end
-          : pw.CrossAxisAlignment.start,
-      children: [
-        pw.Text(
-          platformName,
-          style: pw.TextStyle(font: bold, fontSize: 11, color: _invoiceBrand),
-          textAlign: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-        ),
-        pw.SizedBox(height: 3),
-        pw.Text(
-          AppBranding.legalNoticeLine(isAr: isAr),
-          style: pw.TextStyle(font: base, fontSize: 8, color: PdfColors.grey700),
-          textAlign: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-        ),
-        pw.Text(
-          contactLine,
-          style: pw.TextStyle(font: base, fontSize: 8, color: PdfColors.grey700),
-          textAlign: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-        ),
-      ],
-    );
-
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        pw.Center(
-          child: pw.Text(
-            t('بسم الله الرحمن الرحيم', 'In the name of Allah, the Most Gracious'),
-            style: pw.TextStyle(font: bold, fontSize: 10, color: _invoiceBrand),
-            textAlign: pw.TextAlign.center,
-          ),
-        ),
-        pw.SizedBox(height: 10),
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: isAr
-              ? [metaColumn, pw.SizedBox(width: 18), logoBox, pw.SizedBox(width: 18), pw.Expanded(child: brandColumn)]
-              : [pw.Expanded(child: brandColumn), pw.SizedBox(width: 18), logoBox, pw.SizedBox(width: 18), metaColumn],
-        ),
-        pw.SizedBox(height: 10),
-        pw.Container(height: 2, color: _invoiceBrand),
-      ],
-    );
-  }
-
-  /// فاتورة PDF — شعار، بسملة، ترويسة، جدول، بيانات شريكنا العقاري.
+  /// فاتورة PDF — ترويسة سعودية، رقم رسمي واحد، بدون UUID.
   static Future<Uint8List> buildInvoicePdf({
     required String title,
     required String txnId,
@@ -1253,6 +1248,7 @@ class PaymentService {
     required String statusLine,
     String? footer,
     String? planName,
+    String? descriptionLabel,
     String? periodLabel,
     String? paymentMethod,
     String? paidAtFormatted,
@@ -1263,258 +1259,220 @@ class PaymentService {
     String? userEmail,
     String? userPhone,
     String? invoiceDateFormatted,
+    String? calendarLine,
     bool isAr = true,
+    String? subtotalLine,
+    String? discountLine,
+    String? discountLabel,
+    String? autoPayDiscountLine,
+    String? autoPayDiscountLabel,
+    String? promoDiscountLine,
+    String? promoDiscountLabel,
+    String? vatLine,
+    String? feesLine,
+    String? refundLine,
+    String? vatNote,
+    String? paymentReference,
+    String? periodStart,
+    String? periodEnd,
+    String? currencyLabel,
+    String? qrPayload,
   }) async {
     final fonts = await _invoiceFonts();
-    final base = fonts.base;
-    final bold = fonts.bold;
     final logo = await _invoiceLogo();
-    final doc = pw.Document(theme: pw.ThemeData.withFont(base: base, bold: bold));
-    final issuedAt =
-        invoiceDateFormatted ?? formatLatinDateTime(DateTime.now());
-
-    String t(String ar, String en) => isAr ? ar : en;
-
-    pw.Widget infoRow(String label, String? value) {
-      final v = (value ?? '').trim();
-      if (v.isEmpty) return pw.SizedBox();
-      return pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(vertical: 3),
-        child: pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.SizedBox(
-              width: 118,
-              child: pw.Text(
-                label,
-                style: pw.TextStyle(font: bold, fontSize: 10),
-                textAlign: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-              ),
-            ),
-            pw.SizedBox(width: 10),
-            pw.Expanded(
-              child: pw.Text(
-                v,
-                style: pw.TextStyle(font: base, fontSize: 10),
-                textAlign: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    pw.Widget tableCell(
-      String text, {
-      bool header = false,
-      pw.TextAlign align = pw.TextAlign.center,
-    }) {
-      return pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: pw.Text(
-          text,
-          style: pw.TextStyle(
-            font: header ? bold : base,
-            fontSize: header ? 10 : 9,
-            color: header ? PdfColors.white : PdfColors.black,
-          ),
-          textAlign: align,
-        ),
-      );
-    }
-
-    final clientName = (userFullName ?? payerName ?? '').trim();
-    final clientEmail = (userEmail ?? '').trim();
-    final clientPhone = (userPhone ?? '').trim();
-    final lineDesc = AppBranding.billingDisplayTitle(
-      rawTitle: (planName ?? title).trim(),
+    final riyalSvg = await loadInvoiceRiyalSvg();
+    final doc = pw.Document(theme: _invoiceTheme(fonts));
+    _addOfficialInvoicePage(
+      doc: doc,
+      base: fonts.base,
+      bold: fonts.bold,
+      fontFallback: fonts.fallback,
+      logo: logo,
+      title: title,
+      txnId: txnId,
+      amountLine: amountLine,
+      statusLine: statusLine,
+      footer: footer,
+      planName: planName,
+      descriptionLabel: descriptionLabel,
+      periodLabel: periodLabel,
+      paymentMethod: paymentMethod,
+      paidAtFormatted: paidAtFormatted,
+      payerName: payerName,
+      purposeLabel: purposeLabel,
+      userFullName: userFullName,
+      userEmail: userEmail,
+      userPhone: userPhone,
+      invoiceDateFormatted: invoiceDateFormatted,
+      calendarLine: calendarLine,
       isAr: isAr,
-      periodHint: periodLabel,
-    );
-    final linePeriod = (periodLabel ?? '—').trim();
-    final displayTitle = AppBranding.billingDisplayTitle(
-      rawTitle: title,
-      isAr: isAr,
-      periodHint: periodLabel,
-    );
-
-    doc.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 44),
-        textDirection: isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-        build: (ctx) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            _invoiceHeader(
-              base: base,
-              bold: bold,
-              logo: logo,
-              isAr: isAr,
-              invoiceRef: txnId,
-              issuedAt: issuedAt,
-              docTitle: t('فاتورة رسمية', 'Official invoice'),
-            ),
-            pw.SizedBox(height: 18),
-            pw.Center(
-              child: pw.ConstrainedBox(
-                constraints: const pw.BoxConstraints(maxWidth: 420),
-                child: pw.Text(
-                  displayTitle,
-                  style: pw.TextStyle(
-                    font: bold,
-                    fontSize: 16,
-                    color: _invoiceBrand,
-                  ),
-                  textAlign: pw.TextAlign.center,
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 16),
-            pw.Center(
-              child: pw.ConstrainedBox(
-                constraints: const pw.BoxConstraints(maxWidth: 460),
-                child: pw.Container(
-                  width: double.infinity,
-                  padding: const pw.EdgeInsets.all(12),
-                  decoration: pw.BoxDecoration(
-                    color: _invoiceBrandLight,
-                    borderRadius: pw.BorderRadius.circular(6),
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                    children: [
-                      pw.Text(
-                        AppBranding.invoicePartnerSectionTitle(isAr: isAr),
-                        style: pw.TextStyle(font: bold, fontSize: 11),
-                        textAlign: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-                      ),
-                      pw.SizedBox(height: 6),
-                      infoRow(
-                        AppBranding.invoicePartnerLabel(isAr: isAr),
-                        clientName.isEmpty ? null : clientName,
-                      ),
-                      infoRow(t('البريد', 'Email'),
-                          clientEmail.isEmpty ? null : clientEmail),
-                      infoRow(t('الجوال', 'Phone'),
-                          clientPhone.isEmpty ? null : clientPhone),
-                      infoRow(t('طريقة الدفع', 'Payment method'), paymentMethod),
-                      if ((paidAtFormatted ?? '').isNotEmpty)
-                        infoRow(t('تاريخ الدفع', 'Paid at'), paidAtFormatted),
-                      if ((subscriptionId ?? '').isNotEmpty)
-                        infoRow(t('رقم الاشتراك', 'Subscription'), subscriptionId),
-                      if ((purposeLabel ?? '').isNotEmpty)
-                        infoRow(t('نوع العملية', 'Purpose'), purposeLabel),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 16),
-            pw.Center(
-              child: pw.ConstrainedBox(
-                constraints: const pw.BoxConstraints(maxWidth: 460),
-                child: pw.Table(
-                  border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-                  columnWidths: {
-                    0: const pw.FlexColumnWidth(0.55),
-                    1: const pw.FlexColumnWidth(2.5),
-                    2: const pw.FlexColumnWidth(1.1),
-                    3: const pw.FlexColumnWidth(1.1),
-                    4: const pw.FlexColumnWidth(0.95),
-                  },
-                  children: [
-                    pw.TableRow(
-                      decoration: pw.BoxDecoration(color: _invoiceBrand),
-                      children: [
-                        tableCell('#', header: true),
-                        tableCell(t('البيان', 'Description'), header: true),
-                        tableCell(t('الفترة', 'Period'), header: true),
-                        tableCell(t('المبلغ', 'Amount'), header: true),
-                        tableCell(t('الحالة', 'Status'), header: true),
-                      ],
-                    ),
-                    pw.TableRow(
-                      decoration: const pw.BoxDecoration(color: PdfColors.white),
-                      children: [
-                        tableCell('1'),
-                        tableCell(
-                          lineDesc,
-                          align: isAr ? pw.TextAlign.end : pw.TextAlign.start,
-                        ),
-                        tableCell(linePeriod),
-                        tableCell(amountLine),
-                        tableCell(statusLine),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 12),
-            pw.Center(
-              child: pw.ConstrainedBox(
-                constraints: const pw.BoxConstraints(maxWidth: 460),
-                child: pw.Container(
-                  padding: const pw.EdgeInsets.all(10),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: PdfColors.grey400),
-                    borderRadius: pw.BorderRadius.circular(4),
-                  ),
-                  child: pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        t('الإجمالي', 'Total'),
-                        style: pw.TextStyle(font: bold, fontSize: 12),
-                      ),
-                      pw.Text(
-                        amountLine,
-                        style: pw.TextStyle(
-                          font: bold,
-                          fontSize: 14,
-                          color: _invoiceBrand,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            pw.SizedBox(height: 18),
-            pw.Center(
-              child: pdfReadableQrBlock(
-                data: 'TXN:$txnId|AMT:$amountLine|STATUS:$statusLine',
-                isAr: isAr,
-                font: base,
-                fontBold: bold,
-                size: 104,
-                title: t('رمز التحقق من الفاتورة', 'Invoice verification QR'),
-                hint: t(
-                  'امسح الرمز للتحقق من رقم العملية',
-                  'Scan to verify transaction reference',
-                ),
-                brandColor: _invoiceBrand,
-              ),
-            ),
-            pw.Spacer(),
-            if (footer != null && footer.isNotEmpty)
-              pw.Text(
-                footer,
-                style: pw.TextStyle(font: base, fontSize: 8, color: PdfColors.grey700),
-                textAlign: pw.TextAlign.center,
-              ),
-            pw.SizedBox(height: 6),
-            pw.Text(
-              AppBranding.copyrightLine(isAr: isAr),
-              style: pw.TextStyle(font: base, fontSize: 8, color: PdfColors.grey600),
-              textAlign: pw.TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+      subtotalLine: subtotalLine,
+      discountLine: discountLine,
+      discountLabel: discountLabel,
+      autoPayDiscountLine: autoPayDiscountLine,
+      autoPayDiscountLabel: autoPayDiscountLabel,
+      promoDiscountLine: promoDiscountLine,
+      promoDiscountLabel: promoDiscountLabel,
+      vatLine: vatLine,
+      feesLine: feesLine,
+      refundLine: refundLine,
+      vatNote: vatNote,
+      paymentReference: paymentReference,
+      periodStart: periodStart,
+      periodEnd: periodEnd,
+      currencyLabel: currencyLabel,
+      qrPayload: qrPayload,
+      riyalSvg: riyalSvg,
     );
     return doc.save();
+  }
+
+  /// طباعة مجموعة: كل فاتورة تبدأ في صفحة مستقلة داخل نفس المستند.
+  static Future<Uint8List> mergeInvoicePdfs(List<Uint8List> pages) async {
+    if (pages.isEmpty) return Uint8List(0);
+    if (pages.length == 1) return pages.first;
+    return pages.first;
+  }
+
+  static Future<Uint8List> buildInvoiceBookPdf({
+    required List<Map<String, dynamic>> invoices,
+    required bool isAr,
+  }) async {
+    final fonts = await _invoiceFonts();
+    final logo = await _invoiceLogo();
+    final riyalSvg = await loadInvoiceRiyalSvg();
+    final doc = pw.Document(theme: _invoiceTheme(fonts));
+    for (final inv in invoices) {
+      _addOfficialInvoicePage(
+        doc: doc,
+        base: fonts.base,
+        bold: fonts.bold,
+        fontFallback: fonts.fallback,
+        logo: logo,
+        title: '${inv['title'] ?? ''}',
+        txnId: '${inv['txnId'] ?? ''}',
+        amountLine: '${inv['amountLine'] ?? ''}',
+        statusLine: '${inv['statusLine'] ?? ''}',
+        footer: inv['footer'] as String?,
+        planName: inv['planName'] as String?,
+        descriptionLabel: inv['descriptionLabel'] as String?,
+        periodLabel: inv['periodLabel'] as String?,
+        paymentMethod: inv['paymentMethod'] as String?,
+        paidAtFormatted: inv['paidAtFormatted'] as String?,
+        payerName: inv['payerName'] as String?,
+        purposeLabel: inv['purposeLabel'] as String?,
+        userFullName: inv['userFullName'] as String?,
+        userEmail: inv['userEmail'] as String?,
+        userPhone: inv['userPhone'] as String?,
+        invoiceDateFormatted: inv['invoiceDateFormatted'] as String?,
+        calendarLine: inv['calendarLine'] as String?,
+        isAr: isAr,
+        subtotalLine: inv['subtotalLine'] as String?,
+        discountLine: inv['discountLine'] as String?,
+        discountLabel: inv['discountLabel'] as String?,
+        autoPayDiscountLine: inv['autoPayDiscountLine'] as String?,
+        autoPayDiscountLabel: inv['autoPayDiscountLabel'] as String?,
+        promoDiscountLine: inv['promoDiscountLine'] as String?,
+        promoDiscountLabel: inv['promoDiscountLabel'] as String?,
+        vatLine: inv['vatLine'] as String?,
+        feesLine: inv['feesLine'] as String?,
+        refundLine: inv['refundLine'] as String?,
+        vatNote: inv['vatNote'] as String?,
+        paymentReference: inv['paymentReference'] as String?,
+        periodStart: inv['periodStart'] as String?,
+        periodEnd: inv['periodEnd'] as String?,
+        currencyLabel: inv['currencyLabel'] as String?,
+        qrPayload: inv['qrPayload'] as String?,
+        riyalSvg: riyalSvg,
+      );
+    }
+    return doc.save();
+  }
+
+  static void _addOfficialInvoicePage({
+    required pw.Document doc,
+    required pw.Font base,
+    required pw.Font bold,
+    required List<pw.Font> fontFallback,
+    required pw.ImageProvider? logo,
+    required String title,
+    required String txnId,
+    required String amountLine,
+    required String statusLine,
+    String? footer,
+    String? planName,
+    String? descriptionLabel,
+    String? periodLabel,
+    String? paymentMethod,
+    String? paidAtFormatted,
+    String? payerName,
+    String? purposeLabel,
+    String? userFullName,
+    String? userEmail,
+    String? userPhone,
+    String? invoiceDateFormatted,
+    String? calendarLine,
+    required bool isAr,
+    String? subtotalLine,
+    String? discountLine,
+    String? discountLabel,
+    String? autoPayDiscountLine,
+    String? autoPayDiscountLabel,
+    String? promoDiscountLine,
+    String? promoDiscountLabel,
+    String? vatLine,
+    String? feesLine,
+    String? refundLine,
+    String? vatNote,
+    String? paymentReference,
+    String? periodStart,
+    String? periodEnd,
+    String? currencyLabel,
+    String? qrPayload,
+    String? riyalSvg,
+  }) {
+    addOfficialInvoicePage(
+      doc: doc,
+      base: base,
+      bold: bold,
+      fontFallback: fontFallback,
+      logo: logo,
+      title: title,
+      txnId: txnId,
+      amountLine: amountLine,
+      statusLine: statusLine,
+      footer: footer,
+      planName: planName,
+      descriptionLabel: descriptionLabel,
+      periodLabel: periodLabel,
+      paymentMethod: paymentMethod,
+      paidAtFormatted: paidAtFormatted,
+      payerName: payerName,
+      purposeLabel: purposeLabel,
+      userFullName: userFullName,
+      userEmail: userEmail,
+      userPhone: userPhone,
+      invoiceDateFormatted: invoiceDateFormatted,
+      calendarLine: calendarLine,
+      isAr: isAr,
+      subtotalLine: subtotalLine,
+      discountLine: discountLine,
+      discountLabel: discountLabel,
+      autoPayDiscountLine: autoPayDiscountLine,
+      autoPayDiscountLabel: autoPayDiscountLabel,
+      promoDiscountLine: promoDiscountLine,
+      promoDiscountLabel: promoDiscountLabel,
+      vatLine: vatLine,
+      feesLine: feesLine,
+      refundLine: refundLine,
+      vatNote: vatNote,
+      paymentReference: paymentReference,
+      periodStart: periodStart,
+      periodEnd: periodEnd,
+      currencyLabel: currencyLabel,
+      qrPayload: qrPayload,
+      riyalSvg: riyalSvg,
+    );
   }
 
   /// تقرير PDF لكل الفواتير (طباعة الكل حسب التبويب).
@@ -1529,7 +1487,7 @@ class PaymentService {
     final base = fonts.base;
     final bold = fonts.bold;
     final logo = await _invoiceLogo();
-    final doc = pw.Document(theme: pw.ThemeData.withFont(base: base, bold: bold));
+    final doc = pw.Document(theme: _invoiceTheme(fonts));
     final issuedAt =
         generatedAtFormatted ?? formatLatinDateTime(DateTime.now());
     String t(String ar, String en) => isAr ? ar : en;
@@ -1543,14 +1501,15 @@ class PaymentService {
         margin: const pw.EdgeInsets.symmetric(horizontal: 36, vertical: 40),
         textDirection: isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
         build: (ctx) => [
-          _invoiceHeader(
+          brandingPdfHeader(
             base: base,
             bold: bold,
             logo: logo,
             isAr: isAr,
-            invoiceRef: 'RPT-${DateTime.now().millisecondsSinceEpoch}',
-            issuedAt: issuedAt,
             docTitle: reportTitle,
+            brandColor: _invoiceBrand,
+            metaLine: '${t('التاريخ', 'Date')}: $issuedAt',
+            fontFallback: fonts.fallback,
           ),
           pw.SizedBox(height: 16),
           pw.Center(
@@ -1559,7 +1518,7 @@ class PaymentService {
               child: pw.TableHelper.fromTextArray(
                 headers: [
                   '#',
-                  t('رقم العملية', 'Reference'),
+                  t('رقم الفاتورة', 'Invoice number'),
                   t('التاريخ', 'Date'),
                   t('البيان', 'Description'),
                   t('المبلغ', 'Amount'),
@@ -1601,8 +1560,12 @@ class PaymentService {
           pw.SizedBox(height: 16),
           pw.Center(
             child: pdfReadableQrBlock(
-              data:
-                  'INVOICES_REPORT|${DateTime.now().toIso8601String()}|count=${rows.length}',
+              data: documentQrPlainText(
+                isAr: isAr,
+                kind: reportTitle,
+                paidAt: issuedAt,
+                rowCount: rows.length,
+              ),
               isAr: isAr,
               font: base,
               fontBold: bold,
@@ -1636,7 +1599,7 @@ class PaymentService {
     final base = fonts.base;
     final bold = fonts.bold;
     final logo = await _invoiceLogo();
-    final doc = pw.Document(theme: pw.ThemeData.withFont(base: base, bold: bold));
+    final doc = pw.Document(theme: _invoiceTheme(fonts));
     final title = isAr ? (titleAr ?? 'لا توجد فواتير') : (titleEn ?? 'No invoices');
     final body = isAr
         ? (bodyAr ?? 'لا توجد فواتير للطباعة في هذا التبويب حالياً.')
@@ -1657,6 +1620,7 @@ class PaymentService {
               isAr: isAr,
               docTitle: title,
               brandColor: _invoiceBrand,
+              fontFallback: fonts.fallback,
             ),
             pw.Spacer(),
             pw.Text(

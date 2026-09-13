@@ -199,7 +199,7 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
             builder: (_) => SubscriptionsRootScreen(
               lang: widget.lang,
               accountType: widget.accountType,
-              embedAppBar: !widget.embedAppBar,
+              embedAppBar: false,
             ),
           ),
         );
@@ -235,8 +235,8 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
       };
 
       if (!mounted) return;
-      final res = await Navigator.of(context).push<bool>(
-        MaterialPageRoute<bool>(
+      final res = await Navigator.of(context).push<Object?>(
+        MaterialPageRoute<Object?>(
           fullscreenDialog: true,
           builder: (_) => AddPropertyPage(
             userId: widget.userId,
@@ -266,8 +266,8 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
     }
 
     if (!mounted) return;
-    final res = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
+    final res = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute<Object?>(
         fullscreenDialog: true,
         builder: (_) => AddPropertyPage(
           userId: widget.userId,
@@ -298,14 +298,9 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
           Scaffold(
             appBar: AppBar(
               automaticallyImplyLeading: false,
-              leading: !widget.embedAppBar
-                  ? AppPageCloseButton(
-                      isArabic: _isAr,
-                      onPressed: () {
-                        if (Navigator.canPop(context)) Navigator.pop(context);
-                      },
-                    )
-                  : null,
+              leading: AppPageCloseButton(
+                  isArabic: _isAr,
+                ),
               title: Text(_isAr ? 'إعلان عقاري' : 'Property listing'),
             ),
             body: SafeArea(

@@ -138,6 +138,9 @@ mixin MarketingStateMixin on State<UserDashboard> {
   /// طلبات أخفاها المسوّق من «السوق العقاري» بعد إلغاء عرضه.
   Set<String> _marketerHiddenMarketRequestIds = {};
 
+  /// أعضاء المنشأة نفسها — لا يظهر لهم طلب طرحوه في السوق.
+  Set<String> _marketerSameOrgUserIds = {};
+
   /// بطاقات مفسوخ/ملغى أخفاها المسوّق يدوياً من صفحتي.
   Set<String> _marketerDismissedCancelledIds = {};
 

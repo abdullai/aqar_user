@@ -88,17 +88,29 @@ abstract final class AuthLocalSignOut {
         return;
       }
 
-      // دائماً signOut(local) لتفريغ الجلسة من الذاكرة.
-      // tryRemoteRevoke محفوظ للتوافق؛ لا نرسل revoke عن بُعد عند JWT منتهٍ.
-      if (tryRemoteRevoke && !_accessTokenStillValid(session)) {
-        await _purgePersistedAuthToken();
-      }
-      try {
-        await client.auth
-            .signOut(scope: SignOutScope.local)
-            .timeout(const Duration(seconds: 4));
-      } catch (_) {
-        await _purgePersistedAuthToken();
+      // دائماً نفرّغ الجلسة محلياً. عند طلب الإلغاء عن بُعد نحاول global ثم local.
+      if (tryRemoteRevoke && _accessTokenStillValid(session)) {
+        try {
+          await client.auth
+              .signOut(scope: SignOutScope.global)
+              .timeout(const Duration(seconds: 5));
+        } catch (_) {
+          try {
+            await client.auth
+                .signOut(scope: SignOutScope.local)
+                .timeout(const Duration(seconds: 4));
+          } catch (_) {
+            await _purgePersistedAuthToken();
+          }
+        }
+      } else {
+        try {
+          await client.auth
+              .signOut(scope: SignOutScope.local)
+              .timeout(const Duration(seconds: 4));
+        } catch (_) {
+          await _purgePersistedAuthToken();
+        }
       }
       if (client.auth.currentSession != null) {
         await _purgePersistedAuthToken();

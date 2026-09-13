@@ -1,19 +1,30 @@
+// ignore_for_file: unused_local_variable
+
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui show TextDirection;
 
 import 'package:flutter/foundation.dart'
     show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/auth/auth_challenge_service.dart';
+import '../core/auth/in_app_otp_handoff.dart';
+import '../core/auth/otp_autofill.dart';
+import '../core/auth/otp_pin_layout.dart';
 import '../core/auth/safe_sign_out_service.dart';
+import '../core/gestures/app_keyboard_inset.dart';
 import '../core/haptics/app_haptics.dart';
+import '../core/input/input_normalizers.dart';
+import '../widgets/aqar_text_field.dart';
 import '../core/navigation/app_orphan_route_chrome.dart';
 import '../core/notifications/app_sound_coordinator.dart';
 import '../core/security/screen_protection.dart';
+import '../core/utils/date_helper.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
@@ -22,6 +33,7 @@ import '../services/notification_service.dart';
 import '../services/user_install_session_service.dart';
 import '../core/navigation/post_auth_navigation.dart';
 import '../core/navigation/web_interaction_recovery.dart';
+import '../widgets/app_page_close_button.dart';
 import '../services/user_session_coordination_service.dart';
 
 String _deviceManagementUserMessage(
@@ -71,6 +83,7 @@ class DeviceManagementPage extends StatefulWidget {
 class _DeviceManagementPageState extends State<DeviceManagementPage> {
   bool _loading = true;
   bool _signingOut = false;
+  bool _leavingToNextGate = false;
   String? _error;
   List<Map<String, dynamic>> _rows = const [];
   String _currentFp = '';
@@ -97,6 +110,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
   }
 
   Future<void> _load() async {
+    if (_leavingToNextGate) return;
     final isAr = Localizations.localeOf(context).languageCode != 'en';
     setState(() {
       _loading = true;
@@ -192,7 +206,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     }
     if (dt == null) return '—';
     final locale = isAr ? 'ar' : 'en';
-    return DateFormat.yMMMd(locale).add_jm().format(dt);
+    return DateHelper.fmtCivilDateTime(dt, isAr: isAr);
   }
 
   String _friendlyBrowserLabel(Map<String, dynamic> r, {required bool isAr}) {
@@ -286,8 +300,8 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
         l10n?.securityDeviceColPlatform ?? (isAr ? 'المنصة' : 'Platform');
     final colLocation =
         l10n?.securityDeviceColLocation ?? (isAr ? 'الموقع' : 'Location');
-    final colLast =
-        l10n?.securityDeviceColLastSignIn ?? (isAr ? 'آخر دخول' : 'Last sign-in');
+    final colLast = l10n?.securityDeviceColLastSignIn ??
+        (isAr ? 'آخر دخول' : 'Last sign-in');
     final colRegistered = l10n?.securityDeviceColRegistered ??
         (isAr ? 'تاريخ التسجيل' : 'Registered');
     final colStatus =
@@ -358,8 +372,8 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
         l10n?.securityDeviceColPlatform ?? (isAr ? 'المنصة' : 'Platform');
     final colLocation =
         l10n?.securityDeviceColLocation ?? (isAr ? 'الموقع' : 'Location');
-    final colLast =
-        l10n?.securityDeviceColLastSignIn ?? (isAr ? 'آخر دخول' : 'Last sign-in');
+    final colLast = l10n?.securityDeviceColLastSignIn ??
+        (isAr ? 'آخر دخول' : 'Last sign-in');
     final colRegistered = l10n?.securityDeviceColRegistered ??
         (isAr ? 'تاريخ التسجيل' : 'Registered');
     final colStatus =
@@ -471,8 +485,14 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
           .delete()
           .eq('id', deviceId)
           .timeout(const Duration(seconds: 18));
+      if (widget.mandatory) {
+        if (mounted) {
+          setState(() => _leavingToNextGate = true);
+        }
+        await _completeMandatoryDeviceRegistrationIfNeeded();
+        return;
+      }
       await _load();
-      await _completeMandatoryDeviceRegistrationIfNeeded();
       if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
       messenger.clearSnackBars();
@@ -483,10 +503,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
           content: Text(isAr ? 'تم حذف الجهاز' : 'Device removed'),
         ),
       );
-      // بعد حذف جهاز (مسار إعدادات): العودة للوحة الرئيسية دون البقاء في شاشة العدّ.
-      if (!widget.mandatory) {
-        unawaited(PostAuthNavigation.openDashboard(context));
-      }
+      unawaited(PostAuthNavigation.openDashboard(context));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -501,13 +518,20 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     final reg = await UserInstallSessionService.retryRegisterDeviceSlot();
     if (!mounted) return;
     final uid = Supabase.instance.client.auth.currentUser?.id;
-    if (!reg.ok || !widget.mandatory || uid == null) return;
+    if (!reg.ok || !widget.mandatory || uid == null) {
+      if (_leavingToNextGate && mounted) {
+        setState(() => _leavingToNextGate = false);
+        unawaited(_load());
+      }
+      return;
+    }
 
     final hints = await UserInstallSessionService.sessionHintsForBump();
     await UserSessionCoordinationService.afterSignIn(
       uid,
       cityHint: hints.city,
       deviceLabel: hints.label,
+      forceBump: true,
     );
     if (!mounted) return;
 
@@ -526,7 +550,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     required String username,
   }) async {
     if (!mounted) return false;
-    final result = await showDialog<bool>(
+    final result = await showAppDialog<bool>(
           context: context,
           barrierDismissible: false,
           builder: (_) => _DeviceOtpDialog(
@@ -573,23 +597,21 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
       if (!otpOk || !mounted) return;
 
       final payload = await UserInstallSessionService.devicePayloadForRpc();
-      await Supabase.instance.client
-          .rpc(
-            'clear_user_devices_except_current',
-            params: {'p_device': payload},
-          )
-          .timeout(const Duration(seconds: 22));
+      await Supabase.instance.client.rpc(
+        'clear_user_devices_except_current',
+        params: {'p_device': payload},
+      ).timeout(const Duration(seconds: 22));
       await UserInstallSessionService.registerDeviceSlotAfterSignIn();
-      await _load();
-      await _completeMandatoryDeviceRegistrationIfNeeded();
-      if (!mounted) return;
-      // بعد المسح الإلزامي: أغلق شاشة الأجهزة وادخل اللوحة — لا تُبقِ شاشة أجهزة ثانية.
       if (widget.mandatory) {
+        if (mounted) {
+          setState(() => _leavingToNextGate = true);
+        }
+        await _completeMandatoryDeviceRegistrationIfNeeded();
         return;
       }
-      if (!widget.mandatory) {
-        unawaited(PostAuthNavigation.openDashboard(context));
-      }
+      await _load();
+      if (!mounted) return;
+      unawaited(PostAuthNavigation.openDashboard(context));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -603,7 +625,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
   Future<void> _confirmMandatorySignOut(BuildContext context) async {
     final lang = Localizations.localeOf(context).languageCode;
     final isAr = lang != 'en';
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: Text(isAr ? 'تسجيل الخروج؟' : 'Sign out?'),
@@ -658,58 +680,60 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
                 ]
               : null,
         ),
-        body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Text(_error!))
-              : ListView(
-                  padding: EdgeInsets.fromLTRB(
-                    16,
-                    16,
-                    16,
-                    _listBottomPadding(context),
-                  ),
-                  children: [
-                    Text(
-                      l10n?.securityDeviceLimitMessage ?? '',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                    const SizedBox(height: 16),
-                    LayoutBuilder(
-                      builder: (context, c) {
-                        final cs = Theme.of(context).colorScheme;
-                        final wide = c.maxWidth >= 760;
-                        if (wide) {
-                          return _buildDevicesTable(
-                            isAr: isAr,
-                            l10n: l10n,
-                            cs: cs,
-                          );
-                        }
-                        return Column(
-                          children: _rows
-                              .map(
-                                (r) => _buildDeviceCard(
-                                  row: r,
+        body: _leavingToNextGate
+            ? const Center(child: CircularProgressIndicator())
+            : _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? Center(child: Text(_error!))
+                    : ListView(
+                        padding: EdgeInsets.fromLTRB(
+                          16,
+                          16,
+                          16,
+                          _listBottomPadding(context),
+                        ),
+                        children: [
+                          Text(
+                            l10n?.securityDeviceLimitMessage ?? '',
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 16),
+                          LayoutBuilder(
+                            builder: (context, c) {
+                              final cs = Theme.of(context).colorScheme;
+                              final wide = c.maxWidth >= 760;
+                              if (wide) {
+                                return _buildDevicesTable(
                                   isAr: isAr,
                                   l10n: l10n,
                                   cs: cs,
-                                ),
-                              )
-                              .toList(),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: _rows.length <= 1 ? null : _clearOthers,
-                      icon: const Icon(Icons.phonelink_erase_outlined),
-                      label: Text(
-                        l10n?.securityClearOtherDevices ?? 'Clear others',
+                                );
+                              }
+                              return Column(
+                                children: _rows
+                                    .map(
+                                      (r) => _buildDeviceCard(
+                                        row: r,
+                                        isAr: isAr,
+                                        l10n: l10n,
+                                        cs: cs,
+                                      ),
+                                    )
+                                    .toList(),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: _rows.length <= 1 ? null : _clearOthers,
+                            icon: const Icon(Icons.phonelink_erase_outlined),
+                            label: Text(
+                              l10n?.securityClearOtherDevices ?? 'Clear others',
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
-                ),
       ),
     );
   }
@@ -730,7 +754,7 @@ class _DeviceOtpDialog extends StatefulWidget {
 
 class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     with SingleTickerProviderStateMixin {
-  static const int _otpLen = 4;
+  static const int _otpLen = InAppOtpHandoff.otpLen;
   static const int _maxSeconds = 60;
   static const int _maxAttempts = 3;
 
@@ -749,11 +773,14 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
   DateTime? _otpRequestStartedAt;
   final ValueNotifier<int> _secondsLeftVn = ValueNotifier<int>(_maxSeconds);
   int _attemptsLeft = _maxAttempts;
+  int _failCount = 0;
+  String _challengeId = '';
   bool _error = false;
   bool _submitting = false;
   bool _sending = false;
   bool _bannerPinnedManual = false;
   String _otp = '';
+  String _expectedCode = '';
   String? _lastBannerCode;
   int _lastBannerAtMs = 0;
 
@@ -769,6 +796,20 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     }
   }
 
+  void _onOtpFocusChanged() {
+    if (_otpFocus.hasFocus) {
+      OtpAutofill.stampFocusedHtmlField();
+    }
+  }
+
+  void _kickOtpKeyboard() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _otpFocus.requestFocus();
+      OtpAutofill.stampFocusedHtmlField();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -782,8 +823,11 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     );
     unawaited(ScreenProtection.enable());
     unawaited(NotificationService.init());
+    _otpFocus.addListener(_onOtpFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_requestCode());
+      if (!mounted) return;
+      _kickOtpKeyboard();
+      unawaited(_requestCode());
     });
   }
 
@@ -794,13 +838,15 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     _removeBanner();
     _pulseController.dispose();
     _otpController.dispose();
+    _otpFocus.removeListener(_onOtpFocusChanged);
     _otpFocus.dispose();
     _secondsLeftVn.dispose();
     unawaited(ScreenProtection.disable());
     super.dispose();
   }
 
-  void _toast(String msg, {Duration duration = const Duration(milliseconds: 1800)}) {
+  void _toast(String msg,
+      {Duration duration = const Duration(milliseconds: 1800)}) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.clearSnackBars();
@@ -834,9 +880,7 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     if (h.contains('network') ||
         h.contains('failed host lookup') ||
         h.contains('socket')) {
-      return _isAr
-          ? 'تعذّر الاتصال بالخادم.'
-          : 'Could not reach the server.';
+      return _isAr ? 'تعذّر الاتصال بالخادم.' : 'Could not reach the server.';
     }
     return _isAr
         ? 'تعذّر إرسال رمز التحقق. تحقق من الشبكة أو حاول لاحقاً.'
@@ -860,15 +904,18 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     });
     _startTimer();
 
+    InAppOtpRequestResult? res;
     String? errHint;
     try {
-      errHint = await AuthService.requestOtpWithMessage(widget.username)
+      res = await AuthService.requestOtpDetailed(widget.username)
           .timeout(const Duration(seconds: 22));
+      errHint = res.error;
       if (errHint != null && mounted) {
         await Future<void>.delayed(const Duration(seconds: 2));
         if (!mounted) return;
-        errHint = await AuthService.requestOtpWithMessage(widget.username)
+        res = await AuthService.requestOtpDetailed(widget.username)
             .timeout(const Duration(seconds: 22));
+        errHint = res.error;
       }
     } on TimeoutException {
       errHint = 'timeout';
@@ -876,14 +923,34 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     if (!mounted) return;
     setState(() => _sending = false);
 
-    if (errHint != null) {
-      _toast(_mapOtpSendError(errHint));
+    if (errHint != null || res == null || !res.ok) {
+      _toast(_mapOtpSendError(errHint ?? res?.error));
+      _kickOtpKeyboard();
       return;
     }
 
-    await _fetchLatestOtpAndAnnounce();
+    _challengeId = (res.challengeId ?? '').trim();
+    if (res.expiresAt != null) {
+      _expiresAt = res.expiresAt!.toUtc();
+      _startTimer();
+    }
+
+    var code = InAppOtpHandoff.digitsFromAny(res.devCode);
+    if (code == null || code.length < _otpLen) {
+      code = await InAppOtpHandoff.pollLatestCode(
+        requestedAtUtc: _otpRequestStartedAt ?? DateTime.now().toUtc(),
+        challengeId: _challengeId,
+      );
+    }
+    if (!mounted) return;
+    if (code != null && code.length >= _otpLen) {
+      _onIncomingOtp(code);
+    } else {
+      await _fetchLatestOtpAndAnnounce();
+    }
     if (!mounted) return;
     _startOtpPolling();
+    _kickOtpKeyboard();
     final t = AppLocalizations.of(context);
     _toast(t?.securityDeviceOtpSent ??
         (_isAr ? 'تم إرسال رمز التحقق' : 'Verification code sent'));
@@ -899,15 +966,13 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
         _otpPollTimer = null;
         return;
       }
-      final row = await _latestOtpRow();
-      final code = _codeFromRow(row);
+      if (InAppOtpHandoff.digitsFromAny(_expectedCode)?.length == _otpLen) {
+        t.cancel();
+        _otpPollTimer = null;
+        return;
+      }
+      final code = await _resolveIncomingCode();
       if (code != null && mounted) {
-        final exp = _expiryFromRow(row);
-        if (exp != null) {
-          // لا setState هنا — يعيد بناء PinCode ويفقد التركيز/اللصق على الويب.
-          _expiresAt = exp.isUtc ? exp : exp.toUtc();
-          _startTimer();
-        }
         _onIncomingOtp(code);
         t.cancel();
         _otpPollTimer = null;
@@ -935,20 +1000,31 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     _secondsLeftVn.value = diff;
   }
 
+  Future<String?> _resolveIncomingCode() async {
+    final peeked = await InAppOtpHandoff.fetchLatestCode(
+      challengeId: _challengeId,
+    );
+    if (peeked != null && peeked.length >= _otpLen) return peeked;
+    final row = await _latestOtpRow();
+    final fromRow = _codeFromRow(row);
+    if (fromRow != null && fromRow.length >= _otpLen) {
+      final exp = _expiryFromRow(row);
+      if (exp != null) {
+        _expiresAt = exp.isUtc ? exp : exp.toUtc();
+        _startTimer();
+      }
+      return fromRow;
+    }
+    return null;
+  }
+
   Future<void> _fetchLatestOtpAndAnnounce() async {
-    const delays = <int>[200, 600, 1200, 2000, 3200, 4800, 6500, 8500];
+    const delays = <int>[0, 70, 160, 280, 450, 700, 1100];
     for (final ms in delays) {
       await Future<void>.delayed(Duration(milliseconds: ms));
       if (!mounted) return;
-      final row = await _latestOtpRow();
-      final code = _codeFromRow(row);
+      final code = await _resolveIncomingCode();
       if (code == null) continue;
-
-      final exp = _expiryFromRow(row);
-      if (exp != null) {
-        setState(() => _expiresAt = exp.isUtc ? exp : exp.toUtc());
-        _startTimer();
-      }
       _onIncomingOtp(code);
       return;
     }
@@ -1025,7 +1101,8 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
 
     _lastBannerCode = code;
     _lastBannerAtMs = now;
-    // بانر علوي واحد + صوت — بدون SnackBar مكرر للرمز.
+    _expectedCode = code;
+    unawaited(Clipboard.setData(ClipboardData(text: code)));
     unawaited(_playAndNotifyOtp());
     _showBanner(code);
   }
@@ -1063,6 +1140,13 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
 
   void _showBanner(String code) {
     if (!mounted) return;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showBanner(code);
+      });
+      return;
+    }
     _removeBanner();
     _bannerPinnedManual = false;
 
@@ -1076,106 +1160,129 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
         isDark ? const Color(0xFFD1D5DB) : const Color(0xFF475569);
 
     _bannerEntry = OverlayEntry(
-      builder: (_) => IgnorePointer(
-        ignoring: false,
-        child: SafeArea(
-          top: true,
-          bottom: false,
-          child: Padding(
-            padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 12, 0),
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: Material(
-                elevation: 12,
-                color: Colors.transparent,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 560),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: border),
-                      boxShadow: [
-                        BoxShadow(
-                          blurRadius: 18,
-                          offset: const Offset(0, 10),
-                          color: Colors.black.withOpacity(isDark ? 0.35 : 0.12),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.notifications_active_outlined,
-                              color: titleColor,
+      builder: (_) => Positioned(
+        top: 0,
+        left: 0,
+        right: 0,
+        child: IgnorePointer(
+          ignoring: false,
+          child: SafeArea(
+            top: true,
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(12, 8, 12, 0),
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: 1,
+                child: Material(
+                  elevation: 12,
+                  color: Colors.transparent,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: bg,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: border),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 18,
+                            offset: const Offset(0, 10),
+                            color:
+                                Colors.black.withOpacity(isDark ? 0.35 : 0.12),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            onTap: () {
+                              AppHaptics.selection();
+                              Clipboard.setData(ClipboardData(text: code));
+                              _removeBanner();
+                              _applyIncomingCode(code, fromUserAction: true);
+                              _toast(
+                                _isAr ? 'تم لصق الرمز' : 'Code pasted',
+                                duration: const Duration(milliseconds: 1400),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.notifications_active_outlined,
+                                  color: titleColor,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        _isAr
+                                            ? 'تم استلام رمز التحقق'
+                                            : 'Verification code received',
+                                        style: TextStyle(
+                                          color: titleColor,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                      Text(
+                                        _isAr
+                                            ? 'رمز التحقق: $code'
+                                            : 'Your code: $code',
+                                        style: TextStyle(
+                                          color: bodyColor,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _isAr
-                                        ? 'تم استلام رمز التحقق'
-                                        : 'Verification code received',
-                                    style: TextStyle(
-                                      color: titleColor,
-                                      fontWeight: FontWeight.w900,
-                                    ),
-                                  ),
-                                  Text(
-                                    _isAr
-                                        ? 'رمز التحقق: $code'
-                                        : 'Your code: $code',
-                                    style: TextStyle(
-                                      color: bodyColor,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () {
+                                  AppHaptics.selection();
+                                  Clipboard.setData(ClipboardData(text: code));
+                                  _removeBanner();
+                                  _applyIncomingCode(code,
+                                      fromUserAction: true);
+                                  _toast(
+                                    _isAr ? 'تم لصق الرمز' : 'Code pasted',
+                                    duration:
+                                        const Duration(milliseconds: 1400),
+                                  );
+                                },
+                                child: Text(_isAr ? 'لصق' : 'Paste'),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                AppHaptics.selection();
-                                Clipboard.setData(ClipboardData(text: code));
-                                _removeBanner();
-                                _applyIncomingCode(code, fromUserAction: true);
-                                _toast(
-                                  _isAr ? 'تم لصق الرمز' : 'Code pasted',
-                                  duration: const Duration(milliseconds: 1400),
-                                );
-                              },
-                              child: Text(_isAr ? 'لصق' : 'Paste'),
-                            ),
-                            TextButton(
-                              onPressed: () {
-                                AppHaptics.selection();
-                                _bannerPinnedManual = true;
-                                _bannerTimer?.cancel();
-                                _bannerTimer = null;
-                                _otpFocus.requestFocus();
-                              },
-                              child: Text(_isAr ? 'إدخال يدوي' : 'Manual'),
-                            ),
-                            TextButton(
-                              onPressed: _removeBanner,
-                              child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-                            ),
-                          ],
-                        ),
-                      ],
+                              TextButton(
+                                onPressed: () {
+                                  AppHaptics.selection();
+                                  _bannerPinnedManual = true;
+                                  _bannerTimer?.cancel();
+                                  _bannerTimer = null;
+                                  _otpFocus.requestFocus();
+                                },
+                                child: Text(_isAr ? 'إدخال يدوي' : 'Manual'),
+                              ),
+                              TextButton(
+                                onPressed: _removeBanner,
+                                child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1185,7 +1292,6 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
         ),
       ),
     );
-    final overlay = Overlay.of(context, rootOverlay: true);
     overlay.insert(_bannerEntry!);
     _bannerTimer = Timer(const Duration(seconds: 15), () {
       if (!mounted || _bannerPinnedManual) return;
@@ -1210,17 +1316,16 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
   }
 
   void _applyIncomingCode(String text, {required bool fromUserAction}) {
-    final only = text.replaceAll(RegExp(r'\D'), '');
-    if (only.isEmpty) return;
-    final take = (only.length >= _otpLen ? only.substring(0, _otpLen) : only)
-        .padLeft(_otpLen, '0');
+    final value = OtpAutofill.sequentialValue(text);
+    if (value.text.isEmpty) return;
+    final take = value.text;
     setState(() {
       _otp = take;
-      _otpController.text = take;
-      _otpController.selection = TextSelection.collapsed(offset: take.length);
+      _otpController.value = value;
       _error = false;
     });
     _otpFocus.requestFocus();
+    OtpAutofill.stampFocusedHtmlField();
     _maybeAutoSubmit();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _maybeAutoSubmit();
@@ -1255,31 +1360,52 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
 
     setState(() => _submitting = true);
     try {
-      final verified = await AuthService.verifyInAppOtp(
-        usernameDigits: widget.username,
+      final verified = await AuthChallengeService.verify(
         code: entered,
+        challengeId: _challengeId.isEmpty ? null : _challengeId,
+        username: widget.username,
       );
       if (!mounted) return;
-      if (!verified) {
+      if (!verified.ok) {
         AppHaptics.vibrate();
+        final remaining = verified.remainingAttempts;
         setState(() {
-          _attemptsLeft--;
+          _failCount += 1;
+          final localLeft = (_maxAttempts - _failCount).clamp(0, _maxAttempts);
+          if (remaining != null) {
+            _attemptsLeft = remaining < localLeft ? remaining : localLeft;
+          } else {
+            _attemptsLeft = localLeft;
+          }
+          if (_failCount >= _maxAttempts || verified.locked) {
+            _attemptsLeft = 0;
+          }
           _error = true;
+          _otp = '';
+          _otpController.clear();
         });
-        if (_attemptsLeft <= 0) {
-          _toast(_isAr
-              ? 'تم تجاوز عدد المحاولات. أعد إرسال الرمز.'
-              : 'Too many attempts. Resend the code.');
+        if (verified.locked || _attemptsLeft <= 0 || _failCount >= _maxAttempts) {
+          await _notifyAttemptsLocked();
+          if (!mounted) return;
+          _toast(AppLocalizations.of(context)?.otpAttemptsLocked ??
+              (_isAr
+                  ? 'تم استخدام المحاولات الثلاث. أعد إرسال الرمز.'
+                  : 'The three attempts were used. Resend the code.'));
           setState(() {
             _secondsLeftVn.value = 0;
-            _attemptsLeft = _maxAttempts;
           });
           _timer?.cancel();
           return;
         }
-        _toast(_isAr
-            ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
-            : 'Invalid code. Left: $_attemptsLeft');
+        if (_failCount == 3) {
+          await _notifyThirdAttempt();
+        }
+        if (!mounted) return;
+        _toast(AppLocalizations.of(context)?.otpAttemptsRemaining(_attemptsLeft) ??
+            (_isAr
+                ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
+                : 'Invalid code. Left: $_attemptsLeft'));
+        _otpFocus.requestFocus();
         return;
       }
 
@@ -1304,9 +1430,53 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     }
     setState(() {
       _attemptsLeft = _maxAttempts;
+      _failCount = 0;
       _error = false;
     });
     await _requestCode();
+  }
+
+  Future<void> _notifyThirdAttempt() async {
+    final t = AppLocalizations.of(context);
+    final title = t?.otpAttemptsThirdNotifyTitle ??
+        (_isAr ? 'تنبيه محاولات رمز التحقق' : 'Verification attempt notice');
+    final body = t?.otpAttemptsThirdNotifyBody ??
+        (_isAr
+            ? 'أدخلت الرمز ثلاث مرات. راجع المحاولات المتبقية أو أعد إرسال رمز جديد.'
+            : 'You entered the code three times. Check remaining attempts or resend a new code.');
+    await _showAttemptNotice(title: title, body: body);
+  }
+
+  Future<void> _notifyAttemptsLocked() async {
+    final t = AppLocalizations.of(context);
+    final title = t?.otpAttemptsThirdNotifyTitle ??
+        (_isAr ? 'تنبيه محاولات رمز التحقق' : 'Verification attempt notice');
+    final body = t?.otpAttemptsLocked ??
+        (_isAr
+            ? 'تم استخدام المحاولات الثلاث. أعد إرسال الرمز.'
+            : 'The three attempts were used. Resend the code.');
+    await _showAttemptNotice(title: title, body: body);
+  }
+
+  Future<void> _showAttemptNotice({
+    required String title,
+    required String body,
+  }) async {
+    if (kIsWeb) {
+      if (mounted) {
+        _toast('$title — $body', duration: const Duration(seconds: 4));
+      }
+      await AppSoundCoordinator.playUiEffect(
+        assetPath: 'sounds/otp_chime.wav',
+        volume: 1.0,
+      );
+      return;
+    }
+    await NotificationService.showOtpNotification(
+      title: title,
+      body: body,
+      playChannelSound: true,
+    );
   }
 
   Widget _otpField() {
@@ -1320,6 +1490,8 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
         ? Colors.white.withOpacity(0.06)
         : Colors.black.withOpacity(0.04);
     final border = _error ? cs.error : primary;
+    final screenW = MediaQuery.sizeOf(context).width;
+    final maxW = (screenW - 72).clamp(200.0, 400.0);
 
     return AnimatedBuilder(
       animation: _pulseAnimation,
@@ -1329,60 +1501,167 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
           child: child,
         );
       },
-      child: PinCodeTextField(
-        appContext: context,
-        length: _otpLen,
-        controller: _otpController,
-        focusNode: _otpFocus,
-        autoDisposeControllers: false,
-        autoFocus: true,
-        keyboardType: TextInputType.number,
-        enableActiveFill: true,
-        animationType: AnimationType.fade,
-        animationDuration: const Duration(milliseconds: 120),
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(_otpLen),
-        ],
-        mainAxisAlignment: MainAxisAlignment.center,
-        pinTheme: PinTheme(
-          shape: PinCodeFieldShape.box,
-          borderRadius: BorderRadius.circular(12),
-          fieldHeight: 56,
-          fieldWidth: 50,
-          inactiveColor: _error ? cs.error : inactiveBorder,
-          activeColor: border.withOpacity(0.65),
-          selectedColor: border,
-          inactiveFillColor: fill,
-          selectedFillColor: fill,
-          activeFillColor: fill,
-          borderWidth: 1.4,
+      child: SizedBox(
+        width: maxW,
+        child: LayoutBuilder(
+          builder: (context, c) {
+            final metrics = OtpPinLayout.of(c.maxWidth);
+            return AutofillGroup(
+              child: PinCodeTextField(
+              appContext: context,
+              length: _otpLen,
+              controller: _otpController,
+              focusNode: _otpFocus,
+              autoDisposeControllers: false,
+              autoFocus: true,
+              autoUnfocus: false,
+              enablePinAutofill: true,
+              useExternalAutoFillGroup: true,
+              keyboardType: TextInputType.number,
+              enableActiveFill: true,
+              animationType: AnimationType.fade,
+              animationDuration: const Duration(milliseconds: 120),
+              errorTextSpace: 0,
+              scrollPadding: aqarFieldScrollPadding(context),
+              onTap: () => OtpAutofill.stampFocusedHtmlField(),
+              inputFormatters: [
+                TextInputFormatter.withFunction((oldValue, newValue) {
+                  final normalized =
+                      digitsOnly(normalizeAsciiDigits(newValue.text));
+                  final clipped = normalized.length > _otpLen
+                      ? normalized.substring(0, _otpLen)
+                      : normalized;
+                  return TextEditingValue(
+                    text: clipped,
+                    selection: TextSelection.collapsed(offset: clipped.length),
+                  );
+                }),
+                LengthLimitingTextInputFormatter(_otpLen),
+              ],
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              pinTheme: PinTheme(
+                shape: PinCodeFieldShape.box,
+                borderRadius: BorderRadius.circular(12),
+                fieldHeight: metrics.fieldHeight,
+                fieldWidth: metrics.fieldWidth,
+                fieldOuterPadding: EdgeInsets.zero,
+                inactiveColor: _error ? cs.error : inactiveBorder,
+                activeColor: border.withOpacity(0.65),
+                selectedColor: border,
+                inactiveFillColor: fill,
+                selectedFillColor: fill,
+                activeFillColor: fill,
+                borderWidth: 1.4,
+              ),
+              textStyle: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: metrics.fontSize,
+              ),
+              onChanged: (v) {
+                final only = v.replaceAll(RegExp(r'\D'), '');
+                _otp = only.length > _otpLen ? only.substring(0, _otpLen) : only;
+                if (_error) {
+                  setState(() => _error = false);
+                }
+                _maybeAutoSubmit();
+              },
+              onCompleted: (_) {
+                AppHaptics.selection();
+                _maybeAutoSubmit();
+              },
+              beforeTextPaste: (text) {
+                final sent = InAppOtpHandoff.digitsFromAny(_expectedCode);
+                final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
+                final use =
+                    (sent != null && sent.length >= _otpLen) ? sent : only;
+                if (use.isEmpty) return true;
+                AppHaptics.selection();
+                _applyIncomingCode(use, fromUserAction: true);
+                _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted',
+                    duration: const Duration(milliseconds: 1200));
+                return false;
+              },
+            ),
+            );
+          },
         ),
-        textStyle: const TextStyle(
-          fontWeight: FontWeight.w900,
-          fontSize: 22,
+      ),
+    );
+  }
+
+  Widget _otpKeyboardDock() {
+    final kb = AppKeyboardInset.bottomOf(context);
+    if (kb < 48) return const SizedBox.shrink();
+    final code = InAppOtpHandoff.digitsFromAny(_expectedCode);
+    if (code == null || code.length < _otpLen) return const SizedBox.shrink();
+    if (_otpDigitsFromUi().replaceAll(RegExp(r'\D'), '').length >= _otpLen) {
+      return const SizedBox.shrink();
+    }
+    final cs = Theme.of(context).colorScheme;
+    return Positioned(
+      left: 10,
+      right: 10,
+      bottom: kb + 6,
+      child: Material(
+        elevation: 16,
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () {
+            AppHaptics.selection();
+            _applyIncomingCode(code, fromUserAction: true);
+            _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: [
+                Icon(Icons.sms_outlined, color: cs.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _isAr
+                            ? 'رمز التحقق في لوحة المفاتيح'
+                            : 'Verification code on keyboard',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 11,
+                          color: cs.onSurfaceVariant,
+                          fontFamily: 'Cairo',
+                        ),
+                      ),
+                      Text(
+                        code,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                          letterSpacing: 4,
+                          color: cs.onSurface,
+                          fontFamily: 'Cairo',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  _isAr ? 'لصق' : 'Paste',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: cs.primary,
+                    fontFamily: 'Cairo',
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        onChanged: (v) {
-          final only = v.replaceAll(RegExp(r'\D'), '');
-          _otp = only.length > _otpLen ? only.substring(0, _otpLen) : only;
-          // لا setState على كل رقم — كان يعيد بناء الحقل ويمنع اللصق على الويب.
-          if (_error) {
-            setState(() => _error = false);
-          }
-          _maybeAutoSubmit();
-        },
-        onCompleted: (_) {
-          AppHaptics.selection();
-          _maybeAutoSubmit();
-        },
-        beforeTextPaste: (text) {
-          final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
-          if (only.isEmpty) return true;
-          AppHaptics.selection();
-          _applyIncomingCode(only, fromUserAction: true);
-          _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted', duration: const Duration(milliseconds: 1200));
-          return false;
-        },
       ),
     );
   }
@@ -1391,84 +1670,170 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context);
     final subColor = Theme.of(context).textTheme.bodySmall?.color;
+    final visH = AppKeyboardInset.visibleHeightOf(context);
+    final maxBodyH = math.max(180.0, visH - 48);
 
-    return Directionality(
-      textDirection: _isAr ? ui.TextDirection.rtl : ui.TextDirection.ltr,
-      child: AlertDialog(
-        title: Text(widget.title),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                t?.securityDeviceOtpHint ??
-                    (_isAr
-                        ? 'أدخل رمز التحقق المرسل لهاتفك المسجّل.'
-                        : 'Enter the verification code sent to your phone.'),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 18),
-              Directionality(
-                textDirection: ui.TextDirection.ltr,
-                child: _otpField(),
-              ),
-              const SizedBox(height: 14),
-              ValueListenableBuilder<int>(
-                valueListenable: _secondsLeftVn,
-                builder: (context, secondsLeft, _) {
-                  final showResend = secondsLeft <= 0;
-                  return Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.timer_outlined, size: 18, color: subColor),
-                      const SizedBox(width: 6),
-                      Text(
-                        showResend
-                            ? (_isAr ? 'انتهى الوقت' : 'Time expired')
-                            : (_isAr
-                                ? 'المتبقي: $secondsLeft ث'
-                                : 'Remaining: $secondsLeft s'),
-                        style: TextStyle(
-                          color: subColor,
-                          fontWeight: FontWeight.w900,
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Center(
+            child: Directionality(
+              textDirection:
+                  _isAr ? ui.TextDirection.rtl : ui.TextDirection.ltr,
+              child: AlertDialog(
+                insetPadding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 12),
+                titlePadding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
+                title: Row(
+                  children: [
+                    Expanded(child: Text(widget.title)),
+                    AppPageCloseButton(
+                      enabled: !_submitting,
+                      onPressed: () => Navigator.pop(context, false),
+                    ),
+                  ],
+                ),
+                contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                content: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 420,
+                    maxHeight: maxBodyH,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          t?.securityDeviceOtpHint ??
+                              (_isAr
+                                  ? 'أدخل رمز التحقق المكوّن من 6 أرقام. في التطوير يصل داخل التطبيق وليس برسالة نصية.'
+                                  : 'Enter the 6-digit verification code. In development it arrives in-app, not by SMS.'),
+                          textAlign: TextAlign.center,
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      TextButton.icon(
-                        onPressed:
-                            showResend && !_sending ? _resendCode : null,
-                        icon: _sending
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.refresh),
-                        label: Text(_isAr ? 'إعادة إرسال' : 'Resend'),
-                      ),
-                    ],
-                  );
-                },
+                        const SizedBox(height: 18),
+                        Directionality(
+                          textDirection: ui.TextDirection.ltr,
+                          child: _otpField(),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          t?.otpAttemptsRemaining(_attemptsLeft) ??
+                              (_isAr
+                                  ? 'المحاولات المتبقية: $_attemptsLeft'
+                                  : 'Attempts left: $_attemptsLeft'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _error
+                                ? Theme.of(context).colorScheme.error
+                                : subColor,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () {
+                            final sent =
+                                InAppOtpHandoff.digitsFromAny(_expectedCode);
+                            if (sent == null || sent.length < _otpLen) {
+                              _toast(
+                                  _isAr ? 'لا يوجد رمز بعد' : 'No code yet');
+                              return;
+                            }
+                            AppHaptics.selection();
+                            _applyIncomingCode(sent, fromUserAction: true);
+                            _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
+                          },
+                          icon: const Icon(Icons.content_paste_rounded, size: 18),
+                          label: Text(_isAr ? 'لصق الرمز' : 'Paste code'),
+                        ),
+                        const SizedBox(height: 8),
+                        ValueListenableBuilder<int>(
+                          valueListenable: _secondsLeftVn,
+                          builder: (context, secondsLeft, _) {
+                            final showResend = secondsLeft <= 0;
+                            return Wrap(
+                              alignment: WrapAlignment.center,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.timer_outlined,
+                                        size: 18, color: subColor),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      showResend
+                                          ? (_isAr
+                                              ? 'انتهى الوقت'
+                                              : 'Time expired')
+                                          : (_isAr
+                                              ? 'المتبقي: $secondsLeft ث'
+                                              : 'Remaining: $secondsLeft s'),
+                                      style: TextStyle(
+                                        color: subColor,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                TextButton.icon(
+                                  onPressed: showResend && !_sending
+                                      ? _resendCode
+                                      : null,
+                                  icon: _sending
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.refresh),
+                                  label:
+                                      Text(_isAr ? 'إعادة إرسال' : 'Resend'),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        OverflowBar(
+                          alignment: MainAxisAlignment.end,
+                          spacing: 8,
+                          overflowSpacing: 8,
+                          children: [
+                            TextButton(
+                              onPressed: _submitting
+                                  ? null
+                                  : () => Navigator.pop(context, false),
+                              child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: (_submitting || _attemptsLeft <= 0)
+                                  ? null
+                                  : _submit,
+                              child: _submitting
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : Text(t?.securityOk ??
+                                      (_isAr ? 'تأكيد' : 'Confirm')),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _submitting ? null : () => Navigator.pop(context, false),
-            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: _submitting ? null : _submit,
-            child: _submitting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text(t?.securityOk ?? (_isAr ? 'تأكيد' : 'Confirm')),
-          ),
+          _otpKeyboardDock(),
         ],
       ),
     );

@@ -487,14 +487,14 @@ class _PostAuthShellState extends State<PostAuthShell>
 
   Future<void> _onDeviceLimitResolved() async {
     if (!mounted) return;
+    // الجهاز سُجِّل في شاشة الحدّ — لا تُعد عرضها ولا شاشة التحميل.
     setState(() {
       _deviceBlocked = false;
-      _deviceReady = false;
+      _deviceReady = true;
       _deviceBusy = false;
     });
-    await _loadComplianceProfile();
-    if (!mounted) return;
-    await _ensureDevice();
+    unawaited(_loadComplianceProfile());
+    unawaited(_loadPlatformBan());
   }
 
   @override

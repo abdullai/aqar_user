@@ -1,53 +1,22 @@
 ﻿import 'dart:typed_data';
 
-import '../core/branding/app_branding.dart';
-import 'package:image/image.dart' as img;
+import '../core/listing/listing_media_seal.dart';
 
+/// توافق قديم: لا تُعاد ضغط الصورة ولا تُرسم نصوص على البكسل.
+/// الختم الحقيقي هو تجزئة SHA-256 عبر [ListingMediaSeal].
 class WatermarkService {
   static Future<Uint8List> addTextWatermark(
     Uint8List inputBytes, {
-    String text = AppBranding.brandNameAr,
+    String text = '',
     int margin = 16,
-    int fontSize = 24, // 14/24/48 supported
-    int opacity = 170, // 0..255
+    int fontSize = 24,
+    int opacity = 170,
   }) async {
-    final decoded = img.decodeImage(inputBytes);
-    if (decoded == null) return inputBytes;
+    // الإبقاء على البايتات الأصلية — إعادة decode/encode كانت تدمّر الصفاء.
+    return Uint8List.fromList(inputBytes);
+  }
 
-    // ✅ Compatible with older Dart (no switch-expressions)
-    img.BitmapFont font;
-    if (fontSize <= 14) {
-      font = img.arial14;
-    } else if (fontSize >= 48) {
-      font = img.arial48;
-    } else {
-      font = img.arial24;
-    }
-
-    final int y = (decoded.height - margin - font.lineHeight);
-    final int safeY = y < 0 ? 0 : y;
-
-    // Shadow
-    img.drawString(
-      decoded,
-      text,
-      font: font,
-      x: null, // center horizontally
-      y: safeY + 1,
-      color: img.ColorRgba8(0, 0, 0, (opacity * 0.55).round()),
-    );
-
-    // Main text (alpha من لون الخط — package:image 4.x لا يدعم blend في drawString)
-    img.drawString(
-      decoded,
-      text,
-      font: font,
-      x: null, // center horizontally
-      y: safeY,
-      color: img.ColorRgba8(255, 255, 255, opacity),
-    );
-
-    final out = img.encodeJpg(decoded, quality: 92);
-    return Uint8List.fromList(out);
+  static ListingSealedBytes seal(Uint8List inputBytes, {String name = ''}) {
+    return ListingMediaSeal.preserve(inputBytes, name: name);
   }
 }

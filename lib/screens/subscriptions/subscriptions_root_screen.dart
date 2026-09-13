@@ -2,14 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 import '../../core/subscription/marketing_subscription_resume_intent.dart';
 import '../../core/subscription/subscription_billing_context.dart';
 import '../../core/workflow/app_role_helper.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/subscription_service.dart';
 import '../../widgets/aqar_primary_scroll_scope.dart';
-import '../organization_settings_screen.dart';
+import '../../widgets/org_fal_and_seats_panel.dart';
+import '../../widgets/app_page_close_button.dart';
 import 'manage_team_subscription_screen.dart';
 import 'owner_instant_payments_hub_screen.dart';
 import 'payment_history_screen.dart';
@@ -196,7 +196,14 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
           icon: const Icon(Icons.verified_outlined),
           text: t.subscriptionsTabRenewFal,
         ),
-        _RenewFalTab(lang: widget.lang),
+        _RenewFalTab(
+          lang: widget.lang,
+          accountType: widget.accountType,
+          organizationId: widget.organizationId,
+          onOpenPlans: () {
+            _ctrl?.animateTo(0);
+          },
+        ),
       );
     }
 
@@ -217,13 +224,26 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       return Scaffold(
         appBar: widget.embedAppBar
             ? null
-            : AppBar(title: Text(t.subscriptionsTitle)),
+            : AppBar(
+                automaticallyImplyLeading: false,
+                leading: AppPageCloseButton(
+                  isArabic: widget.lang.toLowerCase() != 'en',
+                ),
+                title: Text(t.subscriptionsTitle),
+              ),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
     if (widget.embedAppBar) {
       final cs = Theme.of(context).colorScheme;
       return Scaffold(
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(
+            isArabic: widget.lang.toLowerCase() != 'en',
+          ),
+          title: Text(t.subscriptionsTitle),
+        ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -255,6 +275,10 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
     }
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: AppPageCloseButton(
+          isArabic: widget.lang.toLowerCase() != 'en',
+        ),
         title: Text(t.subscriptionsTitle),
         bottom: TabBar(
           controller: _ctrl,
@@ -276,9 +300,17 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
 }
 
 class _RenewFalTab extends StatelessWidget {
-  const _RenewFalTab({required this.lang});
+  const _RenewFalTab({
+    required this.lang,
+    required this.accountType,
+    this.organizationId,
+    this.onOpenPlans,
+  });
 
   final String lang;
+  final String accountType;
+  final String? organizationId;
+  final VoidCallback? onOpenPlans;
 
   bool get _isAr => lang.toLowerCase() != 'en';
 
@@ -291,17 +323,11 @@ class _RenewFalTab extends StatelessWidget {
       children: [
         Text(t.subscriptionsRenewFalBody),
         const SizedBox(height: 20),
-        FilledButton(
-          onPressed: () {
-            Navigator.push<void>(
-              context,
-              MaterialPageRoute<void>(
-                builder: (_) => const OrganizationSettingsScreen(),
-                settings: const RouteSettings(name: '/desk/org-settings'),
-              ),
-            );
-          },
-          child: Text(t.subscriptionsOpenOrgSettings),
+        OrgFalAndSeatsPanel(
+          accountType: accountType,
+          organizationId: organizationId,
+          lang: lang,
+          onOpenPlans: onOpenPlans,
         ),
         const SizedBox(height: 16),
         Text(

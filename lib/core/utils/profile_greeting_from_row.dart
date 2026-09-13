@@ -1,3 +1,4 @@
+import '../l10n/locale_content.dart';
 import 'compound_display_name.dart';
 
 /// استخراج اسم العرض وآخر دخول من صف users_profiles (لتسجيل الدخول وشاشة التحقق).
@@ -74,21 +75,27 @@ class ProfileGreetingFromRow {
       }
       final primary = isAr ? pickAr() : pickEn();
       final secondary = isAr ? pickEn() : pickAr();
-      final merged = (primary != null && primary.trim().isNotEmpty)
+      var merged = (primary != null && primary.trim().isNotEmpty)
           ? primary.trim()
           : (secondary != null && secondary.trim().isNotEmpty)
               ? secondary.trim()
               : '';
-      if (merged.isNotEmpty) return merged;
-      if (office.isNotEmpty) return office;
+      if (merged.isNotEmpty) {
+        return LocaleContent.forUi(merged, isAr: isAr);
+      }
+      if (office.isNotEmpty) {
+        return LocaleContent.forUi(office, isAr: isAr);
+      }
       return null;
     }
 
-    if (wantAlias && alias.isNotEmpty) return alias;
+    if (wantAlias && alias.isNotEmpty) {
+      return LocaleContent.forUi(alias, isAr: isAr);
+    }
 
     final off = official();
     if (off != null && off.isNotEmpty) return off;
-    if (alias.isNotEmpty) return alias;
+    if (alias.isNotEmpty) return LocaleContent.forUi(alias, isAr: isAr);
     return null;
   }
 

@@ -1,10 +1,13 @@
-﻿import 'dart:async';
+﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field, unused_local_variable
+
+import 'dart:async';
 import 'dart:math';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -14,16 +17,16 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../core/branding/app_branding.dart';
-import '../core/branding/branding_logo_image.dart';
 import '../core/haptics/app_haptics.dart';
 import '../core/input/input_normalizers.dart' as input_norm;
 import '../core/permissions/runtime_permission_helper.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/property_type_catalog.dart';
+import '../core/listing/post_publish_nav_result.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/utils/app_money.dart';
+import '../core/payment/platform_fee_catalog.dart';
 import '../core/utils/display_ids.dart';
-import '../core/utils/profile_greeting_from_row.dart';
 import '../core/profile/publisher_identity_prefs.dart';
 import '../widgets/publisher_identity_options_card.dart';
 import '../l10n/app_localizations.dart';
@@ -31,6 +34,13 @@ import '../models/market_property_request_row.dart';
 import '../models/market_property_request_priority.dart';
 import '../models/saudi_location.dart';
 import '../services/saudi_location_hierarchy.dart';
+import '../core/market/market_request_rent_schedule.dart';
+import '../services/location_hierarchy_service.dart';
+import '../widgets/deed_date_calendar_dialog.dart';
+import '../widgets/equal_option_tile_grid.dart';
+import '../widgets/rent_term_schedule_fields.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
+import '../core/utils/date_helper.dart';
 import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../services/instant_market_request_payment_service.dart';
@@ -49,8 +59,11 @@ import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/budget_text_field.dart';
 import '../widgets/searchable_select_field.dart';
-import '../widgets/stable_select_chip.dart';
+import '../widgets/smart_count_field.dart';
 import '../core/navigation/post_auth_navigation.dart';
+import '../core/navigation/safe_overlay_pop.dart';
+import '../core/gestures/app_keyboard_inset.dart';
+import '../widgets/composer_step_constellation.dart';
 import '../main.dart' show suspendAutoLock;
 import 'map_picker_page.dart';
 
@@ -90,6 +103,10 @@ class _CreateMarketPropertyRequestPageState
   final _areaMinCtrl = TextEditingController();
   final _publicNameCtrl = TextEditingController();
   final _districtsCtrl = TextEditingController();
+  final _manualRegionCtrl = TextEditingController();
+  final _manualGovCtrl = TextEditingController();
+  final _manualCityCtrl = TextEditingController();
+  bool _manualLocation = false;
 
   bool _purchase = true;
   MarketPropertyRequestPriority _requestPriority =
@@ -104,8 +121,15 @@ class _CreateMarketPropertyRequestPageState
   double? _selectedLat;
   double? _selectedLng;
 
-  /// مدة الإيجار عند اختيار «إيجار».
-  String _rentTerm = 'monthly';
+  /// مدة الإيجار عند اختيار «إيجار» — فارغة حتى يختار المستخدم.
+  String _rentTerm = '';
+  int _rentDays = 1;
+  int _rentWeeks = 1;
+  int _rentMonths = 1;
+  int _rentYears = 1;
+  DateTime? _rentStart;
+  bool? _furnishedWanted;
+  List<String> _districtOptions = const [];
   int? _bedrooms;
   int? _bathrooms;
   final Map<String, bool> _requestAmenityToggles = {
@@ -117,14 +141,21 @@ class _CreateMarketPropertyRequestPageState
     'balcony': false,
     'ac': false,
     'parking': false,
+    'wifi': false,
     'maid_room': false,
     'driver_room': false,
+    'storage': false,
+    'roof': false,
+    'kitchen': false,
+    'majlis': false,
+    'yard': false,
   };
-  bool _preferNew = false;
+  bool? _preferNew;
   bool _locationIsApproximate = false;
   PublicNameSource _pubNameSource = PublicNameSource.official;
-  PublicPhoneSource _pubPhoneSource = PublicPhoneSource.primary;
+  PublicPhoneSource _pubPhoneSource = PublicPhoneSource.hidden;
   bool _publishPresenceOnCards = true;
+  bool _showRequesterNameOnCards = false;
   String _officialNameCached = '';
   String _displayAliasCached = '';
   String _primaryPhoneCached = '';
@@ -183,6 +214,9 @@ class _CreateMarketPropertyRequestPageState
     _areaMinCtrl.dispose();
     _publicNameCtrl.dispose();
     _districtsCtrl.dispose();
+    _manualRegionCtrl.dispose();
+    _manualGovCtrl.dispose();
+    _manualCityCtrl.dispose();
     super.dispose();
   }
 
@@ -210,9 +244,7 @@ class _CreateMarketPropertyRequestPageState
     }
     if (_step >= _stepCount - 1) return;
     setState(() {
-      if (_step == 0 || _step == 1 || _step == 2) {
-        _maybeSuggestSmartTitle();
-      }
+      _syncComposedTitle();
       _step++;
     });
     if (!_isEditing) {
@@ -258,7 +290,7 @@ class _CreateMarketPropertyRequestPageState
           id: 'market_property_request',
           hasUnsavedInput: () => !_isEditing && _hasUnsavedWizardInput(),
           isPublishing: () => _saving || _publishLock,
-          onSaveDraft: _persistDraft,
+          onSaveDraft: () => _persistDraft(showSnack: false),
           onDiscard: _clearDraftAndForm,
           leaveTitleAr: 'هل تريد إغلاق الطلب؟',
           leaveTitleEn: 'Leave this request?',
@@ -304,6 +336,12 @@ class _CreateMarketPropertyRequestPageState
       bathrooms: _bathrooms,
       amenityToggles: Map<String, bool>.from(_requestAmenityToggles),
       preferNew: _preferNew,
+      furnishedWanted: _furnishedWanted,
+      rentDays: _rentDays,
+      rentWeeks: _rentWeeks,
+      rentMonths: _rentMonths,
+      rentYears: _rentYears,
+      rentStartIso: _rentStart?.toIso8601String(),
     );
   }
 
@@ -330,19 +368,30 @@ class _CreateMarketPropertyRequestPageState
     _selectedGovernorate = d['selected_governorate']?.toString();
     _selectedLat = (d['selected_lat'] as num?)?.toDouble();
     _selectedLng = (d['selected_lng'] as num?)?.toDouble();
-    _rentTerm = '${d['rent_term'] ?? _rentTerm}';
+    _rentTerm = '${d['rent_term'] ?? ''}';
+    _rentDays = (d['rent_days'] as num?)?.toInt().clamp(1, 6) ?? 1;
+    _rentWeeks = (d['rent_weeks'] as num?)?.toInt().clamp(1, 3) ?? 1;
+    _rentMonths = (d['rent_months'] as num?)?.toInt().clamp(1, 12) ?? 1;
+    _rentYears = (d['rent_years'] as num?)?.toInt().clamp(1, 20) ?? 1;
+    final rs = '${d['rent_start'] ?? ''}';
+    _rentStart = DateTime.tryParse(rs);
+    _furnishedWanted = _triChoiceFromDraft(d, 'furnished');
     _bedrooms = (d['bedrooms'] as num?)?.toInt();
     _bathrooms = (d['bathrooms'] as num?)?.toInt();
-    final am = d['amenities'];
-    if (am is Map) {
-      for (final e in am.entries) {
-        final k = e.key.toString();
-        if (_requestAmenityToggles.containsKey(k)) {
-          _requestAmenityToggles[k] = e.value == true;
-        }
-      }
+    for (final k in _requestAmenityToggles.keys) {
+      _requestAmenityToggles[k] = false;
     }
-    _preferNew = d['prefer_new'] == true;
+    _applyAmenitySelections(d['amenities']);
+    _preferNew = _triChoiceFromDraft(d, 'prefer_new');
+  }
+
+  /// مسودات قديمة كانت تخزّن `false` كقيمة افتراضية — لا نضع صح مسبقاً.
+  bool? _triChoiceFromDraft(Map<String, dynamic> d, String key) {
+    if (d['choice_tristate'] == true) {
+      final v = d[key];
+      return v is bool ? v : null;
+    }
+    return d[key] == true ? true : null;
   }
 
   Future<void> _restoreDraftIfAny() async {
@@ -374,13 +423,13 @@ class _CreateMarketPropertyRequestPageState
       data: _snapshotDraft(),
     );
     if (showSnack && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          content: Text(_isAr
-              ? 'تم حفظ المسودة — يمكنك العودة لاحقاً.'
-              : 'Draft saved — you can return later.'),
-        ),
+      final l10n = AppLocalizations.of(context);
+      showFormExitNotice(
+        context,
+        l10n?.formExitDraftSaved ??
+            (_isAr
+                ? 'حُفظت البيانات التي أدخلتها كمسودة على هذا الجهاز. يمكنك العودة لآخر حقل وصلت إليه وإكمال الإدخال. المسودة لا تُرسل إلى قاعدة البيانات، وتُحذف تلقائياً عند تسجيل الخروج.'
+                : 'Your entries were saved as a draft on this device. You can return to the last field you filled and continue. This draft is not stored in the database and is removed when you sign out.'),
       );
     }
   }
@@ -406,10 +455,16 @@ class _CreateMarketPropertyRequestPageState
     _selectedLat = null;
     _selectedLng = null;
     _locationIsApproximate = false;
-    _rentTerm = 'monthly';
+    _rentTerm = '';
+    _rentDays = 1;
+    _rentWeeks = 1;
+    _rentMonths = 1;
+    _rentYears = 1;
+    _rentStart = null;
+    _furnishedWanted = null;
     _bedrooms = null;
     _bathrooms = null;
-    _preferNew = false;
+    _preferNew = null;
     _termsAccepted = false;
     for (final k in _requestAmenityToggles.keys) {
       _requestAmenityToggles[k] = false;
@@ -421,18 +476,50 @@ class _CreateMarketPropertyRequestPageState
     ));
   }
 
+  Future<void> _onComposerClosePressed() async {
+    if (_saving || _publishLock) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(_isAr
+              ? 'جاري نشر الطلب… يرجى الانتظار حتى ظهور رقم الطلب.'
+              : 'Publishing request… please wait for the confirmation.'),
+        ),
+      );
+      return;
+    }
+    if (_isEditing || !_hasUnsavedWizardInput()) {
+      SafeOverlayPop.pop(context);
+      return;
+    }
+    await _handleFormExitFromPop();
+  }
+
   Future<void> _handleFormExitFromPop([dynamic result]) async {
-    final choice = await showFormExitConfirmDialog(context: context, isAr: _isAr);
+    final choice = await showFormExitConfirmDialog(
+      context: context,
+      isAr: _isAr,
+      title: _isAr ? 'هل تريد إغلاق الطلب؟' : 'Leave this request?',
+    );
     if (!mounted || choice == null || choice == FormExitChoice.keepEditing) {
       return;
     }
     if (choice == FormExitChoice.saveDraft) {
       await _persistDraft();
-      if (mounted) Navigator.of(context).pop(result);
       return;
     }
     await _clearDraftAndForm();
-    if (mounted) Navigator.of(context).pop(result);
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    showFormExitNotice(
+      context,
+      l10n?.formExitCleared ??
+          (_isAr
+              ? 'مُسحت كل البيانات التي أدخلتها في الحقول. لم تُحفظ كمسودة.'
+              : 'All entered data was cleared. Nothing was saved as a draft.'),
+    );
+    SafeOverlayPop.pop(context, 'closed');
   }
 
   Future<void> _ensureSubscriptionForCreatePage() async {
@@ -478,12 +565,12 @@ class _CreateMarketPropertyRequestPageState
           SnackBar(
             content: Text(
               _isAr
-                  ? (err.isEmpty
-                      ? 'لم يُكتمل دفع الطلب الفوري (30 ر.س).'
-                      : 'لم يُكتمل الدفع: $err')
-                  : (err.isEmpty
-                      ? 'Instant request payment (SAR 30) was not completed.'
-                      : 'Payment not completed: $err'),
+                      ? (err.isEmpty
+                          ? PlatformFeeCatalog.of(context).instantPayIncomplete(isAr: true)
+                          : 'لم يُكتمل الدفع: $err')
+                      : (err.isEmpty
+                          ? PlatformFeeCatalog.of(context).instantPayIncomplete(isAr: false)
+                          : 'Payment not completed: $err'),
             ),
           ),
         );
@@ -509,14 +596,12 @@ class _CreateMarketPropertyRequestPageState
   Future<void> _cancelUnusedInstantCredit() async {
     final cid = _instantCreditId?.trim() ?? '';
     if (cid.isEmpty) return;
-    final confirm = await showDialog<bool>(
+    final confirm = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'إلغاء رصيد الطلب الفوري' : 'Cancel instant credit'),
         content: Text(
-          _isAr
-              ? 'لم تُستخدم هذه الدفعة في طلب منشور. سيتم عكس المبلغ (30 ر.س) على نفس وسيلة الدفع حسب سياسة البوابة.'
-              : 'This payment was not used for a published request. SAR 30 will be reversed to your payment method per gateway policy.',
+          PlatformFeeCatalog.of(context).unusedPaymentReversal(isAr: _isAr),
         ),
         actions: [
           TextButton(
@@ -564,21 +649,21 @@ class _CreateMarketPropertyRequestPageState
   }
 
   void _showInstantPriorityInfo() {
-    showDialog<void>(
+    showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_isAr ? 'الطلب الفوري — 30 ر.س' : 'Instant request — SAR 30'),
+        title: Text(PlatformFeeCatalog.of(ctx, listen: true).instantTitle(isAr: _isAr)),
         content: SingleChildScrollView(
           child: Text(
             _isAr
                 ? '• يظهر طلبك في أعلى الرئيسية مع تمييز بصري.\n'
-                  '• يلزم دفع 30 ر.س لكل طلب فوري (مرة واحدة).\n'
+                  '• يلزم دفع ${PlatformFeeCatalog.of(ctx).instantPhrase(isAr: true)} لكل طلب فوري (مرة واحدة).\n'
                   '• إذا دفعت ولم تنشر الطلب، يبقى الرصيد لطلب فوري آخر.\n'
                   '• زر «إلغاء الطلب» يظهر فقط قبل الاستفادة — لاسترجاع المبلغ.\n'
                   '• بعد النشر لا يمكن الاسترجاع — الدفع مرتبط بالطلب المنشور.\n'
                   '• الفاتورة والإيصال متاحان بعد الدفع (طباعة/تصدير).'
                 : '• Your request stays at the top of home with a visual highlight.\n'
-                  '• SAR 30 one-time payment per instant request.\n'
+                  '• ${PlatformFeeCatalog.of(ctx).instantPhrase(isAr: false)} one-time payment per instant request.\n'
                   '• If you pay but do not publish, credit applies to another instant request.\n'
                   '• «Cancel request» appears only before use — to refund.\n'
                   '• After publishing, no refund — payment is tied to the live request.\n'
@@ -598,14 +683,14 @@ class _CreateMarketPropertyRequestPageState
   Future<void> _onPriorityChanged(MarketPropertyRequestPriority v) async {
     if (v == MarketPropertyRequestPriority.immediate) {
       if ((_instantCreditId ?? '').isEmpty) {
-        final go = await showDialog<bool>(
+        final go = await showAppDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: Text(_isAr ? 'دفع الطلب الفوري' : 'Pay for instant request'),
             content: Text(
               _isAr
-                  ? 'خيار «فوري» يتطلب دفع 30 ر.س. تُفتح صفحة الدفع ثم تعود لإكمال الطلب.'
-                  : 'Instant requires SAR 30. You will pay then return to complete the form.',
+                  ? 'خيار فوري يتطلب دفعاً. تُفتح صفحة الدفع ثم تعود لإكمال الطلب.'
+                  : 'Instant requires payment. You will pay then return to finish.',
             ),
             actions: [
               TextButton(
@@ -614,15 +699,35 @@ class _CreateMarketPropertyRequestPageState
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: Text(_isAr ? 'متابعة للدفع' : 'Continue to pay'),
+                child: Text(_isAr ? 'متابعة الدفع' : 'Continue to pay'),
               ),
             ],
           ),
         );
-        if (go != true || !mounted) return;
+        if (go != true || !mounted) {
+          if (mounted) {
+            setState(() {
+              _requestPriority = MarketPropertyRequestPriority.standard;
+            });
+          }
+          return;
+        }
         await _payForInstantPriority();
+        if (!mounted) return;
+        if ((_instantCreditId ?? '').isEmpty) {
+          setState(() {
+            _requestPriority = MarketPropertyRequestPriority.standard;
+          });
+        }
         return;
       }
+      setState(() => _requestPriority = v);
+      _showSnack(
+        _isAr
+            ? 'سيُستخدم رصيد فوري سابق لهذا الطلب.'
+            : 'Existing instant credit will be used for this request.',
+      );
+      return;
     }
     setState(() => _requestPriority = v);
   }
@@ -636,6 +741,8 @@ class _CreateMarketPropertyRequestPageState
     _budgetMaxCtrl.text = _numberForField(r.budgetMax);
     _areaMinCtrl.text = _numberForField(r.areaMinM2);
     _publicNameCtrl.text = (r.requesterPublicName ?? '').trim();
+    _showRequesterNameOnCards = r.showRequesterName;
+    _publishPresenceOnCards = r.publishPresenceOnCards;
     _districtsCtrl.text = r.districts.join(_isAr ? '، ' : ', ');
     _purchase = r.purpose != 'rent';
     _requestPriority =
@@ -658,12 +765,58 @@ class _CreateMarketPropertyRequestPageState
         (nestedLocation is Map && nestedLocation['approximate'] == true);
     _bedrooms = _intFromAny(details['bedrooms']);
     _bathrooms = _intFromAny(details['bathrooms']);
-    final amenities = details['amenities'];
-    if (amenities is Map) {
-      for (final key in _requestAmenityToggles.keys) {
-        _requestAmenityToggles[key] = amenities[key] == true;
+    for (final key in _requestAmenityToggles.keys) {
+      _requestAmenityToggles[key] = false;
+    }
+    _applyAmenitySelections(details['amenities']);
+    _furnishedWanted =
+        details.containsKey('furnished') && details['furnished'] is bool
+            ? details['furnished'] as bool
+            : null;
+    _preferNew =
+        details.containsKey('prefer_new') && details['prefer_new'] is bool
+            ? details['prefer_new'] as bool
+            : null;
+  }
+
+  void _applyAmenitySelections(dynamic raw) {
+    if (raw is Map) {
+      for (final e in raw.entries) {
+        final k = e.key.toString();
+        if (_requestAmenityToggles.containsKey(k) && _amenityFlagOn(e.value)) {
+          _requestAmenityToggles[k] = true;
+        }
+      }
+      return;
+    }
+    if (raw is List) {
+      // قائمة المفاتيح المختارة فقط — لا نعتبر كل مفاتيح الكتالوج محددة.
+      for (final item in raw) {
+        if (item is Map) {
+          for (final e in item.entries) {
+            final k = e.key.toString();
+            if (_requestAmenityToggles.containsKey(k) &&
+                _amenityFlagOn(e.value)) {
+              _requestAmenityToggles[k] = true;
+            }
+          }
+          continue;
+        }
+        final k = item.toString().trim();
+        if (_requestAmenityToggles.containsKey(k)) {
+          _requestAmenityToggles[k] = true;
+        }
       }
     }
+  }
+
+  static bool _amenityFlagOn(dynamic value) {
+    if (value == true || value == 1) return true;
+    if (value is String) {
+      final s = value.trim().toLowerCase();
+      return s == 'true' || s == '1' || s == 'yes';
+    }
+    return false;
   }
 
   static String _numberForField(num? value) {
@@ -704,6 +857,7 @@ class _CreateMarketPropertyRequestPageState
         _locations = all;
         _hierarchy = h;
         _locationsLoading = false;
+        _manualLocation = all.isEmpty;
         _selectedRegion = selReg;
         _selectedGovernorate = selGov;
       });
@@ -714,6 +868,7 @@ class _CreateMarketPropertyRequestPageState
           _locations = [];
           _hierarchy = null;
           _locationsLoading = false;
+          _manualLocation = true;
         });
       }
     }
@@ -755,8 +910,191 @@ class _CreateMarketPropertyRequestPageState
   bool _wantsResidentialDetailFields() =>
       PropertyTypeCatalog.showsResidentialRoomBedCountsEffective(_typeKey);
 
-  bool _wantsAmenityFields() =>
-      !PropertyTypeCatalog.isLandLikeEffective(_typeKey);
+  bool _wantsAmenityFields() => _requestAmenityToggles.keys.any(
+        (k) => PropertyTypeCatalog.amenityKeyRelevantForType(_typeKey, k),
+      );
+
+  DateTime? get _rentEndComputed {
+    if (_purchase || _rentTerm.isEmpty || _rentStart == null) return null;
+    return MarketRequestRentSchedule.endOf(
+      term: _rentTerm,
+      start: _rentStart!,
+      days: _rentDays,
+      weeks: _rentWeeks,
+      months: _rentMonths,
+      years: _rentYears,
+    );
+  }
+
+  String _fmtG(DateTime d) => DateHelper.fmtCivilDate(d, isAr: _isAr);
+
+  Future<void> _pickRentStart() async {
+    final picked = await showDeedDateCalendarDialog(
+      context: context,
+      isAr: _isAr,
+      initialDate: _rentStart ?? DateTime.now(),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _rentStart = MarketRequestRentSchedule.dateOnly(picked));
+  }
+
+  void _applyRentTerm(String term) {
+    setState(() {
+      _rentTerm = term;
+      if (term == 'monthly' && _rentMonths >= 12) {
+        _rentTerm = 'yearly';
+        _rentYears = 1;
+        _rentMonths = 1;
+      }
+    });
+  }
+
+  void _setRentMonths(int n) {
+    setState(() {
+      if (n >= 12) {
+        _rentTerm = 'yearly';
+        _rentYears = 1;
+        _rentMonths = 12;
+      } else {
+        _rentMonths = n.clamp(1, 11);
+        _rentTerm = 'monthly';
+      }
+    });
+  }
+
+  String _composedRequestTitle() {
+    final typeLabel = PropertyTypeCatalog.label(_typeKey, _isAr);
+    final purposeBit = _purchase
+        ? (_isAr ? 'للشراء' : 'to buy')
+        : switch (_rentTerm) {
+            'daily' => _isAr ? 'إيجار يومي' : 'daily rent',
+            'weekly' => _isAr ? 'إيجار أسبوعي' : 'weekly rent',
+            'monthly' => _isAr ? 'إيجار شهري' : 'monthly rent',
+            'yearly' => _isAr ? 'إيجار سنوي' : 'yearly rent',
+            _ => _isAr ? 'للإيجار' : 'to rent',
+          };
+    final city = _cityForSubmit().trim();
+    final districts = _districtsCtrl.text.trim();
+    final suggested = PropertyListingDisplay.composeListingHeadline(
+      typeLabel: typeLabel,
+      purposeBit: purposeBit,
+      city: city,
+      district: districts.isNotEmpty ? districts : null,
+      isAr: _isAr,
+      asRequest: true,
+    );
+    return suggested.trim().isEmpty
+        ? (_isAr ? 'طلب عقاري' : 'Property request')
+        : suggested.trim();
+  }
+
+  void _syncComposedTitle() {
+    _titleCtrl.text = _composedRequestTitle();
+  }
+
+  void _fillSmartDetails() {
+    final parts = <String>[];
+    parts.add(_composedRequestTitle());
+    if (!_purchase && _rentTerm.isNotEmpty) {
+      final start = _rentStart;
+      final end = _rentEndComputed;
+      if (start != null && end != null) {
+        parts.add(_isAr
+            ? 'المدة: ${_fmtG(start)} — ${_fmtG(end)}'
+            : 'Period: ${_fmtG(start)} — ${_fmtG(end)}');
+      }
+    }
+    final min = _parseMoney(_budgetMinCtrl.text);
+    final max = _parseMoney(_budgetMaxCtrl.text);
+    if (min != null || max != null) {
+      parts.add(_isAr
+          ? 'المبلغ المحدد: ${_requestBudgetLabel() ?? ''}'
+          : 'Budget: ${_requestBudgetLabel() ?? ''}');
+    }
+    if (_areaMinCtrl.text.trim().isNotEmpty) {
+      parts.add(_isAr
+          ? 'مساحة لا تقل عن ${_areaMinCtrl.text.trim()} م²'
+          : 'Min area ${_areaMinCtrl.text.trim()} m²');
+    }
+    if (_bedrooms != null) {
+      parts.add(_isAr ? 'غرف نوم: $_bedrooms' : 'Bedrooms: $_bedrooms');
+    }
+    if (_bathrooms != null) {
+      parts.add(_isAr ? 'دورات مياه: $_bathrooms' : 'Baths: $_bathrooms');
+    }
+    if (_furnishedWanted == true) {
+      parts.add(_isAr ? 'مفروش' : 'Furnished');
+    } else if (_furnishedWanted == false) {
+      parts.add(_isAr ? 'غير مفروش' : 'Unfurnished');
+    }
+    if (_preferNew == true) {
+      parts.add(_isAr ? 'يفضّل جديد' : 'Prefer new');
+    } else if (_preferNew == false) {
+      parts.add(_isAr ? 'لا يشترط الجديد' : 'New not required');
+    }
+    setState(() => _descCtrl.text = parts.join(_isAr ? ' · ' : ' · '));
+  }
+
+  Future<void> _refreshDistricts() async {
+    final ar = _cityForSubmit();
+    final L = _locationForCityKey(_cityKey);
+    final en = L?.cityEn ?? ar;
+    final svc = LocationHierarchyService.instance;
+    var list = await svc.districtsIn(city: ar);
+    if (list.isEmpty && en != ar) list = await svc.districtsIn(city: en);
+    if (!mounted) return;
+    setState(() => _districtOptions = list);
+  }
+
+  String get _coordsCombined {
+    final lat = _selectedLat;
+    final lng = _selectedLng;
+    if (lat == null || lng == null) return '';
+    return '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';
+  }
+
+  Future<void> _copyCoords() async {
+    final s = _coordsCombined;
+    if (s.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: s));
+    _showSnack(_isAr ? 'نُسخت الإحداثيات' : 'Coordinates copied');
+  }
+
+  Widget _instantFeeChip(ColorScheme cs) {
+    final cat = PlatformFeeCatalog.of(context, listen: true);
+    final n = cat.numberText(
+      PlatformFeeCatalog.instantMarketRequest,
+      isAr: _isAr,
+    );
+    if (n.isEmpty) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_isAr)
+          SaudiRiyalSymbolIcon(size: 14, color: cs.primary)
+        else
+          Text(
+            AppMoney.sarUiSuffix(isAr: false),
+            style: TextStyle(
+              color: cs.primary,
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              fontFamily: 'Cairo',
+            ),
+          ),
+        const SizedBox(width: 4),
+        Text(
+          n,
+          style: TextStyle(
+            color: cs.primary,
+            fontWeight: FontWeight.w900,
+            fontSize: 12,
+            fontFamily: 'Cairo',
+          ),
+        ),
+      ],
+    );
+  }
 
   String _amenityLabel(String key) {
     switch (key) {
@@ -789,7 +1127,22 @@ class _CreateMarketPropertyRequestPageState
     final out = <String, dynamic>{};
     if (!_purchase) {
       out['rent_term'] = _rentTerm;
+      out['rent_days'] = _rentDays;
+      out['rent_weeks'] = _rentWeeks;
+      out['rent_months'] = _rentMonths;
+      out['rent_years'] = _rentYears;
+      if (_rentStart != null) {
+        out['rent_start'] = _rentStart!.toIso8601String();
+        final end = _rentEndComputed;
+        if (end != null) out['rent_end'] = end.toIso8601String();
+      }
     }
+    if (_furnishedWanted != null) out['furnished'] = _furnishedWanted;
+    if (_preferNew != null) out['prefer_new'] = _preferNew;
+    final region = (_selectedRegion ?? '').trim();
+    if (region.isNotEmpty) out['region'] = region;
+    final gov = (_selectedGovernorate ?? '').trim();
+    if (gov.isNotEmpty) out['governorate'] = gov;
     if (_selectedLat != null && _selectedLng != null) {
       out['lat'] = _selectedLat;
       out['lng'] = _selectedLng;
@@ -800,6 +1153,20 @@ class _CreateMarketPropertyRequestPageState
         'approximate': _locationIsApproximate,
         'source': 'map_picker',
       };
+    } else {
+      final cityLoc = _locationForCityKey(_cityKey);
+      if (cityLoc != null &&
+          !(cityLoc.lat.abs() < 1e-5 && cityLoc.lng.abs() < 1e-5)) {
+        out['lat'] = cityLoc.lat;
+        out['lng'] = cityLoc.lng;
+        out['location_is_approximate'] = true;
+        out['location'] = {
+          'lat': cityLoc.lat,
+          'lng': cityLoc.lng,
+          'approximate': true,
+          'source': 'city_centroid',
+        };
+      }
     }
     if (_wantsResidentialDetailFields()) {
       if (_bedrooms != null) out['bedrooms'] = _bedrooms;
@@ -818,7 +1185,9 @@ class _CreateMarketPropertyRequestPageState
   List<String> get _governorateOptions {
     final r = _selectedRegion;
     if (r == null || r.isEmpty || _hierarchy == null) return const [];
-    return _hierarchy!.governoratesByRegion[r] ?? const [];
+    final raw = _hierarchy!.governoratesByRegion[r] ?? const [];
+    final mains = raw.where((g) => g.trim() != r.trim()).toList();
+    return mains.isNotEmpty ? mains : raw;
   }
 
   List<String> get _cityOptions {
@@ -872,6 +1241,15 @@ class _CreateMarketPropertyRequestPageState
     }
   }
 
+  void _applyManualLocationFields() {
+    final r = _manualRegionCtrl.text.trim();
+    final g = _manualGovCtrl.text.trim();
+    final c = _manualCityCtrl.text.trim();
+    _selectedRegion = r.isEmpty ? _selectedRegion : r;
+    _selectedGovernorate = g.isEmpty ? _selectedGovernorate : g;
+    if (c.isNotEmpty) _cityKey = c;
+  }
+
   void _onCitySelected(String? cityLabel) {
     if (cityLabel == null || _selectedRegion == null) return;
     final reg = _selectedRegion!;
@@ -889,6 +1267,7 @@ class _CreateMarketPropertyRequestPageState
     }
     if (found != null) {
       setState(() => _cityKey = found!.cityEn);
+      unawaited(_refreshDistricts());
     }
   }
 
@@ -941,8 +1320,8 @@ class _CreateMarketPropertyRequestPageState
       setState(() {
         _profileAvatarUrl = av;
         _pubNameSource = id.nameSource;
-        _pubPhoneSource = id.phoneSource;
-        _publishPresenceOnCards = id.publishPresenceOnCards;
+        _pubPhoneSource = PublicPhoneSource.hidden;
+        _publishPresenceOnCards = true;
         _officialNameCached = id.officialName(isAr: _isAr);
         _displayAliasCached = id.aliasName(isAr: _isAr);
         _primaryPhoneCached = id.primaryPhone;
@@ -973,8 +1352,11 @@ class _CreateMarketPropertyRequestPageState
     if (cur != null && cur.lat != 0 && cur.lng != 0) {
       initial = LatLng(cur.lat, cur.lng);
     }
-    final res = await Navigator.of(context).push<Map<String, dynamic>>(
+    final res = await Navigator.of(context, rootNavigator: true)
+        .push<Map<String, dynamic>>(
       MaterialPageRoute(
+        fullscreenDialog: true,
+        settings: const RouteSettings(name: '/map-picker'),
         builder: (_) => MapPickerPage(
           initial: initial,
           isAr: _isAr,
@@ -996,7 +1378,16 @@ class _CreateMarketPropertyRequestPageState
     if (lat == null || lng == null) return;
     final approx = res['approximate'] == true;
     final hit = await SaudiLocationsService.instance.findNearest(lat, lng);
-    if (!mounted || hit == null) return;
+    if (!mounted) return;
+    if (hit == null) {
+      setState(() {
+        _selectedLat = lat;
+        _selectedLng = lng;
+        _locationIsApproximate = approx;
+        _manualLocation = true;
+      });
+      return;
+    }
     final reg = _isAr ? hit.regionAr.trim() : hit.regionEn.trim();
     final rawG = _isAr ? hit.governorateAr?.trim() : hit.governorateEn?.trim();
     final gov = (rawG != null && rawG.isNotEmpty) ? rawG : reg;
@@ -1009,6 +1400,7 @@ class _CreateMarketPropertyRequestPageState
       _locationIsApproximate = approx;
       _maybeSuggestSmartTitle();
     });
+    unawaited(_refreshDistricts());
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1043,11 +1435,10 @@ class _CreateMarketPropertyRequestPageState
 
   double? _parseMoney(String s) {
     final t = input_norm
-        .normalizeAsciiDigits(s.trim())
+        .normalizeAsciiDigits(AppMoney.stripSarMarks(s.trim()))
         .replaceAll(',', '')
         .replaceAll('٬', '')
         .replaceAll('٫', '.')
-        .replaceAll(AppMoney.saudiRiyalSignUnicode, '')
         .replaceAll(RegExp(r'[^0-9.]'), '');
     if (t.isEmpty) return null;
     return double.tryParse(t);
@@ -1057,12 +1448,16 @@ class _CreateMarketPropertyRequestPageState
     final min = _parseMoney(_budgetMinCtrl.text);
     final max = _parseMoney(_budgetMaxCtrl.text);
     if (min == null && max == null) return null;
-    final cur = AppMoney.sarUiSuffix(isAr: _isAr);
     if (min != null && max != null) {
-      return '${min.toStringAsFixed(0)} - ${max.toStringAsFixed(0)} $cur';
+      return AppMoney.sarPhrase(
+        '${min.toStringAsFixed(0)} - ${max.toStringAsFixed(0)}',
+        isAr: _isAr,
+      );
     }
-    if (max != null) return '${max.toStringAsFixed(0)} $cur';
-    return '${min!.toStringAsFixed(0)}+ $cur';
+    if (max != null) {
+      return AppMoney.sarPhrase(max.toStringAsFixed(0), isAr: _isAr);
+    }
+    return AppMoney.sarPhrase('${min!.toStringAsFixed(0)}+', isAr: _isAr);
   }
 
   void _showSnack(String message) {
@@ -1076,20 +1471,44 @@ class _CreateMarketPropertyRequestPageState
   bool _validateStepBeforeLeave(int step) {
     switch (step) {
       case 0:
-        if (_titleCtrl.text.trim().isEmpty) {
-          _showSnack(_isAr ? 'أدخل عنواناً للطلب' : 'Enter a title');
-          _titleFocus.requestFocus();
+        if (!_purchase && _rentTerm.isEmpty) {
+          _showSnack(_isAr ? 'حدّد مدة الإيجار' : 'Choose a rent period');
+          return false;
+        }
+        if (!_purchase && _rentTerm == 'daily' && _rentStart == null) {
+          _showSnack(_isAr ? 'حدّد التاريخ' : 'Choose a date');
+          return false;
+        }
+        if (!_purchase &&
+            _rentTerm.isNotEmpty &&
+            _rentTerm != 'daily' &&
+            _rentStart == null) {
+          _showSnack(_isAr ? 'حدّد تاريخ البداية' : 'Choose a start date');
           return false;
         }
         return true;
       case 1:
         return true;
       case 2:
+        if (_manualLocation || (_locations.isEmpty && !_locationsLoading)) {
+          _applyManualLocationFields();
+          if ((_selectedRegion ?? '').trim().isEmpty ||
+              (_selectedGovernorate ?? '').trim().isEmpty ||
+              _cityKey.trim().isEmpty) {
+            _showSnack(
+              _isAr
+                  ? 'أدخل المنطقة والمحافظة والمدينة يدوياً أو حدّد على الخريطة'
+                  : 'Enter region, governorate, and city manually or pick on the map',
+            );
+            return false;
+          }
+          return true;
+        }
         if (_locations.isEmpty && !_locationsLoading) {
           _showSnack(
             _isAr
-                ? 'تعذر تحميل بيانات المدن. تحقق من الاتصال وحاول مجدداً.'
-                : 'Could not load city data. Check your connection and retry.',
+                ? 'تعذر تحميل بيانات المدن. استخدم الإدخال اليدوي.'
+                : 'Could not load city data. Use manual entry.',
           );
           return false;
         }
@@ -1117,11 +1536,11 @@ class _CreateMarketPropertyRequestPageState
           );
           return false;
         }
-        if (_publicNameCtrl.text.trim().isEmpty) {
+        if (_publicNameCtrl.text.trim().isEmpty && _showRequesterNameOnCards) {
           _showSnack(
             _isAr
-                ? 'أدخل الاسم الرباعي / المعروض للمهتمين'
-                : 'Enter your display name for responders',
+                ? 'أدخل الاسم الرباعي / المعروض للمهتمين أو أوقف إظهار الاسم'
+                : 'Enter a display name or turn off showing your name',
           );
           _publicNameFocus.requestFocus();
           return false;
@@ -1141,7 +1560,7 @@ class _CreateMarketPropertyRequestPageState
       return;
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    await showAppModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
@@ -1279,6 +1698,7 @@ class _CreateMarketPropertyRequestPageState
       );
       return;
     }
+    _syncComposedTitle();
     for (var s = 0; s < _stepCount; s++) {
       if (!_validateStepBeforeLeave(s)) {
         setState(() => _step = s);
@@ -1389,7 +1809,7 @@ class _CreateMarketPropertyRequestPageState
           _requestPriority == MarketPropertyRequestPriority.immediate;
 
       var row = <String, dynamic>{
-        'requester_id': widget.userId,
+        'requester_id': (_sb.auth.currentUser?.id ?? widget.userId).trim(),
         if (!_isEditing)
           'status': isInstantNew ? 'draft' : 'published',
         'request_priority': _requestPriority.wireValue,
@@ -1403,19 +1823,17 @@ class _CreateMarketPropertyRequestPageState
         'budget_min': _parseMoney(_budgetMinCtrl.text),
         'budget_max': _parseMoney(_budgetMaxCtrl.text),
         'area_min_m2': _parseMoney(_areaMinCtrl.text),
-        'prefer_new': _preferNew,
-        'show_requester_name': true,
-        'requester_public_name': pub,
+        if (_preferNew != null) 'prefer_new': _preferNew,
+        'show_requester_name': _showRequesterNameOnCards,
+        'requester_public_name':
+            _showRequesterNameOnCards && pub.isNotEmpty ? pub : null,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
       // هوية الناشر داخل details لتجنّب أعمدة غير موجودة على السيرفر القديم.
       final identityMeta = <String, dynamic>{
         'publisher_public_name_source': _pubNameSource.name,
-        'publisher_public_phone_source': _pubPhoneSource.name,
+        'publisher_public_phone_source': PublicPhoneSource.hidden.name,
         'publisher_publish_presence': _publishPresenceOnCards,
-        if (_pubPhoneSource != PublicPhoneSource.hidden)
-          'requester_contact_phone':
-              PublisherIdentityPrefs.instance.resolvedPublicPhone(),
       };
       if (coverPath != null) {
         row['cover_image_storage_path'] = coverPath;
@@ -1481,8 +1899,8 @@ class _CreateMarketPropertyRequestPageState
               SnackBar(
                 content: Text(
                   _isAr
-                      ? 'الطلب الفوري يتطلب دفع 30 ر.س قبل النشر.'
-                      : 'Instant requests require SAR 30 payment before publishing.',
+                      ? PlatformFeeCatalog.of(context).instantRequiresPay(isAr: true)
+                      : PlatformFeeCatalog.of(context).instantRequiresPay(isAr: false),
                 ),
               ),
             );
@@ -1556,12 +1974,16 @@ class _CreateMarketPropertyRequestPageState
       final next = await showAdaptivePostPublishDialog(
         context: context,
         isAr: _isAr,
+        leadingIcon: Icons.home_rounded,
+        accentColor: const Color(0xFF0F766E),
         title: t?.marketPropertySubmitSuccessTitle ??
-            (_isAr ? 'تم بنجاح' : 'Success'),
+            (_isAr ? 'تم إرسال الطلب إلى الرئيسية' : 'Sent to Home'),
         body: t?.marketPropertySubmitSuccessBody ??
             (_isAr
-                ? 'تم تقديم طلبك العقاري بنجاح.'
-                : 'Your property request was submitted.'),
+                ? 'طلبك ظاهر للمهتمين في السوق العقاري. الرئيسية تُحدَّث فوراً وتفتح على طلبك.'
+                : 'Your request is visible to interested marketers. Home refreshes instantly to your new request.'),
+        statusChip: t?.listingPublishLiveStatusChip ??
+            (_isAr ? 'منشور في الرئيسية' : 'Live on Home'),
         codeLine: codeLine,
         actions: [
           AdaptivePostPublishAction(
@@ -1573,7 +1995,8 @@ class _CreateMarketPropertyRequestPageState
           AdaptivePostPublishAction(
             id: 'home',
             label: t?.marketPropertySubmitGoHome ??
-                (_isAr ? 'العودة للرئيسية' : 'Back to Home'),
+                (_isAr ? 'الرئيسية' : 'Home'),
+            icon: Icons.home_outlined,
             filled: true,
           ),
         ],
@@ -1596,7 +2019,14 @@ class _CreateMarketPropertyRequestPageState
       // أغلِق النموذج داخل جسم اللوحة → الرئيسية (لا تُعد بناء ويب).
       final nav = Navigator.of(context);
       if (nav.canPop()) {
-        nav.pop('home');
+        nav.pop(
+          PostPublishNavResult.liveHome(
+            marketRequestId:
+                '${insertedMarket?['id'] ?? ''}'.trim().isEmpty
+                    ? null
+                    : '${insertedMarket?['id'] ?? ''}'.trim(),
+          ),
+        );
       } else {
         await PostAuthNavigation.openDashboard(context);
       }
@@ -1680,6 +2110,7 @@ class _CreateMarketPropertyRequestPageState
     }
   }
 
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -1700,11 +2131,12 @@ class _CreateMarketPropertyRequestPageState
       if (_step == 0) ...[
         Text(
           _isAr
-              ? 'يظهر طلبك في الرئيسية للمهتمين. أكمل الخطوات بالترتيب.'
-              : 'Your request appears on the home feed. Complete the steps in order.',
+              ? 'يظهر طلبك لجميع الشركاء المهتمين. أكمل الخطوات بالترتيب.'
+              : 'Your request is shown to all interested partners. Complete the steps in order.',
           style: TextStyle(
             color: cs.onSurfaceVariant,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
+            fontFamily: 'Cairo',
           ),
         ),
         const SizedBox(height: 16),
@@ -1715,21 +2147,7 @@ class _CreateMarketPropertyRequestPageState
           decoration: InputDecoration(
             labelText: t?.marketRequestUrgencyTitle ??
                 (_isAr ? 'درجة الإلحاح' : 'Request urgency'),
-            helperText: _requestPriority ==
-                    MarketPropertyRequestPriority.immediate
-                ? (_isAr
-                    ? 'فوري — يتطلب دفع 30 ر.س (مرة واحدة لكل طلب).'
-                    : 'Instant — requires SAR 30 one-time payment per request.')
-                : (t?.marketRequestUrgencyHint ??
-                    (_isAr
-                        ? 'عادي — ضمن حصة اشتراكك.'
-                        : 'Standard — within your subscription quota.')),
             border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              tooltip: _isAr ? 'تفاصيل الطلب الفوري' : 'Instant request details',
-              icon: const Icon(Icons.help_outline),
-              onPressed: busy ? null : _showInstantPriorityInfo,
-            ),
           ),
           items: _priorityChoices
               .map(
@@ -1741,14 +2159,7 @@ class _CreateMarketPropertyRequestPageState
                       if (p == MarketPropertyRequestPriority.immediate)
                         Padding(
                           padding: const EdgeInsetsDirectional.only(start: 6),
-                          child: Text(
-                            _isAr ? '30 ر.س' : 'SAR 30',
-                            style: TextStyle(
-                              color: cs.primary,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                            ),
-                          ),
+                          child: _instantFeeChip(cs),
                         ),
                     ],
                   ),
@@ -1774,8 +2185,8 @@ class _CreateMarketPropertyRequestPageState
                 children: [
                   Text(
                     _isAr
-                        ? 'رصيد طلب فوري مدفوع — جاهز للاستخدام في هذا النموذج.'
-                        : 'Paid instant credit ready — use it when you publish.',
+                        ? 'رصيد فوري جاهز — يُخصم لهذا الطلب عند النشر.'
+                        : 'Instant credit ready — applied when you publish.',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
@@ -1783,9 +2194,7 @@ class _CreateMarketPropertyRequestPageState
                     onPressed: busy ? null : () => unawaited(_cancelUnusedInstantCredit()),
                     icon: const Icon(Icons.cancel_outlined),
                     label: Text(
-                      _isAr
-                          ? 'إلغاء الطلب (استرجاع 30 ر.س)'
-                          : 'Cancel request (refund SAR 30)',
+                      PlatformFeeCatalog.of(context).cancelInstantRefund(isAr: _isAr),
                     ),
                   ),
                 ],
@@ -1798,38 +2207,9 @@ class _CreateMarketPropertyRequestPageState
             child: LinearProgressIndicator(minHeight: 2),
           ),
         const SizedBox(height: 14),
-        AqarTextField(
-          controller: _titleCtrl,
-          focusNode: _titleFocus,
-          enabled: !busy,
-          decoration: InputDecoration(
-            labelText: _isAr ? 'عنوان الطلب *' : 'Request title *',
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              tooltip: _isAr ? 'اقتراح عنوان ذكي' : 'Suggest smart title',
-              onPressed: busy
-                  ? null
-                  : () => setState(() => _maybeSuggestSmartTitle(force: true)),
-              icon: const Icon(Icons.auto_awesome_outlined),
-            ),
-          ),
-          textInputAction: TextInputAction.next,
-        ),
-        const SizedBox(height: 12),
-        AqarTextField(
-          controller: _descCtrl,
-          enabled: !busy,
-          decoration: InputDecoration(
-            labelText: _isAr ? 'تفاصيل إضافية' : 'More details',
-            border: const OutlineInputBorder(),
-          ),
-          minLines: 2,
-          maxLines: 5,
-        ),
-        const SizedBox(height: 14),
         Text(
           _isAr ? 'الغرض' : 'Purpose',
-          style: const TextStyle(fontWeight: FontWeight.w800),
+          style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
         ),
         const SizedBox(height: 8),
         AbsorbPointer(
@@ -1849,50 +2229,29 @@ class _CreateMarketPropertyRequestPageState
             onSelectionChanged: (s) {
               setState(() {
                 _purchase = s.first;
-                if (!_purchase && _rentTerm.isEmpty) {
-                  _rentTerm = 'monthly';
-                }
-                _maybeSuggestSmartTitle();
+                if (_purchase) _rentTerm = '';
+                _syncComposedTitle();
               });
             },
           ),
         ),
-        if (!_purchase) ...[
-          const SizedBox(height: 14),
-          Text(
-            _isAr ? 'مدة الإيجار' : 'Rent period',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          AbsorbPointer(
-            absorbing: busy,
-            child: SegmentedButton<String>(
-              segments: [
-                ButtonSegment(
-                  value: 'daily',
-                  label: Text(_isAr ? 'يومي' : 'Daily'),
-                ),
-                ButtonSegment(
-                  value: 'weekly',
-                  label: Text(_isAr ? 'أسبوعي' : 'Weekly'),
-                ),
-                ButtonSegment(
-                  value: 'monthly',
-                  label: Text(_isAr ? 'شهري' : 'Monthly'),
-                ),
-                ButtonSegment(
-                  value: 'yearly',
-                  label: Text(_isAr ? 'سنوي' : 'Yearly'),
-                ),
-              ],
-              selected: {_rentTerm},
-              onSelectionChanged: (s) {
-                final v = s.first;
-                if (v.isNotEmpty) setState(() => _rentTerm = v);
-              },
-            ),
-          ),
-        ],
+        if (!_purchase) RentTermScheduleFields(
+          isAr: _isAr,
+          busy: busy,
+          rentTerm: _rentTerm,
+          rentDays: _rentDays,
+          rentWeeks: _rentWeeks,
+          rentMonths: _rentMonths,
+          rentYears: _rentYears,
+          rentStart: _rentStart,
+          rentEnd: _rentEndComputed,
+          onTerm: _applyRentTerm,
+          onDays: (n) => setState(() => _rentDays = n),
+          onWeeks: (n) => setState(() => _rentWeeks = n),
+          onMonths: _setRentMonths,
+          onYears: (n) => setState(() => _rentYears = n),
+          onPickStart: () => unawaited(_pickRentStart()),
+        ),
       ],
       if (_step == 1) ...[
         DropdownButtonFormField<String>(
@@ -1944,9 +2303,97 @@ class _CreateMarketPropertyRequestPageState
                   if (v == null) return;
                   setState(() {
                     _typeKey = v;
-                    _maybeSuggestSmartTitle();
+                    for (final k in _requestAmenityToggles.keys) {
+                      _requestAmenityToggles[k] = false;
+                    }
+                    _syncComposedTitle();
                   });
                 },
+        ),
+        if (_wantsResidentialDetailFields()) ...[
+          const SizedBox(height: 16),
+          Text(
+            _isAr ? 'تفاصيل سكنية' : 'Residential details',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: SmartCountField(
+                  label: _isAr ? 'غرف نوم' : 'Bedrooms',
+                  value: _bedrooms,
+                  onChanged: (v) => setState(() => _bedrooms = v),
+                  isAr: _isAr,
+                  enabled: !busy,
+                  min: 0,
+                  maxPreset: 12,
+                  allowClear: true,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SmartCountField(
+                  label: _isAr ? 'دورات مياه' : 'Bathrooms',
+                  value: _bathrooms,
+                  onChanged: (v) => setState(() => _bathrooms = v),
+                  isAr: _isAr,
+                  enabled: !busy,
+                  min: 0,
+                  maxPreset: 10,
+                  allowClear: true,
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (_wantsAmenityFields()) ...[
+          const SizedBox(height: 14),
+          Text(
+            _isAr ? 'الخدمات المطلوبة' : 'Amenities',
+            style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
+          ),
+          const SizedBox(height: 8),
+          AmenityEqualSelectGrid(
+            typeCode: _typeKey,
+            values: _requestAmenityToggles,
+            isAr: _isAr,
+            enabled: !busy,
+            onToggle: (k, v) => setState(() => _requestAmenityToggles[k] = v),
+          ),
+        ],
+        const SizedBox(height: 14),
+        EqualOptionTileGrid(
+          children: [
+            EqualSelectTile(
+              label: _isAr ? 'مفروش' : 'Furnished',
+              selected: _furnishedWanted == true,
+              enabled: !busy,
+              onTap: () => setState(() => _furnishedWanted =
+                  _furnishedWanted == true ? null : true),
+            ),
+            EqualSelectTile(
+              label: _isAr ? 'غير مفروش' : 'Unfurnished',
+              selected: _furnishedWanted == false,
+              enabled: !busy,
+              onTap: () => setState(() => _furnishedWanted =
+                  _furnishedWanted == false ? null : false),
+            ),
+            EqualSelectTile(
+              label: _isAr ? 'جديدة' : 'New',
+              selected: _preferNew == true,
+              enabled: !busy,
+              onTap: () => setState(
+                  () => _preferNew = _preferNew == true ? null : true),
+            ),
+            EqualSelectTile(
+              label: _isAr ? 'ليست جديدة' : 'Not new',
+              selected: _preferNew == false,
+              enabled: !busy,
+              onTap: () => setState(
+                  () => _preferNew = _preferNew == false ? null : false),
+            ),
+          ],
         ),
       ],
       if (_step == 2) ...[
@@ -1956,22 +2403,101 @@ class _CreateMarketPropertyRequestPageState
         ],
         Text(
           _isAr
-              ? 'المنطقة والمحافظة والمدينة مطلوبة. يمكنك التحديد على الخريطة.'
-              : 'Region, governorate, and city are required. You can pick on the map.',
+              ? 'المنطقة ثم المحافظة ثم المدينة ثم الحي.'
+              : 'Region, then governorate, then city, then district.',
           style: TextStyle(
             color: cs.onSurfaceVariant,
             fontWeight: FontWeight.w600,
           ),
         ),
         const SizedBox(height: 12),
-        if (!_locationsLoading && _locations.isEmpty)
-          Text(
-            _isAr
-                ? 'تعذر تحميل المدن. تحقق من الاتصال ثم أعد فتح هذه الخطوة.'
-                : 'Could not load cities. Check connection, then reopen this step.',
-            style: TextStyle(color: cs.error),
+        if (_locations.isNotEmpty)
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: TextButton.icon(
+              onPressed: busy
+                  ? null
+                  : () => setState(() => _manualLocation = !_manualLocation),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: Text(
+                _manualLocation
+                    ? (_isAr ? 'العودة للقوائم الرسمية' : 'Back to official lists')
+                    : (_isAr ? 'إدخال يدوي للموقع' : 'Enter location manually'),
+              ),
+            ),
           ),
-        if (!_locationsLoading && _locations.isNotEmpty) ...[
+        if (_manualLocation || (!_locationsLoading && _locations.isEmpty)) ...[
+          if (!_locationsLoading && _locations.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                _isAr
+                    ? 'تعذر جلب بيانات الهيئة. أكمل الموقع يدوياً أو من الخريطة.'
+                    : 'Authority city data is unavailable. Complete location manually or from the map.',
+                style: TextStyle(color: cs.error, fontWeight: FontWeight.w700),
+              ),
+            ),
+          AqarTextField(
+            controller: _manualRegionCtrl,
+            enabled: !busy,
+            decoration: deco(_isAr ? 'المنطقة *' : 'Region *'),
+            onChanged: (v) => _selectedRegion = v.trim(),
+          ),
+          const SizedBox(height: 10),
+          AqarTextField(
+            controller: _manualGovCtrl,
+            enabled: !busy,
+            decoration: deco(_isAr ? 'المحافظة *' : 'Governorate *'),
+            onChanged: (v) => _selectedGovernorate = v.trim(),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: AqarTextField(
+                  controller: _manualCityCtrl,
+                  enabled: !busy,
+                  decoration: deco(_isAr ? 'المدينة *' : 'City *'),
+                  onChanged: (v) => _cityKey = v.trim(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: IconButton.filledTonal(
+                  tooltip: _isAr ? 'تحديد على الخريطة' : 'Pick on map',
+                  onPressed: busy ? null : _openMapForCity,
+                  icon: const Icon(Icons.map_outlined),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          AqarTextField(
+            controller: _districtsCtrl,
+            enabled: !busy,
+            decoration: deco(_isAr ? 'الحي' : 'District'),
+          ),
+          if (_selectedLat != null && _selectedLng != null) ...[
+            const SizedBox(height: 10),
+            AqarTextField(
+              controller: TextEditingController(
+                text: _selectedLat!.toStringAsFixed(6),
+              ),
+              readOnly: true,
+              decoration: deco(_isAr ? 'خط العرض' : 'Latitude'),
+            ),
+            const SizedBox(height: 8),
+            AqarTextField(
+              controller: TextEditingController(
+                text: _selectedLng!.toStringAsFixed(6),
+              ),
+              readOnly: true,
+              decoration: deco(_isAr ? 'خط الطول' : 'Longitude'),
+            ),
+          ],
+        ] else if (!_locationsLoading && _locations.isNotEmpty) ...[
           if (regions.length > kTh)
             SearchableSelectField(
               label: _isAr ? 'المنطقة *' : 'Region *',
@@ -2078,67 +2604,69 @@ class _CreateMarketPropertyRequestPageState
           ],
           if (_selectedLat != null && _selectedLng != null) ...[
             const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primaryContainer
-                    .withValues(alpha: 0.45),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.22),
-                ),
+            AqarTextField(
+              controller: TextEditingController(
+                text: _selectedLat!.toStringAsFixed(6),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.location_on_outlined,
-                    size: 19,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _isAr
-                          ? 'تم حفظ موقع الطلب على الخريطة'
-                          : 'Request map location is saved',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                ],
+              readOnly: true,
+              decoration: deco(_isAr ? 'خط العرض' : 'Latitude'),
+            ),
+            const SizedBox(height: 8),
+            AqarTextField(
+              controller: TextEditingController(
+                text: _selectedLng!.toStringAsFixed(6),
+              ),
+              readOnly: true,
+              decoration: deco(_isAr ? 'خط الطول' : 'Longitude'),
+            ),
+            const SizedBox(height: 8),
+            AqarTextField(
+              controller: TextEditingController(text: _coordsCombined),
+              readOnly: true,
+              decoration: InputDecoration(
+                labelText: _isAr ? 'الإحداثي' : 'Coordinates',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  tooltip: _isAr ? 'نسخ' : 'Copy',
+                  onPressed: _copyCoords,
+                  icon: const Icon(Icons.copy_outlined),
+                ),
               ),
             ),
           ],
           const SizedBox(height: 10),
-          AqarTextField(
-            controller: _districtsCtrl,
-            enabled: !busy,
-            decoration: InputDecoration(
-              labelText: _isAr
-                  ? 'أحياء مفضّلة (اختياري)'
-                  : 'Preferred districts (optional)',
-              hintText: _isAr
-                  ? 'مثال: النرجس، الياسمين — افصل بفاصلة أو سطر'
-                  : 'e.g. Al Narjis, Al Yasmin — comma or newline',
-              border: const OutlineInputBorder(),
+          if (_districtOptions.isNotEmpty)
+            DropdownButtonFormField<String>(
+              value: _districtsCtrl.text.trim().isNotEmpty &&
+                      _districtOptions.contains(_districtsCtrl.text.trim())
+                  ? _districtsCtrl.text.trim()
+                  : null,
+              decoration: deco(_isAr ? 'الحي' : 'District'),
+              isExpanded: true,
+              items: _districtOptions
+                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                  .toList(),
+              onChanged: busy
+                  ? null
+                  : (v) {
+                      if (v == null) return;
+                      setState(() {
+                        _districtsCtrl.text = v;
+                        _syncComposedTitle();
+                      });
+                    },
+            )
+          else
+            AqarTextField(
+              controller: _districtsCtrl,
+              enabled: !busy,
+              decoration: deco(_isAr ? 'الحي' : 'District'),
             ),
-            minLines: 1,
-            maxLines: 3,
-          ),
         ],
       ],
       if (_step == 3) ...[
         Text(
-          _isAr
-              ? 'راجع المبلغ المحدد والمساحة والمرافق، ثم أضف صورة اختيارية واسمك المعروض قبل النشر. إن أدخلت «من» و«إلى» للمبلغ يجب أن يكون الترتيب منطقياً.'
-              : 'Review the specified amount, area, and amenities, then add an optional image and your display name before publishing. If both amount min and max are set, min must be ≤ max.',
+          _isAr ? 'المبلغ والمساحة ثم مراجعة الطلب.' : 'Amount, area, then review.',
           style: TextStyle(
             color: cs.onSurfaceVariant,
             fontWeight: FontWeight.w600,
@@ -2156,6 +2684,8 @@ class _CreateMarketPropertyRequestPageState
                         controller: _budgetMinCtrl,
                         label: _isAr ? 'المبلغ من' : 'Amount min',
                         enabled: !busy,
+                        isAr: _isAr,
+                        alignOpposite: true,
                         inputFormatters: _moneyInputFormatters,
                       ),
                       const SizedBox(height: 10),
@@ -2164,6 +2694,8 @@ class _CreateMarketPropertyRequestPageState
                         label: _isAr ? 'المبلغ إلى' : 'Amount max',
                         enabled: !busy,
                         textInputAction: TextInputAction.next,
+                        isAr: _isAr,
+                        alignOpposite: true,
                         inputFormatters: _moneyInputFormatters,
                       ),
                     ],
@@ -2176,6 +2708,8 @@ class _CreateMarketPropertyRequestPageState
                           controller: _budgetMinCtrl,
                           label: _isAr ? 'المبلغ من' : 'Amount min',
                           enabled: !busy,
+                          isAr: _isAr,
+                          alignOpposite: true,
                           inputFormatters: _moneyInputFormatters,
                         ),
                       ),
@@ -2186,6 +2720,8 @@ class _CreateMarketPropertyRequestPageState
                           label: _isAr ? 'المبلغ إلى' : 'Amount max',
                           enabled: !busy,
                           textInputAction: TextInputAction.next,
+                          isAr: _isAr,
+                          alignOpposite: true,
                           inputFormatters: _moneyInputFormatters,
                         ),
                       ),
@@ -2205,158 +2741,30 @@ class _CreateMarketPropertyRequestPageState
             border: const OutlineInputBorder(),
           ),
         ),
-        if (_wantsResidentialDetailFields()) ...[
-          const SizedBox(height: 16),
-          Text(
-            _isAr ? 'تفاصيل سكنية (اختياري)' : 'Residential details (optional)',
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<int?>(
-                  value: _bedrooms,
-                  decoration: deco(_isAr ? 'غرف نوم' : 'Bedrooms'),
-                  isExpanded: true,
-                  items: [
-                    DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text(_isAr ? 'غير محدد' : 'Any'),
-                    ),
-                    for (var n = 1; n <= 12; n++)
-                      DropdownMenuItem<int?>(
-                        value: n,
-                        child: Text('$n'),
-                      ),
-                  ],
-                  onChanged: busy ? null : (v) => setState(() => _bedrooms = v),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<int?>(
-                  value: _bathrooms,
-                  decoration: deco(_isAr ? 'دورات مياه' : 'Bathrooms'),
-                  isExpanded: true,
-                  items: [
-                    DropdownMenuItem<int?>(
-                      value: null,
-                      child: Text(_isAr ? 'غير محدد' : 'Any'),
-                    ),
-                    for (var n = 1; n <= 10; n++)
-                      DropdownMenuItem<int?>(
-                        value: n,
-                        child: Text('$n'),
-                      ),
-                  ],
-                  onChanged:
-                      busy ? null : (v) => setState(() => _bathrooms = v),
-                ),
-              ),
-            ],
-          ),
-          if (_wantsAmenityFields()) ...[
-          const SizedBox(height: 10),
-          Text(
-            _isAr ? 'الخدمات المطلوبة' : 'Desired amenities',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: cs.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            children: _requestAmenityToggles.keys.map((k) {
-              final on = _requestAmenityToggles[k] ?? false;
-              const chipGreen = Color(0xFF16A34A);
-              return StableSelectChip(
-                label: _amenityLabel(k),
-                selected: on,
-                selectedColor: Theme.of(context).brightness == Brightness.dark
-                    ? cs.primaryContainer.withValues(alpha: 0.85)
-                    : chipGreen.withValues(alpha: 0.22),
-                checkColor: chipGreen,
-                onSelected: busy
-                    ? null
-                    : (v) => setState(() => _requestAmenityToggles[k] = v),
-              );
-            }).toList(),
-          ),
-          ],
-        ],
-        const SizedBox(height: 8),
-        SwitchListTile(
-          value: _preferNew,
-          onChanged: busy ? null : (v) => setState(() => _preferNew = v),
-          title: Text(
-            _isAr ? 'أفضّل عقاراً جديداً' : 'Prefer newer property',
+        const SizedBox(height: 14),
+        AqarTextField(
+          controller: _titleCtrl,
+          readOnly: true,
+          decoration: InputDecoration(
+            labelText: _isAr ? 'عنوان الطلب' : 'Request title',
+            border: const OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 20),
-        Text(
-          _isAr ? 'صورة للطلب (اختياري)' : 'Request image (optional)',
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: 72,
-                height: 72,
-                color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
-                alignment: Alignment.center,
-                child: _coverBytes == null
-                    ? BrandingLogoImage(
-                        width: 48,
-                        height: 48,
-                        fit: BoxFit.contain,
-                        errorIcon: Icons.add_photo_alternate_outlined,
-                      )
-                    : Image.memory(
-                        _coverBytes!,
-                        width: 72,
-                        height: 72,
-                        fit: BoxFit.cover,
-                      ),
-              ),
+        const SizedBox(height: 10),
+        AqarTextField(
+          controller: _descCtrl,
+          enabled: !busy,
+          minLines: 3,
+          maxLines: 8,
+          decoration: InputDecoration(
+            labelText: _isAr ? 'تفاصيل العقار' : 'Property details',
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+              tooltip: _isAr ? 'تفاصيل مناسبة' : 'Suggest details',
+              onPressed: busy ? null : _fillSmartDetails,
+              icon: const Icon(Icons.auto_awesome_outlined),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: busy ? null : _showCoverPickMenu,
-                    icon: const Icon(Icons.add_photo_alternate_outlined),
-                    label: Text(
-                      _isAr
-                          ? 'صورة (معرض / كاميرا / ملف)'
-                          : 'Image (gallery / camera / file)',
-                    ),
-                  ),
-                  if (_coverBytes != null)
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () => setState(() {
-                                _coverBytes = null;
-                                _coverFileName = null;
-                                _usedDefaultCover = false;
-                              }),
-                      child: Text(
-                        _isAr ? 'إزالة الصورة' : 'Remove image',
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
         const SizedBox(height: 12),
         Text(
@@ -2369,44 +2777,68 @@ class _CreateMarketPropertyRequestPageState
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_profileAvatarUrl.isNotEmpty) ...[
-              ClipOval(
-                child: CachedNetworkImage(
-                  imageUrl: _profileAvatarUrl,
-                  width: 48,
-                  height: 48,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              child: AqarTextField(
-                controller: _publicNameCtrl,
-                focusNode: _publicNameFocus,
-                enabled: !busy,
-                decoration: InputDecoration(
-                  labelText: _isAr
-                      ? 'الاسم الظاهر للمهتمين *'
-                      : 'Name shown to responders *',
-                  hintText: _isAr
-                      ? 'يُقترح من هويتك (معتمد أو مستعار)'
-                      : 'Suggested from your identity prefs',
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ),
-          ],
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            _isAr
+                ? 'إظهار اسمي في السوق العقاري'
+                : 'Show my name on the market',
+            style: const TextStyle(fontWeight: FontWeight.w800, height: 1.25),
+          ),
+          subtitle: Text(
+            _isAr
+                ? 'اختياري: الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو المستعار. الجوال لا يظهر.'
+                : 'Optional official or alias name. Phone stays hidden.',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          value: _showRequesterNameOnCards,
+          onChanged: busy
+              ? null
+              : (v) => setState(() => _showRequesterNameOnCards = v),
         ),
+        if (_showRequesterNameOnCards) ...[
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_profileAvatarUrl.isNotEmpty) ...[
+                ClipOval(
+                  child: CachedNetworkImage(
+                    imageUrl: _profileAvatarUrl,
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: AqarTextField(
+                  controller: _publicNameCtrl,
+                  focusNode: _publicNameFocus,
+                  enabled: !busy,
+                  decoration: InputDecoration(
+                    labelText: _isAr
+                        ? 'الاسم الظاهر للمهتمين'
+                        : 'Name shown to responders',
+                    hintText: _isAr
+                        ? 'يُقترح من هويتك (معتمد أو مستعار)'
+                        : 'Suggested from your identity prefs',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 12),
         PublisherIdentityOptionsCard(
           isAr: _isAr,
           compact: true,
           enabled: !busy,
+          hidePhoneOptions: true,
+          marketContactLocked: true,
           nameSource: _pubNameSource,
           phoneSource: _pubPhoneSource,
           publishPresence: _publishPresenceOnCards,
@@ -2419,15 +2851,10 @@ class _CreateMarketPropertyRequestPageState
             if (!mounted) return;
             setState(() {
               _pubNameSource = v;
-              final n =
-                  PublisherIdentityPrefs.instance.resolvedPublicName(isAr: _isAr);
+              final n = PublisherIdentityPrefs.instance
+                  .resolvedPublicName(isAr: _isAr);
               if (n.isNotEmpty) _publicNameCtrl.text = n;
             });
-          },
-          onPhoneSourceChanged: (v) async {
-            await PublisherIdentityPrefs.instance.setPhoneSource(v);
-            if (!mounted) return;
-            setState(() => _pubPhoneSource = v);
           },
           onPublishPresenceChanged: (v) async {
             await PublisherIdentityPrefs.instance.setPublishPresenceOnCards(v);
@@ -2477,16 +2904,13 @@ class _CreateMarketPropertyRequestPageState
         await _handleFormExitFromPop(result);
       },
       child: Scaffold(
+        resizeToAvoidBottomInset: false,
         appBar: AppBar(
         automaticallyImplyLeading: false,
-        leading: !widget.embedAppBar
-            ? AppPageCloseButton(
+        leading: AppPageCloseButton(
                 isArabic: _isAr,
-                onPressed: () {
-                  if (Navigator.canPop(context)) Navigator.pop(context);
-                },
-              )
-            : null,
+                onPressed: () => unawaited(_onComposerClosePressed()),
+              ),
         title: Text(
           _isEditing
               ? (_isAr ? 'تعديل الطلب العقاري' : 'Edit property request')
@@ -2504,20 +2928,20 @@ class _CreateMarketPropertyRequestPageState
             ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(6),
+          preferredSize: const Size.fromHeight(28),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                minHeight: 4,
-                value: (_step + 1) / _stepCount,
-              ),
+            child: ComposerStepConstellation(
+              step: _step + 1,
+              total: _stepCount,
+              accent: Theme.of(context).colorScheme.primary,
             ),
           ),
         ),
         ),
-        body: _saving
+        body: AppKeyboardPad(
+          extra: 8,
+          child: _saving
           ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2640,6 +3064,7 @@ class _CreateMarketPropertyRequestPageState
               },
             ),
         ),
+      ),
     );
   }
 }

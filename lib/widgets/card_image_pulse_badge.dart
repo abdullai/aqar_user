@@ -8,6 +8,7 @@ class CardImagePulseBadge extends StatefulWidget {
     required this.color,
     this.icon = Icons.bolt_rounded,
     this.prominent = false,
+    this.pulse = true,
   });
 
   final String label;
@@ -16,6 +17,9 @@ class CardImagePulseBadge extends StatefulWidget {
 
   /// شارة أوضح للمستعجل المدفوع (وميض أقوى + حجم أكبر).
   final bool prominent;
+
+  /// «عادي» ثابت دون وميض حتى لا يزاحم صورة البطاقة.
+  final bool pulse;
 
   @override
   State<CardImagePulseBadge> createState() => _CardImagePulseBadgeState();
@@ -32,7 +36,10 @@ class _CardImagePulseBadgeState extends State<CardImagePulseBadge>
     _ctrl = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: widget.prominent ? 900 : 1400),
-    )..repeat(reverse: true);
+    );
+    if (widget.pulse) {
+      _ctrl.repeat(reverse: true);
+    }
     _pulse = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
   }
 
@@ -78,28 +85,31 @@ class _CardImagePulseBadgeState extends State<CardImagePulseBadge>
           horizontal: prominent ? 12 : 8,
           vertical: prominent ? 6.5 : 4,
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              widget.icon,
-              size: prominent ? 15 : 11,
-              color: Colors.white,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              widget.label,
-              maxLines: 1,
-              softWrap: false,
-              style: TextStyle(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                widget.icon,
+                size: prominent ? 15 : 11,
                 color: Colors.white,
-                fontSize: prominent ? 12 : 9.5,
-                fontWeight: FontWeight.w900,
-                height: 1.0,
-                letterSpacing: prominent ? 0.2 : 0,
               ),
-            ),
-          ],
+              const SizedBox(width: 5),
+              Text(
+                widget.label,
+                maxLines: 1,
+                softWrap: false,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: prominent ? 12 : 9.5,
+                  fontWeight: FontWeight.w900,
+                  height: 1.0,
+                  letterSpacing: prominent ? 0.2 : 0,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -10,6 +10,7 @@ import '../core/branding/app_branding.dart';
 import '../core/branding/branding_pdf.dart';
 import '../core/pdf/pdf_readable_qr.dart';
 import '../core/share/app_listing_links.dart';
+import '../core/utils/date_helper.dart';
 
 /// توليد PDF لعقد تسويق: نص كامل (عربي عند توفر الخط)، رقم العقد، التواريخ، QR للتحقق، توقيعان.
 class ContractPdfService {
@@ -49,8 +50,7 @@ class ContractPdfService {
           );
     final verifyUrl = verifyUri.toString();
     final now = DateTime.now().toLocal();
-    final issuedDate =
-        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    final issuedDate = DateHelper.civilDigits(now);
 
     final title = isAr ? 'عقد تسويق عقاري' : 'Real estate marketing contract';
     final idLabel = isAr ? 'رقم العقد' : 'Contract no.';
@@ -471,17 +471,14 @@ class ContractPdfService {
     }
     if (latest == null) return '';
     final d =
-        '${latest.year}-${latest.month.toString().padLeft(2, '0')}-${latest.day.toString().padLeft(2, '0')} '
-        '${latest.hour.toString().padLeft(2, '0')}:${latest.minute.toString().padLeft(2, '0')}';
+        '${DateHelper.civilDigits(latest)}${DateHelper.dateTimeGap}${DateHelper.fmtClock(latest)}';
     if (isAr) {
       return '$d (توقيع المالك: ${o != null ? _shortDate(o) : '—'} — المسوّق: ${m != null ? _shortDate(m) : '—'})';
     }
     return '$d (owner: ${o != null ? _shortDate(o) : '—'}, marketer: ${m != null ? _shortDate(m) : '—'})';
   }
 
-  static String _shortDate(DateTime dt) {
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-  }
+  static String _shortDate(DateTime dt) => DateHelper.civilDigits(dt);
 
   static List<String> _splitContractBody(String raw) {
     if (raw.isEmpty) return const [''];

@@ -11,6 +11,7 @@ class InboxBulkToolbar extends StatelessWidget {
     required this.onClearSelection,
     required this.onArchive,
     required this.onDelete,
+    this.onMarkRead,
     this.showArchive = true,
   });
 
@@ -21,6 +22,7 @@ class InboxBulkToolbar extends StatelessWidget {
   final VoidCallback onClearSelection;
   final VoidCallback onArchive;
   final VoidCallback onDelete;
+  final VoidCallback? onMarkRead;
   final bool showArchive;
 
   @override
@@ -56,6 +58,12 @@ class InboxBulkToolbar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (onMarkRead != null)
+                  IconButton(
+                    tooltip: isAr ? 'كمقروء' : 'Mark read',
+                    onPressed: onMarkRead,
+                    icon: const Icon(Icons.mark_email_read_outlined),
+                  ),
                 if (showArchive)
                   IconButton(
                     tooltip: isAr ? 'أرشفة' : 'Archive',
@@ -70,97 +78,6 @@ class InboxBulkToolbar extends StatelessWidget {
               ],
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// زر فرز + أرشيف + قراءة الكل لصناديق الوارد.
-class InboxActionsBar extends StatelessWidget {
-  const InboxActionsBar({
-    super.key,
-    required this.isAr,
-    required this.sortLabel,
-    required this.onSortTap,
-    required this.onMarkAllRead,
-    this.onToggleArchive,
-    this.showArchiveToggle = false,
-    this.archiveActive = false,
-    this.onToggleSelectMode,
-    this.selectMode = false,
-  });
-
-  final bool isAr;
-  final String sortLabel;
-  final VoidCallback onSortTap;
-  final VoidCallback onMarkAllRead;
-  final VoidCallback? onToggleArchive;
-  final bool showArchiveToggle;
-  final bool archiveActive;
-  final VoidCallback? onToggleSelectMode;
-  final bool selectMode;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            TextButton.icon(
-              onPressed: onMarkAllRead,
-              icon: const Icon(Icons.mark_email_read_outlined, size: 18),
-              label: Text(
-                isAr ? 'قراءة الكل' : 'Mark all read',
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              ),
-            ),
-            TextButton.icon(
-              onPressed: onSortTap,
-              icon: const Icon(Icons.sort_rounded, size: 18),
-              label: Text(
-                sortLabel,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                  color: cs.primary,
-                ),
-              ),
-            ),
-            if (showArchiveToggle && onToggleArchive != null)
-              TextButton.icon(
-                onPressed: onToggleArchive,
-                icon: Icon(
-                  archiveActive ? Icons.inbox : Icons.archive_outlined,
-                  size: 18,
-                ),
-                label: Text(
-                  archiveActive
-                      ? (isAr ? 'الوارد' : 'Inbox')
-                      : (isAr ? 'الأرشيف' : 'Archive'),
-                  style:
-                      const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-              ),
-            if (onToggleSelectMode != null)
-              TextButton.icon(
-                onPressed: onToggleSelectMode,
-                icon: Icon(
-                  selectMode ? Icons.close_rounded : Icons.checklist_rounded,
-                  size: 18,
-                ),
-                label: Text(
-                  selectMode
-                      ? (isAr ? 'إنهاء' : 'Done')
-                      : (isAr ? 'تحديد' : 'Select'),
-                  style:
-                      const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-              ),
-          ],
         ),
       ),
     );

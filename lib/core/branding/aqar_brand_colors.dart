@@ -14,6 +14,33 @@ abstract final class AqarBrandColors {
   static const Color alertRed = Color(0xFFDA3E27);
   static const Color alertBg = Color(0xFFFFF2F0);
 
+  /// سطح ليلي للهوية — يُستخدم بدل [bg]/[cardBg]/[border] الثابتة النهارية.
+  static const Color nightSurface = Color(0xFF071210);
+  static const Color nightCard = Color(0xFF0F1C19);
+  static const Color nightBorder = Color(0xFF2A3D38);
+  static const Color nightWash = Color(0xFF14302B);
+  static const Color nightInk = Color(0xFFF7FAF8);
+  static const Color nightAlertBg = Color(0xFF3A1A16);
+
+  static bool isDarkScheme(ColorScheme cs) =>
+      cs.brightness == Brightness.dark;
+
+  static Color surface(ColorScheme cs) =>
+      isDarkScheme(cs) ? nightSurface : bg;
+
+  static Color card(ColorScheme cs) => isDarkScheme(cs) ? nightCard : cardBg;
+
+  static Color frame(ColorScheme cs) =>
+      isDarkScheme(cs) ? nightBorder : border;
+
+  static Color wash(ColorScheme cs) =>
+      isDarkScheme(cs) ? nightWash : accent;
+
+  static Color ink(ColorScheme cs) => isDarkScheme(cs) ? nightInk : dark;
+
+  static Color alertFill(ColorScheme cs) =>
+      isDarkScheme(cs) ? nightAlertBg : alertBg;
+
   /// إطار ذهبي للطلبات المدفوعة / ذات الأولوية النشطة.
   static Border goldPriorityBorder({double width = 1.8}) => Border.all(
         color: gold.withValues(alpha: 0.85),

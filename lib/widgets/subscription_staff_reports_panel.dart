@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/payment/invoice_copy.dart';
+import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
+import '../services/report_service.dart';
 import '../services/subscription_admin_report_service.dart';
 import 'app_logo_loading.dart';
 
@@ -44,7 +46,7 @@ class _SubscriptionStaffReportsPanelState
       }
       return;
     }
-    final b = await _svc.fetchBillingSuccess();
+    final b = await _svc.fetchBilling();
     final l = await _svc.fetchLifecycleEvents();
     if (!mounted) return;
     setState(() {
@@ -55,62 +57,51 @@ class _SubscriptionStaffReportsPanelState
     });
   }
 
+  double _amt(Map<String, dynamic> r) {
+    final raw = r['amount'];
+    if (raw is num) return raw.toDouble();
+    return double.tryParse('${raw ?? ''}') ?? 0.0;
+  }
+
+  String _amountLabel(Map<String, dynamic> r) =>
+      AppMoney.formatForExport(_amt(r), isAr: widget.isAr, maxFractionDigits: 2);
+
   Future<void> _printBillingPdf() async {
-    final doc = pw.Document();
-    final rows = _billing.take(60).toList();
-    doc.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4,
-        build: (ctx) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(
-              widget.isAr ? 'مدفوعات ناجحة (ملخص)' : 'Successful payments (summary)',
-              style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
-            ),
-            pw.SizedBox(height: 12),
-            pw.Table(
-              border: pw.TableBorder.all(width: 0.4),
-              children: [
-                pw.TableRow(
-                  children: (widget.isAr
-                          ? ['مبلغ', 'طريقة', 'أُكمل']
-                          : ['Amount', 'Method', 'Completed'])
-                      .map((h) => pw.Padding(
-                            padding: const pw.EdgeInsets.all(4),
-                            child: pw.Text(
-                              h,
-                              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                            ),
-                          ))
-                      .toList(),
-                ),
-                ...rows.map(
-                  (r) => pw.TableRow(
-                    children: [
-                      '${r['amount'] ?? ''}',
-                      '${r['payment_method'] ?? ''}',
-                      '${r['completed_at'] ?? ''}',
-                    ]
-                        .map(
-                          (c) => pw.Padding(
-                            padding: const pw.EdgeInsets.all(4),
-                            child: pw.Text(
-                              c,
-                              style: const pw.TextStyle(fontSize: 9),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+    final isAr = widget.isAr;
+    final cfg = ReportConfig(
+      id: 'staff_billing',
+      title: isAr ? 'مدفوعات المنصة' : 'Platform billing',
+      columns: isAr
+          ? const ['المبلغ', 'الطريقة', 'الحالة', 'الغرض', 'أُكمل']
+          : const ['Amount', 'Method', 'Status', 'Purpose', 'Completed'],
+      rows: _billing
+          .take(80)
+          .map(
+            (r) => [
+              _amountLabel(r),
+              InvoiceCopy.methodLabel(
+                '${r['payment_method'] ?? ''}',
+                isAr: isAr,
+              ),
+              '${r['status'] ?? ''}',
+              InvoiceCopy.purposeLabel(
+                InvoiceCopy.purposeFromRow(r),
+                isAr: isAr,
+              ),
+              DateHelper.fmtCivilDateTimeRaw(
+                r['completed_at'] ?? r['created_at'],
+                isAr: isAr,
+              ),
+            ],
+          )
+          .toList(),
+      filtersDescription: isAr
+          ? 'يشمل المكتمل والمسترد والمعلّق'
+          : 'Includes success, refunded, and pending',
     );
-    await Printing.layoutPdf(onLayout: (_) async => doc.save());
+    final bytes =
+        await ReportService(Supabase.instance.client).exportToPdf(cfg, isAr: isAr);
+    await Printing.layoutPdf(onLayout: (_) async => bytes);
   }
 
   @override
@@ -189,7 +180,7 @@ class _SubscriptionStaffReportsPanelState
             ),
             const SizedBox(height: 12),
             Text(
-              widget.isAr ? 'آخر المدفوعات الناجحة' : 'Latest successful payments',
+              widget.isAr ? 'آخر العمليات (كل الحالات)' : 'Latest billing (all statuses)',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: cs.primary,
@@ -210,15 +201,33 @@ class _SubscriptionStaffReportsPanelState
                           label: Text(widget.isAr ? 'الطريقة' : 'Method'),
                         ),
                         DataColumn(
+                          label: Text(widget.isAr ? 'الحالة' : 'Status'),
+                        ),
+                        DataColumn(
                           label: Text(widget.isAr ? 'التاريخ' : 'Completed'),
                         ),
                       ],
                       rows: _billing.take(40).map((r) {
                         return DataRow(
                           cells: [
-                            DataCell(Text('${r['amount'] ?? ''}')),
-                            DataCell(Text('${r['payment_method'] ?? ''}')),
-                            DataCell(Text('${r['completed_at'] ?? ''}')),
+                            DataCell(Text(_amountLabel(r))),
+                            DataCell(
+                              Text(
+                                InvoiceCopy.methodLabel(
+                                  '${r['payment_method'] ?? ''}',
+                                  isAr: widget.isAr,
+                                ),
+                              ),
+                            ),
+                            DataCell(Text('${r['status'] ?? ''}')),
+                            DataCell(
+                              Text(
+                                DateHelper.fmtCivilDateTimeRaw(
+                                  r['completed_at'] ?? r['created_at'],
+                                  isAr: widget.isAr,
+                                ),
+                              ),
+                            ),
                           ],
                         );
                       }).toList(),
@@ -251,7 +260,14 @@ class _SubscriptionStaffReportsPanelState
                     return DataRow(
                       cells: [
                         DataCell(Text('${r['event_type'] ?? ''}')),
-                        DataCell(Text('${r['created_at'] ?? ''}')),
+                        DataCell(
+                          Text(
+                            DateHelper.fmtCivilDateTimeRaw(
+                              r['created_at'],
+                              isAr: widget.isAr,
+                            ),
+                          ),
+                        ),
                       ],
                     );
                   }).toList(),

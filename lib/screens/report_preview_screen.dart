@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/branding/branding_pdf.dart';
 import '../core/haptics/app_haptics.dart';
 import '../main.dart' show langNotifier;
 import '../services/report_service.dart';
@@ -20,12 +21,12 @@ class ReportPreviewScreen extends StatelessWidget {
   bool get _isAr => (lang ?? langNotifier.value).toLowerCase() != 'en';
 
   String _qrPayload() {
-    final b = StringBuffer(config.title);
-    if (config.filtersDescription.isNotEmpty) {
-      b.write('\n${config.filtersDescription}');
-    }
-    b.write('\n${config.id}');
-    return b.toString();
+    return documentQrPlainText(
+      isAr: _isAr,
+      kind: config.title,
+      description: config.filtersDescription,
+      rowCount: config.rows.length,
+    );
   }
 
   String _pdfShareName() {

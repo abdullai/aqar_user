@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/gestures/app_keyboard_popups.dart';
+
 /// حوارات موحّدة: رجوع المتصفح/النظام، وتحديث الصفحة على الويب.
 abstract final class AppBackRefreshDialogs {
   static Future<bool> confirmLeaveGuest(BuildContext context, bool isAr) {
@@ -41,7 +43,7 @@ abstract final class AppBackRefreshDialogs {
     required String title,
     required String message,
   }) async {
-    final result = await showDialog<bool>(
+    final result = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(

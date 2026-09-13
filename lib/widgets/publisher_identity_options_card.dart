@@ -19,6 +19,8 @@ class PublisherIdentityOptionsCard extends StatelessWidget {
     this.onPublishPresenceChanged,
     this.compact = false,
     this.enabled = true,
+    this.hidePhoneOptions = false,
+    this.marketContactLocked = false,
   });
 
   final bool isAr;
@@ -34,6 +36,12 @@ class PublisherIdentityOptionsCard extends StatelessWidget {
   final ValueChanged<bool>? onPublishPresenceChanged;
   final bool compact;
   final bool enabled;
+
+  /// في إضافة الإعلان/طلب السوق: الجوال لا يُعرض للعامة أبداً.
+  final bool hidePhoneOptions;
+
+  /// نص نظامي: التواصل يُكشف بعد موافقة المالك على عرض مسوّق.
+  final bool marketContactLocked;
 
   @override
   Widget build(BuildContext context) {
@@ -85,8 +93,12 @@ class PublisherIdentityOptionsCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               isAr
-                  ? 'المعاملات الرسمية تستخدم الاسم/الصفة المعتمدة. يمكنك اختيار المستعار للبطاقات.'
-                  : 'Official deals use your registered name/title. You may choose an alias on cards.',
+                  ? (marketContactLocked
+                      ? 'في السوق العقاري لا يظهر رقم الجوال ولا الدردشة ولا المراسلة لأي زائر. الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو الاسم المستعار اختياري. بعد موافقتك على عرض مسوّق يُكشف الاسم النظامي أو المستعار الذي اختاره عند تقديم العرض، ثم الجوال والدردشة في تبويب التعاقد وتبويب التصريح فقط.'
+                      : 'المعاملات الرسمية تستخدم الاسم/الصفة المعتمدة. يمكنك اختيار المستعار للبطاقات.')
+                  : (marketContactLocked
+                      ? 'Phone, chat, and messaging stay hidden on the public market. Official name (quad / office / institution / company) or an alias is optional. After you accept a marketer’s offer, their chosen identity is shown; phone and chat unlock only in contracting and permit tabs.'
+                      : 'Official deals use your registered name/title. You may choose an alias on cards.'),
               style: TextStyle(
                 fontSize: 12.5,
                 height: 1.35,
@@ -151,56 +163,93 @@ class PublisherIdentityOptionsCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            _labeledBlock(
-              context,
-              label: isAr ? 'رقم الجوال الظاهر' : 'Visible phone',
-              child: SegmentedButton<PublicPhoneSource>(
-                segments: [
-                  ButtonSegment(
-                    value: PublicPhoneSource.primary,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        isAr ? 'الأساسي' : 'Primary',
-                        maxLines: 1,
-                      ),
-                    ),
+            if (hidePhoneOptions || marketContactLocked) ...[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: cs.primary.withValues(alpha: 0.22),
                   ),
-                  ButtonSegment(
-                    value: PublicPhoneSource.secondary,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        isAr ? 'الإضافي' : 'Extra',
-                        maxLines: 1,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.lock_outline, size: 18, color: cs.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          isAr
+                              ? 'رقم الجوال والدردشة والمراسلة لا تُعرض في السوق. تُكشف للمسوّق المختار بعد موافقة المالك، في تبويب التعاقد وتبويب التصريح.'
+                              : 'Phone, chat, and messaging stay off the market. They unlock for the selected marketer after the owner accepts, in contracting and permit tabs.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.35,
+                            fontWeight: FontWeight.w700,
+                            color: cs.onSurface,
+                          ),
+                        ),
                       ),
-                    ),
-                    enabled: secondaryPhone.trim().length >= 10,
+                    ],
                   ),
-                  ButtonSegment(
-                    value: PublicPhoneSource.hidden,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        isAr ? 'إخفاء' : 'Hide',
-                        maxLines: 1,
-                      ),
-                    ),
-                  ),
-                ],
-                selected: {phoneSource},
-                onSelectionChanged: !enabled || onPhoneSourceChanged == null
-                    ? null
-                    : (s) {
-                        if (s.isEmpty) return;
-                        onPhoneSourceChanged!(s.first);
-                      },
-                style: ButtonStyle(
-                  visualDensity: VisualDensity.compact,
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
+              const SizedBox(height: 8),
+            ],
+            if (!hidePhoneOptions) ...[
+              _labeledBlock(
+                context,
+                label: isAr ? 'رقم الجوال الظاهر' : 'Visible phone',
+                child: SegmentedButton<PublicPhoneSource>(
+                  segments: [
+                    ButtonSegment(
+                      value: PublicPhoneSource.primary,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isAr ? 'الأساسي' : 'Primary',
+                          maxLines: 1,
+                        ),
+                      ),
+                    ),
+                    ButtonSegment(
+                      value: PublicPhoneSource.secondary,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isAr ? 'الإضافي' : 'Extra',
+                          maxLines: 1,
+                        ),
+                      ),
+                      enabled: secondaryPhone.trim().length >= 10,
+                    ),
+                    ButtonSegment(
+                      value: PublicPhoneSource.hidden,
+                      label: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          isAr ? 'إخفاء' : 'Hide',
+                          maxLines: 1,
+                        ),
+                      ),
+                    ),
+                  ],
+                  selected: {phoneSource},
+                  onSelectionChanged: !enabled || onPhoneSourceChanged == null
+                      ? null
+                      : (s) {
+                          if (s.isEmpty) return;
+                          onPhoneSourceChanged!(s.first);
+                        },
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             SwitchListTile.adaptive(
               contentPadding: EdgeInsets.zero,
               title: Text(

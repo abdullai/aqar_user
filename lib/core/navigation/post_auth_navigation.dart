@@ -5,6 +5,7 @@ import '../../services/inactivity_service.dart';
 import '../../services/user_session_coordination_service.dart';
 import 'root_overlay_guard.dart';
 import 'start_router_controller.dart';
+import 'web_in_app_nav.dart';
 import 'web_interaction_recovery.dart';
 
 /// انتقال آمن إلى اللوحة أو مسار post-auth — يزيل الطبقات العالقة ويحدّث ساعة الخمول.
@@ -88,6 +89,7 @@ abstract final class PostAuthNavigation {
   }
 
   static void _afterWebDashboardNav() {
+    WebInAppNav.clearReplayStack();
     if (!kIsWeb) return;
     WebInteractionRecovery.dismissStuckOverlaysOnce();
     WebInteractionRecovery.scheduleDashboardRecovery(

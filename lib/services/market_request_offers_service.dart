@@ -18,7 +18,7 @@ class MarketRequestOffersService {
     final res = await _sb
         .from('market_request_offers')
         .select(
-          'id,created_at,status,message,price_offer,offerer_id',
+          'id,created_at,updated_at,status,message,price_offer,offerer_id,owner_accepted_at',
         )
         .eq('market_request_id', id)
         .order('created_at', ascending: false);
@@ -27,22 +27,79 @@ class MarketRequestOffersService {
     return rows.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
+  /// عروض إتمام صفقة حيّة على طلبات يملكها المستخدم (تبويب العروض الواردة).
+  Future<List<Map<String, dynamic>>> listLiveOffersOnRequests(
+    List<String> requestIds,
+  ) async {
+    final ids = requestIds
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return const [];
+    Object res;
+    try {
+      res = await _sb
+          .from('market_request_offers')
+          .select(
+            'id,created_at,updated_at,status,message,price_offer,offerer_id,market_request_id,owner_accepted_at',
+          )
+          .inFilter('market_request_id', ids)
+          .order('created_at', ascending: false)
+          .limit(200);
+    } catch (_) {
+      res = await _sb
+          .from('market_request_offers')
+          .select(
+            'id,created_at,status,message,price_offer,offerer_id,market_request_id',
+          )
+          .inFilter('market_request_id', ids)
+          .order('created_at', ascending: false)
+          .limit(200);
+    }
+    final rows = (res as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    const live = {
+      'submitted',
+      'pending',
+      'accepted',
+      'approved',
+      'selected',
+      '',
+    };
+    return rows.where((o) {
+      final st = (o['status'] ?? '').toString().toLowerCase().trim();
+      return live.contains(st);
+    }).toList(growable: false);
+  }
+
   /// نفس [listOffersForRequest] مع اسم وصورة مقدّم العرض من [users_profiles].
   Future<List<Map<String, dynamic>>> listOffersForRequestEnriched(
     String requestId, {
     bool preferArabicNames = true,
   }) async {
     final raw = await listOffersForRequest(requestId);
-    if (raw.isEmpty) return raw;
+    return enrichOfferRows(raw, preferArabicNames: preferArabicNames);
+  }
 
+  /// يضيف اسم وصورة مقدّم العرض إلى صفوف جاهزة.
+  Future<List<Map<String, dynamic>>> enrichOfferRows(
+    List<Map<String, dynamic>> raw, {
+    bool preferArabicNames = true,
+  }) async {
+    if (raw.isEmpty) return raw;
     final ids = raw
         .map((e) => (e['offerer_id'] ?? '').toString().trim())
         .where((e) => e.isNotEmpty)
         .toSet()
         .toList();
     if (ids.isEmpty) return raw;
-
-    final byUser = await UsersProfilesSafeSelect.fetchProfilesByIds(_sb, ids);
+    final byUser = await UsersProfilesSafeSelect.fetchProfilesByIds(
+      _sb,
+      ids,
+      columnAttempts: UsersProfilesSafeSelect.dealPartyProfileColumns,
+    );
 
     String offererName(Map<String, dynamic>? prof) {
       if (prof == null) return '';
@@ -70,10 +127,29 @@ class MarketRequestOffersService {
         '_offerer_avatar_url': (prof?['avatar_url'] ?? '').toString().trim(),
         '_offerer_account_type': (prof?['account_type'] ?? '').toString(),
         '_offerer_phone': (prof?['phone'] ?? '').toString().trim(),
-        '_offerer_city': (prof?['city'] ?? '').toString().trim(),
+        '_offerer_city': _addressFromProfile(prof, preferArabicNames),
         '_offerer_license_no': (prof?['license_no'] ?? '').toString().trim(),
       };
     }).toList(growable: false);
+  }
+
+  static String _addressFromProfile(
+    Map<String, dynamic>? prof,
+    bool preferArabic,
+  ) {
+    if (prof == null) return '';
+    String pick(dynamic v) => (v?.toString() ?? '').trim();
+    final parts = <String>[
+      if (preferArabic) pick(prof['city_ar']) else pick(prof['city_en']),
+      pick(prof['city']),
+      pick(prof['district']),
+      pick(prof['address_line']),
+    ].where((s) => s.isNotEmpty).toList();
+    final seen = <String>{};
+    return [
+      for (final p in parts)
+        if (seen.add(p)) p,
+    ].join(' · ');
   }
 
   Future<bool> submitOffer({
@@ -115,7 +191,15 @@ class MarketRequestOffersService {
               .update(patch)
               .eq('market_request_id', rid)
               .eq('offerer_id', uid)
-              .inFilter('status', ['submitted', 'pending', 'accepted']);
+              .inFilter('status', [
+            'submitted',
+            'pending',
+            'withdrawn',
+            'rejected',
+            'declined',
+            'cancelled',
+            'canceled',
+          ]);
         } on PostgrestException catch (updateError) {
           final detail = '${updateError.message} ${updateError.details ?? ''}'
               .toLowerCase();
@@ -126,7 +210,15 @@ class MarketRequestOffersService {
               .update(patch)
               .eq('market_request_id', rid)
               .eq('offerer_id', uid)
-              .inFilter('status', ['submitted', 'pending', 'accepted']);
+              .inFilter('status', [
+            'submitted',
+            'pending',
+            'withdrawn',
+            'rejected',
+            'declined',
+            'cancelled',
+            'canceled',
+          ]);
         }
         await _notifyRequesterOfferSubmitted(rid, uid, updated: true);
         return true;
@@ -194,6 +286,7 @@ class MarketRequestOffersService {
   Future<void> completeRequest({
     required String requestId,
     String? offerId,
+    String? note,
   }) async {
     final rid = requestId.trim();
     if (rid.isEmpty) return;
@@ -202,6 +295,7 @@ class MarketRequestOffersService {
       params: {
         'p_request_id': rid,
         'p_offer_id': (offerId ?? '').trim().isEmpty ? null : offerId!.trim(),
+        'p_note': (note ?? '').trim(),
       },
     );
     await _notifyRequestCompleted(requestId: rid, offerId: offerId);
@@ -254,21 +348,22 @@ class MarketRequestOffersService {
     if (rid.isEmpty) return;
 
     if (accept) {
+      final already = await _sb
+          .from('market_request_offers')
+          .select('id')
+          .eq('market_request_id', rid)
+          .neq('id', offerId)
+          .inFilter('status', ['accepted', 'approved', 'selected'])
+          .limit(1);
+      if ((already as List).isNotEmpty) {
+        throw StateError('another_offer_already_selected');
+      }
       await _sb.from('market_request_offers').update({
         'status': 'accepted',
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', offerId);
-      await _sb
-          .from('market_request_offers')
-          .update({
-            'status': 'rejected',
-            'updated_at': DateTime.now().toUtc().toIso8601String(),
-          })
-          .eq('market_request_id', rid)
-          .neq('id', offerId)
-          .inFilter('status', ['submitted', 'pending']);
       await _sb.from('market_property_requests').update({
-        'status': 'completed',
+        'selected_offer_id': offerId,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', rid);
     } else {

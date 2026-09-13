@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../core/compliance/platform_policy_copy.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../l10n/app_localizations.dart';
 import '../screens/platform_policies_screen.dart';
+import 'app_page_close_button.dart';
 
 /// إقرار الشروط لمرة واحدة: مربع صح إلزامي + رابط يفتح السياسة كنافذة منبثقة.
 /// لا يُغلق بالضغط خارجها ولا بزر موافقة قبل التأشير.
@@ -10,7 +12,7 @@ Future<bool> showLegalTermsAckDialog(
   BuildContext context, {
   required bool isAr,
 }) async {
-  final result = await showDialog<bool>(
+  final result = await showAppDialog<bool>(
     context: context,
     barrierDismissible: false,
     builder: (ctx) => _LegalTermsAckDialog(isAr: isAr),
@@ -33,7 +35,7 @@ class _LegalTermsAckDialogState extends State<_LegalTermsAckDialog> {
   Future<void> _openTermsPopup() async {
     final size = MediaQuery.sizeOf(context);
     final narrow = size.width < 520;
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       barrierDismissible: true,
       builder: (ctx) {
@@ -65,10 +67,8 @@ class _LegalTermsAckDialogState extends State<_LegalTermsAckDialog> {
                           ),
                         ),
                       ),
-                      IconButton(
-                        tooltip: widget.isAr ? 'إغلاق' : 'Close',
+                      AppPageCloseButton(
                         onPressed: () => Navigator.of(ctx).pop(),
-                        icon: const Icon(Icons.close_rounded),
                       ),
                     ],
                   ),

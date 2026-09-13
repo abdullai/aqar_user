@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/session/web_session_ttl.dart';
 import '../theme.dart';
 import '../core/share/listing_deep_link.dart';
+import '../core/utils/compound_display_name.dart';
 import '../core/utils/dashboard_greeting.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart' show langNotifier;
@@ -112,27 +113,27 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
   String _quadName() {
     String pick(dynamic v) => (v?.toString() ?? '').trim();
     if (_isAr) {
-      final q = [
+      final q = CompoundDisplayName.normalize([
         pick(_profileRow['first_name_ar']),
         pick(_profileRow['second_name_ar']),
         pick(_profileRow['third_name_ar']),
         pick(_profileRow['fourth_name_ar']),
-      ].where((s) => s.isNotEmpty).join(' ').trim();
+      ].where((s) => s.isNotEmpty).join(' '));
       if (q.isNotEmpty) return q;
-      final f = pick(_profileRow['full_name_ar']);
+      final f = CompoundDisplayName.normalize(pick(_profileRow['full_name_ar']));
       if (f.isNotEmpty) return f;
     } else {
-      final q = [
+      final q = CompoundDisplayName.normalize([
         pick(_profileRow['first_name_en']),
         pick(_profileRow['second_name_en']),
         pick(_profileRow['third_name_en']),
         pick(_profileRow['fourth_name_en']),
-      ].where((s) => s.isNotEmpty).join(' ').trim();
+      ].where((s) => s.isNotEmpty).join(' '));
       if (q.isNotEmpty) return q;
-      final f = pick(_profileRow['full_name_en']);
+      final f = CompoundDisplayName.normalize(pick(_profileRow['full_name_en']));
       if (f.isNotEmpty) return f;
     }
-    final full = pick(_profileRow['full_name']);
+    final full = CompoundDisplayName.normalize(pick(_profileRow['full_name']));
     if (full.isNotEmpty) return full;
     return pick(_profileRow['username']);
   }
@@ -383,9 +384,6 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
             leading: !widget.suppressImpliedLeading
                 ? AppPageCloseButton(
                     isArabic: _isAr,
-                    onPressed: () {
-                      if (Navigator.canPop(context)) Navigator.pop(context);
-                    },
                   )
                 : null,
             title: Text(_isAr ? 'إدارتي' : 'My desk'),
@@ -403,9 +401,6 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
             leading: !widget.suppressImpliedLeading
                 ? AppPageCloseButton(
                     isArabic: _isAr,
-                    onPressed: () {
-                      if (Navigator.canPop(context)) Navigator.pop(context);
-                    },
                   )
                 : null,
             title: Text(_isAr ? 'إدارتي' : 'My desk'),
@@ -428,9 +423,6 @@ class _MarketerDashboardPageState extends State<MarketerDashboardPage>
           leading: !widget.suppressImpliedLeading
               ? AppPageCloseButton(
                   isArabic: _isAr,
-                  onPressed: () {
-                    if (Navigator.canPop(context)) Navigator.pop(context);
-                  },
                 )
               : null,
           toolbarHeight: 72,

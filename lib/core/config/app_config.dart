@@ -4,9 +4,11 @@
 // still use [themeModeNotifier], [langNotifier], and [accentSeedNotifier] in
 // `main.dart` (loaded from SharedPreferences at startup).
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import '../../shared/core/supabase_runtime_overrides.dart';
 import '../theme/app_accent.dart';
 
 /// App-wide constants (English identifiers; UI strings stay in l10n).
@@ -72,10 +74,18 @@ abstract final class AppConfig {
   static Color accentSeedAt(int index) =>
       AppAccent.seedForIndex(index.clamp(0, AppAccent.count - 1));
 
-  /// نفس المفتاح المستخدم في `web/index.html` لـ Maps JavaScript API.
-  /// يُستعمل لصورة خريطة ثابتة على الويب عند فشل DNS لخوادم OSM الأخرى.
-  static const String googleMapsWebBrowserKey =
-      'AIzaSyB1GB51H6O-8O5wab9WnEDSj5aY_qQL4Vs';
+  /// مفتاح Maps JavaScript — من `--dart-define` أو dotenv أو `supabase_config.json`.
+  /// قيّده في Google Cloud (HTTP referrer / Android SHA / iOS bundle). لا قيمة افتراضية في الكود.
+  static String get googleMapsWebBrowserKey {
+    const fromDefine = String.fromEnvironment(
+      'GOOGLE_MAPS_WEB_KEY',
+      defaultValue: '',
+    );
+    if (fromDefine.trim().isNotEmpty) return fromDefine.trim();
+    final fromWeb = (SupabaseRuntimeOverrides.webGoogleMapsKey ?? '').trim();
+    if (fromWeb.isNotEmpty) return fromWeb;
+    return (dotenv.env['GOOGLE_MAPS_WEB_KEY'] ?? '').trim();
+  }
 
   /// عند `true`: زر «نشر الإعلان» يظهر في تبويب التصريح حتى في مرحلة `permit_pending` دون تصريح.
   /// في الإنتاج يُفضّل `false` حتى يُكمَل رفع/ربط التصريح قبل النشر.
@@ -108,19 +118,8 @@ abstract final class AppConfig {
 
 /// Responsive shell / navigation breakpoints.
 abstract final class AppLayout {
-  static bool _isHandheldNative() {
-    if (kIsWeb) return false;
-    return defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS;
-  }
-
-  /// Narrow phone/tablet native: full-width content. Desktop native: centered column.
-  /// Web: full viewport width (RTL rail + lists); avoids a narrow centered column.
-  static bool shouldConstrainAppShell(BuildContext context) {
-    if (_isHandheldNative()) return false;
-    if (kIsWeb) return false;
-    return true;
-  }
+  /// لا نضيّق التطبيق بالكامل: النماذج تقيّد نفسها، واللوحة تستخدم عرض الشاشة.
+  static bool shouldConstrainAppShell(BuildContext context) => false;
 
   /// Bottom [NavigationBar] on all platforms (phones, web, desktop native).
   static bool useDashboardSideNavigation(BuildContext context) {

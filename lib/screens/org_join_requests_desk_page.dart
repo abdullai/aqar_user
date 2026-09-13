@@ -1,11 +1,12 @@
 ﻿import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/input/saudi_input_formatters.dart';
+import '../core/utils/date_helper.dart';
 import '../l10n/app_localizations.dart';
 import '../services/org_notification_service.dart';
 import '../services/org_team_service.dart';
@@ -82,7 +83,7 @@ class _OrgJoinRequestsDeskPageState extends State<OrgJoinRequestsDeskPage> {
     if (id.isEmpty) return;
     final nidCtrl = TextEditingController(text: '${row['national_id'] ?? ''}');
     final mobCtrl = TextEditingController(text: '${row['mobile_local'] ?? ''}');
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(_isAr ? 'تعديل الطلب' : 'Edit invitation'),
@@ -153,8 +154,7 @@ class _OrgJoinRequestsDeskPageState extends State<OrgJoinRequestsDeskPage> {
   String _formatDt(dynamic raw) {
     final dt = DateTime.tryParse('$raw');
     if (dt == null) return '$raw';
-    final loc = _isAr ? 'ar' : 'en';
-    return DateFormat.yMMMd(loc).add_jm().format(dt.toLocal());
+    return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: _isAr);
   }
 
   Widget _invitationCard(Map<String, dynamic> row) {

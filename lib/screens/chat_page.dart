@@ -1,38 +1,48 @@
-﻿// lib/screens/chat_page.dart
+﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field
+
+// lib/screens/chat_page.dart
 import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
+import 'package:flutter/services.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
-import 'package:intl/intl.dart' show DateFormat;
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/navigation/safe_overlay_pop.dart';
 import '../core/marketing/marketer_owner_chat_intro_ar.dart';
 import '../core/notifications/chat_message_sound.dart';
 import '../core/notifications/in_app_notifications.dart';
 import '../core/session/app_session.dart';
+import '../core/utils/date_helper.dart';
 import '../core/utils/display_ids.dart';
 import '../core/workflow/listing_workflow.dart';
 import '../l10n/app_localizations.dart';
 import '../navigation/chat_navigation.dart';
 import '../services/chat_inbox_service.dart';
 import '../services/communication_hub_service.dart';
+import '../services/in_app_notification_hub.dart';
 import '../services/chat_peer_service.dart';
 import '../services/chat_presence_service.dart';
+import '../services/chat_typing_service.dart';
 import '../services/org_team_service.dart';
 import '../services/reservations_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/chat_peer_profile_sheet.dart';
 import '../widgets/inbox_bulk_toolbar.dart';
+import '../widgets/inbox_surface_chrome.dart';
 import '../widgets/swipe_actions_tile.dart';
-import '../widgets/stable_select_chip.dart';
 import '../widgets/user_presence_strip.dart';
 import '../core/presence/presence_display_prefs.dart';
 
@@ -55,21 +65,53 @@ DateTime? _parseMsgTs(dynamic v) {
 }
 
 String _fmtMsgTimeFromRow(Map<String, dynamic> m, {required bool isAr}) {
-  final raw = m['created_at'];
-  DateTime? dt;
-  if (raw is String && raw.isNotEmpty) {
-    dt = DateTime.tryParse(raw)?.toLocal();
-  } else if (raw is DateTime) {
-    dt = raw.toLocal();
-  }
+  final dt = _parseMsgTs(m['created_at']);
   if (dt == null) return '';
+  return DateHelper.fmtClock(dt);
+}
+
+String _fmtChatDayChip(DateTime dt, bool isAr) {
   final now = DateTime.now();
-  final t = DateFormat.Hm().format(dt);
-  if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
-    return t;
+  final today = DateTime(now.year, now.month, now.day);
+  final d = DateTime(dt.year, dt.month, dt.day);
+  final diff = today.difference(d).inDays;
+  if (diff == 0) return isAr ? 'اليوم' : 'Today';
+  if (diff == 1) return isAr ? 'أمس' : 'Yesterday';
+  return DateHelper.fmtCivilDate(dt, isAr: isAr);
+}
+
+String _fmtMsgInfoTs(DateTime? dt, bool isAr) {
+  if (dt == null) return isAr ? '—' : '—';
+  return DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: isAr);
+}
+
+bool _sameChatCalendarDay(Map<String, dynamic> a, Map<String, dynamic> b) {
+  final da = _parseMsgTs(a['created_at']);
+  final db = _parseMsgTs(b['created_at']);
+  if (da == null || db == null) return false;
+  return da.year == db.year && da.month == db.month && da.day == db.day;
+}
+
+String _friendlyChatOpenError(Object e, {required bool isAr}) {
+  final s = e.toString();
+  if (s.contains('42703') ||
+      s.contains('listing_request_id') ||
+      s.contains('does not exist')) {
+    return isAr
+        ? 'تعذر فتح المحادثة بسبب اختلاف في قاعدة البيانات. أعد المحاولة بعد التحديث.'
+        : 'Could not open chat because of a database mismatch. Retry after updating.';
   }
-  final dPart = DateFormat.yMMMd(isAr ? 'ar' : 'en').format(dt);
-  return '$dPart · $t';
+  if (s.contains('PostgrestException') || s.contains('column')) {
+    return isAr
+        ? 'تعذر فتح الدردشة حالياً. تحقق من الاتصال ثم أعد المحاولة.'
+        : 'Could not open chat right now. Check your connection and retry.';
+  }
+  if (s.contains('SocketException') ||
+      s.contains('Failed host lookup') ||
+      s.contains('network')) {
+    return isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection';
+  }
+  return isAr ? 'تعذر فتح الدردشة. أعد المحاولة.' : 'Could not open chat. Please retry.';
 }
 
 /// مطابقة رسالة تفاؤلية مع صف من الخادم لتجنّب التكرار عند وصول البث.
@@ -250,10 +292,14 @@ class ChatPage extends StatefulWidget {
   /// داخل [UserDashboard] / مركز تواصل بلا [AppBar] مزدوج: الشريط الخارجي للوحة يحمل العنوان والرجوع.
   final bool embedInParentDashboardShell;
 
+  /// يُستدعى بعد قراءة محادثة أو تحديث الصندوق (شارة الجرس وتبويب المحادثات).
+  final VoidCallback? onInboxSurfaceChanged;
+
   const ChatPage({
     super.key,
     this.isAr = true,
     this.embedInParentDashboardShell = false,
+    this.onInboxSurfaceChanged,
     this.conversationId,
     this.propertyId,
     this.reservationId,
@@ -296,16 +342,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   /// عرض في شريط الدردشة (صورة + اسم مثل واتساب)
   String? _peerDisplayName;
   String? _peerAvatarUrl;
-  String? _peerLastSeenLine;
 
   final TextEditingController _tc = TextEditingController();
   bool _sending = false;
+  ChatTypingSession? _typing;
 
   bool _bootStarted = false;
 
   /// نبض «آخر ظهور» للمستخدم الحالي أثناء فتح شاشة الدردشة
   Timer? _presenceTimer;
-  Timer? _peerSeenTimer;
   bool _presenceStarted = false;
 
   // list refresh key
@@ -336,6 +381,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _tc.addListener(_onComposerTyping);
     _boot();
   }
 
@@ -343,8 +389,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _presenceTimer?.cancel();
-    _peerSeenTimer?.cancel();
+    _tc.removeListener(_onComposerTyping);
     _tc.dispose();
+    unawaited(_typing?.dispose());
     super.dispose();
   }
 
@@ -355,27 +402,88 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  void _onComposerTyping() {
+    _typing?.onComposerChanged(_tc.text);
+  }
+
+  Future<void> _attachTyping(String conversationId) async {
+    final cid = conversationId.trim();
+    if (cid.isEmpty || _uid.isEmpty) return;
+    if (_typing?.conversationId == cid) return;
+    final prev = _typing;
+    _typing = null;
+    await prev?.dispose();
+    if (!mounted) return;
+    final next = ChatTypingSession(
+      sb: _sb,
+      conversationId: cid,
+      myUserId: _uid,
+    );
+    _typing = next;
+    await next.start();
+    if (mounted) setState(() {});
+  }
+
+  static const String _kConversationSelect =
+      'id, kind, title, user_id, counterparty_id, org_id, '
+      'property_id, reservation_id, market_request_id';
+
+  Future<Map<String, dynamic>?> _fetchConversationRow(String id) async {
+    final cid = id.trim();
+    if (cid.isEmpty) return null;
+    Future<Map<String, dynamic>?> trySelect(String cols) async {
+      try {
+        final row = await _sb.from('conversations').select(cols).eq('id', cid).maybeSingle();
+        if (row == null) return null;
+        return Map<String, dynamic>.from(row);
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return await trySelect(_kConversationSelect) ??
+        await trySelect('*') ??
+        await trySelect('id, kind, title, user_id, counterparty_id, org_id');
+  }
+
+  String _widgetKindRaw() {
+    switch (widget.kind) {
+      case ConversationKind.support:
+        return 'support';
+      case ConversationKind.direct:
+        return 'direct';
+      case ConversationKind.marketRequest:
+        return 'market_request';
+      case ConversationKind.agencyTeam:
+        return 'org_team_channel';
+      case ConversationKind.property:
+        return 'property';
+      case null:
+        return 'property';
+    }
+  }
+
+  Map<String, dynamic> _syntheticConversationFromWidget(String id) {
+    return <String, dynamic>{
+      'id': id,
+      'kind': _widgetKindRaw(),
+      'title': widget.title,
+      'user_id': _uid,
+      'counterparty_id': (widget.counterpartyId ?? '').trim(),
+      'org_id': null,
+      'property_id': widget.propertyId,
+      'reservation_id': widget.reservationId,
+      'market_request_id': widget.marketRequestId,
+    };
+  }
+
   void _schedulePresenceLoop() {
     if (_isGuest || _uid.isEmpty) return;
     _presenceTimer?.cancel();
-    _presenceTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+    _presenceTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       unawaited(ChatPresenceService.ping(_sb));
     });
     unawaited(ChatPresenceService.ping(_sb));
-  }
-
-  void _schedulePeerSeenPolling(String peerId) {
-    final id = peerId.trim();
-    if (id.isEmpty) return;
-    _peerSeenTimer?.cancel();
-    _peerSeenTimer = Timer.periodic(const Duration(seconds: 32), (_) async {
-      final row = await ChatPeerService.fetchProfile(_sb, id);
-      if (!mounted) return;
-      setState(() {
-        _peerLastSeenLine =
-            ChatPeerService.formatPresenceLine(row, widget.isAr);
-      });
-    });
   }
 
   // =========================
@@ -447,8 +555,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _peerDisplayName = ChatPeerService.displayName(row, widget.isAr);
         final av = (row?['avatar_url'] ?? '').toString().trim();
         _peerAvatarUrl = av.isNotEmpty ? av : null;
-        _peerLastSeenLine =
-            ChatPeerService.formatPresenceLine(row, widget.isAr);
       });
     } catch (_) {}
   }
@@ -471,81 +577,56 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
 
-    final session = context.read<AppSession>();
-
-    // ✅ لا نبدأ أي شبكات بدون إنترنت
-    final ok = await session.runNetworkGuarded<bool>(
-      context: context,
-      action: () async => true,
-    );
-    if (ok != true) {
-      setState(() {
-        _booting = false;
-        _bootError =
-            widget.isAr ? 'لا يوجد اتصال بالإنترنت' : 'No internet connection';
-      });
-      return;
-    }
-
     if (!mounted) return;
 
     try {
       // 1) فتح مباشر عبر conversationId
       final directCid = (widget.conversationId ?? '').trim();
       if (directCid.isNotEmpty) {
-        final conv = await session.runNetworkGuarded<Map<String, dynamic>?>(
-          context: context,
-          action: () async {
-            return await _sb
-                .from('conversations')
-                .select(
-                  'id, kind, title, user_id, counterparty_id, org_id, '
-                  'property_id, reservation_id, market_request_id, '
-                  'listing_request_id',
-                )
-                .eq('id', directCid)
-                .maybeSingle();
-          },
-        );
+        Map<String, dynamic>? conv;
+        try {
+          conv = await _fetchConversationRow(directCid);
+        } catch (_) {
+          conv = null;
+        }
 
         if (!mounted) return;
 
-        if (conv == null) {
-          throw Exception(
-              widget.isAr ? 'المحادثة غير موجودة' : 'Conversation not found');
-        }
+        final opened = conv ?? _syntheticConversationFromWidget(directCid);
 
-        final kindStr = (conv['kind'] ?? '').toString().toLowerCase().trim();
+        final kindStr = (opened['kind'] ?? '').toString().toLowerCase().trim();
         if (kindStr == 'org_team_channel') {
-          final ownerId = (conv['user_id'] ?? '').toString().trim();
-          final orgId = conv['org_id'] == null
+          final ownerId = (opened['user_id'] ?? '').toString().trim();
+          final orgId = opened['org_id'] == null
               ? ''
-              : conv['org_id'].toString().trim();
-          if (orgId.isEmpty) {
-            throw Exception(widget.isAr
-                ? 'محادثة قناة الفريق غير مكتملة على الخادم'
-                : 'Team channel conversation is not configured');
+              : opened['org_id'].toString().trim();
+          if (orgId.isNotEmpty) {
+            final peer =
+                ownerId.isNotEmpty ? ownerId : (_uid.isNotEmpty ? _uid : '');
+            setState(() {
+              _activeConversationId = (opened['id'] ?? '').toString();
+              _activeConversationKindRaw = 'org_team_channel';
+              _activeOrgId = orgId;
+              _activeKind = _parseKind('org_team_channel');
+              _activeTitle = (opened['title'] as String?)?.trim();
+              _activeCounterpartyId = peer.isNotEmpty ? peer : null;
+              _booting = false;
+            });
+            if (peer.isNotEmpty) {
+              unawaited(_loadPeerProfile(peer));
+            }
+            unawaited(_resolveOrgOwnerFlag(orgId));
+            unawaited(_markReadSafe());
+            return;
           }
-          final peer =
-              ownerId.isNotEmpty ? ownerId : (_uid.isNotEmpty ? _uid : '');
-          setState(() {
-            _activeConversationId = (conv['id'] ?? '').toString();
-            _activeConversationKindRaw = 'org_team_channel';
-            _activeOrgId = orgId;
-            _activeKind = _parseKind('org_team_channel');
-            _activeTitle = (conv['title'] as String?)?.trim();
-            _activeCounterpartyId = peer.isNotEmpty ? peer : null;
-            _booting = false;
-          });
-          if (peer.isNotEmpty) {
-            unawaited(_loadPeerProfile(peer));
-            _schedulePeerSeenPolling(peer);
-          }
-          unawaited(_markReadSafe());
-          return;
         }
 
-        final otherPartyId = _resolveOtherPartyId(conv);
+        var otherPartyId = _resolveOtherPartyId(opened);
+        final fromWidgetPeer = (widget.counterpartyId ?? '').trim();
+        if ((otherPartyId == null || otherPartyId.trim().isEmpty) &&
+            fromWidgetPeer.isNotEmpty) {
+          otherPartyId = fromWidgetPeer;
+        }
         if (otherPartyId == null || otherPartyId.trim().isEmpty) {
           throw Exception(widget.isAr
               ? 'تعذر تحديد الطرف الآخر'
@@ -553,17 +634,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         }
 
         setState(() {
-          _activeConversationId = (conv['id'] ?? '').toString();
-          _activeConversationKindRaw = (conv['kind'] ?? '').toString();
-          _activeOrgId = conv['org_id'] == null
+          _activeConversationId = (opened['id'] ?? '').toString();
+          _activeConversationKindRaw = (opened['kind'] ?? '').toString();
+          _activeOrgId = opened['org_id'] == null
               ? null
-              : conv['org_id'].toString().trim().isEmpty
+              : opened['org_id'].toString().trim().isEmpty
                   ? null
-                  : conv['org_id'].toString().trim();
-          _activeKind = _parseKind(conv['kind']);
-          _activeTitle = (conv['title'] as String?)?.trim();
+                  : opened['org_id'].toString().trim();
+          _activeKind = _parseKind(opened['kind']);
+          _activeTitle = (opened['title'] as String?)?.trim();
           _activeCounterpartyId = otherPartyId;
-          _conversationPropertyId = (conv['property_id'] ??
+          _conversationPropertyId = (opened['property_id'] ??
                   widget.propertyId ??
                   '')
               .toString()
@@ -575,10 +656,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
 
         unawaited(_loadPeerProfile(otherPartyId));
-        _schedulePeerSeenPolling(otherPartyId);
         // ✅ مثل واتساب: عند فتح المحادثة نعلّم الرسائل كمقروءة
         unawaited(_markReadSafe());
-        unawaited(_resolveListingCodeForActiveConversation(conv));
+        unawaited(_resolveListingCodeForActiveConversation(opened));
         return;
       }
 
@@ -608,7 +688,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
 
         unawaited(_loadPeerProfile(info.counterpartyId));
-        _schedulePeerSeenPolling(info.counterpartyId);
         unawaited(_markReadSafe());
         return;
       }
@@ -642,7 +721,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
 
         unawaited(_loadPeerProfile(info.counterpartyId));
-        _schedulePeerSeenPolling(info.counterpartyId);
         unawaited(_markReadSafe());
         return;
       }
@@ -673,7 +751,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
 
         unawaited(_loadPeerProfile(info.counterpartyId));
-        _schedulePeerSeenPolling(info.counterpartyId);
         unawaited(_markReadSafe());
         return;
       }
@@ -682,15 +759,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (widget.kind == ConversationKind.marketRequest &&
           (widget.marketRequestId ?? '').trim().isNotEmpty) {
         final peerOpt = (widget.counterpartyId ?? '').trim();
-        final cid = await session.runNetworkGuarded<String?>(
-          context: context,
-          action: () async {
-            return ReservationsService.getOrCreateMarketRequestConversation(
-              marketRequestId: widget.marketRequestId!.trim(),
-              counterpartyId: peerOpt.isEmpty ? null : peerOpt,
-            );
-          },
-        );
+        String? cid;
+        try {
+          cid = await ReservationsService.getOrCreateMarketRequestConversation(
+            marketRequestId: widget.marketRequestId!.trim(),
+            counterpartyId: peerOpt.isEmpty ? null : peerOpt,
+          );
+        } catch (_) {
+          cid = null;
+        }
 
         if (!mounted) return;
 
@@ -700,32 +777,31 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               : 'Offline or could not open chat');
         }
 
-        final conv = await session.runNetworkGuarded<Map<String, dynamic>?>(
-          context: context,
-          action: () async {
-            return _sb
-                .from('conversations')
-                .select('user_id, counterparty_id, title')
-                .eq('id', cid)
-                .maybeSingle();
-          },
-        );
+        Map<String, dynamic>? conv;
+        try {
+          conv = await _fetchConversationRow(cid);
+        } catch (_) {
+          conv = null;
+        }
 
         if (!mounted) return;
 
-        if (conv == null) {
-          throw Exception(
-              widget.isAr ? 'المحادثة غير موجودة' : 'Conversation missing');
-        }
+        final opened = conv ??
+            <String, dynamic>{
+              'id': cid,
+              'user_id': _uid,
+              'counterparty_id': peerOpt,
+              'title': widget.title,
+            };
 
-        final otherPartyId = _resolveOtherPartyId(conv);
+        final otherPartyId = _resolveOtherPartyId(opened);
         if (otherPartyId == null || otherPartyId.trim().isEmpty) {
           throw Exception(widget.isAr
               ? 'تعذر تحديد الطرف الآخر'
               : 'Cannot resolve other party');
         }
 
-        final t = (conv['title'] as String?)?.trim();
+        final t = (opened['title'] as String?)?.trim();
 
         setState(() {
           _activeConversationId = cid;
@@ -740,7 +816,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
 
         unawaited(_loadPeerProfile(otherPartyId));
-        _schedulePeerSeenPolling(otherPartyId);
         unawaited(_markReadSafe());
         return;
       }
@@ -756,9 +831,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         _booting = false;
       });
     } catch (e) {
+      final openingThread = _openedDirectlyFromExternal || widget.kind != null;
       setState(() {
         _booting = false;
-        _bootError = e.toString();
+        _bootError = openingThread
+            ? _friendlyChatOpenError(e, isAr: widget.isAr)
+            : null;
       });
     } finally {
       if (mounted && !_booting && _bootError == null && !_isGuest) {
@@ -770,6 +848,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           }
           unawaited(_maybeSendOpeningIntroOnce());
           unawaited(_repairLegacyOpeningMessageIfNeeded());
+          final cid = (_activeConversationId ?? '').trim();
+          if (cid.isNotEmpty) unawaited(_attachTyping(cid));
         });
       }
     }
@@ -890,9 +970,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .eq('sender_id', _uid)
           .order('created_at', ascending: true)
           .limit(8);
-      final rows = (existing is List) ? existing : const <dynamic>[];
+      final rows = existing;
       for (final e in rows) {
-        if (e is! Map) continue;
         final content = (e['content'] ?? '').toString();
         if (!MarketerOwnerChatIntroAr.needsLegacyRepair(content)) continue;
         final mid = (e['id'] ?? '').toString().trim();
@@ -925,9 +1004,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .eq('conversation_id', cid)
           .order('created_at', ascending: true)
           .limit(40);
-      final rows = (existing is List) ? existing : const <dynamic>[];
+      final rows = existing;
       for (final e in rows) {
-        if (e is! Map) continue;
         final content = (e['content'] ?? '').toString();
         if (MarketerOwnerChatIntroAr.looksLikeOpeningIntro(content)) {
           return;
@@ -1012,7 +1090,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (cid.isEmpty) return;
 
     final session = context.read<AppSession>();
-    await session.runNetworkGuarded<int>(
+    final marked = await session.runNetworkGuarded<int>(
       context: context,
       showDialogOnNoInternet: false,
       action: () async {
@@ -1027,6 +1105,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         return 0;
       },
     );
+    if ((marked ?? 0) > 0) {
+      widget.onInboxSurfaceChanged?.call();
+      InAppNotificationHub.onInboxInvalidate?.call();
+    }
   }
 
   // =========================
@@ -1330,7 +1412,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       title: t,
       kind: kind,
     );
-    if (mounted) setState(() => _listReloadTick++);
+    if (!mounted) return;
+    setState(() => _listReloadTick++);
+    widget.onInboxSurfaceChanged?.call();
+    InAppNotificationHub.onInboxInvalidate?.call();
   }
 
   Future<void> _resolveOrgOwnerFlag(String? orgId) async {
@@ -1352,7 +1437,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 
   Future<void> _backToList() async {
-    _peerSeenTimer?.cancel();
     if (_openedDirectlyFromExternal) {
       final nav = Navigator.of(context);
       if (nav.canPop()) {
@@ -1370,7 +1454,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _activeCounterpartyId = null;
       _peerDisplayName = null;
       _peerAvatarUrl = null;
-      _peerLastSeenLine = null;
       _tc.clear();
       _listReloadTick++; // refresh list when returning
     });
@@ -1794,7 +1877,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       return;
     }
     final phoneCtl = TextEditingController();
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (ctx) {
         return AlertDialog(
@@ -1852,7 +1935,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .toList();
       if (ids.isEmpty) return rows;
 
-      final profiles = await ChatPeerService.fetchProfilesBatch(_sb, ids);
+      Map<String, Map<String, dynamic>> profiles = {};
+      try {
+        profiles = await ChatPeerService.fetchProfilesBatch(_sb, ids);
+      } catch (_) {}
       return rows.map((r) {
         final oid = r.otherUserId ?? '';
         final p = profiles[oid];
@@ -1876,31 +1962,59 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }).toList();
     }
 
-    Future<dynamic> rpc() => _sb.rpc('get_chat_list2', params: {
+    Future<dynamic> rpc() async {
+      try {
+        return await _sb.rpc('get_chat_list2', params: {
           'p_limit': 80,
           'p_archived_only': archivedOnly,
         });
+      } catch (_) {
+        return await _sb.rpc('get_chat_list2', params: {'p_limit': 80});
+      }
+    }
 
-    if (widget.embedInParentDashboardShell) {
+    try {
+      return await parse(await rpc());
+    } catch (_) {
       try {
-        return await parse(await rpc());
+        return await parse(await _fallbackConversationList());
       } catch (_) {
         return <_ChatListRow>[];
       }
     }
+  }
 
-    final session = context.read<AppSession>();
-    final res = await session.runNetworkGuarded<dynamic>(
-      context: context,
-      action: rpc,
-    );
-    if (res != null) {
-      return parse(res);
-    }
+  Future<List<Map<String, dynamic>>> _fallbackConversationList() async {
+    if (_uid.isEmpty) return const [];
     try {
-      return await parse(await rpc());
+      final res = await _sb
+          .from('conversations')
+          .select(
+            'id, kind, title, user_id, counterparty_id, org_id, updated_at',
+          )
+          .or('user_id.eq.$_uid,counterparty_id.eq.$_uid')
+          .order('updated_at', ascending: false)
+          .limit(80);
+      final list = res;
+      final out = <Map<String, dynamic>>[];
+      for (final e in list) {
+        final m = Map<String, dynamic>.from(e);
+        final uid = (m['user_id'] ?? '').toString();
+        final cp = (m['counterparty_id'] ?? '').toString();
+        final other = uid == _uid ? cp : uid;
+        out.add(<String, dynamic>{
+          'conversation_id': m['id'],
+          'kind': m['kind'],
+          'title': m['title'],
+          'other_user_id': other,
+          'org_id': m['org_id'],
+          'last_message_at': m['updated_at'],
+          'unread_count': 0,
+        });
+      }
+      return out;
     } catch (_) {
-      return <_ChatListRow>[];
+      return const [];
     }
   }
 
@@ -1914,43 +2028,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return AppBar(
       automaticallyImplyLeading: false,
       title: inThread
-          ? _ChatAppBarLead(
-              name: _threadBarTitle(),
-              subtitle: _threadBarSubtitle(),
-              avatarUrl: _peerAvatarUrl,
-              isAr: widget.isAr,
-              currentUserId: _uid,
-              peerPresenceUserId: () {
-                final raw =
-                    (_activeConversationKindRaw ?? '').toLowerCase().trim();
-                if (raw == 'org_team_channel') return null;
-                final p = (_activeCounterpartyId ?? '').trim();
-                if (p.isEmpty || _uid.isEmpty || p == _uid) return null;
-                return p;
-              }(),
-              onTap: () {
-                final id = (_activeCounterpartyId ?? '').trim();
-                if (id.isEmpty) return;
-                showChatPeerProfileSheet(
-                  context: context,
-                  isAr: widget.isAr,
-                  userId: id,
-                  supabase: _sb,
-                );
-              },
-            )
+          ? (_typing == null
+              ? _threadLead(typing: false)
+              : ValueListenableBuilder<bool>(
+                  valueListenable: _typing!.peerTyping,
+                  builder: (context, typing, _) =>
+                      _threadLead(typing: typing),
+                ))
           : Text(_appTitle()),
       leading: AppPageCloseButton(
         isArabic: widget.isAr,
         tooltip: widget.isAr ? 'إغلاق' : 'Close',
-        onPressed: () {
-          // محادثة فُتحت من قائمة داخل نفس المسار → رجوع للقائمة.
-          if (inThread && !_openedDirectlyFromExternal) {
-            _backToList();
-            return;
-          }
-          Navigator.of(context).maybePop();
-        },
+        onPressed: () => SafeOverlayPop.pop(context),
       ),
     );
   }
@@ -1981,7 +2070,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     load: _loadChatList,
                     onOpen: _openConversationFromList,
                     onInboxChanged: () {
-                      if (mounted) setState(() => _listReloadTick++);
+                      widget.onInboxSurfaceChanged?.call();
+                      InAppNotificationHub.onInboxInvalidate?.call();
                     },
                   )
                 : _ChatThread(
@@ -2012,12 +2102,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     optimisticMessages: _optimisticMessages,
                     introPartnerName: _peerDisplayName,
                     introListingCode: _resolvedListingCode,
+                    peerTyping: _typing?.peerTyping,
                   );
-  }
-
-  Widget? _buildEmbeddedThreadChrome() {
-    // المحادثات تُفتح دائماً كطبقة ملء الشاشة — لا شريط فرعي داخل الهب.
-    return null;
   }
 
   @override
@@ -2123,6 +2209,36 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   /// السطر الثاني: للعقار عنوان الإعلان فقط — حالة الاتصال (متصل/آخر ظهور)
   /// يعرضها [UserPresenceStrip] بشكل أصغر ولحظي تحته (بدون تكرار).
+  Widget _threadLead({required bool typing}) {
+    return _ChatAppBarLead(
+      name: _threadBarTitle(),
+      subtitle: _threadBarSubtitle(),
+      avatarUrl: _peerAvatarUrl,
+      isAr: widget.isAr,
+      currentUserId: _uid,
+      typingLabel: typing
+          ? (widget.isAr ? 'يكتب…' : 'typing…')
+          : null,
+      peerPresenceUserId: () {
+        final raw = (_activeConversationKindRaw ?? '').toLowerCase().trim();
+        if (raw == 'org_team_channel') return null;
+        final p = (_activeCounterpartyId ?? '').trim();
+        if (p.isEmpty || _uid.isEmpty || p == _uid) return null;
+        return p;
+      }(),
+      onTap: () {
+        final id = (_activeCounterpartyId ?? '').trim();
+        if (id.isEmpty) return;
+        showChatPeerProfileSheet(
+          context: context,
+          isAr: widget.isAr,
+          userId: id,
+          supabase: _sb,
+        );
+      },
+    );
+  }
+
   String? _threadBarSubtitle() {
     if ((_activeConversationKindRaw ?? '').toLowerCase().trim() ==
         'org_team_channel') {
@@ -2149,6 +2265,7 @@ class _ChatAppBarLead extends StatelessWidget {
   final bool isAr;
   final String currentUserId;
   final String? peerPresenceUserId;
+  final String? typingLabel;
   final VoidCallback onTap;
 
   const _ChatAppBarLead({
@@ -2158,6 +2275,7 @@ class _ChatAppBarLead extends StatelessWidget {
     required this.isAr,
     required this.currentUserId,
     this.peerPresenceUserId,
+    this.typingLabel,
     required this.onTap,
   });
 
@@ -2167,8 +2285,10 @@ class _ChatAppBarLead extends StatelessWidget {
     final sub = (subtitle ?? '').trim();
     final pid = (peerPresenceUserId ?? '').trim();
     final uid = currentUserId.trim();
+    final typing = (typingLabel ?? '').trim();
+    final showTyping = typing.isNotEmpty;
     final showPresence =
-        pid.isNotEmpty && uid.isNotEmpty && pid != uid;
+        !showTyping && pid.isNotEmpty && uid.isNotEmpty && pid != uid;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -2214,7 +2334,19 @@ class _ChatAppBarLead extends StatelessWidget {
                       ),
                     ),
                   ),
-                  if (sub.isNotEmpty)
+                  if (showTyping)
+                    Text(
+                      typing,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF00A884),
+                        height: 1.2,
+                      ),
+                    )
+                  else if (sub.isNotEmpty)
                     Text(
                       sub,
                       maxLines: 1,
@@ -2508,7 +2640,7 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
   }
 
   Future<void> _pickSort() async {
-    final picked = await showModalBottomSheet<ChatInboxSort>(
+    final picked = await showAppModalBottomSheet<ChatInboxSort>(
       context: context,
       showDragHandle: true,
       builder: (ctx) => SafeArea(
@@ -2538,10 +2670,11 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
   }
 
   Future<void> _markAllRead() async {
-    await CommunicationHubService.markEverythingRead(widget.sb);
+    await CommunicationHubService.markAllChatsRead(widget.sb);
     if (!mounted) return;
     await _reload();
     if (!mounted) return;
+    widget.onInboxChanged?.call();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(widget.isAr ? 'تمت قراءة الكل' : 'All marked as read'),
@@ -2632,8 +2765,8 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         k == 'organization';
   }
 
-  bool _rowMatches(_ChatListRow r) {
-    switch (_filter) {
+  bool _rowMatchesFilter(_ChatListRow r, _ChatInboxFilter filter) {
+    switch (filter) {
       case _ChatInboxFilter.all:
         return true;
       case _ChatInboxFilter.inquiries:
@@ -2646,6 +2779,17 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
       case _ChatInboxFilter.support:
         return r.kind == 'support';
     }
+  }
+
+  bool _rowMatches(_ChatListRow r) => _rowMatchesFilter(r, _filter);
+
+  int _unreadForFilter(List<_ChatListRow> rows, _ChatInboxFilter filter) {
+    var n = 0;
+    for (final r in rows) {
+      if (!_rowMatchesFilter(r, filter)) continue;
+      n += r.unreadCount;
+    }
+    return n;
   }
 
   @override
@@ -2681,7 +2825,7 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         final swipable = filtered.where(_canSwipeActions).toList();
         final touchSwipe = MediaQuery.sizeOf(context).width < 800;
 
-        Widget filterBar() {
+        Widget chrome() {
           String lab(_ChatInboxFilter f) {
             switch (f) {
               case _ChatInboxFilter.all:
@@ -2697,26 +2841,91 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
             }
           }
 
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              InboxSurfaceChrome(
+                filters: [
                   for (final f in _ChatInboxFilter.values)
-                    Padding(
-                      padding: const EdgeInsetsDirectional.only(end: 6),
-                      child: StableSelectChip(
-                        label: lab(f),
-                        exclusive: true,
-                        showLeadingCheck: false,
-                        selected: _filter == f,
-                        onSelected: (_) => setState(() => _filter = f),
-                      ),
+                    InboxFilterTab(
+                      label: lab(f),
+                      selected: _filter == f,
+                      badge: _unreadForFilter(rows, f),
+                      onTap: () => setState(() => _filter = f),
                     ),
                 ],
+                overflowTooltip: widget.isAr ? 'المزيد' : 'More',
+                overflowActions: [
+                  InboxOverflowAction(
+                    value: 'mark_all',
+                    icon: Icons.mark_email_read_outlined,
+                    label: widget.isAr ? 'قراءة الكل' : 'Mark all read',
+                  ),
+                  InboxOverflowAction(
+                    value: 'select',
+                    icon: _selectMode
+                        ? Icons.close_rounded
+                        : Icons.checklist_rounded,
+                    label: _selectMode
+                        ? (widget.isAr ? 'إنهاء التحديد' : 'Done')
+                        : (widget.isAr ? 'تحديد' : 'Select'),
+                  ),
+                  InboxOverflowAction(
+                    value: 'sort',
+                    icon: Icons.sort_rounded,
+                    label: _sortLabel(),
+                  ),
+                  InboxOverflowAction(
+                    value: 'archive',
+                    icon: _showArchived ? Icons.inbox : Icons.archive_outlined,
+                    label: _showArchived
+                        ? (widget.isAr ? 'الوارد' : 'Inbox')
+                        : (widget.isAr ? 'الأرشيف' : 'Archive'),
+                  ),
+                ],
+                onOverflowSelected: (value) {
+                  switch (value) {
+                    case 'mark_all':
+                      unawaited(_markAllRead());
+                      break;
+                    case 'select':
+                      setState(() {
+                        _selectMode = !_selectMode;
+                        if (!_selectMode) _selectedIds.clear();
+                      });
+                      break;
+                    case 'sort':
+                      unawaited(_pickSort());
+                      break;
+                    case 'archive':
+                      setState(() {
+                        _showArchived = !_showArchived;
+                        _selectedIds.clear();
+                        _selectMode = false;
+                        _future = widget.load(archivedOnly: _showArchived);
+                      });
+                      break;
+                  }
+                },
               ),
-            ),
+              if (_selectMode)
+                InboxBulkToolbar(
+                  isAr: widget.isAr,
+                  selectedCount: _selectedIds.length,
+                  totalCount: swipable.length,
+                  onSelectAll: () {
+                    setState(() {
+                      _selectedIds
+                        ..clear()
+                        ..addAll(swipable.map((e) => e.conversationId));
+                    });
+                  },
+                  onClearSelection: () =>
+                      setState(() => _selectedIds.clear()),
+                  onArchive: () => _bulkArchive(swipable),
+                  onDelete: () => _bulkDelete(swipable),
+                ),
+            ],
           );
         }
 
@@ -2762,7 +2971,7 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              filterBar(),
+              chrome(),
               Expanded(
                 child: Center(
                   child: Padding(
@@ -2809,46 +3018,7 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            InboxActionsBar(
-              isAr: widget.isAr,
-              sortLabel: _sortLabel(),
-              onSortTap: _pickSort,
-              onMarkAllRead: _markAllRead,
-              showArchiveToggle: true,
-              archiveActive: _showArchived,
-              onToggleArchive: () {
-                setState(() {
-                  _showArchived = !_showArchived;
-                  _selectedIds.clear();
-                  _selectMode = false;
-                  _future = widget.load(archivedOnly: _showArchived);
-                });
-              },
-              selectMode: _selectMode,
-              onToggleSelectMode: () {
-                setState(() {
-                  _selectMode = !_selectMode;
-                  if (!_selectMode) _selectedIds.clear();
-                });
-              },
-            ),
-            if (_selectMode)
-              InboxBulkToolbar(
-                isAr: widget.isAr,
-                selectedCount: _selectedIds.length,
-                totalCount: swipable.length,
-                onSelectAll: () {
-                  setState(() {
-                    _selectedIds
-                      ..clear()
-                      ..addAll(swipable.map((e) => e.conversationId));
-                  });
-                },
-                onClearSelection: () => setState(() => _selectedIds.clear()),
-                onArchive: () => _bulkArchive(swipable),
-                onDelete: () => _bulkDelete(swipable),
-              ),
-            filterBar(),
+            chrome(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _reload,
@@ -3120,27 +3290,31 @@ class _ConversationsListRpcState extends State<_ConversationsListRpc> {
         local.day == yesterday.day) {
       return widget.isAr ? 'أمس' : 'Yesterday';
     }
-    return DateFormat('d/M/yy').format(local);
+    return DateHelper.fmtCivilDate(local, isAr: widget.isAr);
   }
 
-  String _fmtTimeLocal(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
+  String _fmtTimeLocal(DateTime dt) => DateHelper.fmtClock(dt);
 }
 
-/// علامات واتساب: ✓ مرسل، ✓✓ وصل، ✓✓ مقروء (للرسائل الصادرة فقط).
+/// علامات واتساب: ساعة = قيد الإرسال، ✓ مرسل، ✓✓ وصل، ✓✓ مقروء.
 class _WaReceiptTicks extends StatelessWidget {
   final DateTime? readAt;
   final DateTime? deliveredAt;
+  final bool pending;
 
-  const _WaReceiptTicks({required this.readAt, required this.deliveredAt});
+  const _WaReceiptTicks({
+    required this.readAt,
+    required this.deliveredAt,
+    this.pending = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     const grey = Color(0xFF8696A0);
     const blue = Color(0xFF53BDEB);
+    if (pending) {
+      return const Icon(Icons.access_time_rounded, size: 14, color: grey);
+    }
     if (readAt != null) {
       return const Icon(Icons.done_all, size: 15, color: blue);
     }
@@ -3174,6 +3348,7 @@ class _ChatThread extends StatefulWidget {
   final bool isOrgOwner;
   final String? introPartnerName;
   final String? introListingCode;
+  final ValueListenable<bool>? peerTyping;
 
   const _ChatThread({
     required this.isAr,
@@ -3191,6 +3366,7 @@ class _ChatThread extends StatefulWidget {
     this.isOrgOwner = false,
     this.introPartnerName,
     this.introListingCode,
+    this.peerTyping,
   });
 
   @override
@@ -3211,6 +3387,9 @@ class _ChatThreadState extends State<_ChatThread> {
 
   /// اشتراك ثابت في رسائل المحادثة — لا يُنشأ داخل [build] حتى لا يُعاد الاتصال ويختفي النص.
   late Stream<List<Map<String, dynamic>>> _messagesStream;
+  RealtimeChannel? _threadChannel;
+  Timer? _threadPollTimer;
+  List<Map<String, dynamic>> _polledRows = const [];
 
   String? _lastProcessedVisibleSig;
   int _scrollBumpGuardLen = 0;
@@ -3225,6 +3404,117 @@ class _ChatThreadState extends State<_ChatThread> {
         .stream(primaryKey: const ['id'])
         .eq('conversation_id', cid)
         .order('created_at', ascending: false);
+  }
+
+  List<Map<String, dynamic>> _mergePolledIntoStream(
+    List<Map<String, dynamic>> streamRows,
+  ) {
+    if (_polledRows.isEmpty) return streamRows;
+    final byId = <String, Map<String, dynamic>>{};
+    void put(Map<String, dynamic> r) {
+      final id = (r['id'] ?? '').toString().trim();
+      if (id.isEmpty) return;
+      byId[id] = Map<String, dynamic>.from(r);
+    }
+
+    for (final r in streamRows) {
+      put(r);
+    }
+    for (final r in _polledRows) {
+      put(r);
+    }
+    final merged = byId.values.toList();
+    merged.sort((a, b) {
+      final ta = DateTime.tryParse((a['created_at'] ?? '').toString()) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final tb = DateTime.tryParse((b['created_at'] ?? '').toString()) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return tb.compareTo(ta);
+    });
+    return merged;
+  }
+
+  void _ingestLiveRow(Map<String, dynamic> rec) {
+    final id = (rec['id'] ?? '').toString().trim();
+    if (id.isEmpty || !mounted) return;
+    final cid = (rec['conversation_id'] ?? '').toString().trim();
+    if (cid != widget.conversationId.trim()) return;
+    setState(() {
+      final next = [
+        for (final r in _polledRows)
+          if ((r['id'] ?? '').toString() != id) r,
+      ];
+      next.insert(0, Map<String, dynamic>.from(rec));
+      _polledRows = next;
+    });
+  }
+
+  void _subscribeThreadRealtime() {
+    _threadChannel?.unsubscribe();
+    _threadPollTimer?.cancel();
+    final cid = widget.conversationId.trim();
+    if (cid.isEmpty) return;
+    _threadChannel = widget.sb
+        .channel('chat_thread_rt_$cid')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'conversation_id',
+            value: cid,
+          ),
+          callback: (payload) {
+            final rec = payload.newRecord;
+            if (rec.isEmpty) return;
+            _ingestLiveRow(Map<String, dynamic>.from(rec));
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'messages',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'conversation_id',
+            value: cid,
+          ),
+          callback: (payload) {
+            final rec = payload.newRecord;
+            if (rec.isEmpty) return;
+            _ingestLiveRow(Map<String, dynamic>.from(rec));
+          },
+        )
+        .subscribe();
+    unawaited(_pullLatestMessages());
+    _threadPollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      unawaited(_pullLatestMessages());
+    });
+  }
+
+  Future<void> _pullLatestMessages() async {
+    final cid = widget.conversationId.trim();
+    if (cid.isEmpty || !mounted) return;
+    try {
+      final rows = await widget.sb
+          .from('messages')
+          .select(
+            'id, sender_id, receiver_id, conversation_id, content, '
+            'created_at, attachment_url, attachment_type, read_at, '
+            'delivered_at, edited_at, deleted_for_everyone_at, '
+            'org_channel_post_id',
+          )
+          .eq('conversation_id', cid)
+          .order('created_at', ascending: false)
+          .limit(120);
+      if (!mounted) return;
+      final list = rows
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+      setState(() => _polledRows = list);
+    } catch (_) {}
   }
 
   void _scheduleVisibleMessagesSideEffects(List<Map<String, dynamic>> visible) {
@@ -3296,6 +3586,171 @@ class _ChatThreadState extends State<_ChatThread> {
     }
   }
 
+  Future<void> _showMessageInfo(
+    Map<String, dynamic> m, {
+    required bool mine,
+  }) async {
+    final sent = _parseMsgTs(m['created_at']);
+    final delivered = _parseMsgTs(m['delivered_at']);
+    final read = _parseMsgTs(m['read_at']);
+    if (!mounted) return;
+    await showAppModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.isAr ? 'معلومات الرسالة' : 'Message info',
+                style: Theme.of(ctx)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 14),
+              _infoRow(
+                widget.isAr ? 'أُرسلت' : 'Sent',
+                _fmtMsgInfoTs(sent, widget.isAr),
+              ),
+              if (mine) ...[
+                const SizedBox(height: 8),
+                _infoRow(
+                  widget.isAr ? 'وُصلت' : 'Delivered',
+                  _fmtMsgInfoTs(delivered, widget.isAr),
+                ),
+                const SizedBox(height: 8),
+                _infoRow(
+                  widget.isAr ? 'قُرئت' : 'Read',
+                  _fmtMsgInfoTs(read, widget.isAr),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(String k, String v) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(k, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ),
+        Text(
+          v,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: _kWaTimeColor,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _forwardMessage(
+    Map<String, dynamic> m, {
+    required String text,
+  }) async {
+    final uid = widget.currentUserId.trim();
+    if (uid.isEmpty) return;
+    List<dynamic> list = const [];
+    try {
+      final res = await widget.sb.rpc(
+        'get_chat_list2',
+        params: {'p_limit': 80, 'p_archived_only': false},
+      );
+      list = (res is List) ? res : const [];
+    } catch (_) {}
+    if (!mounted) return;
+    final rows = list.whereType<Map>().map(Map<String, dynamic>.from).where((r) {
+      final kind = (r['kind'] ?? '').toString().toLowerCase().trim();
+      if (kind == 'org_team_channel') return false;
+      final cid = (r['conversation_id'] ?? '').toString().trim();
+      if (cid.isEmpty || cid == widget.conversationId.trim()) return false;
+      return true;
+    }).toList();
+    if (rows.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.isAr
+                ? 'لا توجد محادثة أخرى للتحويل إليها'
+                : 'No other chat to forward to',
+          ),
+        ),
+      );
+      return;
+    }
+    final picked = await showAppModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                widget.isAr ? 'تحويل إلى' : 'Forward to',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            for (final r in rows)
+              ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: Text(
+                  ((r['other_full_name'] ?? r['title'] ?? '')
+                          .toString()
+                          .trim()
+                          .isNotEmpty)
+                      ? (r['other_full_name'] ?? r['title']).toString()
+                      : (widget.isAr ? 'محادثة' : 'Chat'),
+                ),
+                onTap: () => Navigator.pop(ctx, r),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final targetCid = (picked['conversation_id'] ?? '').toString().trim();
+    final other = (picked['other_user_id'] ?? '').toString().trim();
+    if (targetCid.isEmpty || other.isEmpty) return;
+    final au = (m['attachment_url'] ?? '').toString().trim();
+    final at = (m['attachment_type'] ?? '').toString().trim();
+    final payload = <String, dynamic>{
+      'sender_id': uid,
+      'receiver_id': other,
+      'conversation_id': targetCid,
+      'content': text.isEmpty ? (widget.isAr ? 'مرفق' : 'Attachment') : text,
+    };
+    if (au.isNotEmpty) {
+      payload['attachment_url'] = au;
+      if (at.isNotEmpty) payload['attachment_type'] = at;
+    }
+    try {
+      await widget.sb.from('messages').insert(payload);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.isAr ? 'تم التحويل' : 'Forwarded'),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.isAr ? 'تعذّر التحويل' : 'Could not forward'),
+        ),
+      );
+    }
+  }
+
   Future<void> _onLongPressMessage({
     required BuildContext sheetContext,
     required Map<String, dynamic> m,
@@ -3318,189 +3773,144 @@ class _ChatThreadState extends State<_ChatThread> {
     final canRevoke =
         mine && deletedAt == null && _msgWithinHours(m, 48) && !isChannelMirror;
 
-    if (canAdminDeleteChannel) {
-      final choice = await showModalBottomSheet<String>(
-        context: sheetContext,
-        showDragHandle: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(Icons.admin_panel_settings_outlined,
-                    color: Theme.of(ctx).colorScheme.error),
-                title: Text(
-                  widget.isAr ? 'حذف المنشور (مدير)' : 'Delete post (admin)',
-                  style: TextStyle(
-                    color: Theme.of(ctx).colorScheme.error,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                onTap: () => Navigator.pop(ctx, 'admin_delete'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.visibility_off_outlined),
-                title: Text(widget.isAr ? 'إخفاء لي فقط' : 'Hide for me'),
-                onTap: () => Navigator.pop(ctx, 'hide_me'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.close_rounded),
-                title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-                onTap: () => Navigator.pop(ctx),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (!mounted) return;
-      if (choice == 'admin_delete') {
-        try {
-          await ChatInboxService(widget.sb)
-              .adminDeleteOrgChannelPost(ocp.toString().trim());
-        } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(widget.isAr
-                    ? 'تعذّر حذف المنشور'
-                    : 'Could not delete post'),
-              ),
-            );
-          }
-        }
-        return;
-      }
-      if (choice == 'hide_me') await _hideMessageForMe(mid);
-      return;
-    }
+    final text = MarketerOwnerChatIntroAr.displaySanitize(
+      (m['content'] ?? '').toString(),
+      partnerName: widget.introPartnerName,
+      listingCode: widget.introListingCode,
+      isAr: widget.isAr,
+    ).trim();
+    final canCopy = text.isNotEmpty && deletedAt == null;
 
-    if (!mine) {
-      final choice = await showModalBottomSheet<String>(
-        context: sheetContext,
-        showDragHandle: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.visibility_off_outlined),
-                title: Text(widget.isAr ? 'حذف لي فقط' : 'Delete for me'),
-                onTap: () => Navigator.pop(ctx, 'hide_me'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.close_rounded),
-                title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-                onTap: () => Navigator.pop(ctx),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (!mounted) return;
-      if (choice == 'hide_me') await _hideMessageForMe(mid);
-      return;
-    }
-
-    // رسائلي
-    if (deletedAt != null) {
-      final only = await showModalBottomSheet<String>(
-        context: sheetContext,
-        showDragHandle: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.visibility_off_outlined),
-                title: Text(widget.isAr ? 'حذف لي فقط' : 'Delete for me'),
-                onTap: () => Navigator.pop(ctx, 'hide_me'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.close_rounded),
-                title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-                onTap: () => Navigator.pop(ctx),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (!mounted) return;
-      if (only == 'hide_me') await _hideMessageForMe(mid);
-      return;
-    }
-
-    if (!canEdit && !canRevoke) {
-      final only = await showModalBottomSheet<String>(
-        context: sheetContext,
-        showDragHandle: true,
-        builder: (ctx) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.visibility_off_outlined),
-                title: Text(widget.isAr ? 'حذف لي فقط' : 'Delete for me'),
-                onTap: () => Navigator.pop(ctx, 'hide_me'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.close_rounded),
-                title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-                onTap: () => Navigator.pop(ctx),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (!mounted) return;
-      if (only == 'hide_me') await _hideMessageForMe(mid);
-      return;
-    }
-
-    final choice = await showModalBottomSheet<String>(
+    final choice = await showAppModalBottomSheet<String>(
       context: sheetContext,
       showDragHandle: true,
       builder: (ctx) {
+        final err = Theme.of(ctx).colorScheme.error;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (canEdit)
-                ListTile(
-                  leading: const Icon(Icons.edit_outlined),
-                  title: Text(widget.isAr
-                      ? (hasAttach ? 'تعديل التعليق' : 'تعديل')
-                      : (hasAttach ? 'Edit caption' : 'Edit')),
-                  onTap: () => Navigator.pop(ctx, 'edit'),
-                ),
-              if (canRevoke)
-                ListTile(
-                  leading: Icon(Icons.delete_forever_outlined,
-                      color: Theme.of(ctx).colorScheme.error),
-                  title: Text(
-                    widget.isAr ? 'حذف للجميع' : 'Delete for everyone',
-                    style: TextStyle(
-                      color: Theme.of(ctx).colorScheme.error,
-                      fontWeight: FontWeight.w800,
-                    ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (canCopy)
+                  ListTile(
+                    leading: const Icon(Icons.copy_rounded),
+                    title: Text(widget.isAr ? 'نسخ' : 'Copy'),
+                    onTap: () => Navigator.pop(ctx, 'copy'),
                   ),
-                  onTap: () => Navigator.pop(ctx, 'revoke'),
+                if (deletedAt == null)
+                  ListTile(
+                    leading: const Icon(Icons.forward_rounded),
+                    title: Text(widget.isAr ? 'تحويل' : 'Forward'),
+                    onTap: () => Navigator.pop(ctx, 'forward'),
+                  ),
+                if (deletedAt == null && (canCopy || hasAttach))
+                  ListTile(
+                    leading: const Icon(Icons.share_outlined),
+                    title: Text(widget.isAr ? 'مشاركة' : 'Share'),
+                    onTap: () => Navigator.pop(ctx, 'share'),
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.info_outline_rounded),
+                  title: Text(widget.isAr ? 'معلومات' : 'Info'),
+                  onTap: () => Navigator.pop(ctx, 'info'),
                 ),
-              ListTile(
-                leading: const Icon(Icons.visibility_off_outlined),
-                title: Text(widget.isAr ? 'حذف لي فقط' : 'Delete for me'),
-                onTap: () => Navigator.pop(ctx, 'hide_me'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.close_rounded),
-                title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-                onTap: () => Navigator.pop(ctx),
-              ),
-            ],
+                if (canEdit)
+                  ListTile(
+                    leading: const Icon(Icons.edit_outlined),
+                    title: Text(widget.isAr
+                        ? (hasAttach ? 'تعديل التعليق' : 'تعديل')
+                        : (hasAttach ? 'Edit caption' : 'Edit')),
+                    onTap: () => Navigator.pop(ctx, 'edit'),
+                  ),
+                if (canRevoke)
+                  ListTile(
+                    leading: Icon(Icons.delete_forever_outlined, color: err),
+                    title: Text(
+                      widget.isAr ? 'حذف للجميع' : 'Delete for everyone',
+                      style: TextStyle(
+                        color: err,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(ctx, 'revoke'),
+                  ),
+                if (canAdminDeleteChannel)
+                  ListTile(
+                    leading: Icon(Icons.admin_panel_settings_outlined,
+                        color: err),
+                    title: Text(
+                      widget.isAr
+                          ? 'حذف المنشور (مدير)'
+                          : 'Delete post (admin)',
+                      style: TextStyle(
+                        color: err,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(ctx, 'admin_delete'),
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.visibility_off_outlined),
+                  title: Text(widget.isAr ? 'حذف لي فقط' : 'Delete for me'),
+                  onTap: () => Navigator.pop(ctx, 'hide_me'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.close_rounded),
+                  title: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+                  onTap: () => Navigator.pop(ctx),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
-    if (!mounted) return;
+    if (!mounted || choice == null) return;
+    if (choice == 'copy') {
+      await Clipboard.setData(ClipboardData(text: text));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.isAr ? 'تم النسخ' : 'Copied'),
+        ),
+      );
+      return;
+    }
+    if (choice == 'share') {
+      final shareText = [
+        if (text.isNotEmpty) text,
+        if (hasAttach) attachUrl,
+      ].join('\n');
+      if (shareText.trim().isNotEmpty) {
+        await Share.share(shareText);
+      }
+      return;
+    }
+    if (choice == 'forward') {
+      await _forwardMessage(m, text: text);
+      return;
+    }
+    if (choice == 'info') {
+      await _showMessageInfo(m, mine: mine);
+      return;
+    }
+    if (choice == 'admin_delete') {
+      try {
+        await ChatInboxService(widget.sb)
+            .adminDeleteOrgChannelPost(ocp.toString().trim());
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(widget.isAr
+                  ? 'تعذّر حذف المنشور'
+                  : 'Could not delete post'),
+            ),
+          );
+        }
+      }
+      return;
+    }
     if (choice == 'hide_me') {
       await _hideMessageForMe(mid);
       return;
@@ -3509,7 +3919,7 @@ class _ChatThreadState extends State<_ChatThread> {
       if (!sheetContext.mounted) return;
       final initial = (m['content'] ?? '').toString();
       final tc = TextEditingController(text: initial);
-      final ok = await showDialog<bool>(
+      final ok = await showAppDialog<bool>(
         context: sheetContext,
         builder: (ctx) => AlertDialog(
           title: Text(widget.isAr ? 'تعديل الرسالة' : 'Edit message'),
@@ -3566,7 +3976,7 @@ class _ChatThreadState extends State<_ChatThread> {
     }
     if (choice == 'revoke') {
       if (!sheetContext.mounted) return;
-      final confirm = await showDialog<bool>(
+      final confirm = await showAppDialog<bool>(
         context: sheetContext,
         builder: (ctx) => AlertDialog(
           title: Text(widget.isAr ? 'حذف للجميع؟' : 'Delete for everyone?'),
@@ -3611,6 +4021,7 @@ class _ChatThreadState extends State<_ChatThread> {
   void initState() {
     super.initState();
     _messagesStream = _createMessagesStream();
+    _subscribeThreadRealtime();
     final uid = widget.currentUserId.trim();
     final cid = widget.conversationId.trim();
     if (uid.isNotEmpty && cid.isNotEmpty) {
@@ -3648,6 +4059,8 @@ class _ChatThreadState extends State<_ChatThread> {
     if (oldWidget.conversationId != widget.conversationId ||
         !identical(oldWidget.sb, widget.sb)) {
       _messagesStream = _createMessagesStream();
+      _polledRows = const [];
+      _subscribeThreadRealtime();
       _lastProcessedVisibleSig = null;
       _scrollBumpGuardLen = 0;
       _incomingSoundPrimed = false;
@@ -3669,6 +4082,8 @@ class _ChatThreadState extends State<_ChatThread> {
   void dispose() {
     _hidesSub?.cancel();
     _markReadDebounce?.cancel();
+    _threadPollTimer?.cancel();
+    _threadChannel?.unsubscribe();
     _scroll.dispose();
     super.dispose();
   }
@@ -3680,7 +4095,8 @@ class _ChatThreadState extends State<_ChatThread> {
 
   void _debouncedMarkRead() {
     _markReadDebounce?.cancel();
-    _markReadDebounce = Timer(const Duration(milliseconds: 500), () {
+    _markReadDebounce = Timer(const Duration(milliseconds: 400), () {
+      unawaited(_markIncomingDelivered());
       unawaited(widget.onOpenedOrNewData());
     });
   }
@@ -3723,14 +4139,16 @@ class _ChatThreadState extends State<_ChatThread> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final kb = MediaQuery.viewInsetsOf(context).bottom;
+        final kb = AppKeyboardInset.bottomOf(context);
         return Padding(
           padding: EdgeInsets.only(bottom: kb > 0 ? kb : 0),
           child: Column(
             children: [
               Expanded(
                 child: ColoredBox(
-                  color: _kWaChatBg,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Theme.of(context).colorScheme.surface
+                      : _kWaChatBg,
                   child: StreamBuilder<List<Map<String, dynamic>>>(
                     key: ValueKey<String>(
                         '${widget.conversationId.trim()}:${identityHashCode(widget.sb)}'),
@@ -3756,8 +4174,10 @@ class _ChatThreadState extends State<_ChatThread> {
                   );
                 }
 
-                final merged =
-                    chatMergeOptimisticIntoStream(rows, optFor);
+                final merged = chatMergeOptimisticIntoStream(
+                  _mergePolledIntoStream(rows),
+                  optFor,
+                );
                 final visible = merged
                     .where((r) =>
                         !_hiddenMessageIds.contains((r['id'] ?? '').toString()))
@@ -3809,6 +4229,9 @@ class _ChatThreadState extends State<_ChatThread> {
                     final deliveredAt = _parseMsgTs(m['delivered_at']);
                     final deletedAt = _parseMsgTs(m['deleted_for_everyone_at']);
                     final editedAt = _parseMsgTs(m['edited_at']);
+                    final msgDay = _parseMsgTs(m['created_at']);
+                    final showDayChip = i == visible.length - 1 ||
+                        !_sameChatCalendarDay(m, visible[i + 1]);
 
                     final bubbleColor =
                         mine ? _kWaBubbleSent : _kWaBubbleReceived;
@@ -3984,6 +4407,7 @@ class _ChatThreadState extends State<_ChatThread> {
                                 if (timeStr.isNotEmpty)
                                   const SizedBox(width: 4),
                                 _WaReceiptTicks(
+                                  pending: isPendingLocal,
                                   readAt: readAt,
                                   deliveredAt: deliveredAt,
                                 ),
@@ -3997,7 +4421,33 @@ class _ChatThreadState extends State<_ChatThread> {
                     return KeyedSubtree(
                       key: ValueKey<String>(
                           (m['id'] ?? 'idx_$i').toString()),
-                      child: Align(
+                      child: Column(
+                        children: [
+                          if (showDayChip && msgDay != null)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Center(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE1F2FB),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    _fmtChatDayChip(msgDay, widget.isAr),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xFF54656F),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          Align(
                       alignment:
                           mine ? Alignment.centerRight : Alignment.centerLeft,
                       child: GestureDetector(
@@ -4012,6 +4462,8 @@ class _ChatThreadState extends State<_ChatThread> {
                         child: bubble,
                       ),
                     ),
+                        ],
+                      ),
                     );
                   },
                 );
@@ -4022,7 +4474,31 @@ class _ChatThreadState extends State<_ChatThread> {
         SafeArea(
           top: false,
           bottom: false,
-          child: Container(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.peerTyping != null)
+                ValueListenableBuilder<bool>(
+                  valueListenable: widget.peerTyping!,
+                  builder: (context, typing, _) {
+                    if (!typing) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          widget.isAr ? 'يكتب…' : 'typing…',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF00A884),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              Container(
             padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
             decoration: BoxDecoration(
               color: cs.surface,
@@ -4118,6 +4594,8 @@ class _ChatThreadState extends State<_ChatThread> {
                 ),
               ],
             ),
+          ),
+            ],
           ),
         ),
             ],

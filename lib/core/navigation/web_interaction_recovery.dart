@@ -1,9 +1,8 @@
-import 'dart:async' show Timer, unawaited;
+import 'dart:async' show Timer;
 
 import 'package:flutter/foundation.dart';
 
 import '../platform/web_pointer_unblock.dart';
-import 'web_bootstrap_diag.dart';
 
 /// على الويب: فك حظر اللمس من طبقات semantics العالقة فقط.
 ///

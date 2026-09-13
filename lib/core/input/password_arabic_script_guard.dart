@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../gestures/app_keyboard_popups.dart';
 import 'saudi_input_formatters.dart';
 
 /// يمنع الحروف العربية (والسريانية/العرضية) في كلمة المرور ويستدعي [onBlocked] عند محاولة الإدخال.
@@ -36,7 +37,7 @@ Future<void> showPasswordArabicNotAllowedDialog(
   BuildContext context, {
   required bool isAr,
 }) {
-  return showDialog<void>(
+  return showAppDialog<void>(
     context: context,
     barrierDismissible: true,
     builder: (ctx) {
@@ -67,7 +68,7 @@ List<TextInputFormatter> passwordArabicGuardFormatters({
   required VoidCallback onArabicScriptBlocked,
 }) {
   return [
-    ArabicDigitsToLatinFormatter(),
+    const ArabicDigitsToLatinFormatter(),
     BlockArabicScriptInPasswordFormatter(onBlocked: onArabicScriptBlocked),
   ];
 }

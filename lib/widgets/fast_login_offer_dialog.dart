@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../core/gestures/app_keyboard_popups.dart';
 import '../services/fast_login_service.dart';
 
 /// اقتراح تفعيل الدخول السريع بعد اجتياز البوابات.
@@ -12,7 +13,7 @@ class FastLoginOfferDialog {
     final bioOk = !kIsWeb && await FastLoginService.canCheckBiometrics();
     if (!context.mounted) return;
 
-    await showDialog<void>(
+    await showAppDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (ctx) {

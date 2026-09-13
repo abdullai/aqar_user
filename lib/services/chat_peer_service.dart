@@ -1,6 +1,7 @@
-import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/l10n/locale_content.dart';
+import '../core/utils/date_helper.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 
@@ -25,12 +26,13 @@ abstract final class ChatPeerService {
       if (en.isNotEmpty) return en;
     } else {
       if (en.isNotEmpty) return en;
-      if (fn.isNotEmpty) return fn;
-      if (ar.isNotEmpty) return ar;
+      if (fn.isNotEmpty) return LocaleContent.forUi(fn, isAr: false);
+      if (ar.isNotEmpty) return LocaleContent.forUi(ar, isAr: false);
     }
     final u = _s(row['username']);
     if (u.isNotEmpty) return u;
-    return isAr ? 'شريكنا العقاري' : 'Our partner';
+    final raw = isAr ? 'شريكنا العقاري' : 'Our partner';
+    return LocaleContent.forUi(raw, isAr: isAr);
   }
 
   static String accountTypeLabel(String? raw, bool isAr) {
@@ -57,7 +59,9 @@ abstract final class ChatPeerService {
     return DateTime.tryParse(s)?.toLocal();
   }
 
-  /// نص «آخر ظهور» مثل واتساب (يعتمد على عمود chat_last_seen_at بعد migration).
+  static String _clock(DateTime dt) => DateHelper.fmtClock(dt);
+
+  /// نص «آخر ظهور» مثل واتساب: اليوم/أمس + ساعة، أو تاريخ يوم/شهر/سنةم.
   static String formatChatLastSeen(Map<String, dynamic>? row, bool isAr) {
     final dt = _parseTs(row?['chat_last_seen_at']);
     if (dt == null) {
@@ -65,31 +69,24 @@ abstract final class ChatPeerService {
           ? 'لم يُحدَّث وقت الظهور بعد — يمكنك المراسلة في أي وقت'
           : 'No last-seen yet — you can still message anytime';
     }
+    return _whatsAppLastSeen(dt, isAr);
+  }
+
+  static String _whatsAppLastSeen(DateTime dt, bool isAr) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final d = DateTime(dt.year, dt.month, dt.day);
     final diff = today.difference(d).inDays;
-    String t;
-    try {
-      t = DateFormat.Hm().format(dt);
-    } catch (_) {
-      t =
-          '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    }
+    final t = _clock(dt);
     if (diff == 0) {
       return isAr ? 'آخر ظهور اليوم $t' : 'Last seen today at $t';
     }
     if (diff == 1) {
-      return isAr ? 'آخر ظهور أمس' : 'Last seen yesterday';
+      return isAr ? 'آخر ظهور أمس $t' : 'Last seen yesterday at $t';
     }
-    try {
-      final dateStr = DateFormat.yMMMd(isAr ? 'ar' : 'en').format(dt);
-      return isAr ? 'آخر ظهور $dateStr' : 'Last seen $dateStr';
-    } catch (_) {
-      final dateStr =
-          '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
-      return isAr ? 'آخر ظهور $dateStr' : 'Last seen $dateStr';
-    }
+    return isAr
+        ? 'آخر ظهور ${DateHelper.fmtCivilDateTime(dt, isAr: true)}'
+        : 'Last seen ${DateHelper.fmtCivilDateTime(dt, isAr: false)}';
   }
 
   /// متصل الآن (نبض حديث) أو آخر ظهور، مع احترام إخفاء الظهور.
@@ -104,29 +101,7 @@ abstract final class ChatPeerService {
     DateTime? fallbackTimestamp,
   }) {
     String fmtFallback(DateTime dt) {
-      final local = dt.toLocal();
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final d = DateTime(local.year, local.month, local.day);
-      final diff = today.difference(d).inDays;
-      String t;
-      String full;
-      try {
-        t = DateFormat.Hm().format(local);
-        full = DateFormat.yMMMd(isAr ? 'ar' : 'en').add_Hm().format(local);
-      } catch (_) {
-        t =
-            '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-        full =
-            '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} $t';
-      }
-      if (diff == 0) {
-        return isAr ? 'آخر ظهور اليوم $t' : 'Last seen today at $t';
-      }
-      if (diff == 1) {
-        return isAr ? 'آخر ظهور أمس $t' : 'Last seen yesterday at $t';
-      }
-      return isAr ? 'آخر ظهور $full' : 'Last seen $full';
+      return _whatsAppLastSeen(dt.toLocal(), isAr);
     }
 
     if (row == null) {

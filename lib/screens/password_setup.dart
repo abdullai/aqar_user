@@ -17,8 +17,10 @@ import '../core/input/email_domain_catalog.dart';
 import '../l10n/app_localizations.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/password_arabic_script_guard.dart';
+import '../widgets/caps_aware_password_field.dart';
 import '../core/utils/signature_blue_ink.dart';
 import '../core/config/app_config.dart';
+import '../core/utils/date_helper.dart';
 import '../services/commercial_reg_service.dart';
 import '../services/name_translation_service.dart';
 import '../services/org_team_service.dart';
@@ -168,7 +170,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           (!_needsUnifiedCommercialReg || _commercialVerified));
 
   Color get _pageBg =>
-      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF0E0F13);
+      _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
   Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
@@ -2169,7 +2171,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                   const SizedBox(height: 4),
                   Text(
                     '${_isAr ? 'البداية' : 'Start'}: '
-                    '${_falStartDate!.year}-${_falStartDate!.month.toString().padLeft(2, '0')}-${_falStartDate!.day.toString().padLeft(2, '0')}',
+                    '${DateHelper.fmtCivilDate(_falStartDate!, isAr: _isAr)}',
                     style: TextStyle(
                       color: _textPrimary,
                       fontWeight: FontWeight.w700,
@@ -2180,7 +2182,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                   const SizedBox(height: 4),
                   Text(
                     '${_isAr ? 'النهاية' : 'End'}: '
-                    '${_falEndDate!.year}-${_falEndDate!.month.toString().padLeft(2, '0')}-${_falEndDate!.day.toString().padLeft(2, '0')}',
+                    '${DateHelper.fmtCivilDate(_falEndDate!, isAr: _isAr)}',
                     style: TextStyle(
                       color: _isFalStillValid(_falEndDate)
                           ? _textPrimary
@@ -3020,58 +3022,44 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   }
 
   Widget _fieldPassword1() {
-    return AqarTextFormField(
+    return CapsAwarePasswordField(
       controller: _p1,
       focusNode: _p1Focus,
       enabled: !_busy,
       obscureText: _obscure1,
-      enableSuggestions: false,
-      autocorrect: false,
+      onToggleObscure: () => setState(() => _obscure1 = !_obscure1),
+      isAr: _isAr,
+      textInputAction: TextInputAction.next,
       inputFormatters: passwordArabicGuardFormatters(
         onArabicScriptBlocked: _schedulePasswordArabicDialog,
       ),
-      textInputAction: TextInputAction.next,
       decoration: _dec(
         context,
         hint: _isAr ? 'كلمة المرور' : 'Password',
         icon: Icons.lock_outline_rounded,
-        suffix: IconButton(
-          onPressed: () => setState(() => _obscure1 = !_obscure1),
-          icon: Icon(
-            _obscure1 ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-            color: _iconColor,
-          ),
-        ),
       ),
-      onFieldSubmitted: (_) => _p2Focus.requestFocus(),
+      onSubmitted: (_) => _p2Focus.requestFocus(),
     );
   }
 
   Widget _fieldPassword2() {
-    return AqarTextFormField(
+    return CapsAwarePasswordField(
       controller: _p2,
       focusNode: _p2Focus,
       enabled: !_busy,
       obscureText: _obscure2,
-      enableSuggestions: false,
-      autocorrect: false,
+      onToggleObscure: () => setState(() => _obscure2 = !_obscure2),
+      isAr: _isAr,
+      textInputAction: TextInputAction.done,
       inputFormatters: passwordArabicGuardFormatters(
         onArabicScriptBlocked: _schedulePasswordArabicDialog,
       ),
-      textInputAction: TextInputAction.done,
       decoration: _dec(
         context,
         hint: _isAr ? 'تأكيد كلمة المرور' : 'Confirm password',
         icon: Icons.lock_person_outlined,
-        suffix: IconButton(
-          onPressed: () => setState(() => _obscure2 = !_obscure2),
-          icon: Icon(
-            _obscure2 ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-            color: _iconColor,
-          ),
-        ),
       ),
-      onFieldSubmitted: (_) {
+      onSubmitted: (_) {
         if (!_busy &&
             !_verifyingFal &&
             !(_isProfessionalAccount && !_showProfessionalDetails)) {
@@ -3499,40 +3487,55 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Directionality(
-      textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
-      child: ValueListenableBuilder<ThemeMode>(
-        valueListenable: themeModeNotifier,
-        builder: (context, _, __) {
-          return Scaffold(
-            backgroundColor: _pageBg,
-            body: SafeArea(
-              child: Stack(
-                children: [
-                  LayoutBuilder(
-                    builder: (context, c) {
-                      final w = c.maxWidth;
-                      final h = c.maxHeight;
-                      final allowScroll = h < 820;
-                      final maxWidth = (w >= 780) ? 620.0 : 640.0;
+    return ValueListenableBuilder<String>(
+      valueListenable: langNotifier,
+      builder: (context, _, __) {
+        return Directionality(
+          textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
+          child: ValueListenableBuilder<ThemeMode>(
+            valueListenable: themeModeNotifier,
+            builder: (context, _, __) {
+              return Scaffold(
+                backgroundColor: _pageBg,
+                body: SafeArea(
+                  child: Stack(
+                    children: [
+                      LayoutBuilder(
+                        builder: (context, c) {
+                          final w = c.maxWidth;
+                          final h = c.maxHeight;
+                          final allowScroll = h < 820;
+                          final maxWidth = (w >= 780) ? 620.0 : 640.0;
 
-                      return Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: _card(
-                            maxWidth: maxWidth,
-                            allowScroll: allowScroll,
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: _card(
+                                maxWidth: maxWidth,
+                                allowScroll: allowScroll,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      PositionedDirectional(
+                        top: 4,
+                        end: 8,
+                        child: TextButton(
+                          onPressed: () => unawaited(
+                            setAppLang(_isAr ? 'en' : 'ar'),
                           ),
+                          child: Text(_isAr ? 'English' : 'العربية'),
                         ),
-                      );
-                    },
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

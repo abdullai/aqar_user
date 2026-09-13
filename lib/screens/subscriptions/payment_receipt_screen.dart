@@ -6,16 +6,20 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/branding/app_branding.dart';
+import '../../core/branding/branding_pdf.dart';
 import '../../core/config/app_config.dart';
+import '../../core/payment/invoice_copy.dart';
+import '../../core/payment/invoice_document.dart';
+import '../../core/payment/payment_plain_explain.dart';
 import '../../core/utils/app_money.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/payment_service.dart';
+import '../../widgets/app_page_close_button.dart';
 import '../../widgets/app_readable_qr.dart';
 
 /// إيصال الدفع الناجح — يظهر تلقائياً بعد العملية الناجحة.
@@ -38,6 +42,9 @@ class PaymentReceiptScreen extends StatelessWidget {
     this.payerName,
     this.purpose,
     this.verifyUrl,
+    this.billingRow,
+    this.invoiceNumber,
+    this.paymentReference,
   });
 
   final String lang;
@@ -52,43 +59,74 @@ class PaymentReceiptScreen extends StatelessWidget {
   final String? payerName;
   final String? purpose;
 
-  /// رابط تحقق خارجي اختياري. عند عدم تمريره نوّلد payload محلي.
+  /// رابط تحقق خارجي اختياري. عند عدم تمريره نوّلد payload من رقم الفاتورة.
   final String? verifyUrl;
+
+  /// صف billing_transactions المعتمد من الخادم إن وُجد.
+  final Map<String, dynamic>? billingRow;
+  final String? invoiceNumber;
+  final String? paymentReference;
 
   bool get _isAr => lang.toLowerCase() != 'en';
 
-  String get _qrPayload {
-    if ((verifyUrl ?? '').trim().isNotEmpty) return verifyUrl!.trim();
-    final buf = StringBuffer('aqar-receipt|')
-      ..write('tx=$transactionId|')
-      ..write('amt=${amountSar.toStringAsFixed(2)}|')
-      ..write('plan=$planName|')
-      ..write('period=$period|')
-      ..write('at=${completedAt.toIso8601String()}');
-    if ((subscriptionId ?? '').isNotEmpty) buf.write('|sub=$subscriptionId');
-    return buf.toString();
+  InvoiceDocument? get _doc {
+    final row = billingRow;
+    if (row == null || row.isEmpty) return null;
+    return InvoiceDocument.fromRow(row, isAr: _isAr);
   }
 
-  String get _formattedDate => DateFormat(
-        'EEEE d MMM yyyy — HH:mm',
-        _isAr ? 'ar' : 'en',
-      ).format(completedAt.toLocal());
+  String get _officialInvoiceNo {
+    final fromDoc = _doc?.invoiceNumber ?? '';
+    if (fromDoc.isNotEmpty) return fromDoc;
+    final passed = (invoiceNumber ?? '').trim();
+    if (InvoiceDocument.isOfficialInvoiceNumber(passed)) return passed;
+    return '';
+  }
 
-  String _periodLabel() {
-    switch (period.toLowerCase()) {
-      case 'yearly':
-        return _isAr ? 'سنوي' : 'Yearly';
-      case 'monthly':
-        return _isAr ? 'شهري' : 'Monthly';
-      case 'trial':
-        return _isAr ? 'تجربة' : 'Trial';
-      default:
-        return period;
-    }
+  double get _amount {
+    final d = _doc;
+    if (d != null) return d.amount;
+    return amountSar;
+  }
+
+  String get _qrPayload {
+    if ((verifyUrl ?? '').trim().isNotEmpty) return verifyUrl!.trim();
+    final d = _doc;
+    if (d != null) return d.qrPayload;
+    return documentQrPlainText(
+      isAr: _isAr,
+      kind: _isAr ? 'إيصال دفع' : 'Payment receipt',
+      invoiceNo: _officialInvoiceNo,
+      description: planName,
+      period: _periodLabel(),
+      amountLine: _amountText,
+      status: _isAr ? 'مدفوعة' : 'Paid',
+      paidAt: _formattedDate,
+      method: paymentMethodLabel,
+    );
+  }
+
+  String get _formattedDate =>
+      InvoiceCopy.dualCalendar(completedAt, isAr: _isAr);
+
+  String _periodLabel() => InvoiceCopy.periodLabel(period, isAr: _isAr);
+
+  Widget _amountValue(BuildContext context) {
+    return AppMoneyLine(
+      amount: _amount,
+      currencyCode: 'SAR',
+      isAr: _isAr,
+      maxFractionDigits: 2,
+      style: TextStyle(
+        fontWeight: FontWeight.w900,
+        fontSize: 20,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+    );
   }
 
   String get _amountText => AppMoney.formatWithCurrencyCode(
-        amountSar,
+        _amount,
         isAr: _isAr,
         currencyCode: 'SAR',
         maxFractionDigits: 2,
@@ -102,7 +140,6 @@ class PaymentReceiptScreen extends StatelessWidget {
     final close = _isAr ? 'إغلاق' : 'Close';
     final share = _isAr ? 'مشاركة' : 'Share';
     final printLabel = _isAr ? 'طباعة' : 'Print';
-    final title = _isAr ? 'إيصال دفع' : 'Payment receipt';
 
     return Directionality(
       textDirection: _isAr ? ui.TextDirection.rtl : ui.TextDirection.ltr,
@@ -113,12 +150,13 @@ class PaymentReceiptScreen extends StatelessWidget {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(title),
-          leading: IconButton(
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(
+            isArabic: _isAr,
             tooltip: close,
-            icon: const Icon(Icons.close),
             onPressed: () => Navigator.of(context).pop(true),
           ),
+          title: Text(_doc?.documentTitle ?? (_isAr ? 'إيصال دفع' : 'Payment receipt')),
         ),
         body: Center(
           child: ConstrainedBox(
@@ -153,9 +191,11 @@ class PaymentReceiptScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          _isAr
-                              ? 'تم تفعيل اشتراكك مباشرة — يعكس الحالة فوراً.'
-                              : 'Your subscription is active — instantly reflected.',
+                          PaymentPlainExplain.receiptSubtitle(
+                            isAr: _isAr,
+                            period: period,
+                            purpose: purpose,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -177,16 +217,112 @@ class PaymentReceiptScreen extends StatelessWidget {
                           ),
                           const SizedBox(height: 10),
                           _row(_isAr ? 'الباقة' : 'Plan', planName),
-                          _row(_isAr ? 'الفترة' : 'Period', _periodLabel()),
                           _row(
-                            _isAr ? 'المبلغ' : 'Amount',
-                            _amountText,
-                            valueBold: true,
-                            valueColor: cs.primary,
+                            _isAr ? 'البيان' : 'Description',
+                            _doc?.statementLabel ??
+                                InvoiceCopy.statementForPlan(planName, isAr: _isAr),
+                          ),
+                          _row(
+                            _isAr ? 'الفترة' : 'Period',
+                            _doc?.periodLabel ?? _periodLabel(),
+                          ),
+                          if (_doc != null && _doc!.showSubtotal)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 130,
+                                    child: Text(
+                                      _isAr ? 'قبل الخصم' : 'Before discount',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(child: _moneyWidget(_doc!.subtotal)),
+                                ],
+                              ),
+                            ),
+                          if (_doc != null && _doc!.showAutoPayDiscount)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 130,
+                                    child: Text(
+                                      _doc!.autoPayDiscountLabel(isAr: _isAr),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _moneyWidget(_doc!.autoPayDiscountSar),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (_doc != null && _doc!.showPromoDiscount)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 130,
+                                    child: Text(
+                                      _doc!.promoDiscountLabel(isAr: _isAr),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: _moneyWidget(_doc!.promoDiscountSar),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (_doc != null && _doc!.showCombinedDiscount)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 130,
+                                    child: Text(
+                                      _doc!.discountLabel(isAr: _isAr),
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(child: _moneyWidget(_doc!.discount)),
+                                ],
+                              ),
+                            ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 6),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  width: 130,
+                                  child: Text(
+                                    _isAr ? 'المبلغ' : 'Amount',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(child: _amountValue(context)),
+                              ],
+                            ),
                           ),
                           _row(
                             _isAr ? 'طريقة الدفع' : 'Method',
-                            paymentMethodLabel,
+                            _doc?.methodLabel ?? paymentMethodLabel,
                           ),
                           if ((cardLast4 ?? '').isNotEmpty)
                             _row(
@@ -199,22 +335,24 @@ class PaymentReceiptScreen extends StatelessWidget {
                             _isAr ? 'تاريخ الدفع' : 'Paid at',
                             _formattedDate,
                           ),
-                          _row(
-                            _isAr ? 'رقم المعاملة' : 'Transaction ID',
-                            transactionId,
-                            valueSelectable: true,
-                          ),
-                          if ((subscriptionId ?? '').isNotEmpty)
+                          if (_officialInvoiceNo.isNotEmpty)
                             _row(
-                              _isAr ? 'رقم الاشتراك' : 'Subscription ID',
-                              subscriptionId!,
+                              _isAr ? 'رقم الفاتورة' : 'Invoice number',
+                              _officialInvoiceNo,
                               valueSelectable: true,
                             ),
-                          if ((purpose ?? '').isNotEmpty)
+                          if ((_doc?.paymentReference ?? paymentReference ?? '')
+                              .trim()
+                              .isNotEmpty)
                             _row(
-                              _isAr ? 'نوع العملية' : 'Purpose',
-                              _purposeLabel(),
+                              _isAr ? 'مرجع الدفع' : 'Payment reference',
+                              (_doc?.paymentReference ?? paymentReference)!,
+                              valueSelectable: true,
                             ),
+                          _row(
+                            _isAr ? 'نوع العملية' : 'Purpose',
+                            _doc?.purposeLabel ?? _purposeLabel(),
+                          ),
                         ],
                       ),
                     ),
@@ -224,11 +362,26 @@ class PaymentReceiptScreen extends StatelessWidget {
                     data: _qrPayload,
                     isAr: _isAr,
                     size: 188,
-                    caption: transactionId,
+                    caption: _officialInvoiceNo.isNotEmpty
+                        ? _officialInvoiceNo
+                        : null,
                     title: _isAr ? 'رمز التحقق' : 'Verification code',
                     hint: _isAr
-                        ? 'امسح الرمز للتحقق من بيانات المعاملة.'
-                        : 'Scan to verify transaction details.',
+                        ? 'امسح الرمز للتحقق من رقم الفاتورة.'
+                        : 'Scan to verify the invoice number.',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _isAr
+                        ? 'ختم المطابقة: ${_matchSeal()} — يطابق المبلغ ورقم العملية على الفاتورة المطبوعة.'
+                        : 'Match seal: ${_matchSeal()} — must match amount and transaction on the printed invoice.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.4,
+                      fontWeight: FontWeight.w700,
+                      color: cs.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Wrap(
@@ -274,20 +427,32 @@ class PaymentReceiptScreen extends StatelessWidget {
     );
   }
 
-  String _purposeLabel() {
-    switch ((purpose ?? '').toLowerCase()) {
-      case 'subscribe_new':
-        return _isAr ? 'اشتراك جديد' : 'New subscription';
-      case 'renew':
-        return _isAr ? 'تجديد' : 'Renewal';
-      case 'upgrade':
-        return _isAr ? 'ترقية باقة' : 'Plan upgrade';
-      case 'period_switch':
-        return _isAr ? 'تحويل إلى سنوي' : 'Switch to yearly';
-      default:
-        return purpose!;
-    }
+  Widget _moneyWidget(double amount) {
+    return AppMoneyLine(
+      amount: amount,
+      currencyCode: _doc?.currency ?? 'SAR',
+      isAr: _isAr,
+      maxFractionDigits: 2,
+      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+    );
   }
+
+  String _moneyLine(double amount) => AppMoney.formatWithCurrencyCode(
+        amount,
+        isAr: _isAr,
+        currencyCode: _doc?.currency ?? 'SAR',
+        maxFractionDigits: 2,
+      );
+
+  String _matchSeal() {
+    final id = _officialInvoiceNo.replaceAll('-', '');
+    final tail =
+        id.length >= 6 ? id.substring(id.length - 6) : _amount.toStringAsFixed(0);
+    return '${tail.toUpperCase()}-${_amount.toStringAsFixed(2)}';
+  }
+
+  String _purposeLabel() =>
+      InvoiceCopy.purposeLabel(purpose ?? '', isAr: _isAr);
 
   Widget _row(
     String label,
@@ -334,54 +499,89 @@ class PaymentReceiptScreen extends StatelessWidget {
 
   String _buildShareText() {
     final amt = _amountText;
+    final d = _doc;
+    final promo = d != null && d.showPromoDiscount
+        ? (_isAr
+            ? '\n${d.promoDiscountLabel(isAr: true)}: ${_moneyLine(d.promoDiscountSar)}'
+            : '\n${d.promoDiscountLabel(isAr: false)}: ${_moneyLine(d.promoDiscountSar)}')
+        : '';
+    final auto = d != null && d.showAutoPayDiscount
+        ? (_isAr
+            ? '\n${d.autoPayDiscountLabel(isAr: true)}: ${_moneyLine(d.autoPayDiscountSar)}'
+            : '\n${d.autoPayDiscountLabel(isAr: false)}: ${_moneyLine(d.autoPayDiscountSar)}')
+        : '';
     if (_isAr) {
       return '''
-إيصال دفع — ${AppBranding.legalName(isAr: true)}
+إيصال دفع — ${AppBranding.invoiceLetterheadBrandName(isAr: true)}
 الباقة: $planName
-الفترة: ${_periodLabel()}
+الفترة: ${_periodLabel()}$auto$promo
 المبلغ: $amt
 طريقة الدفع: $paymentMethodLabel
 تاريخ الدفع: $_formattedDate
-رقم المعاملة: $transactionId${(subscriptionId ?? '').isNotEmpty ? '\nرقم الاشتراك: $subscriptionId' : ''}
+رقم الفاتورة: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentReference ?? _doc?.paymentReference ?? '').toString().trim().isNotEmpty ? '\nمرجع الدفع: ${_doc?.paymentReference ?? paymentReference}' : ''}
 ''';
     }
     return '''
-${AppBranding.legalName(isAr: false)} — Payment receipt
+${AppBranding.invoiceLetterheadBrandName(isAr: false)} — Payment receipt
 Plan: $planName
-Period: ${_periodLabel()}
+Period: ${_periodLabel()}$auto$promo
 Amount: $amt
 Method: $paymentMethodLabel
 Paid at: $_formattedDate
-Transaction ID: $transactionId${(subscriptionId ?? '').isNotEmpty ? '\nSubscription ID: $subscriptionId' : ''}
+Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentReference ?? _doc?.paymentReference ?? '').toString().trim().isNotEmpty ? '\nPayment reference: ${_doc?.paymentReference ?? paymentReference}' : ''}
 ''';
   }
 
   /// يبني PDF عربي/إنجليزي عبر [PaymentService.buildInvoicePdf].
   Future<Uint8List> _buildInvoiceBytes() {
+    final d = _doc;
+    final period = d?.periodLabel ?? _periodLabel();
+    final statement = d?.statementLabel ??
+        InvoiceCopy.statementForPlan(planName, isAr: _isAr);
     return PaymentService.buildInvoicePdf(
-      title: _isAr ? 'إيصال دفع' : 'Payment receipt',
-      txnId: transactionId,
-      amountLine: _amountText,
-      statusLine: _isAr ? 'مكتمل / Success' : 'Success',
-      footer: _isAr
-          ? 'هذه الفاتورة لأغراض الإثبات داخل المنصة فقط ولا تُستخدم لأغراض ضريبية '
-              'حتى تفعيل البوابة المعتمدة.'
-          : 'For platform proof only. Not valid for tax until a licensed '
-              'gateway is enabled.',
+      title: d?.documentTitle ?? (_isAr ? 'إيصال دفع' : 'Payment receipt'),
+      txnId: _officialInvoiceNo,
+      amountLine: AppMoney.formatForPdf(_amount, isAr: _isAr),
+      statusLine: d?.statusLabel ?? (_isAr ? 'مدفوعة' : 'Paid'),
+      footer: null,
       planName: planName,
-      periodLabel: _periodLabel(),
-      paymentMethod: paymentMethodLabel,
-      paidAtFormatted: _formattedDate,
-      subscriptionId: subscriptionId,
+      descriptionLabel: statement,
+      periodLabel: period,
+      paymentMethod: d?.methodLabel ?? paymentMethodLabel,
+      paidAtFormatted: InvoiceCopy.latinDateTime(completedAt),
+      calendarLine: InvoiceCopy.latinDateTime(completedAt),
       payerName: payerName,
-      purposeLabel: (purpose ?? '').isEmpty ? null : _purposeLabel(),
+      purposeLabel: d?.purposeLabel ??
+          ((purpose ?? '').isEmpty ? null : _purposeLabel()),
+      paymentReference: _doc?.paymentReference ?? paymentReference,
+      qrPayload: _qrPayload,
       isAr: _isAr,
+      subtotalLine: d != null && d.showSubtotal
+          ? AppMoney.formatForPdf(d.subtotal, isAr: _isAr)
+          : null,
+      autoPayDiscountLine: d != null && d.showAutoPayDiscount
+          ? AppMoney.formatForPdf(d.autoPayDiscountSar, isAr: _isAr)
+          : null,
+      autoPayDiscountLabel:
+          d != null && d.showAutoPayDiscount ? d.autoPayDiscountLabel(isAr: _isAr) : null,
+      promoDiscountLine: d != null && d.showPromoDiscount
+          ? AppMoney.formatForPdf(d.promoDiscountSar, isAr: _isAr)
+          : null,
+      promoDiscountLabel:
+          d != null && d.showPromoDiscount ? d.promoDiscountLabel(isAr: _isAr) : null,
+      discountLine: d != null && d.showCombinedDiscount
+          ? AppMoney.formatForPdf(d.discount, isAr: _isAr)
+          : null,
+      discountLabel:
+          d != null && d.showCombinedDiscount ? d.discountLabel(isAr: _isAr) : null,
     );
   }
 
   String _safeFileName() {
-    final raw = transactionId.trim().isEmpty ? 'receipt' : transactionId.trim();
-    return raw.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    if (_officialInvoiceNo.isNotEmpty) {
+      return 'Invoice_$_officialInvoiceNo';
+    }
+    return 'receipt';
   }
 
   Future<void> _sharePdf() async {

@@ -1,8 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/branding/branding_logo_image.dart';
+import 'crystal_listing_media.dart';
 
 /// معاينة بطاقة موحّدة: رابط شبكة أو أصل التطبيق الافتراضي.
 class ListingHeroThumb extends StatelessWidget {
@@ -31,49 +30,39 @@ class ListingHeroThumb extends StatelessWidget {
         resolved.isNotEmpty &&
         (resolved.startsWith('http://') || resolved.startsWith('https://'));
 
-    Widget fallback() => ClipRRect(
-          borderRadius: BorderRadius.circular(borderRadius),
-          child: ColoredBox(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: BrandingLogoImage(
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
-                errorIcon: showVideoBadge
-                    ? Icons.videocam_outlined
-                    : Icons.image_not_supported_outlined,
+    Widget fallback() => BrandingLogoImage(
+          fillFrame: true,
+          filterQuality: FilterQuality.high,
+          errorIcon: showVideoBadge
+              ? Icons.videocam_outlined
+              : Icons.image_not_supported_outlined,
+        );
+
+    final net = resolved;
+    late final Widget core;
+    if (net != null &&
+        net.isNotEmpty &&
+        (net.startsWith('http://') || net.startsWith('https://'))) {
+      core = CrystalListingMedia(
+        url: net,
+        fit: BoxFit.cover,
+        logicalCacheWidth: width,
+        logicalCacheHeight: height,
+        placeholder: ColoredBox(
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+          child: Center(
+            child: SizedBox(
+              width: width * 0.28,
+              height: height * 0.28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.primary.withValues(alpha: 0.55),
               ),
             ),
           ),
-        );
-
-    late final Widget core;
-    if (resolved != null &&
-        resolved.isNotEmpty &&
-        (resolved.startsWith('http://') || resolved.startsWith('https://'))) {
-      core = CachedNetworkImage(
-            imageUrl: resolved,
-            fit: BoxFit.cover,
-            fadeInDuration: const Duration(milliseconds: 140),
-            memCacheWidth: (width * (kIsWeb ? 2.0 : 2.5)).round().clamp(120, 900),
-            memCacheHeight:
-                (height * (kIsWeb ? 2.0 : 2.5)).round().clamp(90, 700),
-            placeholder: (_, __) => ColoredBox(
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-              child: Center(
-                child: SizedBox(
-                  width: width * 0.35,
-                  height: height * 0.35,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: cs.primary.withValues(alpha: 0.55),
-                  ),
-                ),
-              ),
-            ),
-            errorWidget: (_, __, ___) => fallback(),
-          );
+        ),
+        error: fallback(),
+      );
     } else {
       core = fallback();
     }

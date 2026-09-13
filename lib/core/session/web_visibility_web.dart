@@ -20,6 +20,11 @@ void listenDocumentVisibilityShown(void Function() onShown) {
   });
 }
 
+/// عند تجميد التبويب (Chrome Page Lifecycle) — ساعة الجدار تبقى المرجع عند العودة.
+void listenDocumentFreeze(void Function() onFreeze) {
+  html.document.on['freeze'].listen((_) => onFreeze());
+}
+
 /// مغادرة الصفحة (تحديث / إغلاق / انتقال تاريخ).
 ///
 /// [persisted] = true عند bfcache.
@@ -34,4 +39,24 @@ void listenDocumentPageHide(
     onPageHide(persisted: persisted);
   });
   // لا نربط unload — يُطلق مع التحديث ويفرغ الجلسة خطأً.
+}
+
+/// عودة التبويب من bfcache (سهم الرجوع من موقع آخر).
+void listenDocumentPageShow(
+  void Function({required bool persisted}) onPageShow,
+) {
+  html.window.onPageShow.listen((html.Event e) {
+    final persisted =
+        e is html.PageTransitionEvent ? (e.persisted ?? false) : false;
+    onPageShow(persisted: persisted);
+  });
+}
+
+/// يمنع تمرير صفحة الويب خلف حوار الخمول حتى يبقى الحوار في المنتصف.
+void setWebDocumentScrollLocked(bool locked) {
+  try {
+    final overflow = locked ? 'hidden' : '';
+    html.document.documentElement?.style.overflow = overflow;
+    html.document.body?.style.overflow = overflow;
+  } catch (_) {}
 }

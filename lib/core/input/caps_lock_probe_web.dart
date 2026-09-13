@@ -1,58 +1,149 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 
 bool? _cachedCaps;
+int _refs = 0;
 bool _listening = false;
 
-void _readCapsFromEvent(html.KeyboardEvent e) {
+JSFunction? _keyListener;
+JSFunction? _pointerListener;
+JSFunction? _inputListener;
+
+bool _modifierStateUnreliable() {
   try {
-    _cachedCaps = e.getModifierState('CapsLock');
+    final ua = web.window.navigator.userAgent.toLowerCase();
+    return ua.contains('android') ||
+        ua.contains('iphone') ||
+        ua.contains('ipad') ||
+        ua.contains('ipod') ||
+        ua.contains('mobile');
+  } catch (_) {
+    return true;
+  }
+}
+
+void _inferFromLatinChar(String? ch, {required bool shift}) {
+  if (ch == null || ch.length != 1) return;
+  final cu = ch.codeUnitAt(0);
+  final isUpper = cu >= 65 && cu <= 90;
+  final isLower = cu >= 97 && cu <= 122;
+  if (!isUpper && !isLower) return;
+  if (shift) return;
+  _cachedCaps = isUpper;
+}
+
+String? _jsString(web.Event e, String name) {
+  try {
+    final v = (e as JSObject).getProperty<JSAny?>(name.toJS);
+    if (v == null) return null;
+    return (v as JSString).toDart;
+  } catch (_) {
+    return null;
+  }
+}
+
+bool _jsBool(web.Event e, String name) {
+  try {
+    final v = (e as JSObject).getProperty<JSAny?>(name.toJS);
+    if (v == null) return false;
+    return (v as JSBoolean).toDart;
+  } catch (_) {
+    return false;
+  }
+}
+
+void _readModifier(web.Event e) {
+  try {
+    if (e is web.KeyboardEvent) {
+      try {
+        if (e.getModifierState('CapsLock')) {
+          _cachedCaps = true;
+          _inferFromLatinChar(e.key, shift: e.shiftKey);
+          return;
+        }
+      } catch (_) {}
+      _inferFromLatinChar(e.key, shift: e.shiftKey);
+      if (_modifierStateUnreliable()) return;
+      try {
+        _cachedCaps = e.getModifierState('CapsLock');
+      } catch (_) {}
+      return;
+    }
+    if (e is web.MouseEvent) {
+      if (_modifierStateUnreliable()) return;
+      try {
+        _cachedCaps = e.getModifierState('CapsLock');
+      } catch (_) {}
+    }
   } catch (_) {
     // بعض لوحات الجوال لا تدعم getModifierState.
   }
 }
 
-/// محاولة قراءة Caps Lock عبر حدث اصطناعي عند التركيز (ويب ويندوز).
-void _probeCapsViaActiveElement() {
-  try {
-    // لا يوجد API مباشر؛ نعتمد على آخر قراءة من أحداث المفاتيح.
-    // إن وُجدت نافذة نشطة، نُبقي الكاش كما هو حتى أول keydown.
-  } catch (_) {}
+void _readTypedInput(web.Event e) {
+  _inferFromLatinChar(_jsString(e, 'data'), shift: _jsBool(e, 'shiftKey'));
 }
 
 void _ensureDomCapsListener() {
   if (_listening) return;
   _listening = true;
-  void onKey(html.Event e) {
-    if (e is! html.KeyboardEvent) return;
-    _readCapsFromEvent(e);
-  }
-
-  // capture=true يلتقط الحالة حتى قبل تركيز حقل كلمة المرور.
-  html.document.addEventListener('keydown', onKey, true);
-  html.document.addEventListener('keyup', onKey, true);
-  html.document.addEventListener('keypress', onKey, true);
-  html.window.addEventListener('keydown', onKey, true);
-  html.window.addEventListener('keyup', onKey, true);
-
-  // عند أي تفاعل بالفأرة قبل الكتابة: لا نعرف Caps بعد، لكن نجهّز المستمع.
-  html.document.addEventListener('mousedown', (_) {
-    _probeCapsViaActiveElement();
-  }, true);
-  html.document.addEventListener('focusin', (_) {
-    _probeCapsViaActiveElement();
-  }, true);
+  _keyListener = ((web.Event e) {
+    _readModifier(e);
+  }).toJS;
+  _pointerListener = ((web.Event e) {
+    _readModifier(e);
+  }).toJS;
+  _inputListener = ((web.Event e) {
+    _readTypedInput(e);
+  }).toJS;
+  final capture = true.toJS;
+  web.document.addEventListener('keydown', _keyListener, capture);
+  web.document.addEventListener('keyup', _keyListener, capture);
+  web.document.addEventListener('pointerdown', _pointerListener, capture);
+  web.document.addEventListener('beforeinput', _inputListener, capture);
+  web.document.addEventListener('input', _inputListener, capture);
 }
 
-/// حالة Caps Lock من DOM (أكثر دقة على ويب ويندوز من lockModes وحدها).
-/// على ويب الجوال غالباً null حتى أول ضغطة — الاعتماد على استدلال الأحرف الكبيرة.
+void _tearDownDomCapsListener() {
+  if (!_listening) return;
+  final capture = true.toJS;
+  if (_keyListener != null) {
+    web.document.removeEventListener('keydown', _keyListener, capture);
+    web.document.removeEventListener('keyup', _keyListener, capture);
+  }
+  if (_pointerListener != null) {
+    web.document.removeEventListener('pointerdown', _pointerListener, capture);
+  }
+  if (_inputListener != null) {
+    web.document.removeEventListener('beforeinput', _inputListener, capture);
+    web.document.removeEventListener('input', _inputListener, capture);
+  }
+  _keyListener = null;
+  _pointerListener = null;
+  _inputListener = null;
+  _listening = false;
+}
+
 bool? probeBrowserCapsLock() {
-  _ensureDomCapsListener();
+  if (_refs > 0) _ensureDomCapsListener();
   return _cachedCaps;
 }
 
-/// يفرض تحديث الكاش من حدث لوحة مفاتيح إن وُجد؛ يُستدعى بعد التركيز.
-void refreshBrowserCapsLockCache() {
+void retainBrowserCapsLockProbe() {
+  _refs++;
   _ensureDomCapsListener();
+}
+
+void releaseBrowserCapsLockProbe() {
+  if (_refs <= 0) return;
+  _refs--;
+  if (_refs == 0) {
+    _tearDownDomCapsListener();
+  }
+}
+
+void refreshBrowserCapsLockCache() {
+  if (_refs > 0) _ensureDomCapsListener();
 }

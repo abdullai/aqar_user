@@ -2,10 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/branding/aqar_brand_colors.dart';
+import '../core/l10n/locale_content.dart';
+import 'aqar_marquee_text.dart';
+import 'catalog_estate_card_body.dart';
 
-/// بطاقة عقارية موحّدة (إعلان / طلب) — صف بيانات+صورة أو صورة عريضة أعلى البيانات.
-///
-/// الصورة تمتد بارتفاع عمود البيانات (يمين المستخدم في العربية) دون فراغ أسفلها.
+/// بطاقة عقارية موحّدة (إعلان / طلب) — صورة أعلى البيانات في الشبكي والعمودي.
 class UnifiedRealEstateCard extends StatelessWidget {
   static const double imageCornerRadius = 16;
   static const double minListCardHeight = 168;
@@ -16,15 +17,26 @@ class UnifiedRealEstateCard extends StatelessWidget {
   final Widget dataColumn;
   final Widget imageColumn;
   final VoidCallback? onCardTap;
+
   /// نقر مزدوج — إضافة/إزالة المفضلة (إعلانات).
   final VoidCallback? onCardDoubleTap;
   final Widget? footer;
   final Widget? belowMainRow;
+
+  /// متصل الآن / آخر ظهور تحت الصورة مباشرة (ليس فوقها).
+  final Widget? underImage;
+
+  /// شريط أعلى الصورة: مستعجل/عادي + طلب/إعلان + العنوان — بلا نص فوق الصورة.
+  final Widget? topChrome;
   final bool webHoverShell;
   final double cardRadius;
   final bool fullWidthHeroImage;
+
   /// نسبة صورة/رأس البطاقة عند [fullWidthHeroImage] (الطلبات يمكن أن تكون أعرض وأقصر).
   final double heroAspectRatio;
+
+  /// ارتفاع ثابت لصورة الرأس — يوحّد صفوف الشبكة عند تمدد البطاقات.
+  final double? heroHeight;
 
   const UnifiedRealEstateCard({
     super.key,
@@ -37,110 +49,48 @@ class UnifiedRealEstateCard extends StatelessWidget {
     this.onCardDoubleTap,
     this.footer,
     this.belowMainRow,
+    this.underImage,
+    this.topChrome,
     this.webHoverShell = true,
     this.cardRadius = 24,
-    this.fullWidthHeroImage = false,
+    this.fullWidthHeroImage = true,
     this.heroAspectRatio = 2.4,
+    this.heroHeight,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final kindColors = _kindColors(kind, cs);
-
-    final inkContent = Stack(
-      clipBehavior: Clip.none,
-      children: [
-        Padding(
-          padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 10, 6),
-          child: fullWidthHeroImage
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(imageCornerRadius),
-                      child: AspectRatio(
-                        aspectRatio: heroAspectRatio,
-                        child: imageColumn,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    dataColumn,
-                  ],
-                )
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    var w = constraints.maxWidth;
-                    if (!w.isFinite || w <= 0) {
-                      final mq = MediaQuery.sizeOf(context).width;
-                      w = (mq - 24).clamp(200.0, mq);
-                    }
-                    if (!w.isFinite || w <= 0) {
-                      // لا تُرجع فراغاً قابلاً للضغط فقط — اعرض البيانات على الأقل.
-                      return dataColumn;
-                    }
-                    final compact = w < 390;
-                    final gapW = w < 340 ? 10.0 : 14.0;
-                    // صورة أوضح بجانب البيانات (~45% مثل dealapp) — بيانات مريحة بجانبها.
-                    const minDataW = 160.0;
-                    final maxImg = (w - gapW - minDataW).clamp(120.0, 260.0);
-                    final imgWidth = (w * (compact ? 0.40 : 0.46))
-                        .clamp(compact ? 118.0 : 140.0, maxImg);
-                    // IntrinsicHeight يعطي Row ارتفاعاً محدوداً حتى يعمل
-                    // CrossAxisAlignment.stretch + StackFit.expand في الصورة
-                    // دون Null check على الويب بعد إزالة equal-height.
-                    return IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        textDirection: TextDirection.ltr,
-                        children: _orderedMainAxis(
-                          data: Expanded(
-                            child: Padding(
-                              padding: EdgeInsetsDirectional.only(
-                                start: isAr ? 2 : 0,
-                                end: isAr ? 0 : 2,
-                                top: 2,
-                                bottom: 2,
-                              ),
-                              child: Align(
-                                alignment: AlignmentDirectional.centerStart,
-                                child: dataColumn,
-                              ),
-                            ),
-                          ),
-                          gap: SizedBox(width: gapW),
-                          image: SizedBox(
-                            width: imgWidth,
-                            child: ClipRRect(
-                              borderRadius:
-                                  BorderRadius.circular(imageCornerRadius),
-                              child: imageColumn,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-        Positioned(
-          top: 6,
-          // زاوية الصورة دائماً (يمين المستخدم في العربية) — لا يغطي العنوان/التاريخ.
-          left: isAr ? null : 6,
-          right: isAr ? 6 : null,
-          child: _KindPill(
-            label: kind == UnifiedCardKind.ad
-                ? (isAr ? 'إعلان' : 'Listing')
-                : (isAr ? 'طلب' : 'Request'),
-            background: kindColors.background,
-            foreground: kindColors.foreground,
+    final inkContent = Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(8, 6, 8, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (topChrome != null) ...[
+            Padding(
+              padding: const EdgeInsetsDirectional.fromSTEB(4, 2, 4, 6),
+              child: topChrome!,
+            ),
+          ],
+          ClipRRect(
+            borderRadius: BorderRadius.circular(imageCornerRadius),
+            child: SizedBox(
+              height: heroHeight ?? (fullWidthHeroImage ? 156.0 : 148.0),
+              width: double.infinity,
+              child: imageColumn,
+            ),
           ),
-        ),
-      ],
+          if (underImage != null) ...[
+            const SizedBox(height: 6),
+            underImage!,
+          ],
+          const SizedBox(height: 8),
+          dataColumn,
+        ],
+      ),
     );
 
-    Widget face({required bool fillHeight}) {
+    Widget face({required bool fillHeight, double? maxHeight}) {
       final hasTail = belowMainRow != null || footer != null;
       final tail = Column(
         mainAxisSize: MainAxisSize.min,
@@ -166,22 +116,21 @@ class UnifiedRealEstateCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: Container(
           width: double.infinity,
-          height: fillHeight ? double.infinity : null,
+          height: fillHeight && maxHeight != null ? maxHeight : null,
           decoration: decoration,
-          constraints: const BoxConstraints(minHeight: minListCardHeight),
+          constraints: BoxConstraints(
+            minHeight: fullWidthHeroImage ? 0 : 132,
+          ),
           child: Material(
             type: MaterialType.transparency,
             child: Column(
               mainAxisSize: fillHeight ? MainAxisSize.max : MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // بدون ClipRect — قصّ الارتفاع كان يغطي المبلغ ورقم الإعلان.
                 InkWell(
                   borderRadius: BorderRadius.vertical(
                     top: Radius.circular(cardRadius),
-                    bottom: hasTail
-                        ? Radius.zero
-                        : Radius.circular(cardRadius),
+                    bottom: hasTail ? Radius.zero : Radius.circular(cardRadius),
                   ),
                   mouseCursor: onCardTap != null
                       ? SystemMouseCursors.click
@@ -190,7 +139,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
                   onDoubleTap: onCardDoubleTap,
                   child: inkContent,
                 ),
-                if (fillHeight && hasTail) const Spacer(),
+                if (fillHeight) const Spacer(),
                 if (hasTail)
                   Material(
                     type: MaterialType.transparency,
@@ -205,9 +154,16 @@ class UnifiedRealEstateCard extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // لا تملأ الارتفاع بـ infinity داخل IntrinsicHeight — كان يُخفي البطاقات.
-        // الصف يوحّد الارتفاع عبر stretch؛ البطاقة تبقى بمحتواها الطبيعي.
-        Widget core = face(fillHeight: false);
+        final h = constraints.maxHeight;
+        // ارتفاع 0/ضئيل شائع مع IntrinsicHeight على ويب ويندوز — لا تملأ به البطاقة.
+        final fillHeight = constraints.hasBoundedHeight &&
+            h.isFinite &&
+            h > 48 &&
+            h < 8000;
+        Widget core = face(
+          fillHeight: fillHeight,
+          maxHeight: fillHeight ? h : null,
+        );
 
         final hoverShell = footer == null &&
             belowMainRow == null &&
@@ -218,17 +174,6 @@ class UnifiedRealEstateCard extends StatelessWidget {
         return RepaintBoundary(child: core);
       },
     );
-  }
-
-  List<Widget> _orderedMainAxis({
-    required Widget data,
-    required Widget gap,
-    required Widget image,
-  }) {
-    if (isAr) {
-      return [data, gap, image];
-    }
-    return [image, gap, data];
   }
 }
 
@@ -255,12 +200,76 @@ _KindColors _kindColors(UnifiedCardKind kind, ColorScheme cs) {
   }
 }
 
-class _KindPill extends StatelessWidget {
-  const _KindPill({
+/// صف أعلى الصورة: شارات الأولوية/النوع ثم عنوان بتمرير عند الضيق.
+class UnifiedCardTitleChrome extends StatelessWidget {
+  const UnifiedCardTitleChrome({
+    super.key,
+    required this.isAr,
+    required this.title,
+    this.leading = const [],
+  });
+
+  final bool isAr;
+  final String title;
+  final List<Widget> leading;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final lead = <Widget>[];
+    for (var i = 0; i < leading.length; i++) {
+      if (i > 0) lead.add(const SizedBox(width: 6));
+      lead.add(leading[i]);
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        ...lead,
+        if (title.trim().isNotEmpty) ...[
+          if (lead.isNotEmpty) const SizedBox(width: 8),
+          Expanded(
+            child: AqarMarqueeText(
+              text: LocaleContent.forUi(title.trim(), isAr: isAr),
+              height: 22,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+                height: 1.2,
+                letterSpacing: -0.12,
+                color: CatalogReadableInk.title(cs),
+                fontFamily: 'Cairo',
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class UnifiedCardKindPill extends StatelessWidget {
+  const UnifiedCardKindPill({
+    super.key,
     required this.label,
     required this.background,
     required this.foreground,
   });
+
+  factory UnifiedCardKindPill.forKind({
+    required UnifiedCardKind kind,
+    required bool isAr,
+    required ColorScheme cs,
+  }) {
+    final colors = _kindColors(kind, cs);
+    return UnifiedCardKindPill(
+      label: kind == UnifiedCardKind.ad
+          ? (isAr ? 'إعلان' : 'Listing')
+          : (isAr ? 'طلب' : 'Request'),
+      background: colors.background,
+      foreground: colors.foreground,
+    );
+  }
 
   final String label;
   final Color background;
@@ -270,16 +279,19 @@ class _KindPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final labelWidget = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-          color: foreground,
-          height: 1.0,
-          fontFamily: 'Cairo',
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(
+          label,
+          maxLines: 1,
+          softWrap: false,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            color: foreground,
+            height: 1.0,
+            fontFamily: 'Cairo',
+          ),
         ),
       ),
     );
@@ -300,7 +312,7 @@ class _KindPill extends StatelessWidget {
   }
 }
 
-/// صف مواصفات مريح — أيقونة + نص غامق بدون حدود/خلفيات متضاربة.
+/// صف مواصفات: مساحة + منطقة + مدينة + حي بأيقونات، مع تقليص ذكي عند ضيق العرض.
 class UnifiedCardSpecRow extends StatelessWidget {
   const UnifiedCardSpecRow({
     super.key,
@@ -308,6 +320,8 @@ class UnifiedCardSpecRow extends StatelessWidget {
     required this.areaText,
     required this.roomsText,
     this.districtText = '',
+    this.regionText = '',
+    this.cityText = '',
     this.locationParts = const [],
     this.extraChips = const [],
   });
@@ -316,90 +330,219 @@ class UnifiedCardSpecRow extends StatelessWidget {
   final String areaText;
   final String roomsText;
   final String districtText;
+  final String regionText;
+  final String cityText;
+  /// مسار قديم: قائمة مسطّحة إن لم تُمرَّر حقول المنطقة/المدينة/الحي.
   final List<String> locationParts;
   final List<String> extraChips;
-
-  static const _locIcons = <IconData>[
-    Icons.public_outlined,
-    Icons.account_balance_outlined,
-    Icons.location_city_outlined,
-    Icons.holiday_village_outlined,
-  ];
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final isDark = cs.brightness == Brightness.dark;
-    final chips = <({IconData? icon, String text})>[];
+    final isAr = Localizations.localeOf(context).languageCode != 'en';
+    final chipFg = CatalogReadableInk.body(cs);
+    final iconFg = isDark ? cs.primary : bankColor;
+    final style = TextStyle(
+      fontSize: 12.5,
+      fontWeight: FontWeight.w800,
+      color: chipFg,
+      height: 1.1,
+      fontFamily: 'Cairo',
+    );
+
+    final region = LocaleContent.forUi(regionText.trim(), isAr: isAr);
+    final city = LocaleContent.forUi(cityText.trim(), isAr: isAr);
+    final district = LocaleContent.forUi(districtText.trim(), isAr: isAr);
+    if (district.isEmpty &&
+        region.isEmpty &&
+        city.isEmpty &&
+        locationParts.isNotEmpty) {
+      final locs = LocaleContent.parts(locationParts, isAr: isAr);
+      return _legacyJoinedRow(
+        locs: locs,
+        iconFg: iconFg,
+        style: style,
+        isAr: isAr,
+      );
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth;
+        List<({IconData icon, String text})> buildChips({
+          required bool withDistrict,
+          required bool withRooms,
+          required bool withExtras,
+        }) {
+          final out = <({IconData icon, String text})>[];
+          final area = areaText.trim();
+          if (area.isNotEmpty) {
+            out.add((
+              icon: Icons.square_foot_outlined,
+              text: LocaleContent.forUi(area, isAr: isAr),
+            ));
+          }
+          if (region.isNotEmpty) {
+            out.add((icon: Icons.public_outlined, text: region));
+          }
+          if (city.isNotEmpty) {
+            out.add((icon: Icons.location_city_outlined, text: city));
+          }
+          if (withDistrict && district.isNotEmpty) {
+            out.add((icon: Icons.home_work_outlined, text: district));
+          }
+          if (withRooms && roomsText.trim().isNotEmpty) {
+            out.add((
+              icon: Icons.bed_outlined,
+              text: LocaleContent.forUi(roomsText.trim(), isAr: isAr),
+            ));
+          }
+          if (withExtras) {
+            for (final e in extraChips) {
+              final t = e.trim();
+              if (t.isEmpty) continue;
+              out.add((
+                icon: Icons.circle,
+                text: LocaleContent.forUi(t, isAr: isAr),
+              ));
+            }
+          }
+          return out;
+        }
+
+        final variants = <List<({IconData icon, String text})>>[
+          buildChips(withDistrict: true, withRooms: true, withExtras: true),
+          buildChips(withDistrict: false, withRooms: true, withExtras: true),
+          buildChips(withDistrict: false, withRooms: true, withExtras: false),
+          buildChips(withDistrict: false, withRooms: false, withExtras: false),
+          [
+            if (areaText.trim().isNotEmpty)
+              (
+                icon: Icons.square_foot_outlined,
+                text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
+              ),
+            if (region.isNotEmpty) (icon: Icons.public_outlined, text: region),
+            if (city.isNotEmpty)
+              (icon: Icons.location_city_outlined, text: city),
+          ],
+          [
+            if (areaText.trim().isNotEmpty)
+              (
+                icon: Icons.square_foot_outlined,
+                text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
+              ),
+            if (city.isNotEmpty)
+              (icon: Icons.location_city_outlined, text: city)
+            else if (region.isNotEmpty)
+              (icon: Icons.public_outlined, text: region),
+          ],
+          [
+            if (areaText.trim().isNotEmpty)
+              (
+                icon: Icons.square_foot_outlined,
+                text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
+              ),
+          ],
+        ];
+
+        List<({IconData icon, String text})> chosen = const [];
+        for (final v in variants) {
+          if (v.isEmpty) continue;
+          if (!maxW.isFinite ||
+              maxW <= 0 ||
+              _measureChips(v, style) <= maxW + 0.5) {
+            chosen = v;
+            break;
+          }
+        }
+        if (chosen.isEmpty) return const SizedBox.shrink();
+        return _chipsRow(chosen, iconFg: iconFg, style: style);
+      },
+    );
+  }
+
+  Widget _legacyJoinedRow({
+    required List<String> locs,
+    required Color iconFg,
+    required TextStyle style,
+    required bool isAr,
+  }) {
+    final chips = <({IconData icon, String text})>[];
     if (areaText.trim().isNotEmpty) {
-      chips.add((icon: Icons.straighten_outlined, text: areaText.trim()));
-    }
-    if (roomsText.trim().isNotEmpty) {
-      chips.add((icon: Icons.bed_outlined, text: roomsText.trim()));
-    }
-    final locs = locationParts
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList(growable: false);
-    if (locs.isNotEmpty) {
-      for (var i = 0; i < locs.length; i++) {
-        chips.add((
-          icon: _locIcons[i.clamp(0, _locIcons.length - 1)],
-          text: locs[i],
-        ));
-      }
-    } else if (districtText.trim().isNotEmpty) {
       chips.add((
-        icon: Icons.location_on_outlined,
-        text: districtText.trim(),
+        icon: Icons.square_foot_outlined,
+        text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
       ));
     }
-    for (final e in extraChips) {
-      final t = e.trim();
-      if (t.isNotEmpty) chips.add((icon: null, text: t));
+    if (locs.isNotEmpty) {
+      chips.add((icon: Icons.place_outlined, text: locs.join(' · ')));
+    }
+    if (roomsText.trim().isNotEmpty) {
+      chips.add((
+        icon: Icons.bed_outlined,
+        text: LocaleContent.forUi(roomsText.trim(), isAr: isAr),
+      ));
     }
     if (chips.isEmpty) return const SizedBox.shrink();
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: AlignmentDirectional.centerStart,
+      child: _chipsRow(chips, iconFg: iconFg, style: style),
+    );
+  }
 
-    final chipFg = isDark ? cs.onSurface : const Color(0xFF0B1F1A);
-    final iconFg = isDark ? cs.primary : bankColor;
+  static double _measureChips(
+    List<({IconData icon, String text})> chips,
+    TextStyle style,
+  ) {
+    var w = 0.0;
+    for (var i = 0; i < chips.length; i++) {
+      if (i > 0) w += 14;
+      w += 15 + 3;
+      final tp = TextPainter(
+        text: TextSpan(text: chips[i].text, style: style),
+        textDirection: TextDirection.ltr,
+        maxLines: 1,
+      )..layout();
+      w += tp.width;
+    }
+    return w;
+  }
 
-    return Wrap(
-      spacing: 14,
-      runSpacing: 6,
-      crossAxisAlignment: WrapCrossAlignment.center,
+  static Widget _chipsRow(
+    List<({IconData icon, String text})> chips, {
+    required Color iconFg,
+    required TextStyle style,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        for (final chip in chips)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (chip.icon != null) ...[
-                Icon(chip.icon!, size: 15, color: iconFg),
-                const SizedBox(width: 4),
-              ] else ...[
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: AqarBrandColors.gold,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-              ],
-              Text(
-                chip.text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w800,
-                  color: chipFg,
-                  height: 1.1,
-                  fontFamily: 'Cairo',
+        for (var i = 0; i < chips.length; i++) ...[
+          if (i > 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 5),
+              child: Text(
+                '·',
+                style: style.copyWith(
+                  color: style.color?.withValues(alpha: 0.55),
                 ),
               ),
-            ],
+            ),
+          Icon(
+            chips[i].icon,
+            size: chips[i].icon == Icons.circle ? 6 : 15,
+            color: iconFg,
           ),
+          const SizedBox(width: 3),
+          Text(
+            chips[i].text,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
+            style: style,
+          ),
+        ],
       ],
     );
   }

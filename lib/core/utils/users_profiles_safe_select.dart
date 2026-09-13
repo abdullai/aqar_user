@@ -3,6 +3,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class UsersProfilesSafeSelect {
   const UsersProfilesSafeSelect._();
 
+  static const List<String> dealPartyProfileColumns = [
+    'user_id,username,full_name,full_name_ar,full_name_en,avatar_url,account_type,phone,city,city_ar,city_en,address_line,district',
+    'user_id,username,full_name,full_name_ar,full_name_en,avatar_url,account_type,phone,city',
+    'user_id,username,full_name,full_name_ar,full_name_en,avatar_url,account_type,phone',
+    'user_id,username',
+    'user_id',
+  ];
+
   static const List<String> defaultProfileColumns = [
     'user_id,username,full_name,full_name_ar,full_name_en,avatar_url,account_type',
     'user_id,username',

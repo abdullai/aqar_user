@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 
 import 'package:aqar_user/models.dart';
+import 'package:aqar_user/core/auth/auth_challenge_service.dart';
 import 'package:aqar_user/core/auth/login_security_db.dart';
 import 'package:aqar_user/core/input/input_normalizers.dart';
 import 'package:aqar_user/core/security/install_device_identity.dart';
@@ -24,6 +25,25 @@ class LoginResult {
     required this.locked,
     this.user,
   });
+}
+
+/// نتيجة طلب رمز التحقق داخل التطبيق.
+class InAppOtpRequestResult {
+  final String? error;
+  final DateTime? expiresAt;
+  final String? username;
+  final String? challengeId;
+  final String? devCode;
+
+  const InAppOtpRequestResult({
+    this.error,
+    this.expiresAt,
+    this.username,
+    this.challengeId,
+    this.devCode,
+  });
+
+  bool get ok => error == null;
 }
 
 class AuthService {
@@ -74,7 +94,21 @@ class AuthService {
     try {
       if (kIsWeb) {
         final w = await info.webBrowserInfo;
-        return 'web:${w.browserName.name}';
+        final ua = (w.userAgent ?? '').toLowerCase();
+        var os = 'Web';
+        if (ua.contains('windows')) {
+          os = 'Windows';
+        } else if (ua.contains('android')) {
+          os = 'Android';
+        } else if (ua.contains('iphone') || ua.contains('ipad')) {
+          os = 'iOS';
+        } else if (ua.contains('mac os') || ua.contains('macintosh')) {
+          os = 'macOS';
+        } else if (ua.contains('linux')) {
+          os = 'Linux';
+        }
+        final browser = w.browserName.name;
+        return '$browser · $os';
       }
       switch (defaultTargetPlatform) {
         case TargetPlatform.android:
@@ -224,21 +258,64 @@ class AuthService {
     }
   }
 
-  /// Returns `null` if the OTP RPC succeeded; otherwise a machine-readable hint
-  /// (`timeout`, `invalid_username`, or the raw exception message).
-  static Future<String?> requestOtpWithMessage(String username) async {
+  static DateTime? _parseOtpExpiry(dynamic res) {
+    if (res is Map) {
+      final raw = res['expiresAt'] ?? res['expires_at'];
+      if (raw != null) return DateTime.tryParse(raw.toString());
+    }
+    return null;
+  }
+
+  static String? _parseOtpChallengeId(dynamic res) {
+    if (res is Map) {
+      final raw = (res['challenge_id'] ?? '').toString().trim();
+      if (raw.isNotEmpty) return raw;
+    }
+    return null;
+  }
+
+  static String? _parseOtpDevCode(dynamic res) {
+    if (res is Map) {
+      final c = (res['dev_code'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+      if (c.length >= 6) return c.substring(0, 6);
+    }
+    return null;
+  }
+
+  static String _mapOtpRequestError(Object e) {
+    final raw = e.toString();
+    final lower = raw.toLowerCase();
+    if (lower.contains('not_authenticated')) return 'not_authenticated';
+    if (lower.contains('username_not_current_user')) {
+      return 'username_not_current_user';
+    }
+    if (lower.contains('rate') || lower.contains('too many')) {
+      return 'rate_limited';
+    }
+    if (lower.contains('timeout') || lower.contains('timed out')) {
+      return 'timeout';
+    }
+    return raw;
+  }
+
+  /// طلب رمز داخل التطبيق مع تاريخ الانتهاء ورمز الخطأ عند الفشل.
+  static Future<InAppOtpRequestResult> requestOtpDetailed(
+    String username,
+  ) async {
     final u = digitsOnly(normalizeAsciiDigits(username.trim()));
-    if (!_isValidLoginKey(u)) return 'invalid_username';
+    if (!_isValidLoginKey(u)) {
+      return const InAppOtpRequestResult(error: 'invalid_username');
+    }
 
     final uid = _sb.auth.currentUser?.id;
     if (uid == null || uid.isEmpty) {
-      return 'not_authenticated';
+      return const InAppOtpRequestResult(error: 'not_authenticated');
     }
 
     final canonical = await securityUsernameForDeviceFlow(u);
 
     try {
-      await _sb.rpc(
+      final res = await _sb.rpc(
         'request_inapp_otp',
         params: {'p_username': canonical},
       );
@@ -248,7 +325,18 @@ class AuthService {
         success: true,
         details: '',
       );
-      return null;
+      final challengeId = _parseOtpChallengeId(res);
+      final devCode = _parseOtpDevCode(res);
+      await AuthChallengeService.persistPending(
+        challengeId: challengeId,
+        username: canonical,
+      );
+      return InAppOtpRequestResult(
+        expiresAt: _parseOtpExpiry(res),
+        username: canonical,
+        challengeId: challengeId,
+        devCode: devCode,
+      );
     } catch (e) {
       final raw = e.toString();
       await _logSecurity(
@@ -257,17 +345,18 @@ class AuthService {
         success: false,
         details: raw,
       );
-      // PostgREST 400 من RAISE EXCEPTION — أعِد رمزاً واضحاً للواجهة.
-      final lower = raw.toLowerCase();
-      if (lower.contains('not_authenticated')) return 'not_authenticated';
-      if (lower.contains('username_not_current_user')) {
-        return 'username_not_current_user';
-      }
-      if (lower.contains('rate') || lower.contains('too many')) {
-        return 'rate_limited';
-      }
-      return raw;
+      return InAppOtpRequestResult(
+        error: _mapOtpRequestError(e),
+        username: canonical,
+      );
     }
+  }
+
+  /// Returns `null` if the OTP RPC succeeded; otherwise a machine-readable hint
+  /// (`timeout`, `invalid_username`, or the raw exception message).
+  static Future<String?> requestOtpWithMessage(String username) async {
+    final res = await requestOtpDetailed(username);
+    return res.error;
   }
 
   static Future<bool> requestOtp(String username) async {

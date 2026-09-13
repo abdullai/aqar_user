@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../core/branding/aqar_brand_colors.dart';
 import '../core/input/saudi_input_formatters.dart';
+import '../core/utils/app_money.dart';
+import 'aqar_text_field.dart';
 import 'saudi_riyal_symbol_icon.dart';
 
 /// حقل سعر/مبلغ محدد من–إلى مع رمز الريال (عربي) أو SAR (إنجليزي).
@@ -35,24 +37,33 @@ class AqarMoneyRangeField extends StatelessWidget {
 
     InputDecoration deco({
       required String hint,
-      required Widget suffix,
+      required Widget currency,
     }) {
+      final iconPad = Padding(
+        padding: const EdgeInsetsDirectional.only(end: 8),
+        child: Align(
+          widthFactor: 1,
+          heightFactor: 1,
+          alignment: Alignment.center,
+          child: currency,
+        ),
+      );
       return InputDecoration(
         hintText: hint,
         filled: true,
-        fillColor: AqarBrandColors.accent.withValues(alpha: 0.55),
+        fillColor: AqarBrandColors.wash(cs).withValues(alpha: 0.55),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(
-            color: AqarBrandColors.border.withValues(alpha: 0.9),
+            color: AqarBrandColors.frame(cs).withValues(alpha: 0.9),
           ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(
-            color: AqarBrandColors.border.withValues(alpha: 0.9),
+            color: AqarBrandColors.frame(cs).withValues(alpha: 0.9),
           ),
         ),
         focusedBorder: OutlineInputBorder(
@@ -62,12 +73,12 @@ class AqarMoneyRangeField extends StatelessWidget {
             width: 1.5,
           ),
         ),
-        suffixIcon: Padding(
-          padding: const EdgeInsetsDirectional.only(end: 10),
-          child: suffix,
+        suffixIcon: iconPad,
+        suffixIconConstraints: const BoxConstraints(
+          minWidth: 44,
+          minHeight: 40,
+          maxHeight: 48,
         ),
-        suffixIconConstraints:
-            const BoxConstraints(minWidth: 36, minHeight: 24),
       );
     }
 
@@ -79,11 +90,12 @@ class AqarMoneyRangeField extends StatelessWidget {
         );
       }
       return Text(
-        'SAR',
+        AppMoney.sarUiSuffix(isAr: false),
         style: theme.textTheme.labelLarge?.copyWith(
           fontWeight: FontWeight.w900,
           color: AqarBrandColors.primary,
           fontFamily: 'Cairo',
+          height: 1.0,
         ),
       );
     }
@@ -98,14 +110,14 @@ class AqarMoneyRangeField extends StatelessWidget {
           style: theme.textTheme.titleSmall?.copyWith(
             fontWeight: FontWeight.w900,
             fontFamily: 'Cairo',
-            color: AqarBrandColors.dark,
+            color: AqarBrandColors.ink(cs),
           ),
         ),
         const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: TextFormField(
+              child: AqarTextFormField(
                 initialValue: minInitial,
                 keyboardType: TextInputType.number,
                 inputFormatters: latinDecimalNumberFormatters(),
@@ -113,16 +125,18 @@ class AqarMoneyRangeField extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   fontFamily: 'Cairo',
                 ),
+                textAlign: TextAlign.end,
+                textDirection: TextDirection.ltr,
                 onChanged: onMinChanged,
                 decoration: deco(
                   hint: minHint ?? (isAr ? 'من' : 'From'),
-                  suffix: currencySuffix(),
+                  currency: currencySuffix(),
                 ),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: TextFormField(
+              child: AqarTextFormField(
                 initialValue: maxInitial,
                 keyboardType: TextInputType.number,
                 inputFormatters: latinDecimalNumberFormatters(),
@@ -130,10 +144,12 @@ class AqarMoneyRangeField extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   fontFamily: 'Cairo',
                 ),
+                textAlign: TextAlign.end,
+                textDirection: TextDirection.ltr,
                 onChanged: onMaxChanged,
                 decoration: deco(
                   hint: maxHint ?? (isAr ? 'إلى' : 'To'),
-                  suffix: currencySuffix(),
+                  currency: currencySuffix(),
                 ),
               ),
             ),
@@ -142,8 +158,8 @@ class AqarMoneyRangeField extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           isAr
-              ? 'نطاق المبلغ المحدد: الرقم ثم رمز الريال — بدون لفّ'
-              : 'Specified amount range: number then SAR — no wrap',
+              ? 'نطاق المبلغ المحدد: رمز الريال ثم الرقم — بدون لفّ'
+              : 'Specified amount range: SAR then the number — no wrap',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelSmall?.copyWith(

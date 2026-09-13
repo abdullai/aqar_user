@@ -1,4 +1,6 @@
-﻿import 'dart:async';
+// ignore_for_file: unused_field
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
@@ -6,9 +8,11 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
 import '../core/haptics/app_haptics.dart';
 import '../core/notifications/chat_message_sound.dart';
 import '../core/notifications/hub_workflow_sound.dart';
+import '../core/utils/date_helper.dart';
 import '../services/contract_pdf_service.dart';
 import '../services/marketing_flow_service.dart';
 import '../widgets/app_logo_loading.dart';
@@ -99,9 +103,7 @@ String _friendlyContractLoadError(Object e, {required bool isAr}) {
 String _listingContractFmtTime(String raw) {
   final dt = DateTime.tryParse(raw)?.toLocal();
   if (dt == null) return '';
-  final h = dt.hour.toString().padLeft(2, '0');
-  final m = dt.minute.toString().padLeft(2, '0');
-  return '$h:$m';
+  return DateHelper.fmtClock(dt);
 }
 
 /// دردشة مرتبطة بعقد تسويق (طلب تعديل/فسخ عبر اختيار نوع الرسالة).
@@ -477,10 +479,9 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
           ? null
           : AppBar(
               automaticallyImplyLeading: false,
-              leading: AppPageCloseButton(
-                isArabic: _isAr,
-                onPressed: () => Navigator.of(context).maybePop(),
-              ),
+                leading: AppPageCloseButton(
+                  isArabic: _isAr,
+                ),
               title: Text(_isAr ? 'محادثة العقد' : 'Contract chat'),
               actions: appBarActions,
             ),
@@ -499,7 +500,9 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
             ),
           Expanded(
             child: ColoredBox(
-              color: _kWaChatBg,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? Theme.of(context).colorScheme.surface
+                  : _kWaChatBg,
               child: _loading
                   ? const Center(child: AppLogoLoading())
                   : StreamBuilder<List<Map<String, dynamic>>>(
@@ -667,7 +670,7 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
           ),
           Builder(
             builder: (context) {
-              final kb = MediaQuery.viewInsetsOf(context).bottom;
+              final kb = AppKeyboardInset.bottomOf(context);
               return SafeArea(
                 top: false,
                 bottom: kb <= 0,

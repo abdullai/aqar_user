@@ -37,8 +37,14 @@ class AppRoleHelper {
     }
   }
 
-  /// مالك فرد / مستخدم عام: لا باقات اشتراك — الطلب الفوري 30 ر.س منفصل.
+  /// مصور عقاري مخزَّن كـ `account_type` (طبقة اختيارية فوق الحساب).
+  static bool isPhotographerAccount(String? accountType) {
+    return normalizeType(accountType) == 'photographer';
+  }
+
+  /// مالك فرد / مستخدم عام: لا باقات اشتراك — الطلب الفوري من كتالوج الرسوم.
   static bool isOwnerFreeTierAccount(String? accountType) {
+    if (isPhotographerAccount(accountType)) return false;
     final k = fromAccountType(accountType);
     return k == AppRoleKind.ownerIndividual || k == AppRoleKind.publicUser;
   }

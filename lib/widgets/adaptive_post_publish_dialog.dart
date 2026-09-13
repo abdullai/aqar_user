@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
-/// حوار ما بعد النشر: أزرار متكيّفة بدون التفاف مربك.
-/// الشاشات الضيقة: عمود كامل العرض + نص يُصغَّر بلطف.
-/// الشاشات العريضة: صف بأزرار متساوية.
+import '../core/gestures/app_keyboard_popups.dart';
+
+/// حوار ما بعد النشر: أزرار متكيّفة، أيقونة حالة، ونص يطابق مسار الإعلان.
 Future<String?> showAdaptivePostPublishDialog({
   required BuildContext context,
   required bool isAr,
   required String title,
   required String body,
   String? codeLine,
+  String? statusChip,
   required List<AdaptivePostPublishAction> actions,
+  IconData? leadingIcon,
+  Color? accentColor,
 }) {
-  return showDialog<String>(
+  return showAppDialog<String>(
     context: context,
     barrierDismissible: false,
     useRootNavigator: true,
@@ -19,29 +22,84 @@ Future<String?> showAdaptivePostPublishDialog({
       final cs = Theme.of(ctx).colorScheme;
       final size = MediaQuery.sizeOf(ctx);
       final w = size.width;
-      // أقل من 640 أو ≥3 أزرار: عمود — يمنع التفاف النصوص على ويب الجوال.
       final stackActions = w < 640 || actions.length >= 3;
       final maxContentW = (w - (w < 420 ? 28 : 48)).clamp(220.0, 480.0);
+      final accent = accentColor ?? const Color(0xFF0F766E);
 
       return AlertDialog(
         backgroundColor: cs.surface,
+        elevation: 8,
+        shadowColor: accent.withValues(alpha: 0.18),
         insetPadding: EdgeInsets.symmetric(
           horizontal: w < 420 ? 10 : 24,
           vertical: 18,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text(
-          title,
-          maxLines: 2,
-          softWrap: true,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            height: 1.25,
-            fontFamily: 'Cairo',
-            fontSize: w < 380 ? 16 : 18,
-            color: cs.onSurface,
-          ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: BorderSide(color: accent.withValues(alpha: 0.14)),
+        ),
+        titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+        contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 18),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: isAr ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  leadingIcon ?? Icons.check_circle_rounded,
+                  color: accent,
+                  size: 28,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            if ((statusChip ?? '').trim().isNotEmpty) ...[
+              Align(
+                alignment:
+                    isAr ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: accent.withValues(alpha: 0.22)),
+                  ),
+                  child: Text(
+                    statusChip!.trim(),
+                    style: TextStyle(
+                      color: accent,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11.5,
+                      height: 1.2,
+                      fontFamily: 'Cairo',
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+            Text(
+              title,
+              maxLines: 3,
+              softWrap: true,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                height: 1.28,
+                fontFamily: 'Cairo',
+                fontSize: w < 380 ? 16 : 18,
+                color: cs.onSurface,
+              ),
+            ),
+          ],
         ),
         content: SizedBox(
           width: maxContentW,
@@ -56,21 +114,36 @@ Future<String?> showAdaptivePostPublishDialog({
                   style: TextStyle(
                     color: cs.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
-                    height: 1.4,
+                    height: 1.45,
                     fontFamily: 'Cairo',
                     fontSize: w < 380 ? 12.5 : 13.5,
                   ),
                 ),
                 if ((codeLine ?? '').trim().isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  SelectableText(
-                    codeLine!.trim(),
-                    style: TextStyle(
-                      color: cs.primary,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 14.5,
-                      height: 1.3,
-                      fontFamily: 'Cairo',
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: accent.withValues(alpha: 0.22),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: SelectableText(
+                        codeLine!.trim(),
+                        style: TextStyle(
+                          color: accent,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 14.5,
+                          height: 1.3,
+                          fontFamily: 'Cairo',
+                        ),
+                      ),
                     ),
                   ),
                 ],

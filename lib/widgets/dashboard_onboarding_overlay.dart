@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
 import '../theme.dart';
+import 'app_page_close_button.dart';
 
 /// اتجاه سهم التلميح نحو العنصر المشروح.
 enum DashboardCoachArrow {
@@ -317,11 +318,11 @@ class _CoachBubble extends StatelessWidget {
                     ),
                   ),
                 ),
-                IconButton(
-                  tooltip: closeTooltip,
+                AppPageCloseButton(
                   visualDensity: VisualDensity.compact,
+                  iconSize: 20,
+                  tooltip: closeTooltip,
                   onPressed: onClose,
-                  icon: const Icon(Icons.close_rounded, size: 20),
                 ),
               ],
             ),

@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element_parameter
+
 import 'package:app_settings/app_settings.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,7 +7,10 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../l10n/app_localizations.dart';
 
-/// طلب إذن عند الحاجة (بعد بوابة الإقلاع) مع حوار يوجّه لإعدادات النظام.
+/// طلب إذن أصلي من النظام أو المتصفح — بلا حوارات تطبيق ثقيلة.
+///
+/// [Permission.request] / منصّة الويب تظهر نافذة النظام. إن رُفض الإذن
+/// نهائياً نفتح إعدادات الجهاز الأصلية فقط.
 abstract final class RuntimePermissionHelper {
   static Future<bool> ensurePhotos(
     BuildContext context, {
@@ -18,12 +23,7 @@ abstract final class RuntimePermissionHelper {
     final req = await _requestPhotos();
     if (req.isGranted || req.isLimited) return true;
     if (!context.mounted) return false;
-    await _showRationale(
-      context,
-      title: t.permissionRationalePhotosTitle,
-      body: t.permissionRationalePhotosBody,
-      openSettingsLabel: t.permissionsGateOpenSettings,
-    );
+    await _openNativeSettingsIfBlocked(req);
     return false;
   }
 
@@ -38,12 +38,7 @@ abstract final class RuntimePermissionHelper {
     final req = await Permission.camera.request();
     if (req.isGranted) return true;
     if (!context.mounted) return false;
-    await _showRationale(
-      context,
-      title: t.permissionRationaleCameraTitle,
-      body: t.permissionRationaleCameraBody,
-      openSettingsLabel: t.permissionsGateOpenSettings,
-    );
+    await _openNativeSettingsIfBlocked(req);
     return false;
   }
 
@@ -58,12 +53,7 @@ abstract final class RuntimePermissionHelper {
     s = await Permission.locationWhenInUse.request();
     if (s.isGranted) return true;
     if (!context.mounted) return false;
-    await _showRationale(
-      context,
-      title: t.permissionRationaleLocationTitle,
-      body: t.permissionRationaleLocationBody,
-      openSettingsLabel: t.permissionsGateOpenSettings,
-    );
+    await _openNativeSettingsIfBlocked(s);
     return false;
   }
 
@@ -77,15 +67,11 @@ abstract final class RuntimePermissionHelper {
       if (s.isGranted) return true;
       final req = await Permission.notification.request();
       if (req.isGranted) return true;
+      if (!context.mounted) return false;
+      await _openNativeSettingsIfBlocked(req);
+      return false;
     }
-    if (!context.mounted) return false;
-    await _showRationale(
-      context,
-      title: t.permissionRationaleNotificationsTitle,
-      body: t.permissionRationaleNotificationsBody,
-      openSettingsLabel: t.permissionsGateOpenSettings,
-    );
-    return false;
+    return true;
   }
 
   static bool get _isMobile =>
@@ -111,31 +97,10 @@ abstract final class RuntimePermissionHelper {
     return Permission.storage.request();
   }
 
-  static Future<void> _showRationale(
-    BuildContext context, {
-    required String title,
-    required String body,
-    required String openSettingsLabel,
-  }) async {
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(body),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(MaterialLocalizations.of(ctx).cancelButtonLabel),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              AppSettings.openAppSettings();
-            },
-            child: Text(openSettingsLabel),
-          ),
-        ],
-      ),
-    );
+  static Future<void> _openNativeSettingsIfBlocked(PermissionStatus s) async {
+    if (!s.isPermanentlyDenied && !s.isRestricted) return;
+    try {
+      await AppSettings.openAppSettings();
+    } catch (_) {}
   }
 }

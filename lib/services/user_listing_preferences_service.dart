@@ -188,7 +188,7 @@ abstract final class UserListingPreferencesService {
   // تقارير — أحداث (إحصاء + حدّ معدّل)
   // ---------------------------------------------------------------------------
 
-  static Future<List<_ReportEvent>> _loadReportEvents() async {
+  static Future<List<ReportActivityEvent>> _loadReportEvents() async {
     try {
       final p = await SharedPreferences.getInstance();
       final raw = p.getString(_scoped(_kReportEvents)) ??
@@ -196,7 +196,7 @@ abstract final class UserListingPreferencesService {
       if (raw == null || raw.trim().isEmpty) return [];
       final d = jsonDecode(raw);
       if (d is! List) return [];
-      final out = <_ReportEvent>[];
+      final out = <ReportActivityEvent>[];
       for (final e in d) {
         if (e is Map) {
           final m = Map<String, dynamic>.from(e);
@@ -204,7 +204,7 @@ abstract final class UserListingPreferencesService {
           final kind = (m['kind'] ?? '').toString();
           final id = (m['id'] ?? '').toString().trim();
           if (ts > 0 && id.isNotEmpty) {
-            out.add(_ReportEvent(ts: ts, kind: kind, id: id));
+            out.add(ReportActivityEvent(ts: ts, kind: kind, id: id));
           }
         }
       }
@@ -214,7 +214,7 @@ abstract final class UserListingPreferencesService {
     }
   }
 
-  static Future<void> _saveReportEvents(List<_ReportEvent> list) async {
+  static Future<void> _saveReportEvents(List<ReportActivityEvent> list) async {
     final p = await SharedPreferences.getInstance();
     final trimmed = list.length > _maxEvents
         ? list.sublist(list.length - _maxEvents)
@@ -227,11 +227,18 @@ abstract final class UserListingPreferencesService {
     );
   }
 
+  /// سجل البلاغات على هذا الجهاز (الأحدث أولاً) لعرضه في الإعدادات.
+  static Future<List<ReportActivityEvent>> listReportActivity() async {
+    final list = await _loadReportEvents();
+    list.sort((a, b) => b.ts.compareTo(a.ts));
+    return list;
+  }
+
   static Future<void> recordPropertyReportSubmitted(String propertyId) async {
     final id = propertyId.trim();
     if (id.isEmpty) return;
     final list = await _loadReportEvents();
-    list.add(_ReportEvent(
+    list.add(ReportActivityEvent(
       ts: DateTime.now().millisecondsSinceEpoch,
       kind: 'property',
       id: id,
@@ -243,7 +250,7 @@ abstract final class UserListingPreferencesService {
     final id = requestId.trim();
     if (id.isEmpty) return;
     final list = await _loadReportEvents();
-    list.add(_ReportEvent(
+    list.add(ReportActivityEvent(
       ts: DateTime.now().millisecondsSinceEpoch,
       kind: 'request',
       id: id,
@@ -258,7 +265,7 @@ abstract final class UserListingPreferencesService {
     final dayAgo = now - const Duration(hours: 24).inMilliseconds;
     final hourAgo = now - const Duration(hours: 1).inMilliseconds;
     final events = await _loadReportEvents();
-    bool countsTowardLimit(_ReportEvent e) =>
+    bool countsTowardLimit(ReportActivityEvent e) =>
         e.kind == 'property' || e.kind == 'request';
     final day = events.where((e) => countsTowardLimit(e) && e.ts >= dayAgo).length;
     final hour =
@@ -417,10 +424,10 @@ abstract final class UserListingPreferencesService {
   }
 }
 
-class _ReportEvent {
+class ReportActivityEvent {
   final int ts;
   final String kind;
   final String id;
 
-  _ReportEvent({required this.ts, required this.kind, required this.id});
+  ReportActivityEvent({required this.ts, required this.kind, required this.id});
 }

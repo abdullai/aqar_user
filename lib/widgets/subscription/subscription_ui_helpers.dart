@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../core/utils/app_money.dart';
+import '../../core/utils/date_helper.dart';
+import '../../l10n/app_localizations.dart';
 import '../../services/subscription_service.dart';
 
 /// عناصر واجهة مشتركة لصفحات الاشتراك والدفع — تواريخ، جداول، وأسعار.
@@ -36,10 +37,9 @@ abstract final class SubscriptionUiHelpers {
     if (s.isEmpty) return '—';
     try {
       final d = DateTime.parse(s).toLocal();
-      final locale = isAr ? 'ar_SA' : 'en_US';
-      return DateFormat('yyyy-MM-dd', locale).format(d);
+      return DateHelper.fmtCivilDate(d, isAr: isAr);
     } catch (_) {
-      return s.length > 10 ? s.substring(0, 10) : s;
+      return '—';
     }
   }
 
@@ -91,9 +91,20 @@ abstract final class SubscriptionUiHelpers {
     return true;
   }
 
+  /// إظهار خصم/زر الدفع التلقائي: اشتراك شهري جديد فقط — ليس سنوياً ولا دفعة واحدة ولا ترقية.
+  static bool showAutoPayUi({
+    required String period,
+    bool isAddOn = false,
+    bool isExistingSubscription = false,
+    double? chargeOverride,
+  }) {
+    if (isAddOn || isExistingSubscription) return false;
+    if (chargeOverride != null && chargeOverride > 0) return false;
+    return period.trim().toLowerCase() == 'monthly';
+  }
+
   static bool showAutoRenewToggleForPeriod(String period) {
-    final p = period.trim().toLowerCase();
-    return p == 'monthly';
+    return showAutoPayUi(period: period);
   }
 
   static bool showUpgradePlanButton({
@@ -112,7 +123,12 @@ abstract final class SubscriptionUiHelpers {
         ? Map<String, dynamic>.from(currentRow['plan'] as Map)
         : <String, dynamic>{};
     if (curPlan.isEmpty) return false;
-    return planSortOrder(targetPlan) > planSortOrder(curPlan);
+    final targetSort = planSortOrder(targetPlan);
+    if (SubscriptionService.isListingRequestsTopUpSortOrder(targetSort) ||
+        SubscriptionService.isMarketOffersTopUpSortOrder(targetSort)) {
+      return false;
+    }
+    return targetSort > planSortOrder(curPlan);
   }
 
   static String periodChipLabel({
@@ -262,9 +278,10 @@ abstract final class SubscriptionUiHelpers {
         border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Text(
-        isAr
-            ? 'الأسعار تشمل ضريبة القيمة المضافة حيث ينطبق ذلك. الاشتراك يمنح حصص استخدام داخل المنصة ولا يضمن إبرام أي صفقة عقارية. تطبّق شروط الاستخدام وسياسة الخصوصية.'
-            : 'Prices include VAT where applicable. Subscriptions grant platform usage quotas and do not guarantee any real-estate transaction. Terms of use and privacy policy apply.',
+        AppLocalizations.of(context)?.subscriptionsLegalNote ??
+            (isAr
+                ? 'تفعيل هذا الاشتراك يمنحك وصولاً كاملاً وبلا حدود لكافة ميزات الباقة المتقدمة داخل المنصة طوال فترة صلاحية الاشتراك.'
+                : 'Activating this subscription grants you full and unlimited access to all premium features within the platform throughout the subscription period.'),
         style: TextStyle(
           fontSize: 11.5,
           height: 1.3,

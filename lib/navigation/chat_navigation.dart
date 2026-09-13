@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../screens/chat_page.dart';
+import '../screens/communication_hub_page.dart';
 
 /// فتح أي محادثة كطبقة ملء الشاشة فوق كل الواجهة (مثل واتساب) مع زر إغلاق.
 abstract final class ChatOverlayNavigation {
@@ -129,6 +130,48 @@ abstract final class ChatNavigation {
         supportUserId: supportUserId,
         marketRequestId: marketRequestId,
         initialDraftMessage: initialDraftMessage,
+      ),
+    );
+  }
+}
+
+/// مركز الإشعارات والمحادثات فوق التبويبات مع زر إغلاق.
+abstract final class CommunicationHubNavigation {
+  static const String routeName = '/app_communication_hub';
+
+  static Future<void> push(
+    BuildContext context, {
+    required String lang,
+    required bool isAr,
+  }) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      PageRouteBuilder<void>(
+        opaque: true,
+        fullscreenDialog: true,
+        settings: const RouteSettings(name: routeName),
+        transitionDuration: const Duration(milliseconds: 280),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return CommunicationHubPage(
+            lang: lang,
+            isAr: isAr,
+            hideLeadingBecauseShellHasBack: false,
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 1),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          );
+        },
       ),
     );
   }
