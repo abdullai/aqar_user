@@ -71,6 +71,7 @@ class _PostAuthShellState extends State<PostAuthShell>
 
   bool _loading = true;
   bool _showTerms = false;
+  bool _isFirstTimeTerms = false;
   bool _needPassword = false;
   Map<String, dynamic>? _legal;
 
@@ -102,7 +103,8 @@ class _PostAuthShellState extends State<PostAuthShell>
     });
   }
 
-  Future<void> _loadComplianceProfile({bool preserveRowOnTransientFailure = false}) async {
+  Future<void> _loadComplianceProfile(
+      {bool preserveRowOnTransientFailure = false}) async {
     final previous = _complianceRow;
     final sb = Supabase.instance.client;
     try {
@@ -289,6 +291,7 @@ class _PostAuthShellState extends State<PostAuthShell>
       setState(() {
         _legal = legal ?? _legal;
         _showTerms = needTerms;
+        _isFirstTimeTerms = accepted.isEmpty;
         _needPassword = needPwd;
         _pendingOrgJoin = pendingJoin;
       });
@@ -304,22 +307,22 @@ class _PostAuthShellState extends State<PostAuthShell>
     if (sb.auth.currentSession != null) {
       try {
         await sb.auth.refreshSession().timeout(
-          const Duration(seconds: 8),
-          onTimeout: () => throw TimeoutException('refresh'),
-        );
+              const Duration(seconds: 8),
+              onTimeout: () => throw TimeoutException('refresh'),
+            );
       } catch (_) {}
     }
 
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final profile = await _svc.myProfileGates().timeout(
-          const Duration(seconds: 8),
-          onTimeout: () => null,
-        );
+              const Duration(seconds: 8),
+              onTimeout: () => null,
+            );
         final legal = await _svc.activeLegalVersion().timeout(
-          const Duration(seconds: 8),
-          onTimeout: () => null,
-        );
+              const Duration(seconds: 8),
+              onTimeout: () => null,
+            );
 
         final accepted = profile?['terms_version_accepted']?.toString() ?? '';
         final activeVersion = legal?['version']?.toString() ?? '';
@@ -332,6 +335,7 @@ class _PostAuthShellState extends State<PostAuthShell>
         setState(() {
           _legal = legal;
           _showTerms = needTerms;
+          _isFirstTimeTerms = accepted.isEmpty;
           _needPassword = needPwd;
           _deviceReady = true;
         });
@@ -343,9 +347,7 @@ class _PostAuthShellState extends State<PostAuthShell>
       } catch (_) {
         if (attempt == 0) {
           try {
-            await sb.auth
-                .refreshSession()
-                .timeout(const Duration(seconds: 6));
+            await sb.auth.refreshSession().timeout(const Duration(seconds: 6));
           } catch (_) {}
           await Future<void>.delayed(const Duration(milliseconds: 180));
           continue;
@@ -564,6 +566,7 @@ class _PostAuthShellState extends State<PostAuthShell>
         return LegalTermsAcceptanceScreen(
           lang: widget.lang,
           legal: _legal!,
+          isFirstTime: _isFirstTimeTerms,
           onAccept: _onTermsAccepted,
           onDecline: _declineTerms,
         );

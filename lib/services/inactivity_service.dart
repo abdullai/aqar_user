@@ -75,8 +75,7 @@ class InactivityService {
     return false;
   }
 
-  int get _idleUntilMs =>
-      _lastActivityMs + idleBeforePrompt.inMilliseconds;
+  int get _idleUntilMs => _lastActivityMs + idleBeforePrompt.inMilliseconds;
 
   int get _lockUntilMs {
     if (_promptDeadlineMs != null && _promptDeadlineMs! > 0) {
@@ -228,6 +227,11 @@ class InactivityService {
     dismissBlockingPromptCallback?.call();
   }
 
+  /// يُحدَّث في [main.dart] إلى `_inactivity.userActivity` — بدونه يبقى المؤقّت الحي
+  /// يعتمد على آخر نشاط قديم محفوظ عند إقلاع التطبيق حتى لو صُفِّر في التخزين فقط،
+  /// فيعتبر المهلة منتهية فوراً بعد كل دخول (OTP / إدارة الأجهزة) ويُخرج المستخدم عشوائياً.
+  static void Function()? refreshLiveActivityCallback;
+
   static Future<void> stampFreshActivity() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     try {
@@ -235,6 +239,7 @@ class InactivityService {
       await prefs.setInt(kPrefLastActivityAtMs, now);
       await prefs.remove(kPrefPromptDeadlineMs);
     } catch (_) {}
+    refreshLiveActivityCallback?.call();
   }
 
   static Future<void> prepareDashboardEntry() async {
@@ -316,9 +321,8 @@ class InactivityService {
     if (now < _idleUntilMs) return;
     final remainingMs = _lockUntilMs - now;
     final isAr = langNotifier.value != 'en';
-    final title = isAr
-        ? 'تنبيه أمني — عدم نشاط'
-        : 'Security alert — inactivity';
+    final title =
+        isAr ? 'تنبيه أمني — عدم نشاط' : 'Security alert — inactivity';
     final body = remainingMs <= 0
         ? (isAr
             ? 'انتهت مهلة الجلسة. أعد الدخول للمتابعة.'
@@ -512,7 +516,8 @@ class InactivityService {
 
   String _formatNowLine(BuildContext context) {
     final isAr = Localizations.localeOf(context).languageCode == 'ar';
-    return DateHelper.fmtCivilDateTime(DateTime.now(), isAr: isAr, withSeconds: true);
+    return DateHelper.fmtCivilDateTime(DateTime.now(),
+        isAr: isAr, withSeconds: true);
   }
 
   Future<void> _showPrompt({int? remainingSeconds}) async {
@@ -611,9 +616,11 @@ class InactivityService {
             return ValueListenableBuilder<int>(
               valueListenable: vn,
               builder: (context, sec, _) {
-                final progress = (sec / promptCountdown.inSeconds).clamp(0.0, 1.0);
+                final progress =
+                    (sec / promptCountdown.inSeconds).clamp(0.0, 1.0);
                 return Dialog(
-                  insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+                  insetPadding:
+                      const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(22),
                   ),
@@ -640,7 +647,9 @@ class InactivityService {
                           const SizedBox(height: 16),
                           Text(
                             l10n?.securityInactivityTitle ??
-                                (isAr ? 'تم اكتشاف عدم نشاط' : 'Inactivity detected'),
+                                (isAr
+                                    ? 'تم اكتشاف عدم نشاط'
+                                    : 'Inactivity detected'),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontWeight: FontWeight.w900,
@@ -653,7 +662,9 @@ class InactivityService {
                           Text(
                             l10n != null
                                 ? l10n.securityInactivityTime(timeLine)
-                                : (isAr ? 'الوقت: $timeLine' : 'Time: $timeLine'),
+                                : (isAr
+                                    ? 'الوقت: $timeLine'
+                                    : 'Time: $timeLine'),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontWeight: FontWeight.w700,

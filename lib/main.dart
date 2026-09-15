@@ -147,6 +147,7 @@ const String kPrefFastLoginEnabled = AppConfig.prefFastLoginEnabledKey;
 const String kPrefFastLoginPinSet = AppConfig.prefFastLoginPinSetKey;
 const String kPrefAppPausedAtMs = AppConfig.prefAppPausedAtMsKey;
 const String kPrefBgLockGraceMinutes = AppConfig.prefBgLockGraceMinutesKey;
+
 /// مهلة إخفاء التبويب قبل القفل/الخروج — دقيقة واحدة كانت قصيرة جداً على ويندوز/Chrome.
 const int kAppBackgroundLockGraceMinutesDefault = 15;
 
@@ -659,6 +660,7 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     );
     InactivityService.dismissBlockingPromptCallback =
         _inactivity.dismissBlockingPrompt;
+    InactivityService.refreshLiveActivityCallback = _inactivity.userActivity;
     _inactivity.start();
 
     UserSessionCoordinationService.navigatorKey = _navKey;
@@ -1113,8 +1115,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       unawaited(NotificationService.clearOsApplicationIconBadge());
       if (suspendAutoLock.value != true) {
-      unawaited(_inactivity.onAppResumedAfterBackground());
-      unawaited(UserInstallSessionService.reconcileSlotOnForeground());
+        unawaited(_inactivity.onAppResumedAfterBackground());
+        unawaited(UserInstallSessionService.reconcileSlotOnForeground());
       }
       return;
     }
@@ -1555,8 +1557,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                           return ContractVerifyPage(
                             contractId: contractId.trim(),
                             lang: resolvedLang,
-                            verifyToken:
-                                verifyToken.trim().isEmpty ? null : verifyToken.trim(),
+                            verifyToken: verifyToken.trim().isEmpty
+                                ? null
+                                : verifyToken.trim(),
                           );
                         },
                       },
@@ -1655,8 +1658,7 @@ class _StartRouterState extends State<StartRouter> {
     final guestMode = prefs.getBool(kPrefGuestMode) ?? false;
     final session = Supabase.instance.client.auth.currentSession;
     // Auth حيّ = مستخدم مسجّل حتى لو بقيت prefs الضيف.
-    final isGuest =
-        session == null && (guestMode || entryMode == 'guest');
+    final isGuest = session == null && (guestMode || entryMode == 'guest');
     if (session != null && (guestMode || entryMode == 'guest')) {
       try {
         await prefs.setBool(kPrefGuestMode, false);
@@ -1705,8 +1707,7 @@ class _StartRouterState extends State<StartRouter> {
         (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
     final guestMode = prefs.getBool(kPrefGuestMode) ?? false;
     final session = Supabase.instance.client.auth.currentSession;
-    final isGuest =
-        session == null && (guestMode || entryMode == 'guest');
+    final isGuest = session == null && (guestMode || entryMode == 'guest');
 
     if (isGuest) {
       await _openWebDashboardInPlace();
@@ -1865,8 +1866,8 @@ class _StartRouterState extends State<StartRouter> {
       var username = (pending.username ?? '').trim();
       if (username.isEmpty) {
         try {
-          username = (await FastLoginService.getUsernameNationalId() ?? '')
-              .trim();
+          username =
+              (await FastLoginService.getUsernameNationalId() ?? '').trim();
         } catch (_) {}
       }
       if (username.isNotEmpty || (pending.challengeId ?? '').isNotEmpty) {

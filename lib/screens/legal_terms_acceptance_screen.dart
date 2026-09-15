@@ -14,6 +14,9 @@ import 'platform_policies_screen.dart';
 class LegalTermsAcceptanceScreen extends StatefulWidget {
   final String lang;
   final Map<String, dynamic> legal;
+
+  /// `true` لمستخدم لم يوافق على أي إصدار سابقاً؛ يظهر نص ترحيب عادي بدل "راجع شروطنا المحدثة".
+  final bool isFirstTime;
   final Future<void> Function(String version) onAccept;
   final VoidCallback onDecline;
 
@@ -21,6 +24,7 @@ class LegalTermsAcceptanceScreen extends StatefulWidget {
     super.key,
     required this.lang,
     required this.legal,
+    this.isFirstTime = false,
     required this.onAccept,
     required this.onDecline,
   });
@@ -30,7 +34,8 @@ class LegalTermsAcceptanceScreen extends StatefulWidget {
       _LegalTermsAcceptanceScreenState();
 }
 
-class _LegalTermsAcceptanceScreenState extends State<LegalTermsAcceptanceScreen> {
+class _LegalTermsAcceptanceScreenState
+    extends State<LegalTermsAcceptanceScreen> {
   bool _privacyOk = false;
   bool _termsOk = false;
   bool _cookiesOk = false;
@@ -236,9 +241,13 @@ class _LegalTermsAcceptanceScreenState extends State<LegalTermsAcceptanceScreen>
                                   ),
                                   const SizedBox(height: 22),
                                   Text(
-                                    _isAr
-                                        ? 'راجع شروطنا المحدثة واقبلها'
-                                        : 'Review and accept our updated terms',
+                                    widget.isFirstTime
+                                        ? (_isAr
+                                            ? 'مرحباً بك — يرجى قراءة الشروط والموافقة عليها'
+                                            : 'Welcome — please review and accept our terms')
+                                        : (_isAr
+                                            ? 'راجع شروطنا المحدثة واقبلها'
+                                            : 'Review and accept our updated terms'),
                                     textAlign: TextAlign.start,
                                     style: TextStyle(
                                       fontSize: narrow ? 22 : 24,
@@ -249,9 +258,13 @@ class _LegalTermsAcceptanceScreenState extends State<LegalTermsAcceptanceScreen>
                                   ),
                                   const SizedBox(height: 12),
                                   Text(
-                                    _isAr
-                                        ? 'نريد التأكد من أنك على اطلاع دائم. يُرجى مراجعة كل مستند أدناه والموافقة عليه قبل الاستمرار.'
-                                        : 'We want to make sure you stay up to date. Please review each document below and agree before continuing.',
+                                    widget.isFirstTime
+                                        ? (_isAr
+                                            ? 'قبل المتابعة، يرجى مراجعة كل مستند أدناه والموافقة عليه.'
+                                            : 'Before continuing, please review each document below and agree to it.')
+                                        : (_isAr
+                                            ? 'نريد التأكد من أنك على اطلاع دائم. يُرجى مراجعة كل مستند أدناه والموافقة عليه قبل الاستمرار.'
+                                            : 'We want to make sure you stay up to date. Please review each document below and agree before continuing.'),
                                     textAlign: TextAlign.start,
                                     style: TextStyle(
                                       fontSize: 14.5,
