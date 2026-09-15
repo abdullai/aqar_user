@@ -276,6 +276,21 @@ extension _UserDashboardStateActions on _UserDashboardState {
           _loadMyMarketRequestOfferTracking(),
         ]));
       },
+      onOfferSubmitted: () {
+        if (!mounted) return;
+        Navigator.of(context).pop();
+        _ss(() {
+          if (_showBottomNavCart) {
+            _tabIndex = 3;
+            _cartPaneIndex = 1;
+          }
+        });
+        unawaited(Future.wait([
+          _loadCart(force: true),
+          _loadMarketHomeRequests(force: true),
+          _loadMyMarketRequestOfferTracking(),
+        ]));
+      },
       onGuestRequiresAuth: _isGuest ? _showLoginDialog : null,
       onGuestPayOfferUnlock:
           _isGuest ? () => _guestPayUnlockFlow('offer', targetTab: 2) : null,
@@ -997,8 +1012,18 @@ extension _UserDashboardStateActions on _UserDashboardState {
             }
             await _toggleFav(p.id);
           },
-          onCompleteDeal:
-              _isGuest || _isMarketingAccountType ? null : _addToCart,
+          onCompleteDeal: (property) async {
+            await _addToCart(property);
+            if (!mounted || _isGuest) return;
+            final active =
+                await ReservationsService.userHasActiveReservationForProperty(
+              userId: _uid,
+              propertyId: property.id,
+            );
+            if (active && mounted) {
+              Navigator.of(context, rootNavigator: true).pop();
+            }
+          },
           onEditProperty: (prop) => _editProperty(prop),
           onRequestDelete: (prop) => _requestDeleteProperty(prop),
         ),
@@ -1610,21 +1635,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final isInstant = row.isInstantPaid;
 
     if (_isGuest) {
-      if (isInstant) {
-        final choice = await showGuestInstantDealAuthSheet(
-          context: context,
-          isAr: widget.isAr,
-        );
-        if (!mounted) return;
-        if (choice == GuestAuthRequiredResult.login) {
-          _showLoginDialog();
-        } else if (choice == GuestAuthRequiredResult.register) {
-          await Navigator.of(context, rootNavigator: true)
-              .pushNamed('/register');
-        }
-      } else {
-        _showLoginDialog();
-      }
+      _showLoginDialog();
       return;
     }
 

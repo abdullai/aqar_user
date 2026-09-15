@@ -99,6 +99,7 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   StreamSubscription<AuthState>? _authSub;
   Timer? _orgJoinBadgeTimer;
+  Timer? _greetingTimer;
   int _orgPendingJoinCount = 0;
   RealtimeChannel? _workflowRtChannel;
   Timer? _workflowRtDebounce;
@@ -3763,6 +3764,10 @@ class _UserDashboardState extends State<UserDashboard>
         if (!mounted) return;
         unawaited(PresenceHeartbeatService.ping(_sb));
       });
+      _greetingTimer?.cancel();
+      _greetingTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+        if (mounted) setState(() {});
+      });
       unawaited(PresenceHeartbeatService.ping(_sb));
     });
 
@@ -4505,6 +4510,7 @@ class _UserDashboardState extends State<UserDashboard>
     _advancedSearchDraftTimer?.cancel();
     _appAudiencePollTimer?.cancel();
     _presenceHeartbeatTimer?.cancel();
+    _greetingTimer?.cancel();
     _authSub?.cancel();
     _orgJoinBadgeTimer?.cancel();
     _inlineSearchCtrl.dispose();
@@ -4850,11 +4856,6 @@ class _UserDashboardState extends State<UserDashboard>
             label: l10n.subscriptionsMenuHub,
             badge: _subscriptionMenuBadge,
           ),
-          _dashboardActionMenuItem(
-            value: 'quick_browse',
-            icon: Icons.smart_display_outlined,
-            label: _isArabic ? 'تصفح سريع' : 'Quick browse',
-          ),
           if (OrgPermissionManager.can(
                 _orgMembershipPermissions,
                 OrgPermissionKeys.viewReports,
@@ -4868,12 +4869,7 @@ class _UserDashboardState extends State<UserDashboard>
               icon: Icons.assessment_outlined,
               label: _isArabic ? 'التقارير المتقدمة' : 'Reports',
             ),
-        ] else
-          _dashboardActionMenuItem(
-            value: 'quick_browse',
-            icon: Icons.smart_display_outlined,
-            label: _isArabic ? 'تصفح سريع' : 'Quick browse',
-          ),
+        ],
         const PopupMenuDivider(),
         if (!_isGuest && _packageVersionLine.isNotEmpty)
           _dashboardActionMenuItem(
@@ -5724,21 +5720,8 @@ class _UserDashboardState extends State<UserDashboard>
         }
         break;
       case DashboardBottomSlot.addListing:
-        _ensureAccountRoleLoadedForNav();
-        if (_accountRoleLoaded && !_showBottomNavAddSlot) {
-          _showNotification(
-            _isArabic ? 'تنبيه' : 'Notice',
-            _isArabic
-                ? 'إضافة إعلان غير متاحة لهذا الحساب أو بصلاحياتك الحالية.'
-                : 'Posting an ad is not available for this account or your current permissions.',
-            isError: false,
-          );
-          return;
-        }
         AppHaptics.medium();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _openCenterPlus();
-        });
+        unawaited(_openHomeShortsFeed(slotsIndex: i));
         break;
       case DashboardBottomSlot.myDesk:
         _ensureAccountRoleLoadedForNav();
@@ -5828,7 +5811,7 @@ class _UserDashboardState extends State<UserDashboard>
                 width: addSize,
                 height: addSize,
                 child: Icon(
-                  Icons.add_rounded,
+                  Icons.smart_display_rounded,
                   size: addIconSize,
                   color: csAdd.onPrimary,
                 ),
@@ -5839,7 +5822,7 @@ class _UserDashboardState extends State<UserDashboard>
           return NavigationDestination(
             icon: wrap(addChip(filled: false)),
             selectedIcon: wrap(addChip(filled: true)),
-            label: lab(_isArabic ? 'إضافة إعلان' : l10n.navAdd),
+            label: lab(_isArabic ? 'تصفح سريع' : 'Quick browse'),
             tooltip: noTip,
           );
         case DashboardBottomSlot.myDesk:
@@ -6826,12 +6809,12 @@ class _UserDashboardState extends State<UserDashboard>
                     ),
                     dealApplicantCount: _homeRequestApplicantCounts[r.id] ?? 0,
                     onOpen: () => _openMarketRequestDetail(r),
-                    onSubmitOffer: _isGuest
-                        ? null
-                        : () => _openMarketRequestDetail(
-                              r,
-                              autoOpenSubmitOffer: true,
-                            ),
+                    onSubmitOffer: () => _isGuest
+                        ? _showLoginDialog()
+                        : _openMarketRequestDetail(
+                            r,
+                            autoOpenSubmitOffer: true,
+                          ),
                     dealSubscriptionBlocked: dealBlocked,
                     onSubscribeForDeal: _isGuest || !dealBlocked
                         ? null
@@ -7733,12 +7716,12 @@ class _UserDashboardState extends State<UserDashboard>
                       dealApplicantCount:
                           _homeRequestApplicantCounts[r.id] ?? 0,
                       onOpen: () => _openMarketRequestDetail(r),
-                      onSubmitOffer: _isGuest
-                          ? null
-                          : () => _openMarketRequestDetail(
-                                r,
-                                autoOpenSubmitOffer: true,
-                              ),
+                      onSubmitOffer: () => _isGuest
+                          ? _showLoginDialog()
+                          : _openMarketRequestDetail(
+                              r,
+                              autoOpenSubmitOffer: true,
+                            ),
                       dealSubscriptionBlocked: dealSubBlocked,
                       onSubscribeForDeal: _isGuest || !dealSubBlocked
                           ? null
@@ -8146,9 +8129,9 @@ class _UserDashboardState extends State<UserDashboard>
             dealApplicantCount: _homeRequestApplicantCounts[r.id] ?? 0,
             onOpen: () => _openMarketRequestDetail(r),
             onEditMarketRequest: _editMarketRequest,
-            onSubmitOffer: _isGuest
-                ? null
-                : () => _openMarketRequestDetail(r, autoOpenSubmitOffer: true),
+            onSubmitOffer: () => _isGuest
+                ? _showLoginDialog()
+                : _openMarketRequestDetail(r, autoOpenSubmitOffer: true),
             onCopyMarketRequestWebLink: _copyMarketRequestPublicLink,
             onShareMarketRequestFromCard: _shareMarketRequestFromCard,
           );

@@ -4,7 +4,8 @@ import 'package:aqar_user/core/payment/platform_fee_catalog.dart';
 
 import 'guest_one_time_pay_sheet.dart';
 
-Widget _withFeeCatalog({required Widget Function(PlatformFeeCatalog? cat) builder}) {
+Widget _withFeeCatalog(
+    {required Widget Function(PlatformFeeCatalog? cat) builder}) {
   final cat = PlatformFeeCatalog.instance;
   if (cat == null) return builder(null);
   return ListenableBuilder(
@@ -13,11 +14,14 @@ Widget _withFeeCatalog({required Widget Function(PlatformFeeCatalog? cat) builde
   );
 }
 
-String _guestPayOnceLabel(PlatformFeeCatalog? cat, {required bool isAr, required bool forOffer}) {
+String _guestPayOnceLabel(PlatformFeeCatalog? cat,
+    {required bool isAr, required bool forOffer}) {
   final p = cat?.guestPhrase(isAr: isAr) ?? '';
   if (forOffer) {
     if (isAr) {
-      return p.isEmpty ? 'دفع لإتمام الصفقة لمرة واحدة' : 'دفع لإتمام الصفقة لمرة واحدة ($p)';
+      return p.isEmpty
+          ? 'دفع لإتمام الصفقة لمرة واحدة'
+          : 'دفع لإتمام الصفقة لمرة واحدة ($p)';
     }
     return p.isEmpty ? 'One-time pay to offer' : 'One-time pay to offer ($p)';
   }
@@ -40,10 +44,8 @@ Future<GuestHomeOfferGateResult?> showGuestHomeOfferGateSheet({
   required bool isAr,
 }) {
   final cs = Theme.of(context).colorScheme;
-  return showAppModalBottomSheet<GuestHomeOfferGateResult>(
+  return showDialog<GuestHomeOfferGateResult>(
     context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
     builder: (ctx) {
       return _withFeeCatalog(
         builder: (cat) {
@@ -79,18 +81,9 @@ Future<GuestHomeOfferGateResult?> showGuestHomeOfferGateSheet({
                     label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
                   ),
                   const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestHomeOfferGateResult.payOnce),
-                    icon: const Icon(Icons.payments_outlined),
-                    label: Text(
-                      _guestPayOnceLabel(cat, isAr: isAr, forOffer: true),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   TextButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestHomeOfferGateResult.register),
+                    onPressed: () => Navigator.of(ctx)
+                        .pop(GuestHomeOfferGateResult.register),
                     icon: const Icon(Icons.person_add_alt_1_outlined),
                     label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
                   ),
@@ -110,10 +103,8 @@ Future<GuestAuthRequiredResult?> showGuestInstantDealAuthSheet({
   required bool isAr,
 }) {
   final cs = Theme.of(context).colorScheme;
-  return showAppModalBottomSheet<GuestAuthRequiredResult>(
+  return showDialog<GuestAuthRequiredResult>(
     context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
     builder: (ctx) {
       return _withFeeCatalog(
         builder: (cat) {
@@ -130,7 +121,9 @@ Future<GuestAuthRequiredResult?> showGuestInstantDealAuthSheet({
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          isAr ? 'طلب فوري — بدون اشتراك' : 'Instant request — no subscription',
+                          isAr
+                              ? 'طلب فوري — بدون اشتراك'
+                              : 'Instant request — no subscription',
                           style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
                                 fontWeight: FontWeight.w900,
                               ),
@@ -186,10 +179,8 @@ Future<GuestAuthRequiredResult?> showGuestAuthRequiredSheet({
   required bool isAr,
 }) {
   final cs = Theme.of(context).colorScheme;
-  return showAppModalBottomSheet<GuestAuthRequiredResult>(
+  return showDialog<GuestAuthRequiredResult>(
     context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
     builder: (ctx) {
       return SafeArea(
         child: Padding(
@@ -293,15 +284,15 @@ Future<GuestCreateContentGateResult?> showGuestCreateContentGateSheet({
                   ),
                   const SizedBox(height: 18),
                   FilledButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestCreateContentGateResult.login),
+                    onPressed: () => Navigator.of(ctx)
+                        .pop(GuestCreateContentGateResult.login),
                     icon: const Icon(Icons.login_rounded),
                     label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestCreateContentGateResult.payOnce),
+                    onPressed: () => Navigator.of(ctx)
+                        .pop(GuestCreateContentGateResult.payOnce),
                     icon: const Icon(Icons.payments_outlined),
                     label: Text(
                       _guestPayOnceLabel(cat, isAr: isAr, forOffer: false),
@@ -309,8 +300,8 @@ Future<GuestCreateContentGateResult?> showGuestCreateContentGateSheet({
                   ),
                   const SizedBox(height: 10),
                   TextButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestCreateContentGateResult.register),
+                    onPressed: () => Navigator.of(ctx)
+                        .pop(GuestCreateContentGateResult.register),
                     icon: const Icon(Icons.person_add_alt_1_outlined),
                     label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
                   ),
@@ -331,7 +322,8 @@ Future<bool> runGuestOneTimePaymentFlow({
   required String unlockKind,
 }) async {
   var cat = PlatformFeeCatalog.instance;
-  if (cat != null && cat.amountOf(PlatformFeeCatalog.guestOneTimeDeal) == null) {
+  if (cat != null &&
+      cat.amountOf(PlatformFeeCatalog.guestOneTimeDeal) == null) {
     await cat.refresh();
   }
   cat = PlatformFeeCatalog.instance;

@@ -50,6 +50,7 @@ Future<void> showMarketRequestHomeSheet({
   required String currentUserId,
   bool autoOpenSubmitOffer = false,
   VoidCallback? onDidChange,
+  VoidCallback? onOfferSubmitted,
   VoidCallback? onGuestRequiresAuth,
   Future<void> Function()? onGuestPayOfferUnlock,
   Future<bool> Function()? onSubscriptionRequiredForOffer,
@@ -71,6 +72,7 @@ Future<void> showMarketRequestHomeSheet({
         currentUserId: currentUserId,
         autoOpenSubmitOffer: autoOpenSubmitOffer,
         onDidChange: onDidChange,
+        onOfferSubmitted: onOfferSubmitted,
         onGuestRequiresAuth: onGuestRequiresAuth,
         onGuestPayOfferUnlock: onGuestPayOfferUnlock,
         onSubscriptionRequiredForOffer: onSubscriptionRequiredForOffer,
@@ -89,6 +91,7 @@ class _MarketRequestSheetBody extends StatefulWidget {
     required this.currentUserId,
     this.autoOpenSubmitOffer = false,
     this.onDidChange,
+    this.onOfferSubmitted,
     this.onGuestRequiresAuth,
     this.onGuestPayOfferUnlock,
     this.onSubscriptionRequiredForOffer,
@@ -102,6 +105,7 @@ class _MarketRequestSheetBody extends StatefulWidget {
   final String currentUserId;
   final bool autoOpenSubmitOffer;
   final VoidCallback? onDidChange;
+  final VoidCallback? onOfferSubmitted;
   final VoidCallback? onGuestRequiresAuth;
   final Future<void> Function()? onGuestPayOfferUnlock;
 
@@ -624,6 +628,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       );
     } else {
       widget.onDidChange?.call();
+      widget.onOfferSubmitted?.call();
       AppHaptics.medium();
       await _reloadOffers();
     }
