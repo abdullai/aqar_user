@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/deals/deal_messaging_gate.dart';
 import '../core/deals/deal_completion_inbox.dart';
@@ -22,12 +23,14 @@ import '../core/subscription/subscription_gate_helper.dart';
 import '../core/workflow/app_role_helper.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/date_helper.dart';
+import '../core/utils/phone_display.dart';
 import '../core/market/market_request_detail_facts.dart';
 import '../l10n/app_localizations.dart';
 import '../models/market_property_request_priority.dart';
 import '../models/market_property_request_row.dart';
 import '../navigation/chat_navigation.dart';
 import '../screens/create_market_property_request_page.dart';
+import '../services/chat_peer_service.dart';
 import '../services/individual_market_offer_service.dart';
 import '../services/market_request_offers_service.dart';
 import '../services/reservations_service.dart';
@@ -164,8 +167,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   bool get _myOfferAccepted => _mySelectedForDeal;
 
   /// المراسلة ورقم صاحب الطلب فقط بعد اختيار صاحب الطلب لعرضك.
-  bool get _canContactRequester =>
-      !_guest && !_isOwner && _mySelectedForDeal;
+  bool get _canContactRequester => !_guest && !_isOwner && _mySelectedForDeal;
 
   String? _requesterPhone;
 
@@ -204,8 +206,8 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
   Future<void> _reloadAllowance() async {
     if (_guest || _isOwner) return;
     try {
-      final allow = await IndividualMarketOfferService(widget.sb)
-          .currentAllowance(
+      final allow =
+          await IndividualMarketOfferService(widget.sb).currentAllowance(
         accountType: widget.accountType,
         organizationId: widget.organizationId,
       );
@@ -426,14 +428,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       },
     );
     if (!ok || !mounted) return false;
-    final refreshed = await IndividualMarketOfferService(widget.sb).currentAllowance(
+    final refreshed =
+        await IndividualMarketOfferService(widget.sb).currentAllowance(
       accountType: widget.accountType,
       organizationId: widget.organizationId,
     );
     if (!mounted) return false;
     setState(() => _allowance = refreshed);
     if (!refreshed.canSubmitNow) {
-      _toast(widget.isAr ? refreshed.shortStatusAr() : refreshed.shortStatusEn());
+      _toast(
+          widget.isAr ? refreshed.shortStatusAr() : refreshed.shortStatusEn());
       return false;
     }
     return true;
@@ -515,55 +519,54 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       context: context,
       builder: (dCtx) {
         return AlertDialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
-            content: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AqarTextField(
-                    controller: msgCtrl,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    decoration: InputDecoration(
-                      labelText: widget.isAr
-                          ? 'رسالة (اختياري)'
-                          : 'Message (optional)',
-                      alignLabelWithHint: true,
-                    ),
-                    minLines: 3,
-                    maxLines: 8,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
+          content: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AqarTextField(
+                  controller: msgCtrl,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  decoration: InputDecoration(
+                    labelText:
+                        widget.isAr ? 'رسالة (اختياري)' : 'Message (optional)',
+                    alignLabelWithHint: true,
                   ),
-                  const SizedBox(height: 10),
-                  AqarTextField(
-                    controller: priceCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    inputFormatters: [
-                      const ArabicDigitsToLatinFormatter(),
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: widget.isAr
-                          ? 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})'
-                          : 'Suggested price (SAR)',
-                    ),
+                  minLines: 3,
+                  maxLines: 8,
+                ),
+                const SizedBox(height: 10),
+                AqarTextField(
+                  controller: priceCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
                   ),
-                ],
-              ),
+                  inputFormatters: [
+                    const ArabicDigitsToLatinFormatter(),
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  decoration: InputDecoration(
+                    labelText: widget.isAr
+                        ? 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})'
+                        : 'Suggested price (SAR)',
+                  ),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dCtx, false),
-                child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dCtx, true),
-                child: Text(widget.isAr ? 'إرسال' : 'Send'),
-              ),
-            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx, false),
+              child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dCtx, true),
+              child: Text(widget.isAr ? 'إرسال' : 'Send'),
+            ),
+          ],
         );
       },
     );
@@ -577,9 +580,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       if (!mounted) return;
       if (usageRes['ok'] != true) {
         final err = '${usageRes['error'] ?? ''}';
-        _toast(widget.isAr
-            ? individualOfferShortReasonAr(err)
-            : 'Quota: $err');
+        _toast(widget.isAr ? individualOfferShortReasonAr(err) : 'Quota: $err');
         unawaited(_reloadAllowance());
         return;
       }
@@ -814,14 +815,59 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     }
   }
 
+  String _waDigits(String raw) {
+    var d = raw.replaceAll(RegExp(r'\D'), '');
+    if (d.startsWith('00')) d = d.substring(2);
+    if (d.startsWith('0')) d = d.substring(1);
+    if (d.startsWith('966')) return d;
+    if (d.length == 9 && d.startsWith('5')) return '966$d';
+    return d.isEmpty ? d : '966$d';
+  }
+
+  Future<void> _copyOfferPhone(BuildContext context, String raw) async {
+    final shown = PhoneDisplay.localTenDigits(raw);
+    if (shown.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: shown));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(widget.isAr ? 'تم نسخ رقم الجوال' : 'Phone copied'),
+      ),
+    );
+  }
+
+  Future<void> _openOfferWhatsApp(BuildContext context, String raw) async {
+    final digits = _waDigits(raw);
+    if (digits.isEmpty) return;
+    final uri = Uri.parse('https://wa.me/$digits');
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (ok) return;
+    } catch (_) {}
+    try {
+      await launchUrl(uri, mode: LaunchMode.platformDefault);
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.isAr ? 'تعذّر فتح واتساب.' : 'Could not open WhatsApp.',
+          ),
+        ),
+      );
+    }
+  }
+
   Widget _detailRow(
     BuildContext context, {
     required String label,
     required String value,
     IconData? icon,
+    Widget? valueWidget,
+    Widget? trailing,
   }) {
     final v = value.trim();
-    if (v.isEmpty) return const SizedBox.shrink();
+    if (v.isEmpty && valueWidget == null) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -845,14 +891,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              v,
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                height: 1.25,
-              ),
-            ),
+            child: valueWidget ??
+                Text(
+                  v,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                  ),
+                ),
           ),
+          if (trailing != null) trailing,
         ],
       ),
     );
@@ -881,7 +929,8 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       }
     }
     final hasAcceptedOffer = acceptedOfferId.isNotEmpty;
-    final headline = PropertyListingDisplay.displayRequestTitle(row, widget.isAr);
+    final headline =
+        PropertyListingDisplay.displayRequestTitle(row, widget.isAr);
 
     return Padding(
       padding: EdgeInsets.only(
@@ -1052,7 +1101,9 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                 ),
                 const SizedBox(height: 8),
               ],
-              if (!isCompleted && !_hasMyActiveOffer && !_mySelectedForDeal) ...[
+              if (!isCompleted &&
+                  !_hasMyActiveOffer &&
+                  !_mySelectedForDeal) ...[
                 if (_myPriorWithdrawCount == 1) ...[
                   const SizedBox(height: 8),
                   Material(
@@ -1157,9 +1208,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   ),
                 ),
               ],
-            ] else if (!_guest &&
-                !_isOwner &&
-                deletionRequested) ...[
+            ] else if (!_guest && !_isOwner && deletionRequested) ...[
               Material(
                 color: cs.surfaceContainerHighest.withValues(alpha: 0.65),
                 borderRadius: BorderRadius.circular(12),
@@ -1298,10 +1347,9 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   final createdTime = localCreated == null
                       ? ''
                       : DateHelper.fmtClock(localCreated);
-                  final accepted =
-                      DealMessagingGate.offerApprovedByOwner(st) ||
-                          (acceptedOfferId.isNotEmpty &&
-                              oid.trim() == acceptedOfferId);
+                  final accepted = DealMessagingGate.offerApprovedByOwner(st) ||
+                      (acceptedOfferId.isNotEmpty &&
+                          oid.trim() == acceptedOfferId);
                   final pending = st.toLowerCase() == 'submitted' ||
                       st.toLowerCase() == 'pending' ||
                       st.trim().isEmpty;
@@ -1309,7 +1357,11 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                       st.toLowerCase() == 'declined';
                   final nameLine = disp.isNotEmpty
                       ? disp
-                      : (widget.isAr ? 'شريكنا المهتم' : 'Interested partner');
+                      : (widget.isAr ? 'مستخدم عقاري' : 'Real estate user');
+                  final roleLine = ChatPeerService.accountTypeLabel(
+                    acc,
+                    widget.isAr,
+                  );
                   return Card(
                     margin: const EdgeInsets.only(bottom: 8),
                     child: Padding(
@@ -1351,9 +1403,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                                       ),
                                     ),
                                     Text(
-                                      widget.isAr
-                                          ? 'شريكنا المهتم'
-                                          : 'Interested partner',
+                                      roleLine,
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w800,
@@ -1387,7 +1437,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                           _detailRow(
                             context,
                             label: widget.isAr ? 'الصفة' : 'Role',
-                            value: acc,
+                            value: roleLine,
                             icon: Icons.badge_outlined,
                           ),
                           _detailRow(
@@ -1396,12 +1446,47 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                             value: city,
                             icon: Icons.location_city_outlined,
                           ),
-                          _detailRow(
-                            context,
-                            label: widget.isAr ? 'التواصل' : 'Contact',
-                            value: phone,
-                            icon: Icons.phone_outlined,
-                          ),
+                          if (PhoneDisplay.localTenDigits(phone).isNotEmpty)
+                            _detailRow(
+                              context,
+                              label: widget.isAr ? 'التواصل' : 'Contact',
+                              value: PhoneDisplay.localTenDigits(phone),
+                              icon: Icons.phone_outlined,
+                              valueWidget: Text(
+                                PhoneDisplay.forUi(phone, isAr: widget.isAr),
+                                textDirection: TextDirection.ltr,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.25,
+                                ),
+                              ),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: widget.isAr
+                                        ? 'نسخ الرقم'
+                                        : 'Copy number',
+                                    icon: const Icon(Icons.copy_rounded,
+                                        size: 18),
+                                    onPressed: () => unawaited(
+                                        _copyOfferPhone(context, phone)),
+                                  ),
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: widget.isAr
+                                        ? 'فتح واتساب'
+                                        : 'Open WhatsApp',
+                                    icon: const Icon(Icons.chat_rounded,
+                                        size: 18, color: Color(0xFF25D366)),
+                                    onPressed: () => unawaited(
+                                      _openOfferWhatsApp(context, phone),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           _detailRow(
                             context,
                             label: widget.isAr ? 'الترخيص' : 'License',
@@ -1412,10 +1497,18 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                             _detailRow(
                               context,
                               label: widget.isAr ? 'السعر' : 'Price',
-                              value: AppMoney.formatWithCurrencyCode(
+                              value: AppMoney.formatNumber(
                                 priceValue,
                                 isAr: widget.isAr,
                                 maxFractionDigits: 0,
+                              ),
+                              valueWidget: AppMoneyInline(
+                                amountText: AppMoney.formatNumber(
+                                  priceValue,
+                                  isAr: widget.isAr,
+                                  maxFractionDigits: 0,
+                                ),
+                                isAr: widget.isAr,
                               ),
                               icon: Icons.payments_outlined,
                             ),
@@ -1790,4 +1883,3 @@ class _MarketRequestFactsGrid extends StatelessWidget {
     );
   }
 }
-

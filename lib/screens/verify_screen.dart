@@ -231,9 +231,10 @@ class _VerifyScreenState extends State<VerifyScreen>
 
     _otpFocus.onKeyEvent = (node, event) {
       if (event is! KeyDownEvent) return KeyEventResult.ignored;
-      final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
-          event.logicalKey == LogicalKeyboardKey.numpadEnter;
-      if (!isEnter) return KeyEventResult.ignored;
+      final isPasteShortcut = (HardwareKeyboard.instance.isControlPressed ||
+              HardwareKeyboard.instance.isMetaPressed) &&
+          event.logicalKey == LogicalKeyboardKey.keyV;
+      if (!isPasteShortcut) return KeyEventResult.ignored;
       unawaited(_pasteOtpFromClipboard());
       return KeyEventResult.handled;
     };
@@ -453,9 +454,8 @@ class _VerifyScreenState extends State<VerifyScreen>
     final rawCode = fromWidget.isNotEmpty ? fromWidget : fromArgs;
     final onlyCode = rawCode.replaceAll(RegExp(r'\D'), '');
     _expectedFromArgs = onlyCode.isNotEmpty;
-    _expectedCode = onlyCode.length > _otpLen
-        ? onlyCode.substring(0, _otpLen)
-        : onlyCode;
+    _expectedCode =
+        onlyCode.length > _otpLen ? onlyCode.substring(0, _otpLen) : onlyCode;
 
     _nextRoute = PostAuthNavigation.resolveDashboardRoute(
       (args['next'] as String?) ?? _nextRoute,
@@ -476,8 +476,7 @@ class _VerifyScreenState extends State<VerifyScreen>
     if (fn.isNotEmpty) {
       _displayName = fn;
     }
-    _username = (args['username'] as String?) ??
-        (widget.initialUsername ?? '');
+    _username = (args['username'] as String?) ?? (widget.initialUsername ?? '');
     _deviceId = (args['deviceId'] as String?) ?? '';
     _challengeId = (args['challengeId'] as String?)?.trim() ??
         (widget.initialChallengeId ?? '').trim();
@@ -749,8 +748,7 @@ class _VerifyScreenState extends State<VerifyScreen>
 
   DateTime get _nowSaudi => DashboardGreeting.nowSaudiArabia();
 
-  String _formatDateYmd(DateTime d) =>
-      DateHelper.fmtCivilDate(d, isAr: _isAr);
+  String _formatDateYmd(DateTime d) => DateHelper.fmtCivilDate(d, isAr: _isAr);
 
   String _formatTime24(DateTime d) => DateHelper.fmtClock(d);
 
@@ -1398,8 +1396,8 @@ class _VerifyScreenState extends State<VerifyScreen>
                                       BoxShadow(
                                         blurRadius: 18,
                                         offset: const Offset(0, 10),
-                                        color: Colors.black
-                                            .withValues(alpha: isDark ? 0.35 : 0.12),
+                                        color: Colors.black.withValues(
+                                            alpha: isDark ? 0.35 : 0.12),
                                       ),
                                     ],
                                   ),
@@ -1415,8 +1413,7 @@ class _VerifyScreenState extends State<VerifyScreen>
                                                 _removeBanner();
                                               }
                                             : null,
-                                        borderRadius:
-                                            BorderRadius.circular(12),
+                                        borderRadius: BorderRadius.circular(12),
                                         child: Row(
                                           crossAxisAlignment:
                                               CrossAxisAlignment.start,
@@ -2512,303 +2509,310 @@ class _VerifyScreenState extends State<VerifyScreen>
                             return SizedBox(
                               height: visH,
                               child: Align(
-                              alignment: Alignment.topCenter,
-                              child: SingleChildScrollView(
-                                padding: EdgeInsets.fromLTRB(
-                                  phoneLike ? (isTiny ? 6 : 10) : 16,
-                                  phoneLike ? 8 : 16,
-                                  phoneLike ? (isTiny ? 6 : 10) : 16,
-                                  bottomPad,
-                                ),
-                                child: ConstrainedBox(
-                                  constraints:
-                                      BoxConstraints(maxWidth: cardMax),
-                                  child: Card(
-                                    color: card,
-                                    elevation: phoneLike ? 4 : 10,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(
-                                        phoneLike ? 16 : 24,
+                                alignment: Alignment.topCenter,
+                                child: SingleChildScrollView(
+                                  padding: EdgeInsets.fromLTRB(
+                                    phoneLike ? (isTiny ? 6 : 10) : 16,
+                                    phoneLike ? 8 : 16,
+                                    phoneLike ? (isTiny ? 6 : 10) : 16,
+                                    bottomPad,
+                                  ),
+                                  child: ConstrainedBox(
+                                    constraints:
+                                        BoxConstraints(maxWidth: cardMax),
+                                    child: Card(
+                                      color: card,
+                                      elevation: phoneLike ? 4 : 10,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(
+                                          phoneLike ? 16 : 24,
+                                        ),
                                       ),
-                                    ),
-                                    child: Padding(
-                                      padding:
-                                          EdgeInsets.all(isSmall ? 14 : 22),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          AppPageCloseButton.startCorner(
-                                            onPressed: () => _goToLogin(
-                                              signOut: true,
-                                              clearOtp: true,
-                                            ),
-                                          ),
-                                          Container(
-                                            width: double.infinity,
-                                            padding: EdgeInsets.symmetric(
-                                              horizontal: isTiny ? 10 : 12,
-                                              vertical: isTiny ? 8 : 10,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: isDark
-                                                  ? Colors.white
-                                                      .withValues(alpha: 0.04)
-                                                  : Colors.black
-                                                      .withValues(alpha: 0.03),
-                                              borderRadius:
-                                                  BorderRadius.circular(14),
-                                              border: Border.all(
-                                                color: isDark
-                                                    ? Colors.white
-                                                        .withValues(alpha: 0.14)
-                                                    : Colors.black.withValues(
-                                                        alpha: 0.10),
+                                      child: Padding(
+                                        padding:
+                                            EdgeInsets.all(isSmall ? 14 : 22),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            AppPageCloseButton.startCorner(
+                                              onPressed: () => _goToLogin(
+                                                signOut: true,
+                                                clearOtp: true,
                                               ),
                                             ),
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.center,
-                                              children: [
-                                                _singleLineGreeting(
-                                                  greeting: _greeting(),
-                                                  name: displayName,
-                                                  color: titleColor,
-                                                  fontSize: nameSize,
-                                                ),
-                                                const SizedBox(height: 8),
-                                                _infoRow(
-                                                  icon: Icons
-                                                      .calendar_today_rounded,
-                                                  text: _todayLine(),
-                                                  color: subColor,
-                                                  fontSize: bodySize,
-                                                ),
-                                                const SizedBox(height: 6),
-                                                _infoRow(
-                                                  icon: Icons.login_rounded,
-                                                  text: (_isAr
-                                                          ? 'آخر تسجيل دخول: '
-                                                          : 'Last login: ') +
-                                                      _lastLoginLine(),
-                                                  color: subColor,
-                                                  fontSize: bodySize,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          const SizedBox(height: 16),
-                                          if (_restApiFailureHint != null) ...[
-                                            const SizedBox(height: 12),
                                             Container(
                                               width: double.infinity,
-                                              padding: const EdgeInsets.all(12),
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: isTiny ? 10 : 12,
+                                                vertical: isTiny ? 8 : 10,
+                                              ),
                                               decoration: BoxDecoration(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .errorContainer
-                                                    .withValues(alpha: 0.85),
+                                                color: isDark
+                                                    ? Colors.white
+                                                        .withValues(alpha: 0.04)
+                                                    : Colors.black.withValues(
+                                                        alpha: 0.03),
                                                 borderRadius:
-                                                    BorderRadius.circular(12),
+                                                    BorderRadius.circular(14),
                                                 border: Border.all(
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .error
-                                                      .withValues(alpha: 0.4),
+                                                  color: isDark
+                                                      ? Colors.white.withValues(
+                                                          alpha: 0.14)
+                                                      : Colors.black.withValues(
+                                                          alpha: 0.10),
                                                 ),
                                               ),
-                                              child: SelectableText(
-                                                _restApiFailureHint!,
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w700,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onErrorContainer,
-                                                  fontSize: bodySize,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                          const SizedBox(height: 14),
-
-                                          // عدّاد إعادة الإرسال فوق الحقول — يلتف على الشاشات الضيقة ولا يختنق مع الأزرار.
-                                          Wrap(
-                                            alignment: WrapAlignment.center,
-                                            crossAxisAlignment:
-                                                WrapCrossAlignment.center,
-                                            spacing: 8,
-                                            runSpacing: 4,
-                                            children: [
-                                              Row(
-                                                mainAxisSize: MainAxisSize.min,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.center,
                                                 children: [
-                                                  Icon(Icons.timer_outlined,
-                                                      size: 18,
-                                                      color: subColor),
-                                                  const SizedBox(width: 6),
-                                                  Text(
-                                                    showResend
-                                                        ? (_isAr
-                                                            ? 'انتهى الوقت'
-                                                            : 'Time expired')
-                                                        : (_isAr
-                                                            ? 'المتبقي: $_secondsLeft ث'
-                                                            : 'Remaining: $_secondsLeft s'),
-                                                    style: TextStyle(
-                                                      color: subColor,
-                                                      fontWeight:
-                                                          FontWeight.w900,
-                                                      fontSize: bodySize,
-                                                    ),
+                                                  _singleLineGreeting(
+                                                    greeting: _greeting(),
+                                                    name: displayName,
+                                                    color: titleColor,
+                                                    fontSize: nameSize,
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  _infoRow(
+                                                    icon: Icons
+                                                        .calendar_today_rounded,
+                                                    text: _todayLine(),
+                                                    color: subColor,
+                                                    fontSize: bodySize,
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  _infoRow(
+                                                    icon: Icons.login_rounded,
+                                                    text: (_isAr
+                                                            ? 'آخر تسجيل دخول: '
+                                                            : 'Last login: ') +
+                                                        _lastLoginLine(),
+                                                    color: subColor,
+                                                    fontSize: bodySize,
                                                   ),
                                                 ],
                                               ),
-                                              TextButton.icon(
-                                                onPressed:
-                                                    showResend && !_offline
-                                                        ? _resendCode
-                                                        : null,
-                                                icon: const Icon(Icons.refresh),
-                                                label: Text(
-                                                  _isAr
-                                                      ? 'إعادة إرسال'
-                                                      : 'Resend',
+                                            ),
+                                            const SizedBox(height: 16),
+                                            if (_restApiFailureHint !=
+                                                null) ...[
+                                              const SizedBox(height: 12),
+                                              Container(
+                                                width: double.infinity,
+                                                padding:
+                                                    const EdgeInsets.all(12),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .errorContainer
+                                                      .withValues(alpha: 0.85),
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                  border: Border.all(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .error
+                                                        .withValues(alpha: 0.4),
+                                                  ),
+                                                ),
+                                                child: SelectableText(
+                                                  _restApiFailureHint!,
                                                   style: TextStyle(
-                                                    fontWeight: FontWeight.w900,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onErrorContainer,
                                                     fontSize: bodySize,
                                                   ),
                                                 ),
                                               ),
                                             ],
-                                          ),
+                                            const SizedBox(height: 14),
 
-                                          const SizedBox(height: 10),
-                                          FieldGroupFrame(
-                                            title: t.verifySubtitle,
-                                            titleTextAlign: TextAlign.center,
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 14,
-                                              horizontal: 12,
-                                            ),
-                                            child: Column(
+                                            // عدّاد إعادة الإرسال فوق الحقول — يلتف على الشاشات الضيقة ولا يختنق مع الأزرار.
+                                            Wrap(
+                                              alignment: WrapAlignment.center,
+                                              crossAxisAlignment:
+                                                  WrapCrossAlignment.center,
+                                              spacing: 8,
+                                              runSpacing: 4,
                                               children: [
-                                                Directionality(
-                                                  textDirection:
-                                                      TextDirection.ltr,
-                                                  child: _otpBoxes(
-                                                    isDark: isDark,
-                                                    fontSize: bodySize,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 8),
-                                                Align(
-                                                  alignment: Alignment.center,
-                                                  child: TextButton.icon(
-                                                    onPressed: _offline
-                                                        ? null
-                                                        : () => unawaited(
-                                                              _pasteOtpFromClipboard(),
-                                                            ),
-                                                    icon: const Icon(
-                                                      Icons
-                                                          .content_paste_rounded,
-                                                      size: 18,
-                                                    ),
-                                                    label: Text(
-                                                      _isAr
-                                                          ? 'لصق الرمز'
-                                                          : 'Paste code',
+                                                Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    Icon(Icons.timer_outlined,
+                                                        size: 18,
+                                                        color: subColor),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      showResend
+                                                          ? (_isAr
+                                                              ? 'انتهى الوقت'
+                                                              : 'Time expired')
+                                                          : (_isAr
+                                                              ? 'المتبقي: $_secondsLeft ث'
+                                                              : 'Remaining: $_secondsLeft s'),
                                                       style: TextStyle(
+                                                        color: subColor,
                                                         fontWeight:
                                                             FontWeight.w900,
                                                         fontSize: bodySize,
                                                       ),
                                                     ),
+                                                  ],
+                                                ),
+                                                TextButton.icon(
+                                                  onPressed:
+                                                      showResend && !_offline
+                                                          ? _resendCode
+                                                          : null,
+                                                  icon:
+                                                      const Icon(Icons.refresh),
+                                                  label: Text(
+                                                    _isAr
+                                                        ? 'إعادة إرسال'
+                                                        : 'Resend',
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w900,
+                                                      fontSize: bodySize,
+                                                    ),
                                                   ),
                                                 ),
                                               ],
                                             ),
-                                          ),
-                                          const SizedBox(height: 10),
-                                          Text(
-                                            t.otpAttemptsRemaining(
-                                                _attemptsLeft),
-                                            style: TextStyle(
-                                              fontWeight: FontWeight.w900,
-                                              fontSize: bodySize,
-                                              color: _error
-                                                  ? Theme.of(context)
-                                                      .colorScheme
-                                                      .error
-                                                  : subColor,
+
+                                            const SizedBox(height: 10),
+                                            FieldGroupFrame(
+                                              title: t.verifySubtitle,
+                                              titleTextAlign: TextAlign.center,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                vertical: 14,
+                                                horizontal: 12,
+                                              ),
+                                              child: Column(
+                                                children: [
+                                                  Directionality(
+                                                    textDirection:
+                                                        TextDirection.ltr,
+                                                    child: _otpBoxes(
+                                                      isDark: isDark,
+                                                      fontSize: bodySize,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  Align(
+                                                    alignment: Alignment.center,
+                                                    child: TextButton.icon(
+                                                      onPressed: _offline
+                                                          ? null
+                                                          : () => unawaited(
+                                                                _pasteOtpFromClipboard(),
+                                                              ),
+                                                      icon: const Icon(
+                                                        Icons
+                                                            .content_paste_rounded,
+                                                        size: 18,
+                                                      ),
+                                                      label: Text(
+                                                        _isAr
+                                                            ? 'لصق الرمز'
+                                                            : 'Paste code',
+                                                        style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w900,
+                                                          fontSize: bodySize,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
-                                            textAlign: TextAlign.center,
-                                          ),
-                                          if (_error) ...[
-                                            const SizedBox(height: 8),
+                                            const SizedBox(height: 10),
                                             Text(
-                                              t.invalidCode,
+                                              t.otpAttemptsRemaining(
+                                                  _attemptsLeft),
                                               style: TextStyle(
-                                                color: Theme.of(context)
-                                                    .colorScheme
-                                                    .error,
                                                 fontWeight: FontWeight.w900,
                                                 fontSize: bodySize,
+                                                color: _error
+                                                    ? Theme.of(context)
+                                                        .colorScheme
+                                                        .error
+                                                    : subColor,
                                               ),
                                               textAlign: TextAlign.center,
                                             ),
-                                          ],
-                                          const SizedBox(height: 16),
-                                          SizedBox(
-                                            width: double.infinity,
-                                            height: 50,
-                                            child: ElevatedButton(
-                                              style: ElevatedButton.styleFrom(
-                                                backgroundColor:
-                                                    Theme.of(context)
-                                                        .colorScheme
-                                                        .primary,
-                                                foregroundColor: Colors.white,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(16),
+                                            if (_error) ...[
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                t.invalidCode,
+                                                style: TextStyle(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .error,
+                                                  fontWeight: FontWeight.w900,
+                                                  fontSize: bodySize,
                                                 ),
+                                                textAlign: TextAlign.center,
                                               ),
-                                              onPressed:
-                                                  (_submitting || _offline)
-                                                      ? null
-                                                      : _submit,
-                                              child: _submitting
-                                                  ? const SizedBox(
-                                                      width: 22,
-                                                      height: 22,
-                                                      child: AppLogoLoading(
-                                                        compact: true,
-                                                        size: 20,
+                                            ],
+                                            const SizedBox(height: 16),
+                                            SizedBox(
+                                              width: double.infinity,
+                                              height: 50,
+                                              child: ElevatedButton(
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor:
+                                                      Theme.of(context)
+                                                          .colorScheme
+                                                          .primary,
+                                                  foregroundColor: Colors.white,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            16),
+                                                  ),
+                                                ),
+                                                onPressed:
+                                                    (_submitting || _offline)
+                                                        ? null
+                                                        : _submit,
+                                                child: _submitting
+                                                    ? const SizedBox(
+                                                        width: 22,
+                                                        height: 22,
+                                                        child: AppLogoLoading(
+                                                          compact: true,
+                                                          size: 20,
+                                                        ),
+                                                      )
+                                                    : Text(
+                                                        t.confirm,
+                                                        style: TextStyle(
+                                                          fontWeight:
+                                                              FontWeight.w900,
+                                                          fontSize: _font(
+                                                              context, 16, 15),
+                                                        ),
                                                       ),
-                                                    )
-                                                  : Text(
-                                                      t.confirm,
-                                                      style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.w900,
-                                                        fontSize: _font(
-                                                            context, 16, 15),
-                                                      ),
-                                                    ),
+                                              ),
                                             ),
-                                          ),
-                                          const SizedBox(height: 10),
-                                          TextButton(
-                                            onPressed: _clear,
-                                            child:
-                                                Text(_isAr ? 'مسح' : 'Clear'),
-                                          ),
-                                        ],
+                                            const SizedBox(height: 10),
+                                            TextButton(
+                                              onPressed: _clear,
+                                              child:
+                                                  Text(_isAr ? 'مسح' : 'Clear'),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
                               ),
                             );
                           },

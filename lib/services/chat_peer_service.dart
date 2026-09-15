@@ -14,8 +14,7 @@ abstract final class ChatPeerService {
     final m = Map<String, dynamic>.from(row);
     final d = ProfileGreetingFromRow.displayName(m, isAr: isAr)?.trim();
     if (d != null && d.isNotEmpty) return d;
-    final alt =
-        ProfileGreetingFromRow.displayName(m, isAr: !isAr)?.trim();
+    final alt = ProfileGreetingFromRow.displayName(m, isAr: !isAr)?.trim();
     if (alt != null && alt.isNotEmpty) return alt;
     final ar = _s(row['full_name_ar']);
     final en = _s(row['full_name_en']);
@@ -46,6 +45,17 @@ abstract final class ChatPeerService {
         return isAr ? 'مالك' : 'Owner';
       case 'user':
         return isAr ? 'مستخدم' : 'User';
+      case 'individual_seller':
+      case 'owner_individual':
+        return isAr ? 'مالك فردي' : 'Individual owner';
+      case 'office':
+        return isAr ? 'مكتب عقاري' : 'Real estate office';
+      case 'company':
+        return isAr ? 'شركة عقارية' : 'Real estate company';
+      case 'institution':
+        return isAr ? 'مؤسسة عقارية' : 'Real estate institution';
+      case 'agency':
+        return isAr ? 'وكالة عقارية' : 'Real estate agency';
       default:
         return t;
     }
@@ -142,7 +152,8 @@ abstract final class ChatPeerService {
   }
 
   /// تلخيص تقييمات لعدة مستخدمين (أفضل لقوائم العروض).
-  static Future<Map<String, ({double avg, int count})>> fetchRatingSummariesForUserIds(
+  static Future<Map<String, ({double avg, int count})>>
+      fetchRatingSummariesForUserIds(
     SupabaseClient sb,
     Iterable<String> userIds,
   ) async {
