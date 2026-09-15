@@ -254,7 +254,8 @@ class _ListingMarketingTrackingBodyState
         if (invites.isEmpty)
           Text(
             ar ? 'لا توجد دعوات مسجّلة.' : 'No invites recorded.',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant),
           )
         else
           ...invites.asMap().entries.map((e) {
@@ -266,8 +267,8 @@ class _ListingMarketingTrackingBodyState
               (i['_marketer_account_type'] ?? '').toString(),
               ar,
             );
-            final invSt = (i['status'] ?? i['invite_gate_status'] ?? '')
-                .toString();
+            final invSt =
+                (i['status'] ?? i['invite_gate_status'] ?? '').toString();
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Material(
@@ -290,8 +291,10 @@ class _ListingMarketingTrackingBodyState
                         ar ? 'الحالة' : 'Status',
                         WorkflowDisplayTexts.inviteStatus(invSt, ar),
                       ),
-                      _line(ar ? 'المسوّق' : 'Marketer', name.isEmpty ? '—' : name),
-                      if (phone.isNotEmpty) _line(ar ? 'الجوال' : 'Phone', phone),
+                      _line(ar ? 'المسوّق' : 'Marketer',
+                          name.isEmpty ? '—' : name),
+                      if (phone.isNotEmpty)
+                        _line(ar ? 'الجوال' : 'Phone', phone),
                       _line(ar ? 'نوع الحساب' : 'Account type', acc),
                       _line(
                         ar ? 'تاريخ الإنشاء' : 'Created',
@@ -368,8 +371,8 @@ class _ListingMarketingTrackingBodyState
     }.contains(stage);
     final collectingOffers =
         ListingWorkflowUnified.requestActivelyCollectingOffers(
-          req ?? const <String, dynamic>{},
-        );
+      req ?? const <String, dynamic>{},
+    );
 
     Widget step(String text, bool done) {
       return Padding(
@@ -378,11 +381,11 @@ class _ListingMarketingTrackingBodyState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              done ? Icons.check_circle_rounded : Icons.radio_button_off_rounded,
+              done
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_off_rounded,
               size: 20,
-              color: done
-                  ? Colors.teal
-                  : Theme.of(context).colorScheme.outline,
+              color: done ? Colors.teal : Theme.of(context).colorScheme.outline,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -471,12 +474,18 @@ class _ListingMarketingTrackingBodyState
               value: WorkflowDisplayTexts.offerStatus(ost, ar),
             ),
             RequestSummaryRow(
-              label: ar ? 'تاريخ مشاهدة المالك لصفحة العروض' : 'Owner viewed offers page',
-              value: _formatTrackDate(_parseDt(req?['owner_viewed_offers_at']), ar),
+              label: ar
+                  ? 'تاريخ مشاهدة المالك لصفحة العروض'
+                  : 'Owner viewed offers page',
+              value: _formatTrackDate(
+                  _parseDt(req?['owner_viewed_offers_at']), ar),
             ),
             RequestSummaryRow(
-              label: ar ? 'تاريخ رد المالك على عرضك' : 'Owner response on your offer',
-              value: _formatTrackDate(_parseDt(latest?['owner_responded_at']), ar),
+              label: ar
+                  ? 'تاريخ رد المالك على عرضك'
+                  : 'Owner response on your offer',
+              value:
+                  _formatTrackDate(_parseDt(latest?['owner_responded_at']), ar),
             ),
             if (offerNotes.isNotEmpty)
               RequestSummaryRow(
@@ -490,7 +499,8 @@ class _ListingMarketingTrackingBodyState
                 .isNotEmpty)
               RequestSummaryRow(
                 label: ar ? 'سبب رفض المالك' : 'Owner decline reason',
-                value: (latest?['owner_decline_reason'] ?? '').toString().trim(),
+                value:
+                    (latest?['owner_decline_reason'] ?? '').toString().trim(),
               ),
           ],
         ),
@@ -498,10 +508,13 @@ class _ListingMarketingTrackingBodyState
         _sectionTitle(ar ? 'سير العمل' : 'Workflow'),
         if (collectingOffers && !submitted)
           step(
-            ar ? 'الطلب في السوق — بانتظار إتمام صفقتك' : 'On market — awaiting your deal',
+            ar
+                ? 'الطلب في السوق — بانتظار إتمام صفقتك'
+                : 'On market — awaiting your deal',
             true,
           ),
-        step(ar ? 'تم إتمام صفقتك بنجاح' : 'Deal completed', submitted),
+        step(
+            ar ? 'تم إرسال عرضك إلى المالك' : 'Offer sent to owner', submitted),
         step(
           ar ? 'بانتظار مراجعة المالك للعرض' : 'Awaiting owner review',
           ownerViewed || ownerResponded || accepted || contractFlow,

@@ -72,20 +72,20 @@ class _BudgetTextFieldState extends State<BudgetTextField> {
       labelText: widget.label,
       border: const OutlineInputBorder(),
       isDense: true,
-              suffixIcon: Padding(
-                padding: const EdgeInsetsDirectional.only(end: 8, start: 4),
-              child: Align(
-                widthFactor: 1,
-                heightFactor: 1,
-                alignment: Alignment.center,
-                child: _currency(context, color, h),
-              ),
-            ),
-      suffixIconConstraints: BoxConstraints(
-              minWidth: suffixW,
-              minHeight: 40,
-              maxHeight: 48,
-            ),
+      prefixIcon: Padding(
+        padding: const EdgeInsetsDirectional.only(start: 8, end: 4),
+        child: Align(
+          widthFactor: 1,
+          heightFactor: 1,
+          alignment: Alignment.center,
+          child: _currency(context, color, h),
+        ),
+      ),
+      prefixIconConstraints: BoxConstraints(
+        minWidth: suffixW,
+        minHeight: 40,
+        maxHeight: 48,
+      ),
     );
 
     final field = widget.validator == null

@@ -33,14 +33,15 @@ class AqarMoneyRangeField extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
-    final title = label ?? (isAr ? 'المبلغ المحدد / السعر' : 'Specified amount / Price');
+    final title =
+        label ?? (isAr ? 'المبلغ المحدد / السعر' : 'Specified amount / Price');
 
     InputDecoration deco({
       required String hint,
       required Widget currency,
     }) {
       final iconPad = Padding(
-        padding: const EdgeInsetsDirectional.only(end: 8),
+        padding: const EdgeInsetsDirectional.only(start: 8),
         child: Align(
           widthFactor: 1,
           heightFactor: 1,
@@ -73,8 +74,8 @@ class AqarMoneyRangeField extends StatelessWidget {
             width: 1.5,
           ),
         ),
-        suffixIcon: iconPad,
-        suffixIconConstraints: const BoxConstraints(
+        prefixIcon: iconPad,
+        prefixIconConstraints: const BoxConstraints(
           minWidth: 44,
           minHeight: 40,
           maxHeight: 48,

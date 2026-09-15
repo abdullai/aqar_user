@@ -4,7 +4,6 @@ import 'listing_workflow_ui_context.dart';
 
 /// نصوص موحّدة لمرحلة التسويق/العروض (عربي + إنجليزي جاهزة للتوسعة).
 abstract final class ListingWorkflowCopy {
-
   static String t(bool isAr, String ar, String en) => isAr ? ar : en;
 
   /// نص جولة التسويق (بدل الرقم وحده).
@@ -46,11 +45,9 @@ abstract final class ListingWorkflowCopy {
   // ---------------------------------------------------------------------------
   // أزرار مشتركة
   // ---------------------------------------------------------------------------
-  static String btnAcceptOffer(bool isAr) =>
-      t(isAr, 'موافق', 'Approve');
+  static String btnAcceptOffer(bool isAr) => t(isAr, 'موافق', 'Approve');
 
-  static String btnDeclineOffer(bool isAr) =>
-      t(isAr, 'غير موافق', 'Decline');
+  static String btnDeclineOffer(bool isAr) => t(isAr, 'غير موافق', 'Decline');
 
   static String btnIssuePermit(bool isAr) =>
       t(isAr, 'إصدار تصريح', 'Issue permit');
@@ -418,7 +415,8 @@ abstract final class ListingWorkflowCopy {
     return rpcFailed(isAr, error);
   }
 
-  static String ownerOfferDeclineCounter(bool isAr, int declined, int maxDistinct) =>
+  static String ownerOfferDeclineCounter(
+          bool isAr, int declined, int maxDistinct) =>
       t(
         isAr,
         'رفضت عروض $declined مسوّقين مميزين (الحد $maxDistinct). عند بلوغ الحد يُوقف الطلب للمراجعة.',
@@ -445,8 +443,8 @@ abstract final class ListingWorkflowCopy {
 
   static String snackOfferSubmitted(bool isAr) => t(
         isAr,
-        'تم إتمام صفقتك بنجاح.',
-        'Your deal was submitted.',
+        'تم إرسال عرضك إلى المالك.',
+        'Your offer was sent to the owner.',
       );
 
   static String snackInviteAccepted(bool isAr) =>
@@ -513,7 +511,8 @@ abstract final class ListingWorkflowCopy {
         'Request admin review',
       );
 
-  static String marketerOfferBlockedByStage(bool isAr, ListingWorkflowStage stage) {
+  static String marketerOfferBlockedByStage(
+      bool isAr, ListingWorkflowStage stage) {
     switch (stage) {
       case ListingWorkflowStage.marketerSelected:
         return t(
