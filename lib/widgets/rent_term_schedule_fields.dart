@@ -109,7 +109,7 @@ class RentTermScheduleFields extends StatelessWidget {
         if (rentTerm == 'daily') ...[
           const SizedBox(height: 10),
           DropdownButtonFormField<int>(
-            value: rentDays,
+            initialValue: rentDays,
             decoration: InputDecoration(
               labelText: isAr ? 'عدد الأيام' : 'Days',
               border: const OutlineInputBorder(),
@@ -150,7 +150,7 @@ class RentTermScheduleFields extends StatelessWidget {
         if (rentTerm == 'weekly') ...[
           const SizedBox(height: 10),
           DropdownButtonFormField<int>(
-            value: rentWeeks,
+            initialValue: rentWeeks,
             decoration: InputDecoration(
               labelText: isAr ? 'عدد الأسابيع' : 'Weeks',
               border: const OutlineInputBorder(),
@@ -183,7 +183,7 @@ class RentTermScheduleFields extends StatelessWidget {
         if (rentTerm == 'monthly') ...[
           const SizedBox(height: 10),
           DropdownButtonFormField<int>(
-            value: rentMonths.clamp(1, 12),
+            initialValue: rentMonths.clamp(1, 12),
             decoration: InputDecoration(
               labelText: isAr ? 'عدد الأشهر' : 'Months',
               border: const OutlineInputBorder(),
@@ -216,7 +216,7 @@ class RentTermScheduleFields extends StatelessWidget {
         if (rentTerm == 'yearly') ...[
           const SizedBox(height: 10),
           DropdownButtonFormField<int>(
-            value: rentYears,
+            initialValue: rentYears,
             decoration: InputDecoration(
               labelText: isAr ? 'عدد السنوات' : 'Years',
               border: const OutlineInputBorder(),

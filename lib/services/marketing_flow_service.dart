@@ -593,10 +593,7 @@ class MarketingFlowService {
           rethrow;
         }
       }
-      if (m == null) {
-        // عارض قدّم عرضاً: قد تمنع RLS القراءة المباشرة بعد اختفاء الطلب من الرئيسية.
-        m = await _marketPropertyRequestViaMyOffer(clean);
-      }
+      m ??= await _marketPropertyRequestViaMyOffer(clean);
       if (m == null) return null;
       final uid = (m['requester_id'] ?? '').toString().trim();
       if (uid.isNotEmpty) {

@@ -243,7 +243,7 @@ class PublisherIdentityOptionsCard extends StatelessWidget {
                           if (s.isEmpty) return;
                           onPhoneSourceChanged!(s.first);
                         },
-                  style: ButtonStyle(
+                  style: const ButtonStyle(
                     visualDensity: VisualDensity.compact,
                   ),
                 ),

@@ -166,8 +166,8 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
         _verifying = false;
         _verified = true;
         _verifyMessage = _isAr
-            ? 'تم التحقق من رخصة فال (${_profileFal!}) وترخيص الإعلان (${digits}) لدى الهيئة العامة للعقار.'
-            : 'FAL (${_profileFal!}) and ad license (${digits}) verified with REGA.';
+            ? 'تم التحقق من رخصة فال (${_profileFal!}) وترخيص الإعلان ($digits) لدى الهيئة العامة للعقار.'
+            : 'FAL (${_profileFal!}) and ad license ($digits) verified with REGA.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -408,10 +408,10 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
                       Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: cs.errorContainer.withOpacity(0.35),
+                          color: cs.errorContainer.withValues(alpha: 0.35),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: cs.error.withOpacity(0.35),
+                            color: cs.error.withValues(alpha: 0.35),
                           ),
                         ),
                         child: Text(
@@ -487,7 +487,7 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
             Positioned.fill(
               child: AbsorbPointer(
                 child: Material(
-                  color: Colors.black.withOpacity(_verifying ? 0.55 : 0.25),
+                  color: Colors.black.withValues(alpha: _verifying ? 0.55 : 0.25),
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -534,8 +534,8 @@ class _AnswerTile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Material(
       color: selected
-          ? const Color(0xFF0F766E).withOpacity(0.12)
-          : cs.surfaceContainerHighest.withOpacity(0.5),
+          ? const Color(0xFF0F766E).withValues(alpha: 0.12)
+          : cs.surfaceContainerHighest.withValues(alpha: 0.5),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -547,7 +547,7 @@ class _AnswerTile extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? const Color(0xFF0F766E)
-                  : cs.outlineVariant.withOpacity(0.6),
+                  : cs.outlineVariant.withValues(alpha: 0.6),
               width: selected ? 2 : 1,
             ),
           ),

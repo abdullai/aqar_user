@@ -138,7 +138,7 @@ class _ListingContractChatPageState extends State<ListingContractChatPage> {
   final _ctrl = TextEditingController();
   final _scroll = ScrollController();
   bool _loading = true;
-  bool _sending = false;
+  final bool _sending = false;
   String? _err;
   String _snippet = '';
   Map<String, dynamic>? _contract;

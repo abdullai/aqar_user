@@ -187,7 +187,7 @@ class _VerifyScreenState extends State<VerifyScreen>
     return a.isAfter(b) ? a : b;
   }
 
-  String _keyExpiresAt() => 'verify_expiresAt_${_notifUsername}';
+  String _keyExpiresAt() => 'verify_expiresAt_$_notifUsername';
 
   bool get _isAr {
     try {
@@ -1257,8 +1257,8 @@ class _VerifyScreenState extends State<VerifyScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
     final border = isDark
-        ? Colors.white.withOpacity(0.10)
-        : Colors.black.withOpacity(0.08);
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.black.withValues(alpha: 0.08);
     final titleColor = isDark ? Colors.white : const Color(0xFF0B1220);
     final bodyColor =
         isDark ? const Color(0xFFD1D5DB) : const Color(0xFF475569);
@@ -1399,7 +1399,7 @@ class _VerifyScreenState extends State<VerifyScreen>
                                         blurRadius: 18,
                                         offset: const Offset(0, 10),
                                         color: Colors.black
-                                            .withOpacity(isDark ? 0.35 : 0.12),
+                                            .withValues(alpha: isDark ? 0.35 : 0.12),
                                       ),
                                     ],
                                   ),
@@ -1428,7 +1428,7 @@ class _VerifyScreenState extends State<VerifyScreen>
                                                 color: (isDark
                                                         ? Colors.white
                                                         : Colors.black)
-                                                    .withOpacity(0.06),
+                                                    .withValues(alpha: 0.06),
                                                 borderRadius:
                                                     BorderRadius.circular(12),
                                               ),
@@ -2178,10 +2178,10 @@ class _VerifyScreenState extends State<VerifyScreen>
         final fieldH = metrics.fieldHeight;
 
         final inactiveBorder = isDark
-            ? Colors.white.withOpacity(0.18)
-            : Colors.black.withOpacity(0.10);
+            ? Colors.white.withValues(alpha: 0.18)
+            : Colors.black.withValues(alpha: 0.10);
         final primary = cs.primary;
-        final activeBorder = primary.withOpacity(0.65);
+        final activeBorder = primary.withValues(alpha: 0.65);
         final selectedBorder = primary;
         final errorBorder = cs.error;
 
@@ -2190,8 +2190,8 @@ class _VerifyScreenState extends State<VerifyScreen>
         final useSelected = _error ? errorBorder : selectedBorder;
 
         final fill = isDark
-            ? Colors.white.withOpacity(0.06)
-            : Colors.black.withOpacity(0.04);
+            ? Colors.white.withValues(alpha: 0.06)
+            : Colors.black.withValues(alpha: 0.04);
 
         return AutofillGroup(
           child: PinCodeTextField(
@@ -2280,7 +2280,7 @@ class _VerifyScreenState extends State<VerifyScreen>
 
     return Positioned.fill(
       child: Container(
-        color: bg.withOpacity(0.96),
+        color: bg.withValues(alpha: 0.96),
         alignment: Alignment.center,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 420),
@@ -2778,7 +2778,7 @@ class _VerifyScreenState extends State<VerifyScreen>
                                                       ? null
                                                       : _submit,
                                               child: _submitting
-                                                  ? SizedBox(
+                                                  ? const SizedBox(
                                                       width: 22,
                                                       height: 22,
                                                       child: AppLogoLoading(

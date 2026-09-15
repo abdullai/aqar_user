@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/network/supabase_public_read_guard.dart';
@@ -28,7 +27,7 @@ abstract final class PropertiesHomeFeedService {
     bool allowBypassCircuit = false,
   }) async {
     if (!allowBypassCircuit && isCircuitOpen) {
-      throw PostgrestException(
+      throw const PostgrestException(
         message: 'Home properties fetch paused after auth error (circuit open)',
         code: '401',
       );

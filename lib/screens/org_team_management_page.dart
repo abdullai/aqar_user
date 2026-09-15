@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
@@ -26,7 +26,7 @@ class OrgTeamManagementPage extends StatefulWidget {
 class _OrgTeamManagementPageState extends State<OrgTeamManagementPage> {
   final _svc = OrgTeamService(Supabase.instance.client);
   bool _loading = true;
-  bool _busy = false;
+  final bool _busy = false;
   String? _errorKey;
   Map<String, dynamic>? _org;
   List<Map<String, dynamic>> _members = [];

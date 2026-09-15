@@ -478,7 +478,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
 
     final bool shouldUseMarketerTabs = _usesMarketerMyPageHub;
     // دائماً جهّز تبويبات المالك: المسوّق قد يملك طلبات طرحها للسوق.
-    final bool shouldUseOwnerTabs = true;
+    const bool shouldUseOwnerTabs = true;
 
     if (shouldUseOwnerTabs) {
       // ويب: لا تتلف كنترولر المسوّق — IndexedStack قد يُبقي شجرة قديمة لحظة.

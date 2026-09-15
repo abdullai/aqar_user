@@ -28,7 +28,7 @@ abstract final class SupportWhatsappLauncher {
 
     if (!context.mounted) return;
 
-    final lines = SupportWhatsappConfig.lines;
+    const lines = SupportWhatsappConfig.lines;
     final proceed = await showAppDialog<bool>(
       context: context,
       barrierDismissible: false,

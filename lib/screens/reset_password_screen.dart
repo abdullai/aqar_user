@@ -167,8 +167,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   // Internet guard
   // =========================
 
-  
-
   // =========================
   // Storage + security log
   // =========================
@@ -210,17 +208,15 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     try {
       final sb = Supabase.instance.client;
       if (sb.auth.currentSession == null) return;
-      await sb
-          .rpc(
-            'log_security_event',
-            params: {
-              'p_username': u,
-              'p_action': action,
-              'p_success': success, // ✅ bool
-              'p_details': (details ?? '').toString(), // ✅ لا null
-            },
-          )
-          .timeout(const Duration(seconds: 2));
+      await sb.rpc(
+        'log_security_event',
+        params: {
+          'p_username': u,
+          'p_action': action,
+          'p_success': success, // ✅ bool
+          'p_details': (details ?? '').toString(), // ✅ لا null
+        },
+      ).timeout(const Duration(seconds: 2));
     } catch (_) {
       // تجاهل حتى لا تتعطل الشاشة
     }
@@ -338,7 +334,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     if (a != b) {
       setState(() {
         _busy = false;
-        _err = _isAr ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.';
+        _err =
+            _isAr ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.';
       });
       return;
     }
@@ -409,7 +406,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       );
       setState(() {
         _busy = false;
-        _err = _isAr ? 'حدث خطأ غير متوقع: $e' : 'Unexpected error occurred: $e';
+        _err =
+            _isAr ? 'حدث خطأ غير متوقع: $e' : 'Unexpected error occurred: $e';
       });
     }
   }
@@ -420,7 +418,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
 
   double _hintFontSize(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
-    final base = 14.0;
+    const base = 14.0;
     final f = w / 390.0;
     return (base * f).clamp(11.0, 14.0);
   }
@@ -511,8 +509,8 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   }) {
     final t = AppLocalizations.of(context)!;
     final cardColor = _isLight
-        ? Colors.white.withOpacity(0.98)
-        : const Color(0xFF171A22).withOpacity(0.98);
+        ? Colors.white.withValues(alpha: 0.98)
+        : const Color(0xFF171A22).withValues(alpha: 0.98);
 
     final content = Column(
       mainAxisSize: MainAxisSize.min,
@@ -524,15 +522,15 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           height: 120,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            color: _bankColor.withOpacity(0.1),
+            color: _bankColor.withValues(alpha: 0.1),
             border: Border.all(
-              color: _bankColor.withOpacity(0.3),
+              color: _bankColor.withValues(alpha: 0.3),
               width: 1.5,
             ),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(18),
-            child: BrandingLogoImage(
+            child: const BrandingLogoImage(
               fit: BoxFit.contain,
               filterQuality: FilterQuality.high,
               errorIcon: Icons.lock_reset_rounded,
@@ -637,7 +635,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       key: const ValueKey('busy'),
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 22,
                           height: 22,
                           child: AppLogoLoading(compact: true, size: 20),
@@ -688,7 +686,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     },
               child: Text(
                 _isAr ? 'العودة لتسجيل الدخول' : 'Back to sign in',
-                style: TextStyle(
+                style: const TextStyle(
                   fontWeight: FontWeight.w900,
                   color: _bankColor,
                   fontSize: 14,
@@ -739,7 +737,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: Card(
         elevation: 8,
-        shadowColor: Colors.black.withOpacity(0.12),
+        shadowColor: Colors.black.withValues(alpha: 0.12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         color: cardColor,
         child: child,
@@ -764,7 +762,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: _bankColor.withOpacity(0.1),
+              color: _bankColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -851,7 +849,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
       focusNode: _usernameFocus,
       keyboardType: TextInputType.number,
       inputFormatters: [
-        ArabicDigitsToLatinFormatter(),
+        const ArabicDigitsToLatinFormatter(),
         FilteringTextInputFormatter.digitsOnly,
         LengthLimitingTextInputFormatter(10),
       ],

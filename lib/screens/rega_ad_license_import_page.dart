@@ -612,7 +612,7 @@ class _RegaAdLicenseImportPageState extends State<RegaAdLicenseImportPage> {
                   WebViewWidget(controller: _controller),
                   if (_initialLoading || _extracting)
                     ColoredBox(
-                      color: Colors.white.withOpacity(0.94),
+                      color: Colors.white.withValues(alpha: 0.94),
                       child: Center(
                         child: Padding(
                           padding: const EdgeInsets.all(24),

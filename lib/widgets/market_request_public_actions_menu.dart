@@ -156,7 +156,7 @@ class MarketRequestPublicActionsMenuButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
           ),
-          child: Icon(Icons.more_vert, color: Colors.white, size: iconSz),
+          child: const Icon(Icons.more_vert, color: Colors.white, size: iconSz),
         ),
       ),
     );

@@ -136,7 +136,7 @@ class PlanDetailsScreen extends StatelessWidget {
               SubscriptionUiHelpers.section(
                 context: context,
                 title: _isAr
-                    ? 'الأسعار (${periodLabel})'
+                    ? 'الأسعار ($periodLabel)'
                     : 'Pricing ($periodLabel)',
                 children: [
                   if (isOneTime) ...[

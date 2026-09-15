@@ -1,4 +1,4 @@
-﻿// ignore_for_file: unused_element, unused_element_parameter
+// ignore_for_file: unused_element, unused_element_parameter
 
 import 'dart:async' show Timer, unawaited;
 import 'dart:convert';
@@ -1419,7 +1419,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                     await _loadBuyerDealAccess();
                   },
             icon: _loadingBuyerDealAccess
-                ? SizedBox(
+                ? const SizedBox(
                     width: 22,
                     height: 22,
                     child: AppLogoLoading(compact: true, size: 20),
@@ -2282,7 +2282,7 @@ $licLine
                     children: [
                       if (!buyerOnly)
                         DropdownButtonFormField<String>(
-                          value: kind,
+                          initialValue: kind,
                           decoration: InputDecoration(
                             labelText: widget.isAr ? 'نوع الحدث' : 'Event kind',
                           ),
@@ -2300,7 +2300,7 @@ $licLine
                         ),
                       if (!buyerOnly) const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: provider,
+                        initialValue: provider,
                         decoration: InputDecoration(
                           labelText: widget.isAr ? 'البوابة' : 'Provider',
                           helperText: widget.isAr
@@ -2314,11 +2314,11 @@ $licLine
                                 ? 'يدوي / تحويل'
                                 : 'Manual / transfer'),
                           ),
-                          DropdownMenuItem(
+                          const DropdownMenuItem(
                             value: 'stripe',
                             child: Text('Stripe'),
                           ),
-                          DropdownMenuItem(
+                          const DropdownMenuItem(
                             value: 'moyasar',
                             child: Text('Moyasar'),
                           ),
@@ -2729,7 +2729,7 @@ $licLine
             FilledButton.icon(
               onPressed: _placingBid ? null : _submitPropertyBid,
               icon: _placingBid
-                  ? SizedBox(
+                  ? const SizedBox(
                       width: 20,
                       height: 20,
                       child: AppLogoLoading(
@@ -3125,9 +3125,9 @@ $licLine
         children: [
           Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.manage_accounts_outlined,
-                color: const Color(0xFF0F766E),
+                color: Color(0xFF0F766E),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -3145,10 +3145,10 @@ $licLine
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: cs.primaryContainer.withOpacity(0.45),
+                color: cs.primaryContainer.withValues(alpha: 0.45),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: cs.outlineVariant.withOpacity(0.35),
+                  color: cs.outlineVariant.withValues(alpha: 0.35),
                 ),
               ),
               child: Column(
@@ -3227,7 +3227,7 @@ $licLine
                   onPressed:
                       busy || !canOwnerEditBody ? null : _handleEditProperty,
                   icon: busy
-                      ? SizedBox(
+                      ? const SizedBox(
                           width: 22,
                           height: 22,
                           child: AppLogoLoading(compact: true, size: 20),
@@ -3256,7 +3256,7 @@ $licLine
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: cs.error,
-                    side: BorderSide(color: cs.error.withOpacity(0.45)),
+                    side: BorderSide(color: cs.error.withValues(alpha: 0.45)),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -3339,7 +3339,7 @@ $licLine
           FilledButton.icon(
             onPressed: busy ? null : _handleMarketerRegaAlignEdit,
             icon: busy
-                ? SizedBox(
+                ? const SizedBox(
                     width: 22,
                     height: 22,
                     child: AppLogoLoading(compact: true, size: 20),
@@ -3813,7 +3813,7 @@ $licLine
                     ),
                   ),
                 ),
-                Icon(
+                const Icon(
                   Icons.location_pin,
                   size: 48,
                   color: AqarBrandColors.primary,
@@ -4044,9 +4044,9 @@ $licLine
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: cs.secondaryContainer.withOpacity(0.72),
+          color: cs.secondaryContainer.withValues(alpha: 0.72),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+          border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
         ),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -4198,7 +4198,7 @@ $licLine
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(12),
     );
-    final pad = const EdgeInsets.symmetric(horizontal: 12, vertical: 12);
+    const pad = EdgeInsets.symmetric(horizontal: 12, vertical: 12);
     const min = Size(0, 48);
     final child = Row(
       mainAxisAlignment: MainAxisAlignment.center,
@@ -4794,7 +4794,7 @@ $licLine
                                   onPressed:
                                       _openingVideo ? null : _openVideoSheet,
                                   icon: _openingVideo
-                                      ? SizedBox(
+                                      ? const SizedBox(
                                           width: 22,
                                           height: 22,
                                           child: AppLogoLoading(
@@ -5799,7 +5799,7 @@ $licLine
                                       foregroundColor: Colors.white,
                                     ),
                                     icon: _openingChat
-                                        ? SizedBox(
+                                        ? const SizedBox(
                                             width: 22,
                                             height: 22,
                                             child: AppLogoLoading(
@@ -5877,7 +5877,7 @@ $licLine
                             FilledButton.icon(
                               onPressed: _sharing ? null : _openSystemShare,
                               icon: _sharing
-                                  ? SizedBox(
+                                  ? const SizedBox(
                                       width: 22,
                                       height: 22,
                                       child: AppLogoLoading(
@@ -6044,7 +6044,7 @@ class _Card extends StatelessWidget {
     final w = MediaQuery.sizeOf(context).width;
     final wideWeb = kIsWeb && w >= 1040;
     final compact = w < 720;
-    final accent = const Color(0xFF0F766E);
+    const accent = Color(0xFF0F766E);
     return Container(
       padding: EdgeInsets.all(compact ? 12 : (wideWeb ? 16 : 14)),
       decoration: BoxDecoration(
@@ -6193,9 +6193,9 @@ class _Chip extends StatelessWidget {
         vertical: 8,
       ),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withOpacity(0.45),
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.5)),
+        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.5)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -6240,9 +6240,9 @@ class _Tag extends StatelessWidget {
         vertical: 7,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: color.withOpacity(0.30)),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
       ),
       child: Text(
         text,
@@ -6273,7 +6273,7 @@ class _Pill extends StatelessWidget {
         vertical: 6,
       ),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.55),
+        color: Colors.black.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
@@ -6420,9 +6420,9 @@ class _MonoBox extends StatelessWidget {
           width: double.infinity,
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withOpacity(0.35),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: cs.outlineVariant.withOpacity(0.6)),
+            border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.6)),
           ),
           child: Text(
             value,

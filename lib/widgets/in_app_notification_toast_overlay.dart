@@ -139,10 +139,10 @@ class _InAppToastCard extends StatelessWidget {
               BoxShadow(
                 blurRadius: 18,
                 offset: const Offset(0, 6),
-                color: Colors.black.withOpacity(0.14),
+                color: Colors.black.withValues(alpha: 0.14),
               ),
             ],
-            border: Border.all(color: accent.withOpacity(0.35)),
+            border: Border.all(color: accent.withValues(alpha: 0.35)),
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(16),
@@ -156,7 +156,7 @@ class _InAppToastCard extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: accent.withOpacity(0.12),
+                      color: accent.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(icon, color: accent, size: 26),

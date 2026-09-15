@@ -1,4 +1,4 @@
-﻿// lib/screens/change_password_screen.dart
+// lib/screens/change_password_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -285,7 +285,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
                               ),
                             ),
                             child: _busy
-                                ? SizedBox(
+                                ? const SizedBox(
                                     width: 22,
                                     height: 22,
                                     child: AppLogoLoading(

@@ -65,7 +65,7 @@ class _GovernmentInAppWebViewPageState extends State<GovernmentInAppWebViewPage>
           WebViewWidget(controller: _controller),
           if (_loading)
             ColoredBox(
-              color: Colors.white.withOpacity(0.92),
+              color: Colors.white.withValues(alpha: 0.92),
               child: Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),

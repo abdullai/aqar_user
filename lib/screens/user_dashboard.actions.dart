@@ -11,19 +11,32 @@ extension _UserDashboardStateActions on _UserDashboardState {
   /// ويب وجوال: نفس [Navigator] الداخلي — لا rootNavigator (كان يخفي التبويبات).
   Future<T?> _pushBody<T extends Object?>(Route<T> route) async {
     return _keepCurrentTab(() async {
-    if (mounted && !_bottomNavSlideVisible) {
-      _ss(() => _bottomNavSlideVisible = true);
-    }
-    final nestedTitle = _nestedTitleForRouteSettings(route.settings);
-    _nestedTitleStack.add(nestedTitle);
-    if (mounted) {
-      _ss(() => _nestedShellTitle = nestedTitle);
-    }
-    final nav = _dashboardBodyNavKey.currentState;
-    if (nav == null) {
-      // احتياط نادر قبل جاهزية المفتاح.
+      if (mounted && !_bottomNavSlideVisible) {
+        _ss(() => _bottomNavSlideVisible = true);
+      }
+      final nestedTitle = _nestedTitleForRouteSettings(route.settings);
+      _nestedTitleStack.add(nestedTitle);
+      if (mounted) {
+        _ss(() => _nestedShellTitle = nestedTitle);
+      }
+      final nav = _dashboardBodyNavKey.currentState;
+      if (nav == null) {
+        // احتياط نادر قبل جاهزية المفتاح.
+        try {
+          return await Navigator.of(context).push<T>(route);
+        } finally {
+          if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
+          if (mounted) {
+            _ss(() {
+              _nestedShellTitle =
+                  _nestedTitleStack.isEmpty ? null : _nestedTitleStack.last;
+            });
+            unawaited(_maybeConsumeDashboardTourReplayFromPrefs());
+          }
+        }
+      }
       try {
-        return await Navigator.of(context).push<T>(route);
+        return await nav.push<T>(route);
       } finally {
         if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
         if (mounted) {
@@ -34,19 +47,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
           unawaited(_maybeConsumeDashboardTourReplayFromPrefs());
         }
       }
-    }
-    try {
-      return await nav.push<T>(route);
-    } finally {
-      if (_nestedTitleStack.isNotEmpty) _nestedTitleStack.removeLast();
-      if (mounted) {
-        _ss(() {
-          _nestedShellTitle =
-              _nestedTitleStack.isEmpty ? null : _nestedTitleStack.last;
-        });
-        unawaited(_maybeConsumeDashboardTourReplayFromPrefs());
-      }
-    }
     });
   }
 
@@ -118,7 +118,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
     if (args is Map) {
       final l = args['lang'];
       if (l is String && l.isNotEmpty && l != widget.lang) {
-        // TODO: تحديث اللغة
+        // The dashboard language is owned by the app-level language session;
+        // route arguments are intentionally ignored when they disagree.
       }
     }
   }
@@ -263,31 +264,31 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
     if (!mounted) return;
     await showMarketRequestHomeSheet(
-        context: context,
-        row: row,
-        isAr: widget.isAr,
-        sb: _sb,
-        currentUserId: _uid,
-        autoOpenSubmitOffer: autoOpenSubmitOffer,
-        onDidChange: () {
-          unawaited(Future.wait([
-            _loadMarketHomeRequests(force: true),
-            _loadMyMarketRequestOfferTracking(),
-          ]));
-        },
-        onGuestRequiresAuth: _isGuest ? _showLoginDialog : null,
-        onGuestPayOfferUnlock:
-            _isGuest ? () => _guestPayUnlockFlow('offer', targetTab: 2) : null,
-        onSubscriptionRequiredForOffer: _isGuest
-            ? null
-            : () => _openSubscriptionsHubForMarketOffer(row.id),
-        accountType: _accountType,
-        organizationId: oid,
-      );
+      context: context,
+      row: row,
+      isAr: widget.isAr,
+      sb: _sb,
+      currentUserId: _uid,
+      autoOpenSubmitOffer: autoOpenSubmitOffer,
+      onDidChange: () {
+        unawaited(Future.wait([
+          _loadMarketHomeRequests(force: true),
+          _loadMyMarketRequestOfferTracking(),
+        ]));
+      },
+      onGuestRequiresAuth: _isGuest ? _showLoginDialog : null,
+      onGuestPayOfferUnlock:
+          _isGuest ? () => _guestPayUnlockFlow('offer', targetTab: 2) : null,
+      onSubscriptionRequiredForOffer:
+          _isGuest ? null : () => _openSubscriptionsHubForMarketOffer(row.id),
+      accountType: _accountType,
+      organizationId: oid,
+    );
   }
 
   /// Paywall → اشتراكات ومدفوعات. يُرجع true إذا عاد المستخدم بصلاحية تقديم عرض.
-  Future<bool> _openSubscriptionsHubForMarketOffer(String marketRequestId) async {
+  Future<bool> _openSubscriptionsHubForMarketOffer(
+      String marketRequestId) async {
     final isMarketing = _isMarketingAccountType;
     await _pushSubscriptionsHubForPaidActionResume(
       MarketingSubscriptionResumeIntent(
@@ -402,7 +403,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
                         ? (ar ? 'مفسوخ / ملغى' : 'Cancelled / terminated')
                         : idx == 5
                             ? (ar ? 'العقارات المحجوزة' : 'Reserved properties')
-                                : (ar ? 'صفقات مكتملة' : 'Completed deals');
+                            : (ar ? 'صفقات مكتملة' : 'Completed deals');
     final props = idx == 1
         ? <Property>[]
         : _filterOwnerHubTab(
@@ -529,9 +530,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
       showRequesterName: false,
       requesterPublicName: null,
       status: (hit['_request_status'] ?? '').toString(),
-      selectedOfferId: (hit['_selected_offer_id'] ?? '').toString().trim().isEmpty
-          ? null
-          : (hit['_selected_offer_id'] ?? '').toString().trim(),
+      selectedOfferId:
+          (hit['_selected_offer_id'] ?? '').toString().trim().isEmpty
+              ? null
+              : (hit['_selected_offer_id'] ?? '').toString().trim(),
     );
   }
 
@@ -1469,8 +1471,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       final title = r.title.trim().isNotEmpty
           ? r.title.trim()
           : (widget.isAr ? 'طلب عقاري' : 'Property request');
-      final img =
-          PropertyListingDisplay.marketRequestSharePreviewUrl(r, _sb);
+      final img = PropertyListingDisplay.marketRequestSharePreviewUrl(r, _sb);
       await shareListingRich(
         text: '$title\n${uri.toString()}',
         imageHttpUrl: img,
@@ -1618,7 +1619,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
         if (choice == GuestAuthRequiredResult.login) {
           _showLoginDialog();
         } else if (choice == GuestAuthRequiredResult.register) {
-          await Navigator.of(context, rootNavigator: true).pushNamed('/register');
+          await Navigator.of(context, rootNavigator: true)
+              .pushNamed('/register');
         }
       } else {
         _showLoginDialog();
@@ -1699,9 +1701,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       if (usageRes['ok'] != true) {
         final err = '${usageRes['error'] ?? ''}';
         _showNotification(
-          widget.isAr
-              ? individualOfferShortReasonAr(err)
-              : 'Quota: $err',
+          widget.isAr ? individualOfferShortReasonAr(err) : 'Quota: $err',
           '',
           isError: true,
         );
@@ -1753,7 +1753,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  Future<({String message, double? price})?> _showMarketRequestCompleteDealDialog(
+  Future<({String message, double? price})?>
+      _showMarketRequestCompleteDealDialog(
     MarketPropertyRequestRow row,
   ) async {
     final msgCtrl = TextEditingController();
@@ -1884,7 +1885,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
                           : 'Latest bid (SAR)',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                     ),
                     const SizedBox(height: 6),
@@ -1913,7 +1915,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
                                 currentPrice,
                                 isAr: widget.isAr,
                               )
-                            : (widget.isAr ? 'لا توجد مزايدة بعد' : 'No bid yet'),
+                            : (widget.isAr
+                                ? 'لا توجد مزايدة بعد'
+                                : 'No bid yet'),
                         style: const TextStyle(
                           fontWeight: FontWeight.w900,
                           fontSize: 15,
@@ -1954,9 +1958,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
       );
 
       if (ok != true) return null;
-      final parsedOfferPrice = p.isAuction
-          ? NumberHelper.toDouble(priceCtrl.text.trim())
-          : null;
+      final parsedOfferPrice =
+          p.isAuction ? NumberHelper.toDouble(priceCtrl.text.trim()) : null;
       return (
         message: msgCtrl.text.trim(),
         offerPrice: (parsedOfferPrice == null || parsedOfferPrice <= 0)
@@ -2175,8 +2178,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final hr = await UserListingPreferencesService.hiddenMarketRequestIds();
     final hc =
         await UserListingPreferencesService.hiddenCompletedDealPropertyIds();
-    final ho =
-        await UserListingPreferencesService.hiddenCartMarketOfferIds();
+    final ho = await UserListingPreferencesService.hiddenCartMarketOfferIds();
     if (!mounted) return;
     _ssHomeFeed(() {
       _hiddenPropertyIds = hp;
@@ -2254,7 +2256,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) => AlertDialog(
-        title: Text(ar ? 'حذف العرض وإرجاع الطلب للرئيسية' : 'Delete & restore'),
+        title:
+            Text(ar ? 'حذف العرض وإرجاع الطلب للرئيسية' : 'Delete & restore'),
         content: Text(
           ar
               ? 'سيتم سحب عرضك من السوق العقاري، وسيعود الطلب للظهور في الرئيسية مع ملاحظة «سبق وأن قدّمت عرضاً». لا يمكن السحب لو اختارك صاحب الطلب لإتمام الصفقة، وبعد سحبتين على نفس الطلب لن يظهر لك مجدداً.'
@@ -2281,9 +2284,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       final code = (res['error'] ?? '').toString();
       _showNotification(
         ar ? 'تعذّر سحب العرض' : 'Could not withdraw',
-        ar
-            ? individualOfferShortReasonAr(code)
-            : 'Server error: $code',
+        ar ? individualOfferShortReasonAr(code) : 'Server error: $code',
       );
       return;
     }
@@ -2314,12 +2315,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
       }
       // أيضاً أزل بناءً على request_id لأي عرض على نفس الطلب (للأمان).
       _myPendingMarketOffersForCart = _myPendingMarketOffersForCart
-          .where((m) =>
-              (m['market_request_id'] ?? '').toString().trim() != rid)
+          .where((m) => (m['market_request_id'] ?? '').toString().trim() != rid)
           .toList();
       _myArchivedMarketOffersForCart = _myArchivedMarketOffersForCart
-          .where((m) =>
-              (m['market_request_id'] ?? '').toString().trim() != rid)
+          .where((m) => (m['market_request_id'] ?? '').toString().trim() != rid)
           .toList();
       _marketRequestIdsWithMyPendingOffer = {
         ..._marketRequestIdsWithMyPendingOffer,
@@ -2546,7 +2545,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
     return null;
   }
 
-  AppSubscriptionGate get _subscriptionGate => context.read<AppSubscriptionGate>();
+  AppSubscriptionGate get _subscriptionGate =>
+      context.read<AppSubscriptionGate>();
 
   Future<void> _refreshSubscriptionGate({bool force = true}) async {
     await _subscriptionGate.refresh(force: force);
@@ -2576,7 +2576,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
     // إتمام الصفقة للمسوّق: اعرض باقات «إضافة صفقات» فقط (لا الباقات الكاملة).
     final marketOfferOnly =
         action == SubscriptionGateAction.completeMarketDeal &&
-        _isMarketingAccountType;
+            _isMarketingAccountType;
     await _pushSubscriptionsHubForPaidActionResume(
       intent,
       marketOfferPlansOnly: marketOfferOnly,
@@ -2713,7 +2713,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
         context: context,
         builder: (ctx) => AlertDialog(
           title: Text(
-            isAr ? 'اشتراكك على وشك الانتهاء' : 'Your subscription is ending soon',
+            isAr
+                ? 'اشتراكك على وشك الانتهاء'
+                : 'Your subscription is ending soon',
           ),
           content: Text(
             isAr

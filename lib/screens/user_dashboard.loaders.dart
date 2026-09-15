@@ -981,7 +981,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     required bool filterSuppressed,
     bool allowBypassCircuit = false,
   }) {
-    final limit = kIsWeb
+    const limit = kIsWeb
         ? _UserDashboardState.homeFeedFetchLimitWeb
         : _UserDashboardState.homeFeedFetchLimit;
     return PropertiesHomeFeedService.fetch(
@@ -1002,7 +1002,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     List<Map> rows,
     Map<String, Map<String, dynamic>> ownerProfiles,
   ) async {
-    final batch = kIsWeb ? 3 : 6;
+    const batch = kIsWeb ? 3 : 6;
     final list = <Property>[];
     for (var i = 0; i < rows.length; i++) {
       if (!mounted) break;
@@ -1135,11 +1135,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     if (!userInitiated && PropertiesHomeFeedService.isCircuitOpen) {
       WebBootstrapDiag.warn('home.fetch', 'skipped — circuit open');
       _ssHomeFeed(() {
-        if (_errorHome == null) {
-          _errorHome = _isArabic
+        _errorHome ??= _isArabic
               ? 'تعذّر جلب الإعلانات مؤقتاً بعد خطأ مصادقة. انتظر دقيقة أو اضغط «تحديث».'
               : 'Home listings are temporarily paused after an auth error. Wait a minute or tap Refresh.';
-        }
       });
       return;
     }
@@ -1547,7 +1545,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         'requester_id,show_requester_name,requester_public_name,'
         'cover_image_storage_path,default_cover_used,status';
 
-    bool _missingColumn(Object e, String col) {
+    bool missingColumn(Object e, String col) {
       final s = e.toString().toLowerCase();
       return s.contains(col.toLowerCase()) &&
           (s.contains('column') ||
@@ -1555,7 +1553,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               s.contains('could not find'));
     }
 
-    Future<List<Map<String, dynamic>>> _fetchMarketRows(
+    Future<List<Map<String, dynamic>>> fetchMarketRows(
         String selectCols) async {
       final d = await _net(() {
         return SupabasePublicReadGuard.run(_sb, () {
@@ -1586,31 +1584,31 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       try {
         // الويب: استعلام أخف أولاً (بدون details_json) لتقليل زمن الانتظار ومحاولات 400 المتتابعة.
         rowMaps = kIsWeb
-            ? await _fetchMarketRows(selectWithPriority)
-            : await _fetchMarketRows(selectWithPriorityDetails);
+            ? await fetchMarketRows(selectWithPriority)
+            : await fetchMarketRows(selectWithPriorityDetails);
       } catch (e) {
-        if (_missingColumn(e, 'request_public_code') ||
-            _missingColumn(e, 'edit_count') ||
-            _missingColumn(e, 'selected_offer_id')) {
-          rowMaps = await _fetchMarketRows(selectLegacy);
-        } else if (_missingColumn(e, 'details_json')) {
+        if (missingColumn(e, 'request_public_code') ||
+            missingColumn(e, 'edit_count') ||
+            missingColumn(e, 'selected_offer_id')) {
+          rowMaps = await fetchMarketRows(selectLegacy);
+        } else if (missingColumn(e, 'details_json')) {
           if (kDebugMode) {
             print('[DBG][MARKET_REQ_HOME] retry without details_json');
           }
           try {
-            rowMaps = await _fetchMarketRows(selectWithPriority);
+            rowMaps = await fetchMarketRows(selectWithPriority);
           } catch (e2) {
-            if (_missingColumn(e2, 'request_public_code') ||
-                _missingColumn(e2, 'edit_count') ||
-                _missingColumn(e2, 'selected_offer_id') ||
+            if (missingColumn(e2, 'request_public_code') ||
+                missingColumn(e2, 'edit_count') ||
+                missingColumn(e2, 'selected_offer_id') ||
                 _errorLooksLikeMissingRequestPriorityColumn(e2)) {
-              rowMaps = await _fetchMarketRows(selectLegacy);
+              rowMaps = await fetchMarketRows(selectLegacy);
             } else {
               rethrow;
             }
           }
         } else if (_errorLooksLikeMissingRequestPriorityColumn(e)) {
-          rowMaps = await _fetchMarketRows(selectLegacy);
+          rowMaps = await fetchMarketRows(selectLegacy);
         } else {
           rethrow;
         }
@@ -1808,11 +1806,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         return;
       }
 
-      final mineLimit = kIsWeb
+      const mineLimit = kIsWeb
           ? _UserDashboardState.minePropertiesFetchLimitWeb
           : _UserDashboardState.minePropertiesFetchLimit;
       final mineSelect = _UserDashboardState._propertiesSelect;
-      final mineSelectPlain =
+      const mineSelectPlain =
           SupabaseSchemaSelects.propertiesListingWithoutImageEmbed;
 
       Future<dynamic> fetchMineProps({

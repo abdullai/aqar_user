@@ -54,7 +54,7 @@ class NafathAuthService {
       if (data is Map) {
         return NafathSessionResult.fromJson(Map<String, dynamic>.from(data));
       }
-      return NafathSessionResult(
+      return const NafathSessionResult(
         mode: NafathSessionMode.error,
         messageAr: 'استجابة غير متوقعة من الخادم.',
         messageEn: 'Unexpected server response.',
@@ -96,7 +96,7 @@ class NafathAuthService {
       if (data is Map) {
         return NafathSessionResult.fromJson(Map<String, dynamic>.from(data));
       }
-      return NafathSessionResult(
+      return const NafathSessionResult(
         mode: NafathSessionMode.error,
         messageAr: 'استجابة غير متوقعة.',
         messageEn: 'Unexpected response.',

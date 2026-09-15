@@ -56,7 +56,7 @@ abstract final class SupabasePublicReadGuard {
     bool preserveLoggedInSession = true,
   }) async {
     if (isInAuthFailureCooldown) {
-      throw PostgrestException(
+      throw const PostgrestException(
         message: 'Public read paused after auth error (cooldown)',
         code: '401',
       );

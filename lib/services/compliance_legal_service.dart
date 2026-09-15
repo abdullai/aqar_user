@@ -14,7 +14,7 @@ class ComplianceLegalService {
     if (sb.auth.currentUser == null) return;
     final l = lang.trim().toLowerCase();
     final langCode = l == 'en' ? 'en' : 'ar';
-    final ua = kIsWeb ? 'flutter_web' : 'flutter_mobile';
+    const ua = kIsWeb ? 'flutter_web' : 'flutter_mobile';
     try {
       await sb.rpc(
         'record_legal_acceptances_after_terms_v1',

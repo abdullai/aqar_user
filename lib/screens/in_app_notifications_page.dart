@@ -1,9 +1,8 @@
-﻿// lib/screens/in_app_notifications_page.dart
+// lib/screens/in_app_notifications_page.dart
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';

@@ -36,7 +36,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           Icon(
             Icons.lock_outline,
             size: 84,
-            color: _brandPrimary.withOpacity(_op(180)),
+            color: _brandPrimary.withValues(alpha: _op(180)),
           ),
           const SizedBox(height: 18),
           Text(
@@ -144,7 +144,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           Icon(
             Icons.home_work_outlined,
             size: 72,
-            color: _brandPrimary.withOpacity(_op(180)),
+            color: _brandPrimary.withValues(alpha: _op(180)),
           ),
           const SizedBox(height: 16),
           Text(
@@ -193,11 +193,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         );
         final rowCount = (items.length + cross - 1) ~/ cross;
         return ListView.separated(
+          cacheExtent: 360,
           controller: scroll,
           primary: false,
           physics: _myAdsHubScrollPhysics,
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-          cacheExtent: 360,
           itemCount: rowCount,
           separatorBuilder: (_, __) => const SizedBox(height: spacing),
           itemBuilder: (context, row) {
@@ -770,7 +770,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           Icon(
             Icons.handshake_outlined,
             size: 72,
-            color: _brandPrimary.withOpacity(_op(160)),
+            color: _brandPrimary.withValues(alpha: _op(160)),
           ),
           const SizedBox(height: 16),
           Text(
@@ -1009,7 +1009,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           Icon(
             Icons.receipt_long_outlined,
             size: 72,
-            color: _brandPrimary.withOpacity(_op(160)),
+            color: _brandPrimary.withValues(alpha: _op(160)),
           ),
           const SizedBox(height: 16),
           Text(
@@ -1135,8 +1135,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       final bottomPad = _marketerHubScrollBottomPadding(context);
       return _myAdsHubScrollWrap(
         ListView(
-          physics: _myAdsHubScrollPhysics,
           cacheExtent: _myAdsHubListCacheExtent,
+          physics: _myAdsHubScrollPhysics,
           padding: EdgeInsets.fromLTRB(8, 4, 8, bottomPad),
           children: [
             Padding(
@@ -1207,8 +1207,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
     return _myAdsHubScrollWrap(
       ListView(
-        physics: _myAdsHubScrollPhysics,
         cacheExtent: _myAdsHubListCacheExtent,
+        physics: _myAdsHubScrollPhysics,
         padding: EdgeInsets.fromLTRB(8, 4, 8, bottomPad),
         children: children,
       ),
@@ -1635,7 +1635,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                   final oid = (o['id'] ?? '').toString().trim();
                   final busy = _ownerHubInlineOfferBusyId == oid;
                   return Material(
-                    color: cs.surfaceContainerHighest.withOpacity(0.35),
+                    color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(12),
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
@@ -1666,7 +1666,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                               return Padding(
                                 padding: const EdgeInsets.only(top: 6),
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                   children: [
                                     Text(
                                       ar ? 'رسالة العرض' : 'Offer message',
@@ -1913,8 +1914,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         : const <String>[];
     final urlsFromRow = _effectiveImageUrlsForOwnerRequestRow(merged);
     final urls = ListingMediaUrls.mergePathLists([urlsFromProp, urlsFromRow]);
-    final previewViews = (merged['preview_views'] as num?)?.toInt() ??
-        (linkedProperty != null ? linkedProperty.views : null);
+    final previewViews =
+        (merged['preview_views'] as num?)?.toInt() ?? (linkedProperty?.views);
     final mergedReq = _mergedJsonPayloadForRow(merged);
     final vidRow =
         (mergedReq['request_video_path'] ?? mergedReq['video_url'] ?? '')
@@ -2420,10 +2421,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                          color: statusColor.withOpacity(0.12),
+                          color: statusColor.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(999),
-                          border:
-                              Border.all(color: statusColor.withOpacity(0.35)),
+                          border: Border.all(
+                              color: statusColor.withValues(alpha: 0.35)),
                         ),
                         child: Text(
                           statusLabel,
@@ -2442,10 +2443,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: cs.tertiaryContainer.withOpacity(0.55),
+                            color: cs.tertiaryContainer.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(
-                                color: cs.tertiary.withOpacity(0.35)),
+                                color: cs.tertiary.withValues(alpha: 0.35)),
                           ),
                           child: Text(
                             widget.isAr
@@ -5791,10 +5792,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           isAr: widget.isAr,
         );
 
-    final requestTitle =
-        clean((r['request_title'] ?? '').toString().trim());
-    final previewTitle =
-        clean((r['preview_title'] ?? '').toString().trim());
+    final requestTitle = clean((r['request_title'] ?? '').toString().trim());
+    final previewTitle = clean((r['preview_title'] ?? '').toString().trim());
     final title = clean((r['title'] ?? '').toString().trim());
     final city = (r['request_city'] ?? r['preview_city'] ?? r['city'] ?? '')
         .toString()
@@ -6961,10 +6960,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           constraints: BoxConstraints(maxWidth: maxW),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withOpacity(0.40),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.40),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
-              color: cs.outlineVariant.withOpacity(0.35),
+              color: cs.outlineVariant.withValues(alpha: 0.35),
             ),
           ),
           child: Row(
@@ -7038,9 +7037,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (!useGrid) {
       return _myAdsHubScrollWrap(
         ListView.separated(
+          cacheExtent: _myAdsHubListCacheExtent,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           physics: _myAdsHubScrollPhysics,
-          cacheExtent: _myAdsHubListCacheExtent,
           itemCount: requestRows.length,
           separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (_, i) => _buildOwnerListingRequestCard(
@@ -8634,7 +8633,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                 begin: Alignment.bottomCenter,
                 end: Alignment.topCenter,
                 colors: [
-                  Colors.black.withOpacity(0.18),
+                  Colors.black.withValues(alpha: 0.18),
                   Colors.transparent,
                 ],
               ),
@@ -8659,7 +8658,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                   icon: Icon(
                     Icons.explore_outlined,
                     size: 18,
-                    color: Colors.white.withOpacity(0.95),
+                    color: Colors.white.withValues(alpha: 0.95),
                   ),
                   onPressed: onImageTrackingTap,
                 ),
@@ -8670,7 +8669,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               top: 6,
               end: 6,
               child: Material(
-                color: const Color(0xFFFFC107).withOpacity(0.92),
+                color: const Color(0xFFFFC107).withValues(alpha: 0.92),
                 shape: const CircleBorder(),
                 clipBehavior: Clip.antiAlias,
                 elevation: 1,
@@ -8716,7 +8715,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                     : reofferReason!.trim(),
                 waitDuration: const Duration(milliseconds: 220),
                 child: Material(
-                  color: const Color(0xFF2E7D32).withOpacity(0.92),
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.92),
                   borderRadius: BorderRadius.circular(999),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(999),
@@ -8768,7 +8767,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Row(
@@ -9162,11 +9161,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
           if (!useGrid) {
             return ListView.separated(
+              cacheExtent: _myAdsHubListCacheExtent,
               key: ValueKey<String>(
                   'owner_pub_list_${items.length}_${emptyText.hashCode}'),
               padding: EdgeInsets.fromLTRB(paddingH, 12, paddingH, 12),
               physics: _myAdsHubScrollPhysics,
-              cacheExtent: _myAdsHubListCacheExtent,
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (_, i) => _buildOwnerPublishedPropertyCard(items[i]),
@@ -9255,6 +9254,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     } else if (!useGrid) {
       child = ListView.separated(
+        cacheExtent: _myAdsHubListCacheExtent,
         primary: false,
         padding: EdgeInsets.fromLTRB(
           8,
@@ -9263,7 +9263,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           4 + _marketerHubScrollBottomPadding(context),
         ),
         physics: _myAdsHubScrollPhysics,
-        cacheExtent: _myAdsHubListCacheExtent,
         itemCount: rows.length,
         separatorBuilder: (_, __) => const SizedBox(height: 14),
         itemBuilder: (_, i) {
@@ -9488,7 +9487,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     return Material(
-      color: cs.surfaceContainerHighest.withOpacity(0.35),
+      color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -10247,13 +10246,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
     ButtonStyle compactStyle(ButtonStyle? base) {
       return (base ?? const ButtonStyle()).merge(
-        ButtonStyle(
+        const ButtonStyle(
           visualDensity: VisualDensity.compact,
-          padding: const WidgetStatePropertyAll(
+          padding: WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           ),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          minimumSize: const WidgetStatePropertyAll(Size(0, 42)),
+          minimumSize: WidgetStatePropertyAll(Size(0, 42)),
         ),
       );
     }
@@ -10572,12 +10571,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                                   previewImageUrls,
                                   type: type,
                                   views: previewViews,
-                                  videoStoragePath: (previewVideoUrl
-                                              .isNotEmpty &&
-                                          (previewImageUrls.isEmpty ||
-                                              coverPrefersVideo))
-                                      ? previewVideoUrl
-                                      : null,
+                                  videoStoragePath:
+                                      (previewVideoUrl.isNotEmpty &&
+                                              (previewImageUrls.isEmpty ||
+                                                  coverPrefersVideo))
+                                          ? previewVideoUrl
+                                          : null,
                                   coverPrefersVideo: coverPrefersVideo,
                                 ),
                               ),
@@ -10947,10 +10946,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: _brandPrimary.withOpacity(0.08),
+                  color: _brandPrimary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
-                    color: _brandPrimary.withOpacity(0.16),
+                    color: _brandPrimary.withValues(alpha: 0.16),
                   ),
                 ),
                 child: Text(
@@ -10971,10 +10970,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.08),
+                  color: statusColor.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
-                    color: statusColor.withOpacity(0.18),
+                    color: statusColor.withValues(alpha: 0.18),
                   ),
                 ),
                 child: Text(

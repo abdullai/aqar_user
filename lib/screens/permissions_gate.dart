@@ -205,7 +205,7 @@ class _PermissionsGateState extends State<PermissionsGate> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 8),
-                    BrandingLogoImage(
+                    const BrandingLogoImage(
                       width: 72,
                       height: 72,
                       fit: BoxFit.contain,
@@ -333,7 +333,7 @@ class _PermissionsGateState extends State<PermissionsGate> {
                           ),
                         ),
                         child: _loading
-                            ? SizedBox(
+                            ? const SizedBox(
                                 width: 24,
                                 height: 24,
                                 child: AppLogoLoading(compact: true, size: 22),

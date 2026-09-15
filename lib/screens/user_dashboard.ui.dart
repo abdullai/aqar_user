@@ -140,7 +140,7 @@ class _UserDashboardState extends State<UserDashboard>
   String? _lastWebHomePaintSig;
 
   /// يُستخدم سابقاً لتشخيص «كتالوج ملكك فقط» — أُزيل مسار الإظهار الاحتياطي.
-  int _webSelfOwnedPoolLogLen = -1;
+  final int _webSelfOwnedPoolLogLen = -1;
 
   /// تبويب «التعاقد» للمسوّق: 0 = تمت الموافقة، 1 = بانتظار التعاقد.
   int _marketerContractHubSegment = 0;
@@ -1783,13 +1783,13 @@ class _UserDashboardState extends State<UserDashboard>
                   ),
                   decoration: BoxDecoration(
                     color: selected
-                        ? AqarBrandColors.primary.withOpacity(0.12)
-                        : cs.surfaceContainerHighest.withOpacity(0.28),
+                        ? AqarBrandColors.primary.withValues(alpha: 0.12)
+                        : cs.surfaceContainerHighest.withValues(alpha: 0.28),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: selected
-                          ? AqarBrandColors.primary.withOpacity(0.45)
-                          : AqarBrandColors.frame(cs).withOpacity(0.85),
+                          ? AqarBrandColors.primary.withValues(alpha: 0.45)
+                          : AqarBrandColors.frame(cs).withValues(alpha: 0.85),
                     ),
                   ),
                   child: Row(
@@ -1812,7 +1812,8 @@ class _UserDashboardState extends State<UserDashboard>
                           fontWeight: FontWeight.w800,
                           fontFamily: 'Cairo',
                           fontSize: 12,
-                          color: selected ? AqarBrandColors.ink(cs) : cs.onSurface,
+                          color:
+                              selected ? AqarBrandColors.ink(cs) : cs.onSurface,
                         ),
                       ),
                     ],
@@ -1847,8 +1848,8 @@ class _UserDashboardState extends State<UserDashboard>
                                   width: 42,
                                   height: 5,
                                   decoration: BoxDecoration(
-                                    color:
-                                        AqarBrandColors.frame(cs).withOpacity(0.9),
+                                    color: AqarBrandColors.frame(cs)
+                                        .withValues(alpha: 0.9),
                                     borderRadius: BorderRadius.circular(999),
                                   ),
                                 ),
@@ -1864,7 +1865,7 @@ class _UserDashboardState extends State<UserDashboard>
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
                                         color: AqarBrandColors.gold
-                                            .withOpacity(0.35),
+                                            .withValues(alpha: 0.35),
                                       ),
                                     ),
                                     child: const Icon(
@@ -2003,25 +2004,26 @@ class _UserDashboardState extends State<UserDashboard>
                                       : 'Search by ID, price, area, name, marketer, office...',
                                   filled: true,
                                   fillColor: cs.surfaceContainerHighest
-                                      .withOpacity(0.22),
+                                      .withValues(alpha: 0.22),
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(18),
                                     borderSide: BorderSide(
-                                      color:
-                                          cs.outlineVariant.withOpacity(0.35),
+                                      color: cs.outlineVariant
+                                          .withValues(alpha: 0.35),
                                     ),
                                   ),
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(18),
                                     borderSide: BorderSide(
-                                      color:
-                                          cs.outlineVariant.withOpacity(0.35),
+                                      color: cs.outlineVariant
+                                          .withValues(alpha: 0.35),
                                     ),
                                   ),
                                   focusedBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(18),
                                     borderSide: BorderSide(
-                                      color: _brandPrimary.withOpacity(0.70),
+                                      color:
+                                          _brandPrimary.withValues(alpha: 0.70),
                                       width: 1.4,
                                     ),
                                   ),
@@ -2416,10 +2418,10 @@ class _UserDashboardState extends State<UserDashboard>
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
-          color: cs.surfaceContainerHighest.withOpacity(0.35),
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: cs.outlineVariant.withOpacity(0.35),
+            color: cs.outlineVariant.withValues(alpha: 0.35),
           ),
         ),
         child: Row(
@@ -2600,7 +2602,7 @@ class _UserDashboardState extends State<UserDashboard>
   Future<void> _webYieldUi() async {
     // جوال + ويب: فسح خيط الواجهة بين مراحل التحميل بعد الدخول.
     await Future<void>.delayed(
-      Duration(milliseconds: kIsWeb ? 32 : 16),
+      const Duration(milliseconds: kIsWeb ? 32 : 16),
     );
   }
 
@@ -2796,9 +2798,8 @@ class _UserDashboardState extends State<UserDashboard>
     if (_isGuest || _webDeferredTabsScheduled) return;
     _webDeferredTabsScheduled = true;
     // ويب: بعد إصلاح الازدواج — تأخير قصير فقط لترك إطار الرئيسية يستقر (كان 6ث يُشعر بالتعليق).
-    final delay = kIsWeb
-        ? const Duration(milliseconds: 700)
-        : const Duration(milliseconds: 600);
+    const delay =
+        kIsWeb ? Duration(milliseconds: 700) : Duration(milliseconds: 600);
     WebBootstrapDiag.log(
       'deferred_tabs',
       'scheduled in ${delay.inMilliseconds}ms',
@@ -3202,7 +3203,7 @@ class _UserDashboardState extends State<UserDashboard>
   List<DashboardOnboardingStepData> _buildDashboardOnboardingSteps(
     AppLocalizations l10n,
   ) {
-    final isWeb = kIsWeb;
+    const isWeb = kIsWeb;
     final steps = <DashboardOnboardingStepData>[];
 
     // ترحيب في الوسط
@@ -3895,185 +3896,183 @@ class _UserDashboardState extends State<UserDashboard>
   }) {
     // IndexedStack ذكي على كل المنصات: لا تُهدم صفحتي عند مغادرة التبويب والعودة.
     _webVisitedTabs.add(_tabIndex);
-      if (_webTabChildren != null &&
-          _webTabChildren!.length != _kDashboardTabCount) {
-        _webTabChildren = null;
-        _webMaterializedTabs.clear();
-      }
-      final feedSig = Object.hash(
-        _nestedDashboardFeedCacheBuiltKey,
-        homeItems.length,
-        homeRequestsFiltered.length,
-        homeLoadedPropertyRows,
-        _marketHomeRequests.length,
-        _nestedDashboardMixedEntries.length,
-        _errorHome,
-        _homeFeedKind,
-        _homeFeedDataEpoch,
-        _homeRevealOwnPropertyId,
-        _homeRevealOwnMarketRequestId,
-        _homeShowHiddenOnly,
+    if (_webTabChildren != null &&
+        _webTabChildren!.length != _kDashboardTabCount) {
+      _webTabChildren = null;
+      _webMaterializedTabs.clear();
+    }
+    final feedSig = Object.hash(
+      _nestedDashboardFeedCacheBuiltKey,
+      homeItems.length,
+      homeRequestsFiltered.length,
+      homeLoadedPropertyRows,
+      _marketHomeRequests.length,
+      _nestedDashboardMixedEntries.length,
+      _errorHome,
+      _homeFeedKind,
+      _homeFeedDataEpoch,
+      _homeRevealOwnPropertyId,
+      _homeRevealOwnMarketRequestId,
+      _homeShowHiddenOnly,
+      _paidPriorityOnlyFilter,
+      homeItems.isEmpty ? 0 : identityHashCode(homeItems.first),
+      homeRequestsFiltered.isEmpty
+          ? 0
+          : identityHashCode(homeRequestsFiltered.first),
+    );
+    final feedChanged = _webTabChildrenFeedSig != feedSig;
+    // بيانات إعلاناتي/طلباتي — منفصلة عن عاصفة home.paint.
+    final hubSig = Object.hash(
+      Object.hash(
+        _mine.length,
+        _offers.length,
+        _loadingMine,
+        _loadingMarketing,
+        _loadingOwnerRequests,
+        _accountType,
+        _myAdsHubDataLoadStarted,
+        _errorMine,
+        _hasMarketingData,
+        _hasOwnerRequestsData,
+        _mkInvites.length,
+        _mkOffers.length,
+        _mkContracts.length,
+        _mkPermits.length,
+        _mkPublished.length,
+        _ownerListingRequests.length,
+        // لا تُدخل identityHashCode لكنترولر التبويب — إعادة إنشائه كانت تهدم الـ hub وتسبب Null check.
+        _usesMarketerMyPageHub,
+        _hasOwnerRequestsData,
+        _marketerPublisherHubMode,
+        _mkInvites.isNotEmpty ||
+            _mkOffers.isNotEmpty ||
+            _mkContracts.isNotEmpty ||
+            _mkPermits.isNotEmpty ||
+            _mkPublished.isNotEmpty,
+      ),
+      Object.hash(
+        _searchQuery,
+        _cityFilter,
+        _typeFilter,
+        _purposeFilter,
+        _furnishedFilter,
+        _priceMinFilter,
+        _priceMaxFilter,
+        _areaMinFilter,
+        _areaMaxFilter,
+        _sortBy,
         _paidPriorityOnlyFilter,
-        homeItems.isEmpty ? 0 : identityHashCode(homeItems.first),
-        homeRequestsFiltered.isEmpty
-            ? 0
-            : identityHashCode(homeRequestsFiltered.first),
-      );
-      final feedChanged = _webTabChildrenFeedSig != feedSig;
-      // بيانات إعلاناتي/طلباتي — منفصلة عن عاصفة home.paint.
-      final hubSig = Object.hash(
-        Object.hash(
-          _mine.length,
-          _offers.length,
-          _loadingMine,
-          _loadingMarketing,
-          _loadingOwnerRequests,
-          _accountType,
-          _myAdsHubDataLoadStarted,
-          _errorMine,
-          _hasMarketingData,
-          _hasOwnerRequestsData,
-          _mkInvites.length,
-          _mkOffers.length,
-          _mkContracts.length,
-          _mkPermits.length,
-          _mkPublished.length,
-          _ownerListingRequests.length,
-          // لا تُدخل identityHashCode لكنترولر التبويب — إعادة إنشائه كانت تهدم الـ hub وتسبب Null check.
-          _usesMarketerMyPageHub,
-          _hasOwnerRequestsData,
-          _marketerPublisherHubMode,
-          _mkInvites.isNotEmpty ||
-              _mkOffers.isNotEmpty ||
-              _mkContracts.isNotEmpty ||
-              _mkPermits.isNotEmpty ||
-              _mkPublished.isNotEmpty,
-        ),
-        Object.hash(
-          _searchQuery,
-          _cityFilter,
-          _typeFilter,
-          _purposeFilter,
-          _furnishedFilter,
-          _priceMinFilter,
-          _priceMaxFilter,
-          _areaMinFilter,
-          _areaMaxFilter,
-          _sortBy,
-          _paidPriorityOnlyFilter,
-        ),
-      );
-      final hubChanged = _webTabChildrenHubSig != hubSig;
-      final cartSig = Object.hash(
-        _cart.length,
-        _cartCount,
-        _loadingCart,
-        _errorCart,
-        _completedCart.length,
-        _completedMarketOffersForCart.length,
-        _incomingListingReservationsForCart.length,
-        _incomingMarketOffersOnMine.length,
-        _completedOwnedMarketRequests.length,
-        _cartPaneIndex,
-        _incomingDealSortNewest,
-        _incomingDealStatusFilter,
-        _myPendingMarketOffersForCart.length,
-        _myArchivedMarketOffersForCart.length,
-        _marketRequestIdsWithMyPendingOffer.length,
-        _homeFeedDataEpoch,
-        _cart.isEmpty ? 0 : identityHashCode(_cart.first),
-        _myPendingMarketOffersForCart.isEmpty
-            ? 0
-            : identityHashCode(_myPendingMarketOffersForCart.first),
-      );
-      final cartChanged = _webTabChildrenCartSig != cartSig;
-      final active = _tabIndex.clamp(0, _kDashboardTabCount - 1);
-      final tabSwitched = _webBuiltActiveTab != active;
-      Widget buildSlot(int i) {
-        switch (i) {
-          case 1:
-            return _webTabSlot(i, _buildMyAdsHub());
-          case 2:
-            return _webTabSlot(i, _buildMySubmissionsBody());
-          case 3:
-            return _webTabSlot(i, _buildCartBody());
-          case 4:
-            return _webTabSlot(i, _buildSupportHubBody());
-          case 5:
-            return _webTabSlot(i, _buildDeskBody());
-          case 0:
-          default:
-            return _webTabSlot(
-              i,
-              _buildHomeBody(
-                homeItems,
-                homeRequestsFiltered,
-                loadedPropertyRows: homeLoadedPropertyRows,
-                loadedRequestRows: _marketHomeRequests.length,
-              ),
-            );
-        }
+      ),
+    );
+    final hubChanged = _webTabChildrenHubSig != hubSig;
+    final cartSig = Object.hash(
+      _cart.length,
+      _cartCount,
+      _loadingCart,
+      _errorCart,
+      _completedCart.length,
+      _completedMarketOffersForCart.length,
+      _incomingListingReservationsForCart.length,
+      _incomingMarketOffersOnMine.length,
+      _completedOwnedMarketRequests.length,
+      _cartPaneIndex,
+      _incomingDealSortNewest,
+      _incomingDealStatusFilter,
+      _myPendingMarketOffersForCart.length,
+      _myArchivedMarketOffersForCart.length,
+      _marketRequestIdsWithMyPendingOffer.length,
+      _homeFeedDataEpoch,
+      _cart.isEmpty ? 0 : identityHashCode(_cart.first),
+      _myPendingMarketOffersForCart.isEmpty
+          ? 0
+          : identityHashCode(_myPendingMarketOffersForCart.first),
+    );
+    final cartChanged = _webTabChildrenCartSig != cartSig;
+    final active = _tabIndex.clamp(0, _kDashboardTabCount - 1);
+    final tabSwitched = _webBuiltActiveTab != active;
+    Widget buildSlot(int i) {
+      switch (i) {
+        case 1:
+          return _webTabSlot(i, _buildMyAdsHub());
+        case 2:
+          return _webTabSlot(i, _buildMySubmissionsBody());
+        case 3:
+          return _webTabSlot(i, _buildCartBody());
+        case 4:
+          return _webTabSlot(i, _buildSupportHubBody());
+        case 5:
+          return _webTabSlot(i, _buildDeskBody());
+        case 0:
+        default:
+          return _webTabSlot(
+            i,
+            _buildHomeBody(
+              homeItems,
+              homeRequestsFiltered,
+              loadedPropertyRows: homeLoadedPropertyRows,
+              loadedRequestRows: _marketHomeRequests.length,
+            ),
+          );
       }
+    }
 
-      final prev = _webTabChildren;
-      final next = List<Widget>.generate(_kDashboardTabCount, (i) {
-        if (!_webVisitedTabs.contains(i)) {
-          return _webTabSlot(i, const SizedBox.shrink());
+    final prev = _webTabChildren;
+    final next = List<Widget>.generate(_kDashboardTabCount, (i) {
+      if (!_webVisitedTabs.contains(i)) {
+        return _webTabSlot(i, const SizedBox.shrink());
+      }
+      final isActive = i == active;
+      if (i == 0) {
+        // حتى على الرئيسية: لا تعِد البناء إلا عند تغيّر الفيد أو أول زيارة.
+        // (setState من الإشعارات/المتصل كان يطلق home.paint عشرات المرات.)
+        if (feedChanged ||
+            prev == null ||
+            !_webMaterializedTabs.contains(0) ||
+            (isActive && tabSwitched)) {
+          _webMaterializedTabs.add(0);
+          return buildSlot(0);
         }
-        final isActive = i == active;
-        if (i == 0) {
-          // حتى على الرئيسية: لا تعِد البناء إلا عند تغيّر الفيد أو أول زيارة.
-          // (setState من الإشعارات/المتصل كان يطلق home.paint عشرات المرات.)
-          if (feedChanged ||
-              prev == null ||
-              !_webMaterializedTabs.contains(0) ||
-              (isActive && tabSwitched)) {
-            _webMaterializedTabs.add(0);
-            return buildSlot(0);
-          }
-          return prev[0];
-        }
-        // صفقاتي: توقيع مستقل — تغيّر السلة/العروض لا يمر عبر hubSig فكان التبويب يبقى فارغاً.
-        if (i == 3) {
-          if (cartChanged ||
-              prev == null ||
-              !_webMaterializedTabs.contains(3) ||
-              (isActive && tabSwitched)) {
-            _webMaterializedTabs.add(3);
-            return buildSlot(3);
-          }
-          if (prev.length > 3) return prev[3];
+        return prev[0];
+      }
+      // صفقاتي: توقيع مستقل — تغيّر السلة/العروض لا يمر عبر hubSig فكان التبويب يبقى فارغاً.
+      if (i == 3) {
+        if (cartChanged ||
+            prev == null ||
+            !_webMaterializedTabs.contains(3) ||
+            (isActive && tabSwitched)) {
+          _webMaterializedTabs.add(3);
           return buildSlot(3);
         }
-        // صفحتي/طلباتي/الدعم/إدارتي: الإبقاء على المثيل عند العودة — بلا وميض تحميل.
-        if (i == 1 || i == 2 || i == 4 || i == 5) {
-          if (hubChanged ||
-              prev == null ||
-              !_webMaterializedTabs.contains(i)) {
-            _webMaterializedTabs.add(i);
-            return buildSlot(i);
-          }
-          if (i < prev.length) return prev[i];
-          return buildSlot(i);
-        }
-        if (isActive) {
+        if (prev.length > 3) return prev[3];
+        return buildSlot(3);
+      }
+      // صفحتي/طلباتي/الدعم/إدارتي: الإبقاء على المثيل عند العودة — بلا وميض تحميل.
+      if (i == 1 || i == 2 || i == 4 || i == 5) {
+        if (hubChanged || prev == null || !_webMaterializedTabs.contains(i)) {
           _webMaterializedTabs.add(i);
           return buildSlot(i);
         }
-        return _webTabSlot(i, const SizedBox.shrink());
-      });
-      _webTabChildrenFeedSig = feedSig;
-      _webTabChildrenHubSig = hubSig;
-      _webTabChildrenCartSig = cartSig;
-      _webBuiltActiveTab = active;
-      _webTabChildren = next;
-      return PrimaryScrollController.none(
-        child: IndexedStack(
-          index: active,
-          sizing: StackFit.expand,
-          children: _webTabChildren!,
-        ),
-      );
+        if (i < prev.length) return prev[i];
+        return buildSlot(i);
+      }
+      if (isActive) {
+        _webMaterializedTabs.add(i);
+        return buildSlot(i);
+      }
+      return _webTabSlot(i, const SizedBox.shrink());
+    });
+    _webTabChildrenFeedSig = feedSig;
+    _webTabChildrenHubSig = hubSig;
+    _webTabChildrenCartSig = cartSig;
+    _webBuiltActiveTab = active;
+    _webTabChildren = next;
+    return PrimaryScrollController.none(
+      child: IndexedStack(
+        index: active,
+        sizing: StackFit.expand,
+        children: _webTabChildren!,
+      ),
+    );
   }
 
   Future<void> _loadDashboardGesturePreferences() async {
@@ -4562,10 +4561,10 @@ class _UserDashboardState extends State<UserDashboard>
                 // ويب: IndexedStack ذكي (لا يهدم إعلاناتي مع كل home.paint).
                 // KeyedSubtree(tabIndex) السابق كان يعيد بناء الجسم بالكامل → عاصفة + Uncaught Error.
                 child: _buildDashboardTabBody(
-                        homeItems: homeItems,
-                        homeRequestsFiltered: homeRequestsFiltered,
-                        homeLoadedPropertyRows: homeLoadedPropertyRows,
-                      ),
+                  homeItems: homeItems,
+                  homeRequestsFiltered: homeRequestsFiltered,
+                  homeLoadedPropertyRows: homeLoadedPropertyRows,
+                ),
               ),
             ],
           ),
@@ -5242,24 +5241,24 @@ class _UserDashboardState extends State<UserDashboard>
           }),
         ),
         child: NavigationBar(
-            height: hideBottomLabels ? 64 : 72,
-            labelBehavior: hideBottomLabels
-                ? NavigationDestinationLabelBehavior.alwaysHide
-                : NavigationDestinationLabelBehavior.alwaysShow,
+          height: hideBottomLabels ? 64 : 72,
+          labelBehavior: hideBottomLabels
+              ? NavigationDestinationLabelBehavior.alwaysHide
+              : NavigationDestinationLabelBehavior.alwaysShow,
+          selectedIndex: navIndex,
+          indicatorColor: _brandPrimary.withValues(alpha: _op(28)),
+          onDestinationSelected: (i) {
+            AppHaptics.selection();
+            _onDashboardBottomNavSelected(bottomSlots, i);
+          },
+          destinations: _dashboardBottomDestinations(
+            l10n,
+            bottomSlots,
+            compact: compactBottomNav,
             selectedIndex: navIndex,
-            indicatorColor: _brandPrimary.withValues(alpha: _op(28)),
-            onDestinationSelected: (i) {
-              AppHaptics.selection();
-              _onDashboardBottomNavSelected(bottomSlots, i);
-            },
-            destinations: _dashboardBottomDestinations(
-              l10n,
-              bottomSlots,
-              compact: compactBottomNav,
-              selectedIndex: navIndex,
-              hideLabels: hideBottomLabels,
-            ),
+            hideLabels: hideBottomLabels,
           ),
+        ),
       );
       // ويب: SafeArea حتى لا تُقص التبويبات تحت شريط المتصفح، مع ارتفاع يكفي لدائرة +.
       if (kIsWeb) {
@@ -5327,25 +5326,25 @@ class _UserDashboardState extends State<UserDashboard>
       body: AppKeyboardPad(
         extra: 12,
         child: NotificationListener<ScrollNotification>(
-        onNotification: _onDashboardScrollForBottomNav,
-        child: Navigator(
-          key: _dashboardBodyNavKey,
-          observers: <NavigatorObserver>[_dashboardBodyNavObserver],
-          onGenerateInitialRoutes: (nav, initialRoute) => [
-            MaterialPageRoute<void>(
-              settings: const RouteSettings(name: '/dashboard/root'),
-              builder: (routeContext) => Builder(
-                builder: (innerContext) {
-                  final host = innerContext
-                      .findAncestorStateOfType<_UserDashboardState>();
-                  if (host == null) return const SizedBox.shrink();
-                  return host._buildNestedDashboardBody(innerContext);
-                },
+          onNotification: _onDashboardScrollForBottomNav,
+          child: Navigator(
+            key: _dashboardBodyNavKey,
+            observers: <NavigatorObserver>[_dashboardBodyNavObserver],
+            onGenerateInitialRoutes: (nav, initialRoute) => [
+              MaterialPageRoute<void>(
+                settings: const RouteSettings(name: '/dashboard/root'),
+                builder: (routeContext) => Builder(
+                  builder: (innerContext) {
+                    final host = innerContext
+                        .findAncestorStateOfType<_UserDashboardState>();
+                    if (host == null) return const SizedBox.shrink();
+                    return host._buildNestedDashboardBody(innerContext);
+                  },
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
       ),
       floatingActionButton: useSideNav && _showBottomNavAddSlot
           ? FloatingActionButton(
@@ -5484,7 +5483,7 @@ class _UserDashboardState extends State<UserDashboard>
                                                   userInitiated: true,
                                                 ),
                                         icon: networkCheckBusy
-                                            ? SizedBox(
+                                            ? const SizedBox(
                                                 width: 22,
                                                 height: 22,
                                                 child: AppLogoLoading(
@@ -6367,9 +6366,10 @@ class _UserDashboardState extends State<UserDashboard>
         ? Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
             decoration: BoxDecoration(
-              color: cs.surfaceContainerHighest.withOpacity(0.35),
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+              border:
+                  Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
             ),
             child: Text(
               _isArabic ? 'النتائج: $resultCount' : 'Results: $resultCount',
@@ -6413,7 +6413,7 @@ class _UserDashboardState extends State<UserDashboard>
                     ),
               hintText: searchHint,
               filled: true,
-              fillColor: cs.surfaceContainerHighest.withOpacity(0.20),
+              fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.20),
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 12,
@@ -6421,19 +6421,19 @@ class _UserDashboardState extends State<UserDashboard>
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(
-                  color: cs.outlineVariant.withOpacity(0.35),
+                  color: cs.outlineVariant.withValues(alpha: 0.35),
                 ),
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(
-                  color: cs.outlineVariant.withOpacity(0.35),
+                  color: cs.outlineVariant.withValues(alpha: 0.35),
                 ),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(
-                  color: _brandPrimary.withOpacity(0.70),
+                  color: _brandPrimary.withValues(alpha: 0.70),
                   width: 1.3,
                 ),
               ),
@@ -6468,7 +6468,7 @@ class _UserDashboardState extends State<UserDashboard>
         child: Container(
           height: compact ? 38 : 42,
           decoration: BoxDecoration(
-            color: cs.surfaceContainerHighest.withOpacity(0.28),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.28),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
               color: _brandPrimary.withValues(alpha: _op(22)),
@@ -6562,7 +6562,8 @@ class _UserDashboardState extends State<UserDashboard>
         decoration: BoxDecoration(
           color: cs.surface,
           border: Border(
-            bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.25)),
+            bottom:
+                BorderSide(color: cs.outlineVariant.withValues(alpha: 0.25)),
           ),
         ),
         child: Column(
@@ -6823,8 +6824,7 @@ class _UserDashboardState extends State<UserDashboard>
                       l10n,
                       r.requestPriority,
                     ),
-                    dealApplicantCount:
-                        _homeRequestApplicantCounts[r.id] ?? 0,
+                    dealApplicantCount: _homeRequestApplicantCounts[r.id] ?? 0,
                     onOpen: () => _openMarketRequestDetail(r),
                     onSubmitOffer: _isGuest
                         ? null
@@ -7077,7 +7077,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   icon,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -7768,13 +7768,13 @@ class _UserDashboardState extends State<UserDashboard>
 
                 final rowCount = (totalCards + cross - 1) ~/ cross;
                 return ListView.separated(
+                  cacheExtent: 420,
                   controller: onboardingScroll,
                   primary: false,
                   physics: const AlwaysScrollableScrollPhysics(),
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-                  cacheExtent: 420,
                   itemCount: rowCount,
                   separatorBuilder: (_, __) => const SizedBox(height: spacing),
                   itemBuilder: (context, row) {
@@ -7834,7 +7834,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.lock_outline,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -7890,14 +7890,14 @@ class _UserDashboardState extends State<UserDashboard>
 
     // ويب: لا تبقَ على الهيكل العظمي أكثر من اللازم — اعرض ما توفر فوراً.
     if (loading && !hasPartialSubmissions && !kIsWeb) {
-      return PropertyCardSkeletonList(
+      return const PropertyCardSkeletonList(
         count: 6,
         topPadding: 16,
       );
     }
     if (kIsWeb && loading && !hasPartialSubmissions) {
       // إن كانت mine جاهزة عبر مسار آخر ستظهر أعلاه؛ وإلا هيكل قصير جداً.
-      return PropertyCardSkeletonList(
+      return const PropertyCardSkeletonList(
         count: 2,
         topPadding: 16,
       );
@@ -7974,7 +7974,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.assignment_turned_in_outlined,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -8040,7 +8040,7 @@ class _UserDashboardState extends State<UserDashboard>
           spacing: spacing,
         );
         final invUsed = _activeInventoryCardCount;
-        final invMax = DealInventoryPolicy.maxActiveListingsAndRequests;
+        const invMax = DealInventoryPolicy.maxActiveListingsAndRequests;
         final countBar = Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Text(
@@ -8179,12 +8179,12 @@ class _UserDashboardState extends State<UserDashboard>
             (header != null ? 1 : 0) + (totalCards == 0 ? 1 : rowCount);
 
         return ListView.separated(
+          cacheExtent: 420,
           controller: onboardingScroll,
           primary: false,
           physics: const AlwaysScrollableScrollPhysics(),
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-          cacheExtent: 420,
           itemCount: itemCount,
           separatorBuilder: (_, __) => const SizedBox(height: spacing),
           itemBuilder: (context, i) {
@@ -8300,7 +8300,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.lock_outline,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -8352,7 +8352,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.favorite_border,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -8442,7 +8442,8 @@ class _UserDashboardState extends State<UserDashboard>
           child: Text(
             _isArabic ? 'سجّل الدخول لفتح إدارتي.' : 'Sign in to open My desk.',
             textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Cairo'),
+            style: const TextStyle(
+                fontWeight: FontWeight.w800, fontFamily: 'Cairo'),
           ),
         ),
       );
@@ -8498,7 +8499,8 @@ class _UserDashboardState extends State<UserDashboard>
               ? 'تحقق من ربط حسابك بالمؤسسة ثم أعد المحاولة.'
               : 'Check your organization link and try again.',
           textAlign: TextAlign.center,
-          style: const TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Cairo'),
+          style:
+              const TextStyle(fontWeight: FontWeight.w800, fontFamily: 'Cairo'),
         ),
       ),
     );
@@ -8574,10 +8576,10 @@ class _UserDashboardState extends State<UserDashboard>
       list = list.where(_incomingDealAccepted).toList();
     }
     list.sort((a, b) {
-      final da = _incomingDealCreatedAt(a) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
-      final db = _incomingDealCreatedAt(b) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
+      final da =
+          _incomingDealCreatedAt(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db =
+          _incomingDealCreatedAt(b) ?? DateTime.fromMillisecondsSinceEpoch(0);
       return _incomingDealSortNewest ? db.compareTo(da) : da.compareTo(db);
     });
     return list;
@@ -8594,10 +8596,10 @@ class _UserDashboardState extends State<UserDashboard>
         : _incomingMarketOffersOnMine;
     final same = pool.where((e) => (e[idKey] ?? '').toString() == id).toList()
       ..sort((a, b) {
-        final da = _incomingDealCreatedAt(a) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final db = _incomingDealCreatedAt(b) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
+        final da =
+            _incomingDealCreatedAt(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final db =
+            _incomingDealCreatedAt(b) ?? DateTime.fromMillisecondsSinceEpoch(0);
         return da.compareTo(db);
       });
     final rid = (row['id'] ?? '').toString();
@@ -8944,7 +8946,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.lock_outline,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -8998,7 +9000,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.handshake_outlined,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -9059,7 +9061,7 @@ class _UserDashboardState extends State<UserDashboard>
             : MediaQuery.sizeOf(context).width;
         final l10nCart = AppLocalizations.of(context)!;
         final used = _activeDealCardCount;
-        final maxDeals = DealInventoryPolicy.maxActiveDeals;
+        const maxDeals = DealInventoryPolicy.maxActiveDeals;
 
         Widget sectionTitle(String text) {
           return Padding(
@@ -9108,7 +9110,8 @@ class _UserDashboardState extends State<UserDashboard>
               sectionTitle(l10nCart.cartIncomingSectionRequests),
               ..._smartDashboardCardRows(
                 cards: [
-                  for (final o in incomingOffers) _buildIncomingMarketOfferCard(o),
+                  for (final o in incomingOffers)
+                    _buildIncomingMarketOfferCard(o),
                 ],
                 maxWidth: w,
                 context: context,
@@ -9197,9 +9200,7 @@ class _UserDashboardState extends State<UserDashboard>
           else ...[
             if (_completedOwnedMarketRequests.isNotEmpty) ...[
               sectionTitle(
-                _isArabic
-                    ? 'طلباتي المنتهية'
-                    : 'My completed requests',
+                _isArabic ? 'طلباتي المنتهية' : 'My completed requests',
               ),
               ..._smartDashboardCardRows(
                 cards: [
@@ -9227,7 +9228,8 @@ class _UserDashboardState extends State<UserDashboard>
               sectionTitle(_isArabic ? 'صفقات منتهية' : 'Completed deals'),
               ..._smartDashboardCardRows(
                 cards: [
-                  for (final r in _completedCart) _buildCompletedPurchaseCard(r),
+                  for (final r in _completedCart)
+                    _buildCompletedPurchaseCard(r),
                 ],
                 maxWidth: w,
                 context: context,
@@ -9422,7 +9424,9 @@ class _UserDashboardState extends State<UserDashboard>
                         kind: ConversationKind.marketRequest,
                         title: titleHint.isNotEmpty
                             ? titleHint
-                            : (_isArabic ? 'مراسلة الطلب' : 'Request messaging'),
+                            : (_isArabic
+                                ? 'مراسلة الطلب'
+                                : 'Request messaging'),
                       ),
             )
           : null,
@@ -9582,10 +9586,12 @@ class _UserDashboardState extends State<UserDashboard>
                         kind: ConversationKind.marketRequest,
                         title: titleHint.isNotEmpty
                             ? titleHint
-                            : (_isArabic ? 'مراسلة الطلب' : 'Request messaging'),
+                            : (_isArabic
+                                ? 'مراسلة الطلب'
+                                : 'Request messaging'),
                       ),
             )
-            : _ReservationAction(
+          : _ReservationAction(
               kind: _ReservationActionKind.filledDanger,
               icon: Icons.close,
               label: _isArabic ? 'إلغاء العرض' : 'Cancel offer',
@@ -9665,9 +9671,8 @@ class _UserDashboardState extends State<UserDashboard>
 
   Widget _buildCompletedOwnedMarketRequestCard(MarketPropertyRequestRow r) {
     final cs = Theme.of(context).colorScheme;
-    final completedText = r.completedAt == null
-        ? ''
-        : _fmtDateTime(r.completedAt!);
+    final completedText =
+        r.completedAt == null ? '' : _fmtDateTime(r.completedAt!);
     return _ReservationCard(
       bankColor: _brandPrimary,
       icon: Icons.verified_outlined,
@@ -9711,8 +9716,7 @@ class _UserDashboardState extends State<UserDashboard>
     final titleHint = (o['_request_title'] ?? '').toString().trim();
     final note = (o['_deal_completion_note'] ?? '').toString().trim();
     final completedAt = _tryParseDt(o['_request_completed_at']);
-    final completedText =
-        completedAt == null ? '' : _fmtDateTime(completedAt);
+    final completedText = completedAt == null ? '' : _fmtDateTime(completedAt);
     return _ReservationCard(
       bankColor: _brandPrimary,
       icon: Icons.verified_outlined,
@@ -9838,9 +9842,8 @@ class _UserDashboardState extends State<UserDashboard>
     final addr = (r['reserved_by_city'] ?? '').toString().trim();
     final note = (r['applicant_note'] ?? '').toString().trim();
     final applicantId = (r['user_id'] ?? '').toString().trim();
-    final rank = ownerSide
-        ? _incomingQueueRank(r, listing: true)
-        : (index: 0, total: 0);
+    final rank =
+        ownerSide ? _incomingQueueRank(r, listing: true) : (index: 0, total: 0);
     final ownerName = ownerSide
         ? _ownerDisplayNameForDeals()
         : (p?.ownerDisplayName ?? '').toString().trim();
@@ -9956,9 +9959,7 @@ class _UserDashboardState extends State<UserDashboard>
             ),
       bodyExtra: DealApplicantTransparencyBoard(
         isAr: _isArabic,
-        applicantName: ownerSide
-            ? applicantName
-            : _ownerDisplayNameForDeals(),
+        applicantName: ownerSide ? applicantName : _ownerDisplayNameForDeals(),
         requestedAt: createdAt,
         expiresAt: expiresAt,
         applicantAddress: addr.isEmpty ? null : addr,
@@ -10004,7 +10005,9 @@ class _UserDashboardState extends State<UserDashboard>
       title: p?.title ?? (_isArabic ? 'إعلان مكتمل' : 'Completed listing'),
       subtitle: Text(
         [
-          _isArabic ? 'صفقة منتهية · $completedText' : 'Completed deal · $completedText',
+          _isArabic
+              ? 'صفقة منتهية · $completedText'
+              : 'Completed deal · $completedText',
           if (note.isNotEmpty) note,
         ].join('\n'),
         maxLines: 4,
@@ -10149,7 +10152,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.lock_outline,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -10200,7 +10203,7 @@ class _UserDashboardState extends State<UserDashboard>
                 Icon(
                   Icons.receipt_long_outlined,
                   size: 84,
-                  color: _brandPrimary.withOpacity(_op(180)),
+                  color: _brandPrimary.withValues(alpha: _op(180)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -10269,12 +10272,10 @@ class _UserDashboardState extends State<UserDashboard>
         final status = (r['status'] ?? '').toString().trim();
         final statusLc = status.toLowerCase();
         final canMessage = _dealReservationAllowsMessaging(status);
-        final otherAccepted = _propertyHasAcceptedBuyer(propertyId) &&
-            !canMessage;
+        final otherAccepted =
+            _propertyHasAcceptedBuyer(propertyId) && !canMessage;
         final canAcceptThis = !otherAccepted &&
-            (statusLc.isEmpty ||
-                statusLc == 'pending' ||
-                statusLc == 'paid');
+            (statusLc.isEmpty || statusLc == 'pending' || statusLc == 'paid');
         final buyerName = (r['reserved_by_name'] ?? '').toString().trim();
         final buyerLabel = buyerName.isNotEmpty
             ? buyerName
@@ -10379,9 +10380,7 @@ class _UserDashboardState extends State<UserDashboard>
                   label: _isArabic ? 'مراسلة' : 'Message',
                   onPressed: () {
                     final t = p?.title ??
-                        (_isArabic
-                            ? 'مراسلة الحجز'
-                            : 'Reservation messaging');
+                        (_isArabic ? 'مراسلة الحجز' : 'Reservation messaging');
                     _openChat(
                       mode: 'reservation',
                       propertyId: propertyId,
@@ -10394,8 +10393,8 @@ class _UserDashboardState extends State<UserDashboard>
                   ? _ReservationAction(
                       kind: _ReservationActionKind.outlined,
                       icon: Icons.check_circle_outline,
-                      label: AppLocalizations.of(context)!
-                          .dealOwnerAcceptPartner,
+                      label:
+                          AppLocalizations.of(context)!.dealOwnerAcceptPartner,
                       onPressed: () => unawaited(
                         _acceptListingReservationFromOwner(r),
                       ),

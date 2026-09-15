@@ -101,7 +101,7 @@ class PlanDisplayCopy {
     final isAr = _isAr(lang);
     final sort = _intOf(plan['sort_order']) ?? 0;
     final pct = _autoPayPct(plan).round();
-    final yearlyOff = 20;
+    const yearlyOff = 20;
 
     if (SubscriptionService.isMarketOffersTopUpSortOrder(sort)) {
       return isAr

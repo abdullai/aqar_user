@@ -1,9 +1,8 @@
-﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field
+// ignore_for_file: unused_element, unused_element_parameter, unused_field
 
 // lib/screens/settings_page.dart
 import 'dart:async' show unawaited;
 import 'dart:convert' show jsonDecode;
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -1777,7 +1776,7 @@ class _SettingsPageState extends State<SettingsPage> {
             keyboardType: TextInputType.number,
             maxLength: 16,
             inputFormatters: [
-              ArabicDigitsToLatinFormatter(),
+              const ArabicDigitsToLatinFormatter(),
               FilteringTextInputFormatter.digitsOnly,
             ],
             decoration: InputDecoration(
@@ -1835,7 +1834,7 @@ class _SettingsPageState extends State<SettingsPage> {
             keyboardType: TextInputType.number,
             maxLength: 10,
             inputFormatters: [
-              ArabicDigitsToLatinFormatter(),
+              const ArabicDigitsToLatinFormatter(),
               FilteringTextInputFormatter.digitsOnly,
               LengthLimitingTextInputFormatter(10),
             ],
@@ -1893,7 +1892,7 @@ class _SettingsPageState extends State<SettingsPage> {
             keyboardType: TextInputType.text,
             maxLength: 11,
             inputFormatters: [
-              ArabicDigitsToLatinFormatter(),
+              const ArabicDigitsToLatinFormatter(),
               FilteringTextInputFormatter.allow(
                 RegExp(r'[0-9٠-٩۰-۹\u0646]'),
               ),
@@ -2089,7 +2088,7 @@ class _SettingsPageState extends State<SettingsPage> {
       await _sb.storage.from(_avatarStorageBucket).uploadBinary(
             path,
             jpegBytes,
-            fileOptions: FileOptions(
+            fileOptions: const FileOptions(
               contentType: 'image/jpeg',
               upsert: true,
             ),
@@ -2176,7 +2175,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     counterText: '',
                   ),
                   inputFormatters: [
-                    ArabicDigitsToLatinFormatter(),
+                    const ArabicDigitsToLatinFormatter(),
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(6),
                   ],
@@ -2191,7 +2190,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     counterText: '',
                   ),
                   inputFormatters: [
-                    ArabicDigitsToLatinFormatter(),
+                    const ArabicDigitsToLatinFormatter(),
                     FilteringTextInputFormatter.digitsOnly,
                     LengthLimitingTextInputFormatter(6),
                   ],
@@ -2641,7 +2640,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     : null,
               ),
               if (_uploadingPhoto)
-                Positioned.fill(
+                const Positioned.fill(
                   child: Center(
                     child: AppLogoLoading(
                       size: 56,
@@ -3870,7 +3869,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               final cols = w < 280
                                   ? 3
                                   : (w < 360 ? 4 : (w < 480 ? 5 : 6));
-                              final gap = 10.0;
+                              const gap = 10.0;
                               final cell = (w - gap * (cols - 1)) / cols;
                               final size = cell.clamp(32.0, 40.0);
                               return Wrap(

@@ -92,7 +92,7 @@ Future<void> showMarketingSubscriptionPaywallDialog({
             : '$base\n\nEnded on: $formattedEnd');
   }
 
-  final showDevButton =
+  const showDevButton =
       AppConfig.allowDevTestSubscriptionGrant || kDebugMode;
 
   await showAppDialog<void>(

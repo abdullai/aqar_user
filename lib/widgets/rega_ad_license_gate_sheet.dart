@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -364,7 +364,7 @@ class _RegaAdLicenseGateBodyState extends State<_RegaAdLicenseGateBody> {
             Positioned.fill(
               child: AbsorbPointer(
                 child: Material(
-                  color: Colors.black.withOpacity(0.55),
+                  color: Colors.black.withValues(alpha: 0.55),
                   child: Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),

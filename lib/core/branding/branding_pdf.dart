@@ -40,7 +40,7 @@ pw.Widget brandingPdfHeader({
   final platformName = AppBranding.invoiceLetterheadBrandName(isAr: isAr);
   final shortBrand = AppBranding.brandName(isAr: isAr);
   final ksa = isAr ? 'المملكة العربية السعودية' : 'Kingdom of Saudi Arabia';
-  final contact =
+  const contact =
       '${AppBranding.supportEmail}\n${AppBranding.invoiceLetterheadPhone}';
   pw.TextStyle st(pw.Font f, double size, {PdfColor? color}) => pw.TextStyle(
         font: f,

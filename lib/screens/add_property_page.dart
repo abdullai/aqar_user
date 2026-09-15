@@ -1,9 +1,8 @@
-﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field, unused_local_variable
+// ignore_for_file: unused_element, unused_element_parameter, unused_field, unused_local_variable
 
 // lib/screens/add_property_page.dart
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -5289,7 +5288,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               IconButton(
                 tooltip: _isAr ? 'إضافة صور أو فيديو' : 'Add images or video',
                 icon: (_picking || _uploadingVideo)
-                    ? SizedBox(
+                    ? const SizedBox(
                         width: 24,
                         height: 24,
                         child: AppLogoLoading(compact: true, size: 22),
@@ -5770,7 +5769,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                   ? Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        SizedBox(
+                                        const SizedBox(
                                           width: 22,
                                           height: 22,
                                           child: AppLogoLoading(
@@ -5998,9 +5997,9 @@ class _AdLicenseStepCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: cs.errorContainer.withOpacity(0.35),
+              color: cs.errorContainer.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: cs.error.withOpacity(0.35)),
+              border: Border.all(color: cs.error.withValues(alpha: 0.35)),
             ),
             child: Text(
               isAr
@@ -6076,8 +6075,8 @@ class _LicenseAnswerTile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Material(
       color: selected
-          ? const Color(0xFF0F766E).withOpacity(0.12)
-          : cs.surfaceContainerHighest.withOpacity(0.5),
+          ? const Color(0xFF0F766E).withValues(alpha: 0.12)
+          : cs.surfaceContainerHighest.withValues(alpha: 0.5),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -6089,7 +6088,7 @@ class _LicenseAnswerTile extends StatelessWidget {
             border: Border.all(
               color: selected
                   ? const Color(0xFF0F766E)
-                  : cs.outlineVariant.withOpacity(0.6),
+                  : cs.outlineVariant.withValues(alpha: 0.6),
               width: selected ? 2 : 1,
             ),
           ),
@@ -6207,9 +6206,9 @@ class _ExternalLicenseMediaBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: cs.primaryContainer.withOpacity(0.45),
+        color: cs.primaryContainer.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.primary.withOpacity(0.35)),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.35)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -6338,7 +6337,7 @@ class _HeaderCard extends StatelessWidget {
           BoxShadow(
             blurRadius: 8,
             offset: const Offset(0, 4),
-            color: cs.shadow.withOpacity(0.1),
+            color: cs.shadow.withValues(alpha: 0.1),
           ),
         ],
       ),
@@ -6349,7 +6348,7 @@ class _HeaderCard extends StatelessWidget {
             width: 50,
             height: 50,
             decoration: BoxDecoration(
-              color: const Color(0xFF0F766E).withOpacity(0.1),
+              color: const Color(0xFF0F766E).withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -6439,14 +6438,14 @@ class _ListingMediaCard extends StatelessWidget {
         color: cs.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: const Color(0xFF0F766E).withOpacity(0.35),
+          color: const Color(0xFF0F766E).withValues(alpha: 0.35),
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
             blurRadius: 12,
             offset: const Offset(0, 4),
-            color: const Color(0xFF0F766E).withOpacity(0.08),
+            color: const Color(0xFF0F766E).withValues(alpha: 0.08),
           ),
         ],
       ),
@@ -6457,7 +6456,7 @@ class _ListingMediaCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.collections_outlined, color: const Color(0xFF0F766E)),
+              const Icon(Icons.collections_outlined, color: Color(0xFF0F766E)),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -6493,7 +6492,7 @@ class _ListingMediaCard extends StatelessWidget {
               final imgBtn = FilledButton.icon(
                 onPressed: _busy ? null : onPickImages,
                 icon: picking
-                    ? SizedBox(
+                    ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: AppLogoLoading(compact: true, size: 16),
@@ -6508,7 +6507,7 @@ class _ListingMediaCard extends StatelessWidget {
               final vidBtn = OutlinedButton.icon(
                 onPressed: (_busy || uploadingVideo) ? null : onPickVideo,
                 icon: uploadingVideo
-                    ? SizedBox(
+                    ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: AppLogoLoading(compact: true, size: 16),
@@ -6540,9 +6539,9 @@ class _ListingMediaCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withOpacity(0.55),
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
               ),
               child: Row(
                 children: [
@@ -6579,9 +6578,9 @@ class _ListingMediaCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withOpacity(0.6),
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: cs.outlineVariant.withOpacity(0.3)),
+                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -6709,7 +6708,7 @@ class _ImageThumb extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
+                    color: Colors.black.withValues(alpha: 0.7),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -6976,9 +6975,9 @@ class _ErrorBox extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return Container(
       decoration: BoxDecoration(
-        color: cs.errorContainer.withOpacity(0.9),
+        color: cs.errorContainer.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.error.withOpacity(0.3)),
+        border: Border.all(color: cs.error.withValues(alpha: 0.3)),
       ),
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -7667,7 +7666,7 @@ class _FormCard extends StatelessWidget {
                     enabled: !saving,
                     onSelected: onUsageResidentialChanged,
                     selectedColor:
-                        const Color(0xFF0F766E).withOpacity(0.22),
+                        const Color(0xFF0F766E).withValues(alpha: 0.22),
                     checkColor: const Color(0xFF0F766E),
                   ),
                   StableSelectChip(
@@ -7676,7 +7675,7 @@ class _FormCard extends StatelessWidget {
                     enabled: !saving,
                     onSelected: onUsageCommercialChanged,
                     selectedColor:
-                        const Color(0xFF0F766E).withOpacity(0.22),
+                        const Color(0xFF0F766E).withValues(alpha: 0.22),
                     checkColor: const Color(0xFF0F766E),
                   ),
                 ],
@@ -7801,7 +7800,7 @@ class _FormCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         DropdownButtonFormField<String>(
-                          value: selectedRegion != null &&
+                          initialValue: selectedRegion != null &&
                                   regionOptions.contains(selectedRegion)
                               ? selectedRegion
                               : null,
@@ -7926,7 +7925,7 @@ class _FormCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         DropdownButtonFormField<String>(
-                          value: selectedGovernorate != null &&
+                          initialValue: selectedGovernorate != null &&
                                   governorateOptions
                                       .contains(selectedGovernorate)
                               ? selectedGovernorate
@@ -8053,7 +8052,7 @@ class _FormCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         DropdownButtonFormField<String>(
-                          value: selectedCity != null &&
+                          initialValue: selectedCity != null &&
                                   cityOptions.contains(selectedCity)
                               ? selectedCity
                               : null,
@@ -8170,7 +8169,7 @@ class _FormCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     DropdownButtonFormField<String>(
-                      value: selectedDistrict != null &&
+                      initialValue: selectedDistrict != null &&
                               districtOptions.contains(selectedDistrict)
                           ? selectedDistrict
                           : null,
@@ -8538,7 +8537,7 @@ class _FormCard extends StatelessWidget {
                   final narrow = c.maxWidth < 700;
 
                   final unitField = DropdownButtonFormField<ListingAreaUnit>(
-                    value: areaUnit,
+                    initialValue: areaUnit,
                     items: [
                       DropdownMenuItem(
                         value: ListingAreaUnit.m2,
@@ -8724,7 +8723,7 @@ class _FormCard extends StatelessWidget {
                   final narrow = c.maxWidth < 700;
 
                   final currencyField = DropdownButtonFormField<String>(
-                    value: currency,
+                    initialValue: currency,
                     items: const [
                       DropdownMenuItem(value: 'SAR', child: Text('SAR')),
                       DropdownMenuItem(value: 'AED', child: Text('AED')),
@@ -8915,14 +8914,14 @@ class _FormCard extends StatelessWidget {
                         .showsTotalFloorsFieldEffective(type);
 
                     final floorField = DropdownButtonFormField<int>(
-                      value: floor,
+                      initialValue: floor,
                       items: _intItems(0, 50),
                       onChanged: saving ? null : onFloorChanged,
                       decoration: deco(isAr ? 'الطابق' : 'Floor'),
                     );
 
                     final totalFloorsField = DropdownButtonFormField<int>(
-                      value: totalFloors,
+                      initialValue: totalFloors,
                       items: _intItems(1, 50),
                       onChanged: saving ? null : onTotalFloorsChanged,
                       decoration:

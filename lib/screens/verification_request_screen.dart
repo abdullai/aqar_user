@@ -1,4 +1,4 @@
-﻿import 'dart:async' show unawaited;
+import 'dart:async' show unawaited;
 
 import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
@@ -255,7 +255,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 10,
                       inputFormatters: [
-                        ArabicDigitsToLatinFormatter(),
+                        const ArabicDigitsToLatinFormatter(),
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: InputDecoration(
@@ -337,7 +337,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       controller: _brokerPhone,
                       keyboardType: TextInputType.phone,
                       inputFormatters: [
-                        ArabicDigitsToLatinFormatter(),
+                        const ArabicDigitsToLatinFormatter(),
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: InputDecoration(
@@ -423,7 +423,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       controller: _crNo,
                       keyboardType: TextInputType.number,
                       inputFormatters: [
-                        ArabicDigitsToLatinFormatter(),
+                        const ArabicDigitsToLatinFormatter(),
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: InputDecoration(
@@ -437,7 +437,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 10,
                       inputFormatters: [
-                        ArabicDigitsToLatinFormatter(),
+                        const ArabicDigitsToLatinFormatter(),
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: InputDecoration(
@@ -513,7 +513,7 @@ class _VerificationRequestScreenState extends State<VerificationRequestScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 10,
                       inputFormatters: [
-                        ArabicDigitsToLatinFormatter(),
+                        const ArabicDigitsToLatinFormatter(),
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: InputDecoration(

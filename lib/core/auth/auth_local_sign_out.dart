@@ -34,7 +34,7 @@ abstract final class AuthLocalSignOut {
   static Future<void> _purgePersistedAuthToken() async {
     final key = persistSessionKey();
     try {
-      if (kIsWeb && bool.fromEnvironment('dart.library.js_interop')) {
+      if (kIsWeb && const bool.fromEnvironment('dart.library.js_interop')) {
         await _purgeWebLocalStorageKey(key);
       } else {
         final prefs = await SharedPreferences.getInstance();

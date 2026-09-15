@@ -40,10 +40,10 @@ class InstantMarketRequestFeed {
   }
 
   static Duration get sameRegionBoostDuration =>
-      Duration(milliseconds: sameRegionBoostMs);
+      const Duration(milliseconds: sameRegionBoostMs);
 
   static Duration get crossRegionBoostDuration =>
-      Duration(milliseconds: crossRegionBoostMs);
+      const Duration(milliseconds: crossRegionBoostMs);
 
   static Duration boostWindowFor(
     MarketPropertyRequestRow row, {

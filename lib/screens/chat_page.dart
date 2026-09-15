@@ -1,4 +1,4 @@
-﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field
+// ignore_for_file: unused_element, unused_element_parameter, unused_field
 
 // lib/screens/chat_page.dart
 import 'dart:async';
@@ -344,7 +344,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   String? _peerAvatarUrl;
 
   final TextEditingController _tc = TextEditingController();
-  bool _sending = false;
+  final bool _sending = false;
   ChatTypingSession? _typing;
 
   bool _bootStarted = false;

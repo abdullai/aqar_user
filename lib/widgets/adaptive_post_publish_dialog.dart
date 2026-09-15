@@ -228,7 +228,7 @@ class _AdaptiveActionButton extends StatelessWidget {
       ),
     );
 
-    final onPressed = () => Navigator.pop(context, action.id);
+    void onPressed() => Navigator.pop(context, action.id);
     final child = action.icon == null
         ? label
         : Row(
@@ -241,10 +241,10 @@ class _AdaptiveActionButton extends StatelessWidget {
             ],
           );
 
-    final pad = const EdgeInsets.symmetric(vertical: 12, horizontal: 8);
-    final styleBase = ButtonStyle(
+    const pad = EdgeInsets.symmetric(vertical: 12, horizontal: 8);
+    const styleBase = ButtonStyle(
       padding: WidgetStatePropertyAll(pad),
-      minimumSize: const WidgetStatePropertyAll(Size(0, 46)),
+      minimumSize: WidgetStatePropertyAll(Size(0, 46)),
       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
 

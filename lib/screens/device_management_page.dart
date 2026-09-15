@@ -1153,8 +1153,8 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
     final border = isDark
-        ? Colors.white.withOpacity(0.10)
-        : Colors.black.withOpacity(0.08);
+        ? Colors.white.withValues(alpha: 0.10)
+        : Colors.black.withValues(alpha: 0.08);
     final titleColor = isDark ? Colors.white : const Color(0xFF0B1220);
     final bodyColor =
         isDark ? const Color(0xFFD1D5DB) : const Color(0xFF475569);
@@ -1190,7 +1190,7 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
                             blurRadius: 18,
                             offset: const Offset(0, 10),
                             color:
-                                Colors.black.withOpacity(isDark ? 0.35 : 0.12),
+                                Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
                           ),
                         ],
                       ),
@@ -1483,12 +1483,12 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
     final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inactiveBorder = isDark
-        ? Colors.white.withOpacity(0.18)
-        : Colors.black.withOpacity(0.10);
+        ? Colors.white.withValues(alpha: 0.18)
+        : Colors.black.withValues(alpha: 0.10);
     final primary = cs.primary;
     final fill = isDark
-        ? Colors.white.withOpacity(0.06)
-        : Colors.black.withOpacity(0.04);
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.black.withValues(alpha: 0.04);
     final border = _error ? cs.error : primary;
     final screenW = MediaQuery.sizeOf(context).width;
     final maxW = (screenW - 72).clamp(200.0, 400.0);
@@ -1546,7 +1546,7 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
                 fieldWidth: metrics.fieldWidth,
                 fieldOuterPadding: EdgeInsets.zero,
                 inactiveColor: _error ? cs.error : inactiveBorder,
-                activeColor: border.withOpacity(0.65),
+                activeColor: border.withValues(alpha: 0.65),
                 selectedColor: border,
                 inactiveFillColor: fill,
                 selectedFillColor: fill,

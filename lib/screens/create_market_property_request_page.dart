@@ -1,4 +1,4 @@
-﻿// ignore_for_file: unused_element, unused_element_parameter, unused_field, unused_local_variable
+// ignore_for_file: unused_element, unused_element_parameter, unused_field, unused_local_variable
 
 import 'dart:async';
 import 'dart:math';
@@ -194,7 +194,7 @@ class _CreateMarketPropertyRequestPageState
   String _profileAvatarUrl = '';
 
   static final _moneyInputFormatters = <TextInputFormatter>[
-    LatinDecimalNumberFormatter(),
+    const LatinDecimalNumberFormatter(),
   ];
 
   bool get _isAr => widget.isAr;
@@ -2141,7 +2141,7 @@ class _CreateMarketPropertyRequestPageState
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<MarketPropertyRequestPriority>(
-          value: _priorityChoices.contains(_requestPriority)
+          initialValue: _priorityChoices.contains(_requestPriority)
               ? _requestPriority
               : MarketPropertyRequestPriority.standard,
           decoration: InputDecoration(
@@ -2255,7 +2255,7 @@ class _CreateMarketPropertyRequestPageState
       ],
       if (_step == 1) ...[
         DropdownButtonFormField<String>(
-          value: PropertyTypeCatalog.typeGroups.any((g) => g.id == _typeGroupId)
+          initialValue: PropertyTypeCatalog.typeGroups.any((g) => g.id == _typeGroupId)
               ? _typeGroupId
               : PropertyTypeCatalog.typeGroups.first.id,
           decoration: deco(
@@ -2281,7 +2281,7 @@ class _CreateMarketPropertyRequestPageState
         ),
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
-          value: _effectiveTypeKeyForDropdown,
+          initialValue: _effectiveTypeKeyForDropdown,
           decoration: deco(_isAr ? 'نوع العقار' : 'Property type'),
           isExpanded: true,
           items: PropertyTypeCatalog.entriesForGroupMerged(_typeGroupId)
@@ -2512,7 +2512,7 @@ class _CreateMarketPropertyRequestPageState
             )
           else
             DropdownButtonFormField<String>(
-              value:
+              initialValue:
                   _selectedRegion != null && regions.contains(_selectedRegion!)
                       ? _selectedRegion
                       : null,
@@ -2542,7 +2542,7 @@ class _CreateMarketPropertyRequestPageState
               )
             else
               DropdownButtonFormField<String>(
-                value: _selectedGovernorate != null &&
+                initialValue: _selectedGovernorate != null &&
                         govList.contains(_selectedGovernorate!)
                     ? _selectedGovernorate
                     : null,
@@ -2575,7 +2575,7 @@ class _CreateMarketPropertyRequestPageState
                           onSelected: (v) => _onCitySelected(v),
                         )
                       : DropdownButtonFormField<String>(
-                          value: _selectedCityLabelInList,
+                          initialValue: _selectedCityLabelInList,
                           decoration: deco(_isAr ? 'المدينة *' : 'City *'),
                           hint: Text(_isAr ? 'اختر' : 'Choose'),
                           isExpanded: true,
@@ -2637,7 +2637,7 @@ class _CreateMarketPropertyRequestPageState
           const SizedBox(height: 10),
           if (_districtOptions.isNotEmpty)
             DropdownButtonFormField<String>(
-              value: _districtsCtrl.text.trim().isNotEmpty &&
+              initialValue: _districtsCtrl.text.trim().isNotEmpty &&
                       _districtOptions.contains(_districtsCtrl.text.trim())
                   ? _districtsCtrl.text.trim()
                   : null,
@@ -3026,7 +3026,7 @@ class _CreateMarketPropertyRequestPageState
                                       ? Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            SizedBox(
+                                            const SizedBox(
                                               width: 18,
                                               height: 18,
                                               child: AppLogoLoading(

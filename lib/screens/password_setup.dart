@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -1863,7 +1863,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
   double _hintFontSize(BuildContext context) {
     final w = MediaQuery.of(context).size.width;
-    final base = 14.0;
+    const base = 14.0;
     final f = (w / 390.0);
     final size = base * f;
     return size.clamp(11.0, 14.0);
@@ -1961,7 +1961,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: _bankColor.withOpacity(0.1),
+              color: _bankColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(
@@ -2006,7 +2006,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
   Widget _fieldAccountType() {
     return DropdownButtonFormField<String>(
-      value: _accountType,
+      initialValue: _accountType,
       decoration: _dec(
         context,
         hint: _isAr ? 'نوع الحساب' : 'Account type',
@@ -2119,7 +2119,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                 ? null
                 : _verifyFalLicense,
             icon: _verifyingFal
-                ? SizedBox(
+                ? const SizedBox(
                     width: 22,
                     height: 22,
                     child: AppLogoLoading(compact: true, size: 20),
@@ -2248,7 +2248,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                 ? null
                 : _runCommercialLookup,
             icon: _commercialBusy
-                ? SizedBox(
+                ? const SizedBox(
                     width: 22,
                     height: 22,
                     child: AppLogoLoading(compact: true, size: 20),
@@ -2463,7 +2463,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                       ),
                     ),
                     leading:
-                        Icon(Icons.alternate_email_rounded, color: _bankColor, size: 22),
+                        const Icon(Icons.alternate_email_rounded, color: _bankColor, size: 22),
                     onTap: () => onSelected(opt),
                   );
                 },
@@ -2517,7 +2517,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       children: [
         Row(
           children: [
-            Icon(Icons.badge_outlined, size: 22, color: _bankColor),
+            const Icon(Icons.badge_outlined, size: 22, color: _bankColor),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -2553,7 +2553,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
             ),
             child: Row(
               children: [
-                Icon(Icons.lock_outline_rounded, size: 18, color: _bankColor),
+                const Icon(Icons.lock_outline_rounded, size: 18, color: _bankColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -2770,7 +2770,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       children: [
         Row(
           children: [
-            Icon(Icons.draw_rounded, size: 22, color: _bankColor),
+            const Icon(Icons.draw_rounded, size: 22, color: _bankColor),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -2828,7 +2828,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               foregroundColor: _textPrimary,
               side: BorderSide(color: dividerColor),
             ),
-            icon: Icon(Icons.swipe_vertical_rounded, color: _bankColor, size: 20),
+            icon: const Icon(Icons.swipe_vertical_rounded, color: _bankColor, size: 20),
             label: Text(
               _isAr ? 'انتهيت — تفعيل التمرير في الصفحة' : 'Done — resume page scroll',
               style: TextStyle(
@@ -2900,7 +2900,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               onPressed: (_busy || _signupSigBusy || !_signupSigPadArmed)
                   ? null
                   : _undoSignupStroke,
-              icon: Icon(Icons.undo_rounded, size: 20, color: _bankColor),
+              icon: const Icon(Icons.undo_rounded, size: 20, color: _bankColor),
               label: Text(_isAr ? 'تراجع' : 'Undo'),
             ),
             TextButton.icon(
@@ -2910,7 +2910,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                       !_signupSigCtrl.canRedo)
                   ? null
                   : _redoSignupStroke,
-              icon: Icon(Icons.redo_rounded, size: 20, color: _bankColor),
+              icon: const Icon(Icons.redo_rounded, size: 20, color: _bankColor),
               label: Text(_isAr ? 'إعادة' : 'Redo'),
             ),
             TextButton.icon(
@@ -2926,7 +2926,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                   ? null
                   : _confirmDrawnSignupSignature,
               icon: _signupSigBusy
-                  ? SizedBox(
+                  ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: AppLogoLoading(compact: true, size: 16),
@@ -3092,7 +3092,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.verified_user_outlined, color: _bankColor, size: 22),
+              const Icon(Icons.verified_user_outlined, color: _bankColor, size: 22),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -3169,7 +3169,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.groups_outlined, color: _bankColor, size: 22),
+              const Icon(Icons.groups_outlined, color: _bankColor, size: 22),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -3224,8 +3224,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
   Widget _card({required double maxWidth, required bool allowScroll}) {
     final cardColor = _isLight
-        ? Colors.white.withOpacity(0.98)
-        : const Color(0xFF171A22).withOpacity(0.98);
+        ? Colors.white.withValues(alpha: 0.98)
+        : const Color(0xFF171A22).withValues(alpha: 0.98);
 
     final content = Column(
       mainAxisSize: MainAxisSize.min,
@@ -3298,7 +3298,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               hint: _isAr ? 'رقم الجوال (05xxxxxxxx)' : 'Mobile (05xxxxxxxx)',
               icon: Icons.phone_iphone_outlined,
               suffix: _teamInviteVerified
-                  ? Icon(Icons.verified_rounded, color: _bankColor)
+                  ? const Icon(Icons.verified_rounded, color: _bankColor)
                   : null,
             ),
           ),
@@ -3410,7 +3410,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                       key: const ValueKey('busy'),
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        SizedBox(
+                        const SizedBox(
                           width: 22,
                           height: 22,
                           child: AppLogoLoading(compact: true, size: 20),
@@ -3452,7 +3452,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                   },
             child: Text(
               _isAr ? 'لدي حساب بالفعل' : 'I already have an account',
-              style: TextStyle(
+              style: const TextStyle(
                 fontWeight: FontWeight.w900,
                 color: _bankColor,
                 fontSize: 14,
@@ -3477,7 +3477,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       constraints: BoxConstraints(maxWidth: maxWidth),
       child: Card(
         elevation: 8,
-        shadowColor: Colors.black.withOpacity(0.12),
+        shadowColor: Colors.black.withValues(alpha: 0.12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         color: cardColor,
         child: child,

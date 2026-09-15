@@ -90,7 +90,7 @@ class SpecifiedBudgetLine extends StatelessWidget {
             isAr ? 'المبلغ المحدد' : 'Specified amount',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
+            style: const TextStyle(
               fontWeight: FontWeight.w800,
               fontFamily: 'Cairo',
               fontSize: 11,

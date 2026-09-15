@@ -1168,7 +1168,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
                       )
                     else ...[
                       DropdownButtonFormField<String>(
-                        value: planId,
+                        initialValue: planId,
                         decoration: InputDecoration(
                           labelText: l10n.opsDeskGrantPlan,
                         ),
@@ -1189,7 +1189,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<int>(
-                        value: months,
+                        initialValue: months,
                         decoration: InputDecoration(
                           labelText: l10n.opsDeskGrantMonths,
                         ),
@@ -2738,7 +2738,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _campaignAudience,
+          initialValue: _campaignAudience,
           decoration: InputDecoration(labelText: l10n.opsDeskCampaignAudience),
           items: [
             DropdownMenuItem(
@@ -2770,7 +2770,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _campDeepRoute,
+          initialValue: _campDeepRoute,
           decoration: InputDecoration(labelText: l10n.opsDeskCampaignDeep),
           items: [
             DropdownMenuItem(
@@ -2888,7 +2888,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _adPlacement,
+          initialValue: _adPlacement,
           decoration: InputDecoration(labelText: l10n.opsDeskAdPlacement),
           items: [
             DropdownMenuItem(
@@ -3123,7 +3123,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
-          value: _promoKind,
+          initialValue: _promoKind,
           decoration: InputDecoration(labelText: l10n.opsDeskPromoKind),
           items: [
             DropdownMenuItem(

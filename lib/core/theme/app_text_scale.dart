@@ -40,7 +40,7 @@ class UnscaledTextScope extends StatelessWidget {
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
     return MediaQuery(
-      data: mq.copyWith(textScaler: TextScaler.linear(1.0)),
+      data: mq.copyWith(textScaler: const TextScaler.linear(1.0)),
       child: child,
     );
   }

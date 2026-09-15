@@ -188,7 +188,7 @@ void main() {
     TestWidgetsFlutterBinding.ensureInitialized();
 
     test('Arabic PDF bytes include per-user invoice number not UUID', () async {
-      final uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+      const uuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
       final bytes = await PaymentService.buildInvoicePdf(
         title: 'فاتورة اشتراك جديد',
         txnId: '1',

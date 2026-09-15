@@ -2,7 +2,6 @@
 
 // lib/screens/edit_property_page.dart
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -1024,7 +1023,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     });
 
     final imgBucket = _sb.storage.from('property-images');
-    final uuid = const Uuid();
+    const uuid = Uuid();
 
     try {
       await _sb.rpc(
@@ -1312,7 +1311,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
       } else {
         _showSnack(
           _isAr
-              ? 'تم حفظ التعديلات بنجاح (${_editCount}/$_maxEdits)'
+              ? 'تم حفظ التعديلات بنجاح ($_editCount/$_maxEdits)'
               : 'Changes saved successfully ($_editCount/$_maxEdits)',
         );
       }
@@ -1356,13 +1355,13 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: exhausted
-            ? cs.errorContainer.withOpacity(0.70)
-            : cs.primaryContainer.withOpacity(0.45),
+            ? cs.errorContainer.withValues(alpha: 0.70)
+            : cs.primaryContainer.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: exhausted
-              ? cs.error.withOpacity(0.25)
-              : const Color(0xFF0F766E).withOpacity(0.25),
+              ? cs.error.withValues(alpha: 0.25)
+              : const Color(0xFF0F766E).withValues(alpha: 0.25),
         ),
       ),
       child: Row(
@@ -1432,7 +1431,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
           actions: [
             IconButton(
               icon: _saving
-                  ? SizedBox(
+                  ? const SizedBox(
                       width: 22,
                       height: 22,
                       child: AppLogoLoading(compact: true, size: 20),
@@ -1460,10 +1459,10 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: cs.primaryContainer.withOpacity(0.45),
+                        color: cs.primaryContainer.withValues(alpha: 0.45),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: const Color(0xFF0F766E).withOpacity(0.25),
+                          color: const Color(0xFF0F766E).withValues(alpha: 0.25),
                         ),
                       ),
                       child: Text(
@@ -1501,7 +1500,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
-                        color: cs.outlineVariant.withOpacity(0.5),
+                        color: cs.outlineVariant.withValues(alpha: 0.5),
                       ),
                     ),
                     child: Form(
@@ -1595,7 +1594,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ),
                           const SizedBox(height: 12),
                           DropdownButtonFormField<String>(
-                            value: _purposeOptions
+                            initialValue: _purposeOptions
                                     .any((e) => e['code'] == _purpose)
                                 ? _purpose
                                 : 'sale',
@@ -1945,7 +1944,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               SizedBox(
                                 width: 140,
                                 child: DropdownButtonFormField<String>(
-                                  value: _currency,
+                                  initialValue: _currency,
                                   items: const [
                                     DropdownMenuItem(
                                       value: 'SAR',
@@ -2031,7 +2030,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                               SizedBox(
                                 width: 120,
                                 child: DropdownButtonFormField<ListingAreaUnit>(
-                                  value: _areaUnit,
+                                  initialValue: _areaUnit,
                                   items: [
                                     DropdownMenuItem(
                                       value: ListingAreaUnit.m2,
@@ -2320,7 +2319,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                         ? null
                                         : _pickAndUploadVideo,
                                 icon: _uploadingVideo
-                                    ? SizedBox(
+                                    ? const SizedBox(
                                         width: 22,
                                         height: 22,
                                         child: AppLogoLoading(
@@ -2410,7 +2409,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
-                        color: cs.outlineVariant.withOpacity(0.6),
+                        color: cs.outlineVariant.withValues(alpha: 0.6),
                       ),
                     ),
                     child: Column(
@@ -2433,7 +2432,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                       ? null
                                       : _pickImages,
                               icon: _picking
-                                  ? SizedBox(
+                                  ? const SizedBox(
                                       width: 22,
                                       height: 22,
                                       child: AppLogoLoading(
@@ -2572,7 +2571,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                           ? null
                           : _save,
                       icon: _saving
-                          ? SizedBox(
+                          ? const SizedBox(
                               width: 22,
                               height: 22,
                               child: AppLogoLoading(compact: true, size: 20),
@@ -2634,7 +2633,7 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
     }
 
     return DropdownButtonFormField<int?>(
-      value: value,
+      initialValue: value,
       items: items,
       onChanged: disabled ? null : onChanged,
       decoration: InputDecoration(
@@ -2699,7 +2698,7 @@ class _ImageTile extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: cs.outlineVariant.withOpacity(0.6),
+              color: cs.outlineVariant.withValues(alpha: 0.6),
             ),
           ),
           child: image,
@@ -2713,10 +2712,10 @@ class _ImageTile extends StatelessWidget {
               vertical: 4,
             ),
             decoration: BoxDecoration(
-              color: cs.surface.withOpacity(0.9),
+              color: cs.surface.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: cs.outlineVariant.withOpacity(0.6),
+                color: cs.outlineVariant.withValues(alpha: 0.6),
               ),
             ),
             child: Text(
@@ -2735,7 +2734,7 @@ class _ImageTile extends StatelessWidget {
             onPressed: disabled ? null : onRemove,
             icon: const Icon(Icons.close),
             style: IconButton.styleFrom(
-              backgroundColor: cs.surface.withOpacity(0.9),
+              backgroundColor: cs.surface.withValues(alpha: 0.9),
               foregroundColor: cs.error,
               padding: const EdgeInsets.all(6),
             ),
@@ -2750,7 +2749,7 @@ class _ImageTile extends StatelessWidget {
                 onPressed: disabled ? null : onMoveLeft,
                 icon: const Icon(Icons.chevron_left),
                 style: IconButton.styleFrom(
-                  backgroundColor: cs.surface.withOpacity(0.9),
+                  backgroundColor: cs.surface.withValues(alpha: 0.9),
                   foregroundColor: cs.onSurface,
                   padding: const EdgeInsets.all(6),
                 ),
@@ -2760,7 +2759,7 @@ class _ImageTile extends StatelessWidget {
                 onPressed: disabled ? null : onMoveRight,
                 icon: const Icon(Icons.chevron_right),
                 style: IconButton.styleFrom(
-                  backgroundColor: cs.surface.withOpacity(0.9),
+                  backgroundColor: cs.surface.withValues(alpha: 0.9),
                   foregroundColor: cs.onSurface,
                   padding: const EdgeInsets.all(6),
                 ),

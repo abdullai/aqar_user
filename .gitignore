@@ -21,6 +21,13 @@ migrate_working_dir/
 *.ipr
 *.iws
 .idea/
+.vs/
+
+# =====================
+# Local analyzer scratch output (not part of source)
+# =====================
+analyze-*.txt
+dart-fix-preview.txt
 
 # =====================
 # VS Code (اختياري)

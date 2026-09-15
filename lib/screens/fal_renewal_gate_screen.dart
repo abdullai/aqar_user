@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -119,7 +119,7 @@ class _FalRenewalGateScreenState extends State<FalRenewalGateScreen> {
                       keyboardType: TextInputType.number,
                       maxLength: 10,
                       inputFormatters: [
-                        ArabicDigitsToLatinFormatter(),
+                        const ArabicDigitsToLatinFormatter(),
                         FilteringTextInputFormatter.digitsOnly,
                       ],
                       decoration: InputDecoration(

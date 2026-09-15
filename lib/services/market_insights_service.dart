@@ -1,6 +1,5 @@
 // lib/services/market_insights_service.dart
 
-import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/market_insights_snapshot.dart';

@@ -1,5 +1,4 @@
-﻿import 'dart:async';
-import 'dart:ui' show FontFeature;
+import 'dart:async';
 
 import 'package:flutter/foundation.dart'
     show kDebugMode, kIsWeb, defaultTargetPlatform, TargetPlatform;

@@ -885,9 +885,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
             }
           }
         }
-        if (hit == null) {
-          hit = _propertyCache[revealId];
-        }
+        hit ??= _propertyCache[revealId];
         if (hit != null &&
             ListingPermissionsHelper.shouldShowInPublicHome(hit)) {
           out.removeWhere((p) => p.id == revealId);

@@ -526,7 +526,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
                     ? const Color(0xFF6D28D9)
                     : AqarBrandColors.primary;
     final topColor = Color.lerp(baseColor, Colors.white, 0.14)!;
-    final ink = Colors.white;
+    const ink = Colors.white;
     final muted = Colors.white.withValues(alpha: 0.88);
 
     TextPainter paintLine(
@@ -596,7 +596,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
         : null;
     final symbolH = pPrice.height;
     final symbolSize = SaudiRiyalSymbolIcon.canvasSizeFor(symbolH);
-    final sarGap = 3.0 * dpr;
+    const sarGap = 3.0 * dpr;
     final currencyW = !showSar
         ? 0.0
         : (isAr ? symbolSize.width : (sarPainter?.width ?? 0));
@@ -621,10 +621,10 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     );
     final width =
         (math.min(280.0, math.max(128.0, contentW / dpr + 36)) * dpr);
-    final tipH = 14.0 * dpr;
-    final padX = 12.0 * dpr;
-    final padTop = 9.0 * dpr;
-    final gap = 3.2 * dpr;
+    const tipH = 14.0 * dpr;
+    const padX = 12.0 * dpr;
+    const padTop = 9.0 * dpr;
+    const gap = 3.2 * dpr;
     final bubbleH = padTop +
         pPrice.height +
         gap +
@@ -640,7 +640,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
 
     final shadowPaint = Paint()
       ..color = Colors.black.withValues(alpha: selected ? 0.26 : 0.18)
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 5 * dpr);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5 * dpr);
     canvas.drawRRect(
       RRect.fromRectAndRadius(
         Rect.fromLTWH(3 * dpr, 4 * dpr, width - 6 * dpr, bubbleH - 2 * dpr),
@@ -682,12 +682,12 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
             : Colors.white.withValues(alpha: 0.92),
     );
 
-    final badgePadX = 7 * dpr;
+    const badgePadX = 7 * dpr;
     final badgeH = pBadge.height + 5 * dpr;
     final badgeW = pBadge.width + badgePadX * 2;
     final badgeR = RRect.fromRectAndRadius(
       Rect.fromLTWH(padX, padTop - 1 * dpr, badgeW, badgeH),
-      Radius.circular(999),
+      const Radius.circular(999),
     );
     canvas.drawRRect(
       badgeR,
@@ -1444,15 +1444,15 @@ class _MapDiscoveryCard extends StatelessWidget {
                               ? Image.network(
                                   entry.imageUrl,
                                   fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Padding(
-                                    padding: const EdgeInsets.all(8),
+                                  errorBuilder: (_, __, ___) => const Padding(
+                                    padding: EdgeInsets.all(8),
                                     child: BrandingLogoImage(
                                       fit: BoxFit.contain,
                                     ),
                                   ),
                                 )
-                              : Padding(
-                                  padding: const EdgeInsets.all(8),
+                              : const Padding(
+                                  padding: EdgeInsets.all(8),
                                   child: BrandingLogoImage(
                                     fit: BoxFit.contain,
                                   ),

@@ -755,7 +755,7 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
                       errorWidget: (_, __, ___) => Container(
                         color: _brandTeal.withValues(alpha: 0.12),
                         alignment: Alignment.center,
-                        child: BrandingLogoImage(
+                        child: const BrandingLogoImage(
                           fit: BoxFit.cover,
                           errorIcon: Icons.apartment_rounded,
                         ),
@@ -764,7 +764,7 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
                   : Container(
                       color: _brandTeal.withValues(alpha: 0.12),
                       alignment: Alignment.center,
-                      child: BrandingLogoImage(
+                      child: const BrandingLogoImage(
                         fit: BoxFit.cover,
                         errorIcon: Icons.apartment_rounded,
                       ),

@@ -321,11 +321,11 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                       ),
                       child: Card(
                         elevation: 0,
-                        color: cs.surface.withOpacity(isDark ? 0.82 : 0.92),
+                        color: cs.surface.withValues(alpha: isDark ? 0.82 : 0.92),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(24),
                           side: BorderSide(
-                            color: primary.withOpacity(isDark ? 0.22 : 0.18),
+                            color: primary.withValues(alpha: isDark ? 0.22 : 0.18),
                           ),
                         ),
                         child: Padding(
@@ -431,8 +431,8 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                                   ),
                                   const SizedBox(width: 8),
                                   Material(
-                                    color: primary.withOpacity(
-                                        isDark ? 0.22 : 0.12),
+                                    color: primary.withValues(
+                                        alpha: isDark ? 0.22 : 0.12),
                                     shape: const CircleBorder(),
                                     clipBehavior: Clip.antiAlias,
                                     child: InkWell(
@@ -503,14 +503,14 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
             color: filled ? accent : Colors.transparent,
             borderRadius: BorderRadius.circular(22),
             border: Border.all(
-              color: filled ? accent.withOpacity(0.0) : accent.withOpacity(0.50),
+              color: filled ? accent.withValues(alpha: 0.0) : accent.withValues(alpha: 0.50),
               width: 1.2,
             ),
             boxShadow: filled
                 ? [
                     BoxShadow(
                       blurRadius: 18,
-                      color: accent.withOpacity(0.22),
+                      color: accent.withValues(alpha: 0.22),
                       offset: const Offset(0, 12),
                     )
                   ]
@@ -523,8 +523,8 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                 height: 50,
                 decoration: BoxDecoration(
                   color: filled
-                      ? Colors.white.withOpacity(0.16)
-                      : accent.withOpacity(0.10),
+                      ? Colors.white.withValues(alpha: 0.16)
+                      : accent.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: Stack(
@@ -541,7 +541,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                       child: Icon(
                         topBadgeIcon,
                         size: 15,
-                        color: filled ? Colors.white70 : accent.withOpacity(0.9),
+                        color: filled ? Colors.white70 : accent.withValues(alpha: 0.9),
                       ),
                     ),
                   ],
@@ -585,7 +585,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
         Container(
           height: 128,
           alignment: Alignment.center,
-          child: BrandingLogoImage(
+          child: const BrandingLogoImage(
             height: 128,
             width: 128,
             fit: BoxFit.contain,
@@ -635,8 +635,8 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
     required String? fullName,
     required String? error,
   }) {
-    final boxBg = primary.withOpacity(isDark ? 0.14 : 0.10);
-    final border = primary.withOpacity(isDark ? 0.28 : 0.20);
+    final boxBg = primary.withValues(alpha: isDark ? 0.14 : 0.10);
+    final border = primary.withValues(alpha: isDark ? 0.28 : 0.20);
 
     final nameLine = (fullName ?? '').trim();
     final idLine = (username ?? '').trim();
@@ -655,7 +655,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: primary.withOpacity(isDark ? 0.20 : 0.12),
+              color: primary.withValues(alpha: isDark ? 0.20 : 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
             child: const Icon(Icons.verified_user_rounded, color: primary, size: 22),
@@ -677,7 +677,7 @@ class _EntryChoiceScreenState extends State<EntryChoiceScreen> {
                     ),
                     if (loading) ...[
                       const SizedBox(width: 10),
-                      SizedBox(
+                      const SizedBox(
                         width: 18,
                         height: 18,
                         child: AppLogoLoading(compact: true, size: 16),

@@ -5,7 +5,7 @@ abstract final class MarketingOfferFee {
 
   /// للنصوص في الواجهة (مثلاً «2.5٪» / «2.5%»).
   static String commissionPercentLabel({required bool isAr}) {
-    final v = commissionRate * 100;
+    const v = commissionRate * 100;
     final s =
         (v == v.roundToDouble()) ? v.toInt().toString() : v.toStringAsFixed(1);
     return isAr ? '$s٪' : '$s%';

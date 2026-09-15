@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
 import '../core/listing/property_type_catalog.dart';
@@ -226,7 +226,7 @@ class _PropertyTypeHierarchyPickerState
           )
         else
           DropdownButtonFormField<String>(
-            value: dropdownValue,
+            initialValue: dropdownValue,
             items: items
                 .map(
                   (e) => DropdownMenuItem<String>(

@@ -35,8 +35,9 @@ class ListingPermissionsHelper {
     required String? currentUserId,
     required bool hasActionableOffers,
   }) {
-    if (currentUserId == null || property.ownerId != currentUserId)
+    if (currentUserId == null || property.ownerId != currentUserId) {
       return false;
+    }
     if (_stage(property) != ListingWorkflowStage.waitingMarketers) return false;
     return hasActionableOffers;
   }
@@ -216,8 +217,9 @@ class ListingPermissionsHelper {
     required Property property,
     required String? currentUserId,
   }) {
-    if (currentUserId == null || property.ownerId != currentUserId)
+    if (currentUserId == null || property.ownerId != currentUserId) {
       return false;
+    }
     return const {
       ListingWorkflowStage.inactive72h,
       ListingWorkflowStage.cancelled,

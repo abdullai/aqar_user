@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:hijri/hijri_calendar.dart';
 
 import '../core/gestures/app_keyboard_popups.dart';
@@ -152,7 +152,7 @@ class _DeedDateCalendarDialogState extends State<_DeedDateCalendarDialog> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           DropdownButtonFormField<int>(
-                            value: hYear,
+                            initialValue: hYear,
                             decoration: InputDecoration(
                               labelText:
                                   widget.isAr ? 'السنة الهجرية' : 'Hijri year',
@@ -179,7 +179,7 @@ class _DeedDateCalendarDialogState extends State<_DeedDateCalendarDialog> {
                           ),
                           const SizedBox(height: 12),
                           DropdownButtonFormField<int>(
-                            value: hMonth,
+                            initialValue: hMonth,
                             decoration: InputDecoration(
                               labelText: widget.isAr ? 'الشهر' : 'Month',
                             ),
@@ -202,7 +202,7 @@ class _DeedDateCalendarDialogState extends State<_DeedDateCalendarDialog> {
                           ),
                           const SizedBox(height: 12),
                           DropdownButtonFormField<int>(
-                            value: hDay,
+                            initialValue: hDay,
                             decoration: InputDecoration(
                               labelText: widget.isAr ? 'اليوم' : 'Day',
                             ),

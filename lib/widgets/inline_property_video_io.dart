@@ -76,7 +76,7 @@ class _InlinePropertyVideoPlayerImplState
       );
     }
     return ColoredBox(
-      color: Colors.black.withOpacity(0.88),
+      color: Colors.black.withValues(alpha: 0.88),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

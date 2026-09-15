@@ -4,9 +4,8 @@ import 'package:flutter/material.dart';
 class PlusComposerPageRoute<T> extends PageRouteBuilder<T> {
   PlusComposerPageRoute({
     required WidgetBuilder builder,
-    RouteSettings? settings,
+    super.settings,
   }) : super(
-          settings: settings,
           fullscreenDialog: true,
           opaque: true,
           barrierDismissible: false,

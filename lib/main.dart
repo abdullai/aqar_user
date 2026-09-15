@@ -221,19 +221,19 @@ void _runSupabaseConfigMissingApp() {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
-                child: SingleChildScrollView(
+                child: const SingleChildScrollView(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.settings_suggest_outlined, size: 48),
-                      const SizedBox(height: 16),
-                      const Text(
+                      Icon(Icons.settings_suggest_outlined, size: 48),
+                      SizedBox(height: 16),
+                      Text(
                         'Supabase configuration missing',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 20, fontWeight: FontWeight.w800),
                       ),
-                      const SizedBox(height: 12),
+                      SizedBox(height: 12),
                       SelectableText(
                         kIsWeb
                             ? 'SUPABASE_ANON_KEY is not set or was rejected (placeholder / too short).\n\n'
@@ -256,7 +256,7 @@ void _runSupabaseConfigMissingApp() {
                                 'أو أضف .env في الجذر وفعّله في pubspec.\n\n'
                                 '— White screen was likely this: app crashed in main() before runApp.',
                         textAlign: TextAlign.center,
-                        style: const TextStyle(height: 1.45),
+                        style: TextStyle(height: 1.45),
                       ),
                     ],
                   ),
@@ -1549,8 +1549,9 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
                             final l = (args['lang'] ?? '').toString();
                             if (l.isNotEmpty) resolvedLang = l;
                           }
-                          if (contractId.trim().isEmpty)
+                          if (contractId.trim().isEmpty) {
                             return const GateScreen();
+                          }
                           return ContractVerifyPage(
                             contractId: contractId.trim(),
                             lang: resolvedLang,
@@ -1952,10 +1953,10 @@ class _StartRouterState extends State<StartRouter> {
                       ),
                       textAlign: TextAlign.center,
                       maxLines: 2,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w900,
-                        color: const Color(0xFF0B1220),
+                        color: Color(0xFF0B1220),
                         height: 1.25,
                       ),
                     ),
@@ -2060,7 +2061,7 @@ class OfflineGate extends StatelessWidget {
                           ),
                           onPressed: retrying ? null : onRetry,
                           icon: retrying
-                              ? SizedBox(
+                              ? const SizedBox(
                                   width: 22,
                                   height: 22,
                                   child:

@@ -193,7 +193,7 @@ class _IconBadgeButton extends StatelessWidget {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.10),
+                  color: color.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Icon(icon, color: color),
@@ -217,7 +217,7 @@ class _IconBadgeButton extends StatelessWidget {
                       BoxShadow(
                         blurRadius: 10,
                         offset: const Offset(0, 6),
-                        color: Colors.black.withOpacity(0.12),
+                        color: Colors.black.withValues(alpha: 0.12),
                       ),
                     ],
                   ),
@@ -282,7 +282,7 @@ class _BadgeIcon extends StatelessWidget {
                       BoxShadow(
                         blurRadius: 10,
                         offset: const Offset(0, 6),
-                        color: Colors.black.withOpacity(0.12),
+                        color: Colors.black.withValues(alpha: 0.12),
                       ),
                     ],
                   ),
@@ -444,7 +444,7 @@ class _AddButton extends StatelessWidget {
             blurRadius: 14,
             spreadRadius: 0,
             offset: const Offset(0, 5),
-            color: Colors.black.withOpacity(0.18),
+            color: Colors.black.withValues(alpha: 0.18),
           ),
         ],
       ),
@@ -576,7 +576,7 @@ class _RequestCard extends StatelessWidget {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: bankColor.withOpacity(0.10),
+                      color: bankColor.withValues(alpha: 0.10),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(Icons.description_outlined, color: bankColor),
@@ -1485,7 +1485,7 @@ class _HomeMixedTimeline extends StatelessWidget {
       required bool primary,
     }) {
       const spacing = 8.0;
-      final pad = const EdgeInsets.symmetric(horizontal: 12, vertical: 8);
+      const pad = EdgeInsets.symmetric(horizontal: 12, vertical: 8);
 
       final cacheExtent = primary && kIsWeb ? 360.0 : (primary ? 250.0 : 0.0);
 
@@ -1493,10 +1493,9 @@ class _HomeMixedTimeline extends StatelessWidget {
         return ListView.separated(
           // ويب/Expanded: primary:false دائماً — الاعتماد على PrimaryScrollController
           // كان يُظهر عدد النتائج دون رسم البطاقات (ارتفاع/ربط تمرير معطوب).
-          controller: controller,
+          cacheExtent: cacheExtent, controller: controller,
           primary: false,
           shrinkWrap: !primary,
-          cacheExtent: cacheExtent,
           physics: primary
               ? const AlwaysScrollableScrollPhysics()
               : const NeverScrollableScrollPhysics(),
@@ -1519,10 +1518,10 @@ class _HomeMixedTimeline extends StatelessWidget {
         spacing: spacing,
       );
       return ListView.separated(
+        cacheExtent: cacheExtent,
         controller: controller,
         primary: false,
         shrinkWrap: !primary,
-        cacheExtent: cacheExtent,
         physics: primary
             ? const AlwaysScrollableScrollPhysics()
             : const NeverScrollableScrollPhysics(),
@@ -1758,8 +1757,8 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         ? cs.tertiary
         : (Color.lerp(bankColor, cs.primary, 0.5) ?? bankColor);
     final borderColor = theme.brightness == Brightness.light
-        ? Colors.black.withOpacity(0.15)
-        : Colors.white.withOpacity(0.15);
+        ? Colors.black.withValues(alpha: 0.15)
+        : Colors.white.withValues(alpha: 0.15);
     final loggedIn = currentUserId != 'guest';
     final requestStatus = r.status.trim().toLowerCase();
     final requestCompleted = requestStatus == 'completed' ||
@@ -1978,8 +1977,9 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
                 ),
               )
             : null;
-        if (editAction == null)
+        if (editAction == null) {
           return SizedBox(width: double.infinity, child: mainAction);
+        }
         if (c.maxWidth < 420) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2213,16 +2213,17 @@ class _PropertyGrid extends StatelessWidget {
         Widget listingCard(Property p) {
           final isOwner = p.ownerId == currentUserId;
           final isGuest = currentUserId == 'guest';
-          final showDeal = ListingPermissionsHelper.shouldShowHomeListingDealButton(
-                property: p,
-                currentUserId: isGuest ? null : currentUserId,
-                isGuest: isGuest,
-              ) ||
-              ListingPermissionsHelper.shouldShowHomeListingBidButton(
-                property: p,
-                currentUserId: isGuest ? null : currentUserId,
-                isGuest: isGuest,
-              );
+          final showDeal =
+              ListingPermissionsHelper.shouldShowHomeListingDealButton(
+                    property: p,
+                    currentUserId: isGuest ? null : currentUserId,
+                    isGuest: isGuest,
+                  ) ||
+                  ListingPermissionsHelper.shouldShowHomeListingBidButton(
+                    property: p,
+                    currentUserId: isGuest ? null : currentUserId,
+                    isGuest: isGuest,
+                  );
           return _RealEstateCard(
             property: p,
             isOwner: isOwner,
@@ -2266,11 +2267,11 @@ class _PropertyGrid extends StatelessWidget {
         if (isPhone) {
           if (primaryScroll) {
             return ListView.separated(
+              cacheExtent: kIsWeb ? 360 : 250,
               controller: scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
-              cacheExtent: kIsWeb ? 360 : 250,
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, i) => listingCard(items[i]),
@@ -2305,11 +2306,11 @@ class _PropertyGrid extends StatelessWidget {
         final rowCount = (items.length + cross - 1) ~/ cross;
         if (primaryScroll) {
           return ListView.separated(
+            cacheExtent: kIsWeb ? 360 : 250,
             controller: scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
-            cacheExtent: kIsWeb ? 360 : 250,
             itemCount: rowCount,
             separatorBuilder: (_, __) => const SizedBox(height: spacing),
             itemBuilder: (context, row) {
@@ -2329,7 +2330,7 @@ class _PropertyGrid extends StatelessWidget {
         final rowChildren = <Widget>[];
         for (var start = 0; start < items.length; start += cross) {
           if (rowChildren.isNotEmpty) {
-            rowChildren.add(SizedBox(height: spacing));
+            rowChildren.add(const SizedBox(height: spacing));
           }
           rowChildren.add(
             _listingFeedCardsRow(
@@ -2998,7 +2999,7 @@ class _RealEstateCard extends StatelessWidget {
             top: 8,
             end: 8,
             child: Material(
-              color: Colors.black.withOpacity(0.45),
+              color: Colors.black.withValues(alpha: 0.45),
               shape: const CircleBorder(),
               clipBehavior: Clip.antiAlias,
               child: PopupMenuButton<String>(
@@ -3120,7 +3121,7 @@ class _RealEstateCard extends StatelessWidget {
             top: 8,
             end: 8,
             child: Material(
-              color: Colors.black.withOpacity(0.45),
+              color: Colors.black.withValues(alpha: 0.45),
               shape: const CircleBorder(),
               clipBehavior: Clip.antiAlias,
               child: ListingPublicActionsMenuButton(
@@ -3290,8 +3291,8 @@ class _RealEstateCard extends StatelessWidget {
     bool omitMarketingLicenseEntries = false,
   }) {
     final borderHint = theme.brightness == Brightness.light
-        ? Colors.black.withOpacity(0.15)
-        : Colors.white.withOpacity(0.15);
+        ? Colors.black.withValues(alpha: 0.15)
+        : Colors.white.withValues(alpha: 0.15);
     final listingBorder = Color.lerp(
           PropertyListingDisplay.accentColor(property),
           typeAccent,
@@ -3328,9 +3329,8 @@ class _RealEstateCard extends StatelessWidget {
         : (property.province ?? '').trim();
     final regionText = LocaleContent.forUi(regionRaw, isAr: isAr);
     final cityRaw = PropertyListingDisplay.cityLine(property);
-    final cityText = cityRaw == '-'
-        ? ''
-        : LocaleContent.forUi(cityRaw, isAr: isAr);
+    final cityText =
+        cityRaw == '-' ? '' : LocaleContent.forUi(cityRaw, isAr: isAr);
     final districtText = LocaleContent.forUi(
       (property.location ?? '').trim(),
       isAr: isAr,
@@ -3358,7 +3358,7 @@ class _RealEstateCard extends StatelessWidget {
             ),
           ),
         ],
-        SizedBox(height: 2),
+        const SizedBox(height: 2),
         SizedBox(
           width: double.infinity,
           child: UnifiedCardSpecRow(
@@ -3554,7 +3554,7 @@ class _RealEstateCard extends StatelessWidget {
             ),
           ),
         ],
-        SizedBox(height: 2),
+        const SizedBox(height: 2),
         Builder(
           builder: (ctx) {
             final raw = (property.listingPublicCode ?? '').trim();
@@ -3564,8 +3564,9 @@ class _RealEstateCard extends StatelessWidget {
                     currencyCode: 'SAR',
                     isAr: isAr,
                     maxFractionDigits: 0,
-                    symbolColor:
-                        property.isAuction ? Colors.orange.shade800 : cs.primary,
+                    symbolColor: property.isAuction
+                        ? Colors.orange.shade800
+                        : cs.primary,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w900,
                       color: property.isAuction
@@ -3853,24 +3854,26 @@ class _RealEstateCard extends StatelessWidget {
     final typeAccent = PropertyTypeCatalog.accentFor(typeKey);
 
     final isGuest = currentUserId == 'guest';
-    final canAddToCart = ListingPermissionsHelper.shouldShowHomeListingDealButton(
-          property: property,
-          currentUserId: isGuest ? null : currentUserId,
-          isGuest: isGuest,
-        ) &&
-        onAddToCart != null &&
-        (isGuest || canShowCartButton);
-    final canBidFromCard = ListingPermissionsHelper.shouldShowHomeListingBidButton(
-          property: property,
-          currentUserId: isGuest ? null : currentUserId,
-          isGuest: isGuest,
-        ) &&
-        (ListingPermissionsHelper.canOpenBidFromHomeCard(
+    final canAddToCart =
+        ListingPermissionsHelper.shouldShowHomeListingDealButton(
               property: property,
               currentUserId: isGuest ? null : currentUserId,
               isGuest: isGuest,
-            ) ||
-            onAddToCart != null);
+            ) &&
+            onAddToCart != null &&
+            (isGuest || canShowCartButton);
+    final canBidFromCard =
+        ListingPermissionsHelper.shouldShowHomeListingBidButton(
+              property: property,
+              currentUserId: isGuest ? null : currentUserId,
+              isGuest: isGuest,
+            ) &&
+            (ListingPermissionsHelper.canOpenBidFromHomeCard(
+                  property: property,
+                  currentUserId: isGuest ? null : currentUserId,
+                  isGuest: isGuest,
+                ) ||
+                onAddToCart != null);
 
     return LayoutBuilder(
       builder: (context, c) {
@@ -4097,7 +4100,7 @@ class _PropertyImage extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     Widget placeholder() => ColoredBox(
-          color: cs.surfaceContainerHighest.withOpacity(0.35),
+          color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
           child: const BrandingLogoImage(
             fillFrame: true,
             filterQuality: FilterQuality.high,
@@ -4128,12 +4131,12 @@ class _PropertyImage extends StatelessWidget {
             );
           },
           child: ColoredBox(
-            color: cs.surfaceContainerHighest.withOpacity(0.4),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
             child: Center(
               child: Icon(
                 Icons.play_circle_fill_rounded,
                 size: 56,
-                color: cs.primary.withOpacity(0.88),
+                color: cs.primary.withValues(alpha: 0.88),
               ),
             ),
           ),
@@ -4246,12 +4249,12 @@ class _ListingImagePagerState extends State<_ListingImagePager> {
                     height: 6,
                     decoration: BoxDecoration(
                       color: on
-                          ? Colors.white.withOpacity(0.95)
-                          : Colors.white.withOpacity(0.45),
+                          ? Colors.white.withValues(alpha: 0.95)
+                          : Colors.white.withValues(alpha: 0.45),
                       borderRadius: BorderRadius.circular(999),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.35),
+                          color: Colors.black.withValues(alpha: 0.35),
                           blurRadius: 4,
                           offset: const Offset(0, 1),
                         ),
@@ -4284,7 +4287,7 @@ class _Pill extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    final bg = background ?? cs.surface.withOpacity(0.92);
+    final bg = background ?? cs.surface.withValues(alpha: 0.92);
     final fg = foreground ?? cs.onSurface;
 
     return Container(
@@ -4297,7 +4300,7 @@ class _Pill extends StatelessWidget {
         color: bg,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: cs.outlineVariant.withOpacity(0.45),
+          color: cs.outlineVariant.withValues(alpha: 0.45),
         ),
       ),
       child: Row(
@@ -4346,10 +4349,10 @@ class _CornerBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.35)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.35)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.18),
+            color: Colors.black.withValues(alpha: 0.18),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -4413,9 +4416,10 @@ class _SearchField extends StatelessWidget {
     final chip = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F766E).withOpacity(0.08),
+        color: const Color(0xFF0F766E).withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFF0F766E).withOpacity(0.18)),
+        border:
+            Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.18)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -4492,7 +4496,7 @@ class _SearchField extends StatelessWidget {
               BoxShadow(
                 blurRadius: 14,
                 offset: const Offset(0, 8),
-                color: cs.shadow.withOpacity(0.05),
+                color: cs.shadow.withValues(alpha: 0.05),
               ),
             ],
           ),
@@ -4517,7 +4521,7 @@ class _SearchField extends StatelessWidget {
               ),
               suffixIcon: Icon(
                 Icons.travel_explore_outlined,
-                color: const Color(0xFF0F766E).withOpacity(0.80),
+                color: const Color(0xFF0F766E).withValues(alpha: 0.80),
                 size: isSmall ? 20 : 22,
               ),
               border: OutlineInputBorder(
@@ -4536,7 +4540,7 @@ class _SearchField extends StatelessWidget {
               ),
               isDense: true,
               filled: true,
-              fillColor: cs.surfaceContainerHighest.withOpacity(0.35),
+              fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.35),
               contentPadding: isSmall
                   ? const EdgeInsets.symmetric(vertical: 12, horizontal: 12)
                   : const EdgeInsets.symmetric(vertical: 16, horizontal: 16),

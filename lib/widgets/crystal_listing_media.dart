@@ -43,8 +43,8 @@ class CrystalListingMedia extends StatelessWidget {
     final size = mq.size;
     final w = (logicalW ?? size.width).clamp(160.0, 4096.0);
     final h = (logicalH ?? (w * 0.72)).clamp(120.0, 4096.0);
-    final maxW = kIsWeb ? 2560 : 4096;
-    final maxH = kIsWeb ? 1800 : 3072;
+    const maxW = kIsWeb ? 2560 : 4096;
+    const maxH = kIsWeb ? 1800 : 3072;
     return (
       (w * dpr * 1.15).round().clamp(480, maxW),
       (h * dpr * 1.15).round().clamp(360, maxH),

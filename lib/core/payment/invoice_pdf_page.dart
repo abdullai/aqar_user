@@ -148,7 +148,7 @@ void addOfficialInvoicePage({
     return pw.Container(
       padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: pw.BoxDecoration(
-        color: PdfColor.fromInt(0xFFCCFBF1),
+        color: const PdfColor.fromInt(0xFFCCFBF1),
         borderRadius: pw.BorderRadius.circular(4),
         border: pw.Border.all(color: kDocumentBrandPdfColor, width: 0.55),
       ),
@@ -247,7 +247,7 @@ void addOfficialInvoicePage({
                 pw.Container(
                   padding: const pw.EdgeInsets.fromLTRB(12, 10, 12, 10),
                   decoration: pw.BoxDecoration(
-                    color: PdfColor.fromInt(0xFFF8FAFC),
+                    color: const PdfColor.fromInt(0xFFF8FAFC),
                     border:
                         pw.Border.all(color: PdfColors.grey400, width: 0.5),
                     borderRadius: pw.BorderRadius.circular(6),

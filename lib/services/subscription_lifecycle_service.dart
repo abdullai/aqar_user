@@ -209,18 +209,18 @@ class PlanQuote {
   });
 
   factory PlanQuote.fromMap(Map<String, dynamic> m) {
-    double _d(dynamic v) => double.tryParse('$v') ?? 0;
+    double d(dynamic v) => double.tryParse('$v') ?? 0;
     return PlanQuote(
       planId: '${m['plan_id'] ?? ''}',
       period: '${m['period'] ?? 'monthly'}',
-      base: _d(m['base']),
-      subtotal: _d(m['subtotal']),
-      autoPayDiscountPercent: _d(m['auto_pay_discount_percent']),
-      retentionDiscountPercent: _d(m['retention_discount_percent']),
-      yearlyImplicitDiscountPercent: _d(m['yearly_implicit_discount_percent']),
-      totalDiscountPercent: _d(m['total_discount_percent']),
-      totalDue: _d(m['total_due']),
-      savings: _d(m['savings']),
+      base: d(m['base']),
+      subtotal: d(m['subtotal']),
+      autoPayDiscountPercent: d(m['auto_pay_discount_percent']),
+      retentionDiscountPercent: d(m['retention_discount_percent']),
+      yearlyImplicitDiscountPercent: d(m['yearly_implicit_discount_percent']),
+      totalDiscountPercent: d(m['total_discount_percent']),
+      totalDue: d(m['total_due']),
+      savings: d(m['savings']),
     );
   }
 }
@@ -341,7 +341,7 @@ class CancellationOffer {
             retOffer.map((k, v) => MapEntry(k.toString(), v)),
           )
         : <String, dynamic>{};
-    DateTime? _ts(dynamic v) {
+    DateTime? ts(dynamic v) {
       if (v == null) return null;
       try {
         return DateTime.parse('$v').toLocal();
@@ -358,7 +358,7 @@ class CancellationOffer {
           double.tryParse('${ro['discount_percent'] ?? 0}') ?? 0,
       retentionMessageAr: '${ro['message_ar'] ?? ''}',
       retentionMessageEn: '${ro['message_en'] ?? ''}',
-      effectiveAt: _ts(m['effective_at']),
+      effectiveAt: ts(m['effective_at']),
       noteAr: '${m['note_ar'] ?? ''}',
       noteEn: '${m['note_en'] ?? ''}',
     );
@@ -398,7 +398,7 @@ class CancellationConfirmation {
       );
 
   factory CancellationConfirmation.fromMap(Map<String, dynamic> m) {
-    DateTime? _ts(dynamic v) {
+    DateTime? ts(dynamic v) {
       if (v == null) return null;
       try {
         return DateTime.parse('$v').toLocal();
@@ -412,7 +412,7 @@ class CancellationConfirmation {
       cancelled: m['cancelled'] == true,
       retentionApplied: m['retention_applied'] == true,
       discountPercent: double.tryParse('${m['discount_percent'] ?? 0}') ?? 0,
-      effectiveAt: _ts(m['effective_at']),
+      effectiveAt: ts(m['effective_at']),
       messageAr: '${m['message_ar'] ?? ''}',
       messageEn: '${m['message_en'] ?? ''}',
     );

@@ -324,7 +324,7 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
               keyboardType: TextInputType.number,
               enabled: !_busy && !_polling,
               inputFormatters: [
-                ArabicDigitsToLatinFormatter(),
+                const ArabicDigitsToLatinFormatter(),
                 FilteringTextInputFormatter.digitsOnly,
                 LengthLimitingTextInputFormatter(10),
               ],

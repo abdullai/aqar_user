@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform, kDebugMode, kIsWeb, kReleaseMode;
@@ -1192,7 +1191,7 @@ class PaymentService {
   }
 
   static PdfColor get _invoiceBrand => kDocumentBrandPdfColor;
-  static PdfColor get _invoiceBrandLight => PdfColor.fromInt(0xFFCCFBF1);
+  static PdfColor get _invoiceBrandLight => const PdfColor.fromInt(0xFFCCFBF1);
 
   static Future<({pw.Font base, pw.Font bold, List<pw.Font> fallback})>
       _invoiceFonts() async {

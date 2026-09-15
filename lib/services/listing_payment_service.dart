@@ -92,7 +92,7 @@ abstract final class ListingPaymentService {
   }) async {
     final id = paymentEventId.trim();
     if (id.isEmpty) {
-      return CheckoutLaunchResult(
+      return const CheckoutLaunchResult(
         ok: false,
         messageEn: 'Missing payment id',
         messageAr: 'معرّف الدفع مفقود',
@@ -105,7 +105,7 @@ abstract final class ListingPaymentService {
       );
       final data = res.data;
       if (data is! Map) {
-        return CheckoutLaunchResult(
+        return const CheckoutLaunchResult(
           ok: false,
           messageEn: 'Unexpected response',
           messageAr: 'استجابة غير متوقعة',
@@ -128,7 +128,7 @@ abstract final class ListingPaymentService {
       }
       final url = (map['checkout_url'] ?? '').toString().trim();
       if (url.isEmpty) {
-        return CheckoutLaunchResult(
+        return const CheckoutLaunchResult(
           ok: false,
           messageEn: 'No checkout URL returned',
           messageAr: 'لم يُرجَع رابط دفع',
@@ -136,7 +136,7 @@ abstract final class ListingPaymentService {
       }
       final uri = Uri.tryParse(url);
       if (uri == null) {
-        return CheckoutLaunchResult(
+        return const CheckoutLaunchResult(
           ok: false,
           messageEn: 'Invalid checkout URL',
           messageAr: 'رابط الدفع غير صالح',

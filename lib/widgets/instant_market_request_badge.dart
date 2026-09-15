@@ -47,7 +47,7 @@ class InstantMarketRequestBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = const Color(0xFFDC2626);
+    const accent = Color(0xFFDC2626);
     final remaining = _remainingLabel();
     final label = compact
         ? (isAr ? 'فوري' : 'Instant')

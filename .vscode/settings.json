@@ -1,6 +1,8 @@
 {
   "deno.enable": false,
-  "deno.enablePaths": ["supabase/functions"],
+  "deno.enablePaths": [
+    "supabase/functions"
+  ],
   "typescript.tsserver.experimental.enableProjectDiagnostics": true,
   "mssql.intelliSense.enable": false,
   "files.associations": {
@@ -11,5 +13,8 @@
   "[dart]": {
     "editor.formatOnSave": true,
     "editor.defaultFormatter": "Dart-Code.dart-code"
+  },
+  "chat.tools.terminal.autoApprove": {
+    "Tee-Object": true
   }
 }

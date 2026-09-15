@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
@@ -160,9 +160,7 @@ class _OrgJoinRequestsDeskPageState extends State<OrgJoinRequestsDeskPage> {
   Widget _invitationCard(Map<String, dynamic> row) {
     final cs = Theme.of(context).colorScheme;
     final exp = DateTime.tryParse('${row['expires_at'] ?? ''}');
-    final hoursLeft = exp == null
-        ? null
-        : exp.difference(DateTime.now()).inHours.clamp(0, 999);
+    final hoursLeft = exp?.difference(DateTime.now()).inHours.clamp(0, 999);
 
     return Card(
       elevation: 0,
