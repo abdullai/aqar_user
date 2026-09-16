@@ -13,6 +13,9 @@ abstract final class SafeOverlayPop {
   /// يُحقَن من [UserDashboard] — يغلق مساراً واحداً من جسم اللوحة فقط.
   static bool Function()? popNested;
 
+  /// يُحقَن من [UserDashboard] — يفحص جسم اللوحة دون تنفيذ عملية إغلاق.
+  static bool Function()? canPopNested;
+
   /// يحدد إن كان هناك مسار ظاهر يمكن إغلاقه دون إسقاط هيكل التطبيق.
   /// يستخدمه شريط الصفحة حتى لا يعرض زر X لا يملك عملية إغلاق حقيقية.
   static bool canPop({
@@ -21,8 +24,8 @@ abstract final class SafeOverlayPop {
     bool Function()? popNestedOverride,
   }) {
     if (root != null && _hasOverlay(root)) return true;
-    final nestedPop = popNestedOverride ?? popNested;
-    if (nestedPop != null) return true;
+    final nestedCanPop = canPopNested;
+    if (nestedCanPop?.call() == true) return true;
     if (nested != null && _hasOverlay(nested)) return true;
     return false;
   }

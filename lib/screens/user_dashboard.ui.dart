@@ -3700,6 +3700,8 @@ class _UserDashboardState extends State<UserDashboard>
     WebInAppNav.nestedNavigatorKey = _dashboardBodyNavKey;
     WebInAppNav.popNested = _popDashboardBodyRoute;
     SafeOverlayPop.popNested = _popDashboardBodyRoute;
+    SafeOverlayPop.canPopNested =
+        () => _dashboardBodyNavKey.currentState?.canPop() ?? false;
 
     _lastAuthUserId = _sb.auth.currentUser?.id;
     _hydrateAccountRoleFromCache();
@@ -4501,6 +4503,7 @@ class _UserDashboardState extends State<UserDashboard>
     }
     if (identical(SafeOverlayPop.popNested, _popDashboardBodyRoute)) {
       SafeOverlayPop.popNested = null;
+      SafeOverlayPop.canPopNested = null;
     }
     langNotifier.removeListener(_onLiveAppearanceChanged);
     themeModeNotifier.removeListener(_onLiveAppearanceChanged);
