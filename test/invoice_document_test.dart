@@ -130,7 +130,8 @@ void main() {
     test('purpose, statement and period do not duplicate', () {
       expect(InvoiceCopy.purposeLabel('renew', isAr: true), 'تجديد اشتراك');
       expect(InvoiceCopy.purposeLabel('upgrade', isAr: true), 'ترقية الباقة');
-      expect(InvoiceCopy.purposeLabel('subscribe_new', isAr: true), 'اشتراك جديد');
+      expect(
+          InvoiceCopy.purposeLabel('subscribe_new', isAr: true), 'اشتراك جديد');
       final statement = InvoiceCopy.statementForPlan('ذهبي', isAr: true);
       expect(statement.contains('ذهبي'), isTrue);
       expect(statement.contains('من '), isFalse);
@@ -162,6 +163,7 @@ void main() {
       expect(ar.contains('SAR'), isFalse);
       expect(ar.contains(AppMoney.saudiRiyalSignCompat), isTrue);
       expect(ar.contains('12.5'), isTrue);
+      expect(ar, contains('${AppMoney.saudiRiyalSignCompat}12.5'));
       expect(en.contains('SAR'), isTrue);
       expect(en.contains('ر.س'), isFalse);
       expect(en.contains(AppMoney.saudiRiyalSignCompat), isFalse);
@@ -207,7 +209,8 @@ void main() {
           'amount': 199,
           'status': 'success',
           'id': uuid,
-        }, isAr: true).qrPayload,
+        }, isAr: true)
+            .qrPayload,
       );
       expect(bytes.length, greaterThan(2000));
       final asText = String.fromCharCodes(bytes);

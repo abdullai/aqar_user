@@ -556,9 +556,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final t2 = ar ? 'لم يتخذ إجراء 72 ساعة' : 'No action (72h)';
     final t3 = ar ? 'مفسوخ / ملغى' : 'Cancelled / terminated';
     final t4 = ar ? 'العقارات المحجوزة' : 'Reserved properties';
-    // ملاحظة: تم حذف تبويب «إعلاناتي المنشورة» — الإعلانات المنشورة تظهر
-    // في الرئيسية وفي «إعلاناتي/طلباتي» المجاور للرئيسية.
     final t6 = ar ? 'صفقات مكتملة' : 'Completed deals';
+    final t7 = ar ? 'إعلاناتي' : 'My listings';
 
     return Column(
       children: [
@@ -594,6 +593,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             _ownerTabWithBadge(
               t6,
               _ownerMyPageTabBadgeCount(6, myItems),
+            ),
+            _ownerTabWithBadge(
+              t7,
+              _ownerMyPageTabBadgeCount(7, myItems),
             ),
           ],
         ),
@@ -641,6 +644,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                       ),
                       _buildOwnerReservationsTab(l10n),
                       _buildOwnerCompletedDealsTab(myItems),
+                      _buildOwnerPublishedPropertiesList(
+                        items: _filterOwnerHubTab(myItems, 6),
+                        emptyText: ar
+                            ? 'لا توجد إعلانات منشورة بعد'
+                            : 'No published listings yet',
+                      ),
                     ],
                   )
                 : AnimatedBuilder(
@@ -704,6 +713,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         return _buildOwnerReservationsTab(l10n);
       case 6:
         return _buildOwnerCompletedDealsTab(myItems);
+      case 7:
+        return _buildOwnerPublishedPropertiesList(
+          items: _filterOwnerHubTab(myItems, 6),
+          emptyText:
+              ar ? 'لا توجد إعلانات منشورة بعد' : 'No published listings yet',
+        );
       case 0:
       default:
         return _buildOwnerHubTab(
@@ -731,7 +746,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       case 5:
         return 4; // المحجوزة
       case 6:
-        return 6; // الصفقات المكتملة
+        return 8; // الصفقات المكتملة
+      case 7:
+        return 6; // الإعلانات المنشورة
       default:
         return 0;
     }
@@ -4865,6 +4882,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       case 5:
         return _offers.length;
       case 6:
+        return _filterOwnerHubTab(myItems, 8).length;
+      case 7:
         return _filterOwnerHubTab(myItems, 6).length;
       default:
         return 0;

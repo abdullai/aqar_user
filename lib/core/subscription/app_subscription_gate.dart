@@ -45,12 +45,10 @@ class AppSubscriptionGate extends ChangeNotifier {
   bool get isMarketingAccount =>
       AppRoleHelper.isMarketingAccountType(accountType);
 
-  /// إتمام صفقة على طلبات الرئيسية —
-  /// مجاني للمالك/المستخدم العادي؛ للمسوّق حسب حصة عروض الاشتراك.
+  /// إتمام صفقة على طلبات الرئيسية — يحتاج حصة اشتراك لكل حساب مسجل.
   bool get canCompleteMarketDeal {
     if (AppConfig.devBypassSubscriptionGate) return true;
     if (isGuest) return false;
-    if (!isMarketingAccount) return true;
     // أثناء التحميل لا نمنع الزر حتى لا تومض شاشة الاشتراك خطأً.
     if (!loaded) return true;
     final a = marketOfferAllowance;
@@ -65,7 +63,7 @@ class AppSubscriptionGate extends ChangeNotifier {
     return !canCompleteMarketDeal;
   }
 
-  /// نشر «طلب عقاري» — مجاني للمالك/المستخدم العادي.
+  /// نشر «طلب عقاري» — قواعده مستقلة عن حصة إتمام الصفقة.
   bool get canAddMarketPropertyRequest {
     if (AppConfig.devBypassSubscriptionGate) return true;
     if (isGuest) return false;
@@ -119,10 +117,8 @@ class AppSubscriptionGate extends ChangeNotifier {
   String alertBodyAr(SubscriptionGateAction action) {
     switch (action) {
       case SubscriptionGateAction.completeMarketDeal:
-        return isMarketingAccount
-            ? (marketOfferAllowance?.shortStatusAr() ??
-                'يلزم اشتراك لإتمام الصفقة.')
-            : 'إتمام الصفقة على طلبات الآخرين مجاني — لا يلزم اشتراك.';
+        return marketOfferAllowance?.shortStatusAr() ??
+            'يلزم اشتراك مناسب لإتمام الصفقة.';
       case SubscriptionGateAction.addMarketPropertyRequest:
         return isMarketingAccount
             ? (listingRequestsAllowance?.shortStatusAr() ??
@@ -141,10 +137,8 @@ class AppSubscriptionGate extends ChangeNotifier {
   String alertBodyEn(SubscriptionGateAction action) {
     switch (action) {
       case SubscriptionGateAction.completeMarketDeal:
-        return isMarketingAccount
-            ? (marketOfferAllowance?.shortStatusEn() ??
-                'Subscription required to complete deals.')
-            : 'Completing deals on others\' requests is free — no subscription needed.';
+        return marketOfferAllowance?.shortStatusEn() ??
+            'A suitable subscription is required to complete deals.';
       case SubscriptionGateAction.addMarketPropertyRequest:
         return isMarketingAccount
             ? (listingRequestsAllowance?.shortStatusEn() ??
@@ -275,7 +269,8 @@ class AppSubscriptionGate extends ChangeNotifier {
 
   Future<void> _loadSnapshot(String uid) async {
     try {
-      final (at, oid) = await MarketingSubscriptionAccess.loadBillingContext(_sb);
+      final (at, oid) =
+          await MarketingSubscriptionAccess.loadBillingContext(_sb);
       accountType = at;
       organizationId = oid;
 
@@ -302,13 +297,12 @@ class AppSubscriptionGate extends ChangeNotifier {
           : <String, dynamic>{};
 
       if (ctx is SubscriptionBillingContext) {
-        marketingFeatureAccess =
-            ctx.ok && ctx.hasMarketingFeatureAccess;
+        marketingFeatureAccess = ctx.ok && ctx.hasMarketingFeatureAccess;
       }
       if (entitlements['ok'] == true && entitlements['active'] == true) {
         marketingFeatureAccess =
             entitlements['can_use_marketing_workflow'] == true ||
-            marketingFeatureAccess;
+                marketingFeatureAccess;
       }
       if (!marketingFeatureAccess) {
         marketingFeatureAccess =

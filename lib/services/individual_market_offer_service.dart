@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../core/payment/platform_fee_catalog.dart';
 import '../core/workflow/app_role_helper.dart';
 
 /// حصة تقديم عروض على طلبات السوق من الرئيسية (فردي أو تسويق).
@@ -43,8 +42,7 @@ class IndividualMarketOfferAllowance {
   final String? planId;
   final String? error;
 
-  bool get isUnlimited =>
-      (isTrial && audience == 'marketing') || max >= 999999;
+  bool get isUnlimited => (isTrial && audience == 'marketing') || max >= 999999;
 
   bool get canSubmitNow {
     if (!ok) return false;
@@ -64,9 +62,7 @@ class IndividualMarketOfferAllowance {
       rem = 999999;
     } else {
       max = int.tryParse('$maxRaw') ?? 0;
-      rem = remRaw == null
-          ? max
-          : (int.tryParse('$remRaw') ?? 0);
+      rem = remRaw == null ? max : (int.tryParse('$remRaw') ?? 0);
     }
     return IndividualMarketOfferAllowance(
       ok: m['ok'] == true,
@@ -106,10 +102,7 @@ class IndividualMarketOfferAllowance {
       return 'الفترة التجريبية مفعّلة — يمكنك إتمام الصفقات.';
     }
     if (!hasSubscription) {
-      if (audience != 'marketing') {
-        return 'إتمام الصفقة على طلبات الآخرين مجاني — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: true) ?? 'ادفع فقط عند اختيار «فوري»'} لطلبك.';
-      }
-      return 'يلزم اشتراك الباقة المناسبة لنوع حسابك لإتمام الصفقات.';
+      return 'يلزم اشتراك باقة صفقات مناسب لنوع حسابك لإتمام الصفقات.';
     }
     if (planProgram == 'lifetime_one_time') {
       return 'رصيدك: $used من $max صفقات (دفعة واحدة). المتبقي: $remaining.';
@@ -123,10 +116,7 @@ class IndividualMarketOfferAllowance {
       return 'Trial active — you can complete deals.';
     }
     if (!hasSubscription) {
-      if (audience != 'marketing') {
-        return 'Completing deals on others\' requests is free — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: false) ?? 'pay only when you choose Instant'} for your request.';
-      }
-      return 'Subscribe to the plan for your account type to complete deals.';
+      return 'Subscribe to the deal plan for your account type to complete deals.';
     }
     if (planProgram == 'lifetime_one_time') {
       return 'Balance: $used of $max deals (one-time). Remaining: $remaining.';
@@ -199,8 +189,10 @@ class IndividualMarketOfferService {
           planProgram: main == null ? null : main['plan_program']?.toString(),
           isTrial: main?['is_trial'] == true,
           needsPaywall: m['needs_paywall'] == true,
-          audience: '${m['audience'] ?? (isMarketing ? 'marketing' : 'individual')}',
-          subscriptionId: main == null ? null : main['subscription_id']?.toString(),
+          audience:
+              '${m['audience'] ?? (isMarketing ? 'marketing' : 'individual')}',
+          subscriptionId:
+              main == null ? null : main['subscription_id']?.toString(),
           planId: main == null ? null : main['plan_id']?.toString(),
         );
       }

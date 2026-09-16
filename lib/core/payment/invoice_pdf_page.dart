@@ -62,8 +62,7 @@ void addOfficialInvoicePage({
       );
 
   final issuedAt = safe(
-    invoiceDateFormatted ??
-        InvoiceCopy.latinDateTime(DateTime.now()),
+    invoiceDateFormatted ?? InvoiceCopy.latinDateTime(DateTime.now()),
   );
   final invoiceNo = safe(txnId);
   final clientName = safe(userFullName ?? payerName);
@@ -119,8 +118,9 @@ void addOfficialInvoicePage({
       child: pw.Row(
         mainAxisSize: pw.MainAxisSize.min,
         children: [
-          pw.Text(n, style: style),
           icon,
+          pw.SizedBox(width: 2),
+          pw.Text(n, style: style),
         ],
       ),
     );
@@ -248,8 +248,7 @@ void addOfficialInvoicePage({
                   padding: const pw.EdgeInsets.fromLTRB(12, 10, 12, 10),
                   decoration: pw.BoxDecoration(
                     color: const PdfColor.fromInt(0xFFF8FAFC),
-                    border:
-                        pw.Border.all(color: PdfColors.grey400, width: 0.5),
+                    border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
                     borderRadius: pw.BorderRadius.circular(6),
                   ),
                   child: pw.Column(
@@ -341,9 +340,12 @@ void addOfficialInvoicePage({
                       color: kDocumentBrandPdfColor,
                     ),
                     children: [
-                      _th(t('البيان', 'Description'), st(bold, 8.5, color: PdfColors.white), isAr),
-                      _th(t('الفترة', 'Period'), st(bold, 8.5, color: PdfColors.white), isAr),
-                      _th(t('المبلغ', 'Amount'), st(bold, 8.5, color: PdfColors.white), isAr),
+                      _th(t('البيان', 'Description'),
+                          st(bold, 8.5, color: PdfColors.white), isAr),
+                      _th(t('الفترة', 'Period'),
+                          st(bold, 8.5, color: PdfColors.white), isAr),
+                      _th(t('المبلغ', 'Amount'),
+                          st(bold, 8.5, color: PdfColors.white), isAr),
                     ],
                   ),
                   pw.TableRow(
@@ -525,7 +527,7 @@ pw.Widget _td(
 String _pdfMoneyLine(String raw) {
   final n = AppMoney.stripSarMarks(InvoiceCopy.stripBidi(raw)).trim();
   if (n.isEmpty) return raw;
-  return '$n ${AppMoney.saudiRiyalSignCompat}';
+  return '${AppMoney.saudiRiyalSignCompat}$n';
 }
 
 Future<String?> loadInvoiceRiyalSvg() async {

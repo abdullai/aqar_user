@@ -84,8 +84,7 @@ Map<String, bool> _ownerOffersNeedRelistMap({
   for (final entry in requestRowsById.entries) {
     final rid = entry.key;
     final req = entry.value;
-    final stage =
-        (req['workflow_stage'] ?? '').toString().toLowerCase().trim();
+    final stage = (req['workflow_stage'] ?? '').toString().toLowerCase().trim();
     if (stage != 'waiting_marketers') {
       out[rid] = false;
       continue;
@@ -133,8 +132,9 @@ void _annotateMarketerInvitesPriorRoundOfferFlag(
   final uid = marketerUid.trim();
   if (uid.isEmpty) return;
   for (final inv in invites) {
-    final reqId =
-        (inv['request_id'] ?? inv['listing_request_id'] ?? '').toString().trim();
+    final reqId = (inv['request_id'] ?? inv['listing_request_id'] ?? '')
+        .toString()
+        .trim();
     if (reqId.isEmpty) {
       inv['_hub_prior_round_marketer_offer'] = false;
       continue;
@@ -484,12 +484,10 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       // ويب: لا تتلف كنترولر المسوّق — IndexedStack قد يُبقي شجرة قديمة لحظة.
       // يُتلف في dispose() فقط.
 
-      // الطول الجديد للمالك = 7 (دمج تبويبي «التعاقد» و«التصريح 72 ساعة»).
-      const int kOwnerTabsLen = 7;
-      if (_ownerTabsCtrl == null ||
-          _ownerTabsCtrl!.length != kOwnerTabsLen) {
-        final int preserved =
-            _ownerTabsCtrl?.index ?? _lastOwnerSubTabIndex;
+      // تبويبات المالك تشمل الآن الإعلانات المنشورة الخاصة به.
+      const int kOwnerTabsLen = 8;
+      if (_ownerTabsCtrl == null || _ownerTabsCtrl!.length != kOwnerTabsLen) {
+        final int preserved = _ownerTabsCtrl?.index ?? _lastOwnerSubTabIndex;
         final int? oldLen = _ownerTabsCtrl?.length;
         final oldOwner = _ownerTabsCtrl;
         // لا تُصفّر الحقل قبل التبديل — IndexedStack/AnimatedBuilder قد يقرأ null → Null check.
@@ -506,6 +504,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
           if (preserved >= 3) {
             mappedPreserved = preserved - 1;
           }
+        }
+        if (oldLen == 7 && preserved >= 6) {
+          mappedPreserved = preserved;
         }
         mappedPreserved = mappedPreserved.clamp(0, kOwnerTabsLen - 1);
         final next = TabController(
@@ -696,7 +697,8 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     try {
       final prefs = await SharedPreferences.getInstance();
       final owner = prefs.getInt(MarketingStateMixin._kPrefOwnerSubTabIndex);
-      final marketer = prefs.getInt(MarketingStateMixin._kPrefMarketerSubTabIndex);
+      final marketer =
+          prefs.getInt(MarketingStateMixin._kPrefMarketerSubTabIndex);
       if (!mounted) return;
       if (owner != null) {
         _lastOwnerSubTabIndex = owner.clamp(0, 8);
@@ -760,12 +762,11 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   }) {
     if (uid.isEmpty) return false;
     final ids = <String>{uid, ...sameOrgUserIds};
-    final pub =
-        (row['preview_published_by_marketer_id'] ??
-                row['published_by_marketer_id'] ??
-                '')
-            .toString()
-            .trim();
+    final pub = (row['preview_published_by_marketer_id'] ??
+            row['published_by_marketer_id'] ??
+            '')
+        .toString()
+        .trim();
     final owner =
         (row['owner_id'] ?? row['request_owner_id'] ?? '').toString().trim();
     final created = (row['created_by'] ??
@@ -813,9 +814,8 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         )) {
       return false;
     }
-    final owner = (row['owner_id'] ?? row['request_owner_id'] ?? '')
-        .toString()
-        .trim();
+    final owner =
+        (row['owner_id'] ?? row['request_owner_id'] ?? '').toString().trim();
     if (id.isNotEmpty &&
         (owner == id || _marketerSameOrgUserIds.contains(owner))) {
       return false;
@@ -1048,8 +1048,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
 
     _ss(() {
       if (!silent) {
-        _loadingOwnerRequests =
-            !hadOwnerCache && _ownerListingRequests.isEmpty;
+        _loadingOwnerRequests = !hadOwnerCache && _ownerListingRequests.isEmpty;
         // لا تمسح الصفوف عند force — حدّث في الخلفية.
       }
     });
@@ -1188,8 +1187,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
             final ridK = (e['request_id'] ?? '').toString().trim();
             final midK = (e['marketer_id'] ?? '').toString().trim();
             if (ridK.isEmpty || midK.isEmpty) continue;
-            final stK =
-                (e['status'] ?? '').toString().toLowerCase().trim();
+            final stK = (e['status'] ?? '').toString().toLowerCase().trim();
             if (!const {'owner_rejected', 'rejected', 'declined'}
                 .contains(stK)) {
               continue;
@@ -1205,6 +1203,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
             if (roundNo > 1) return true;
             return (priorRejectedByKey['$ridK|$midK'] ?? 0) > 0;
           }
+
           final reqRowById = <String, Map<String, dynamic>>{};
           for (final mr in merged) {
             final id = (mr['request_id'] ?? mr['id'] ?? '').toString().trim();
@@ -1323,11 +1322,10 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
           r['_owner_offers_all_expired_by_deadline'] =
               offerDeadlineExpiredByRequest[rid] ?? false;
           r['_owner_offers_need_relist'] = needRelistByReq[rid] ?? false;
-          r['_owner_has_marketer_chat'] = reqWithPropChat.contains(rid) ||
-              directChatReq.contains(rid);
-          r['_owner_pending_offers_preview'] =
-              List<Map<String, dynamic>>.from(
-                  pendingPreviewByReq[rid] ?? const <Map<String, dynamic>>[]);
+          r['_owner_has_marketer_chat'] =
+              reqWithPropChat.contains(rid) || directChatReq.contains(rid);
+          r['_owner_pending_offers_preview'] = List<Map<String, dynamic>>.from(
+              pendingPreviewByReq[rid] ?? const <Map<String, dynamic>>[]);
           r['_owner_has_repeat_pending_offer'] =
               (pendingPreviewByReq[rid] ?? const <Map<String, dynamic>>[])
                   .any((o) => o['is_repeat_offer'] == true);
@@ -2135,7 +2133,8 @@ preview_property_id
   // =========================================================
   // Merge request + preview info
   // =========================================================
-  String _mergeNonEmptyStr(dynamic a, dynamic b, [dynamic c, dynamic d, dynamic e]) {
+  String _mergeNonEmptyStr(dynamic a, dynamic b,
+      [dynamic c, dynamic d, dynamic e]) {
     for (final x in [a, b, c, d, e]) {
       final t = (x ?? '').toString().trim();
       if (t.isNotEmpty) return t;
@@ -2823,9 +2822,8 @@ preview_property_id
             .toString()
             .trim();
         final os = (o['status'] ?? '').toString().toLowerCase().trim();
-        final stageInactive =
-            ListingWorkflowUnified.fromMarketerMergedRow(o) ==
-                ListingWorkflowStage.inactive72h;
+        final stageInactive = ListingWorkflowUnified.fromMarketerMergedRow(o) ==
+            ListingWorkflowStage.inactive72h;
         final isBlockedPrev = prev == uid;
         final isExpiredOwn = os == 'expired' &&
             (o['marketer_id'] ?? '').toString().trim() == uid;
@@ -3008,10 +3006,9 @@ preview_property_id
           try {
             final openProfMap = await _fetchProfilesByUserIds(openOwnerIds);
             for (final r in reqMap.values) {
-              final oid =
-                  (r['request_owner_id'] ?? r['owner_id'] ?? '')
-                      .toString()
-                      .trim();
+              final oid = (r['request_owner_id'] ?? r['owner_id'] ?? '')
+                  .toString()
+                  .trim();
               if (oid.isEmpty) continue;
               if ((r['request_owner_name']?.toString().trim().isNotEmpty ??
                       false) &&
@@ -3035,10 +3032,7 @@ preview_property_id
               }
               final av = (prof?['avatar_url'] ?? '').toString().trim();
               if (av.isNotEmpty &&
-                  (r['request_owner_avatar_url']
-                          ?.toString()
-                          .trim()
-                          .isEmpty ??
+                  (r['request_owner_avatar_url']?.toString().trim().isEmpty ??
                       true)) {
                 r['request_owner_avatar_url'] = av;
               }

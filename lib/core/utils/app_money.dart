@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../widgets/saudi_riyal_symbol_icon.dart';
 
-/// تنسيق موحد للمبالغ: رمز الريال ملاصق بعد الرقم بالعربية، وSAR بعد الرقم بالإنجليزية.
+/// تنسيق موحد للمبالغ: رمز الريال قبل الرقم بالعربية، وSAR بعد الرقم بالإنجليزية.
 class AppMoney {
   AppMoney._();
 
@@ -21,11 +21,11 @@ class AppMoney {
     return isAr ? saudiRiyalSignCompat : 'SAR';
   }
 
-  /// المبلغ ثم العملة: `1234﷼` بالعربية و`1234 SAR` بالإنجليزية.
+  /// العملة حسب اتجاه اللغة: `﷼1234` بالعربية و`1234 SAR` بالإنجليزية.
   static String sarPhrase(String amountText, {required bool isAr}) {
     final t = amountText.trim();
     final suffix = sarUiSuffix(isAr: isAr);
-    return isAr ? '\u202A$t$suffix\u202C' : '$t $suffix';
+    return isAr ? '\u202A$suffix$t\u202C' : '$t $suffix';
   }
 
   /// يزيل رموز/اختصارات الريال من حقل إدخال قبل التحليل.
@@ -75,7 +75,7 @@ class AppMoney {
     return NumberFormat(pattern, locale).format(rounded);
   }
 
-  /// نص فقط (مشاركة، أسطر متعددة): الرقم ثم ﷼.
+  /// نص فقط (مشاركة، أسطر متعددة) باتجاه العملة الموحد.
   static String formatWithCurrencyCode(
     double amount, {
     required bool isAr,
@@ -91,7 +91,7 @@ class AppMoney {
     return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$code $fmt';
   }
 
-  /// PDF — الرقم ثم ﷼ دائماً. لا ر.س ولا SAR (تظهر مربعات إن غاب الرمز في الخط).
+  /// PDF — رمز الريال قبل الرقم بالعربية وبعد الرقم بالإنجليزية.
   static String formatForPdf(
     double amount, {
     required bool isAr,
@@ -105,7 +105,7 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '$fmt$saudiRiyalSignCompat' : '$fmt SAR';
+      return isAr ? '$saudiRiyalSignCompat$fmt' : '$fmt SAR';
     }
     return '$fmt $code';
   }
@@ -124,13 +124,13 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '$fmt$saudiRiyalSignCompat' : '$fmt SAR';
+      return isAr ? '$saudiRiyalSignCompat$fmt' : '$fmt SAR';
     }
     return '$fmt $code';
   }
 }
 
-/// الرقم ثم رمز الريال SVG بالعربية، والرقم ثم SAR بالإنجليزية.
+/// اتجاه رمز الريال حسب اللغة: قبل الرقم بالعربية وبعده SAR بالإنجليزية.
 class AppMoneyInline extends StatelessWidget {
   final String amountText;
   final bool isAr;
@@ -150,7 +150,8 @@ class AppMoneyInline extends StatelessWidget {
     final fmt = amountText.trim();
     final baseStyle = style ?? DefaultTextStyle.of(context).style;
     final rawFont = baseStyle.fontSize ?? 14;
-    final fontSize = MediaQuery.textScalerOf(context).scale(rawFont).clamp(10.0, 48.0);
+    final fontSize =
+        MediaQuery.textScalerOf(context).scale(rawFont).clamp(10.0, 48.0);
     final color = baseStyle.color ?? Theme.of(context).colorScheme.onSurface;
     final symColor = symbolColor ?? color;
     final mergedStyle = baseStyle.merge(
@@ -190,13 +191,19 @@ class AppMoneyInline extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         textDirection: ui.TextDirection.ltr,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: [amount, if (!isAr) gap, currency],
+        children: [
+          if (isAr) currency,
+          if (isAr) gap,
+          amount,
+          if (!isAr) gap,
+          if (!isAr) currency
+        ],
       ),
     );
   }
 }
 
-/// سطر مبلغ مع رمز الريال (SVG) بعد الرقم عند SAR.
+/// سطر مبلغ مع رمز الريال (SVG) باتجاه اللغة عند SAR.
 class AppMoneyLine extends StatelessWidget {
   final double amount;
   final String currencyCode;
