@@ -9469,6 +9469,16 @@ class _UserDashboardState extends State<UserDashboard>
             ? null
             : () => unawaited(_openMarketRequestDetailById(rid)),
       ),
+      fourthAction: canMessage
+          ? null
+          : _ReservationAction(
+              kind: _ReservationActionKind.filledDanger,
+              icon: Icons.person_off_outlined,
+              label: _isArabic ? 'استبعاد' : 'Exclude',
+              onPressed: oid.isEmpty
+                  ? null
+                  : () => unawaited(_rejectIncomingMarketOffer(oid)),
+            ),
       thirdAction: canMessage
           ? _ReservationAction(
               kind: _ReservationActionKind.outlined,
@@ -10011,14 +10021,23 @@ class _UserDashboardState extends State<UserDashboard>
               },
             )
           : null,
-      fourthAction: canMessage || ownerSide
-          ? null
-          : _ReservationAction(
+      fourthAction: ownerSide && !canMessage
+          ? _ReservationAction(
               kind: _ReservationActionKind.filledDanger,
-              icon: Icons.close,
-              label: _isArabic ? 'إلغاء' : 'Cancel',
-              onPressed: () => _cancelReservationFromCart(r),
-            ),
+              icon: Icons.person_off_outlined,
+              label: _isArabic ? 'استبعاد' : 'Exclude',
+              onPressed: () => unawaited(
+                _rejectListingReservationFromOwner(r),
+              ),
+            )
+          : canMessage || ownerSide
+              ? null
+              : _ReservationAction(
+                  kind: _ReservationActionKind.filledDanger,
+                  icon: Icons.close,
+                  label: _isArabic ? 'إلغاء' : 'Cancel',
+                  onPressed: () => _cancelReservationFromCart(r),
+                ),
       bodyExtra: DealApplicantTransparencyBoard(
         isAr: _isArabic,
         applicantName: ownerSide ? applicantName : _ownerDisplayNameForDeals(),

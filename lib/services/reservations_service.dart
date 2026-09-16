@@ -131,6 +131,19 @@ class ReservationsService {
     );
   }
 
+  static Future<void> rejectListingReservation({
+    required String reservationId,
+    required String reason,
+  }) async {
+    await _sb.rpc(
+      'reject_property_reservation',
+      params: {
+        'p_reservation_id': reservationId,
+        'p_reason': reason.trim(),
+      },
+    );
+  }
+
   /// ✅ إلغاء الحجز (للمستخدم)
   static Future<void> cancelReservation(String reservationId) async {
     await _sb.rpc(
@@ -320,8 +333,7 @@ class ReservationsService {
           .select('id')
           .eq('user_id', uid)
           .eq('property_id', pid)
-          .inFilter('status', ['pending', 'paid', 'accepted'])
-          .limit(1);
+          .inFilter('status', ['pending', 'paid', 'accepted']).limit(1);
       return (res as List).isNotEmpty;
     } catch (_) {
       return false;
@@ -358,7 +370,8 @@ class ReservationsService {
           'id, property_id, status, expires_at, base_price, platform_fee_amount, extra_fee_amount, total_amount',
         )
         .eq('user_id', userId)
-        .inFilter('status', ['pending', 'paid', 'accepted']) // نشط: بانتظار أو وافق المالك
+        .inFilter('status',
+            ['pending', 'paid', 'accepted']) // نشط: بانتظار أو وافق المالك
         .order('created_at', ascending: false);
 
     final rows = (res as List).cast<Map<String, dynamic>>();
@@ -588,9 +601,7 @@ class ReservationsService {
       params: params,
     );
 
-    final cid = res is String
-        ? res
-        : _s(res);
+    final cid = res is String ? res : _s(res);
     if (cid.isEmpty) {
       throw Exception('Could not open conversation');
     }

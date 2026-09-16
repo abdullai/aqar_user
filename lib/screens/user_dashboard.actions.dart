@@ -2041,6 +2041,73 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
+  Future<void> _rejectIncomingMarketOffer(String offerId) async {
+    final controller = TextEditingController();
+    try {
+      final reason = await showAppDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title:
+              Text(widget.isAr ? 'استبعاد مقدم الصفقة' : 'Exclude applicant'),
+          content: AqarTextField(
+            controller: controller,
+            minLines: 3,
+            maxLines: 6,
+            decoration: InputDecoration(
+              labelText: widget.isAr ? 'سبب الاستبعاد' : 'Exclusion reason',
+              hintText: widget.isAr
+                  ? 'اكتب سبباً واضحاً ليظهر في سجل الصفقة.'
+                  : 'Write a clear reason for the deal record.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.length < 3) return;
+                Navigator.pop(ctx, value);
+              },
+              child: Text(widget.isAr ? 'استبعاد' : 'Exclude'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || reason == null || reason.trim().length < 3) return;
+      await MarketRequestOffersService(_sb).respondOffer(
+        offerId: offerId,
+        accept: false,
+        rejectionReason: reason.trim(),
+      );
+      if (!mounted) return;
+      await Future.wait([
+        _loadMyMarketSubmissions(force: true, silent: true),
+        _loadIncomingMarketOffersOnMine(),
+        _loadMyMarketRequestOfferTracking(),
+        _loadMarketHomeRequests(force: true),
+      ]);
+      if (!mounted) return;
+      _showNotification(
+        widget.isAr ? 'تم الاستبعاد' : 'Applicant excluded',
+        widget.isAr
+            ? 'تم نقل مقدم الصفقة إلى قائمة المستبعدين.'
+            : 'The applicant was moved to the excluded list.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _showNotification(
+        widget.isAr ? 'تعذر الاستبعاد' : 'Could not exclude applicant',
+        RpcUserMessage.of(e, isAr: widget.isAr),
+        isError: true,
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
   Future<void> _completeIncomingMarketOffer(Map<String, dynamic> o) async {
     final rid = (o['market_request_id'] ?? '').toString().trim();
     if (rid.isEmpty) return;
@@ -2086,6 +2153,68 @@ extension _UserDashboardStateActions on _UserDashboardState {
         RpcUserMessage.of(e, isAr: widget.isAr),
         isError: true,
       );
+    }
+  }
+
+  Future<void> _rejectListingReservationFromOwner(Map r) async {
+    final id = (r['id'] ?? '').toString().trim();
+    if (id.isEmpty) return;
+    final controller = TextEditingController();
+    try {
+      final reason = await showAppDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title:
+              Text(widget.isAr ? 'استبعاد مقدم الصفقة' : 'Exclude applicant'),
+          content: AqarTextField(
+            controller: controller,
+            minLines: 3,
+            maxLines: 6,
+            decoration: InputDecoration(
+              labelText: widget.isAr ? 'سبب الاستبعاد' : 'Exclusion reason',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.length >= 3) Navigator.pop(ctx, value);
+              },
+              child: Text(widget.isAr ? 'استبعاد' : 'Exclude'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || reason == null) return;
+      await ReservationsService.rejectListingReservation(
+        reservationId: id,
+        reason: reason,
+      );
+      if (!mounted) return;
+      await Future.wait(
+          [_loadCart(force: true), _loadMineAndOffers(force: true)]);
+      if (mounted) {
+        _showNotification(
+          widget.isAr ? 'تم الاستبعاد' : 'Applicant excluded',
+          widget.isAr
+              ? 'تم نقل مقدم الصفقة إلى المستبعدين.'
+              : 'Applicant moved to excluded.',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        _showNotification(
+          widget.isAr ? 'تعذر الاستبعاد' : 'Could not exclude applicant',
+          RpcUserMessage.of(e, isAr: widget.isAr),
+          isError: true,
+        );
+      }
+    } finally {
+      controller.dispose();
     }
   }
 

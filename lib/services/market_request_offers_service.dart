@@ -57,9 +57,8 @@ class MarketRequestOffersService {
           .order('created_at', ascending: false)
           .limit(200);
     }
-    final rows = (res as List)
-        .map((e) => Map<String, dynamic>.from(e as Map))
-        .toList();
+    final rows =
+        (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
     const live = {
       'submitted',
       'pending',
@@ -230,18 +229,21 @@ class MarketRequestOffersService {
   Future<void> respondOffer({
     required String offerId,
     required bool accept,
+    String? rejectionReason,
   }) async {
     final oid = offerId.trim();
     if (oid.isEmpty) return;
     try {
-      await _sb.rpc(
-        'respond_market_request_offer',
-        params: {
-          'p_offer_id': oid,
-          'p_action': accept ? 'accept' : 'reject',
-        },
-      );
+      await _sb.rpc('respond_market_request_offer', params: {
+        'p_offer_id': oid,
+        'p_action': accept ? 'accept' : 'reject',
+        if (!accept && (rejectionReason ?? '').trim().isNotEmpty)
+          'p_reason': rejectionReason!.trim(),
+      });
     } catch (_) {
+      if (!accept && (rejectionReason ?? '').trim().isNotEmpty) {
+        rethrow;
+      }
       await _respondOfferFallback(offerId: oid, accept: accept);
     }
     await _notifyOfferResponse(offerId: oid, accepted: accept);
@@ -353,8 +355,7 @@ class MarketRequestOffersService {
           .select('id')
           .eq('market_request_id', rid)
           .neq('id', offerId)
-          .inFilter('status', ['accepted', 'approved', 'selected'])
-          .limit(1);
+          .inFilter('status', ['accepted', 'approved', 'selected']).limit(1);
       if ((already as List).isNotEmpty) {
         throw StateError('another_offer_already_selected');
       }
