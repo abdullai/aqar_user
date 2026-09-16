@@ -8531,13 +8531,16 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   List<Map<String, dynamic>> get _incomingListingReservationsForCart {
-    return _offers.where((r) {
-      final st = (r['status'] ?? '').toString().toLowerCase().trim();
-      final buyer = (r['user_id'] ?? '').toString();
-      return buyer.isNotEmpty &&
-          buyer != _uid &&
-          (st == 'pending' || st == 'paid' || st == 'accepted');
-    }).toList(growable: false);
+    return _offers
+        .where((r) {
+          final st = (r['status'] ?? '').toString().toLowerCase().trim();
+          final buyer = (r['user_id'] ?? '').toString();
+          return buyer.isNotEmpty &&
+              buyer != _uid &&
+              (st == 'pending' || st == 'paid' || st == 'accepted');
+        })
+        .where((r) => !_incomingDealAccepted(r))
+        .toList(growable: false);
   }
 
   DateTime? _incomingDealCreatedAt(Map<String, dynamic> row) =>
@@ -8552,7 +8555,9 @@ class _UserDashboardState extends State<UserDashboard>
   List<Map<String, dynamic>> _filteredIncomingDeals(
     List<Map<String, dynamic>> src,
   ) {
-    var list = List<Map<String, dynamic>>.from(src);
+    var list = List<Map<String, dynamic>>.from(src)
+        .where((e) => !_incomingDealAccepted(e))
+        .toList();
     if (_incomingDealStatusFilter == 'waiting') {
       list = list.where((e) => !_incomingDealAccepted(e)).toList();
     } else if (_incomingDealStatusFilter == 'accepted') {
@@ -8566,6 +8571,29 @@ class _UserDashboardState extends State<UserDashboard>
       return _incomingDealSortNewest ? db.compareTo(da) : da.compareTo(db);
     });
     return list;
+  }
+
+  String _dealPartyRoleLabel(dynamic raw) {
+    final type = (raw ?? '').toString().trim().toLowerCase();
+    switch (type) {
+      case 'marketer':
+      case 'marketer_pro':
+        return _isArabic ? 'مسوّق عقاري' : 'Marketer';
+      case 'office':
+        return _isArabic ? 'مكتب عقاري' : 'Real estate office';
+      case 'institution':
+        return _isArabic ? 'مؤسسة عقارية' : 'Real estate institution';
+      case 'company':
+        return _isArabic ? 'شركة عقارية' : 'Real estate company';
+      case 'agency':
+        return _isArabic ? 'وكالة عقارية' : 'Real estate agency';
+      case 'owner':
+      case 'individual_seller':
+      case 'owner_individual':
+        return _isArabic ? 'مالك عقار' : 'Property owner';
+      default:
+        return _isArabic ? 'مستخدم عقاري' : 'Real estate user';
+    }
   }
 
   ({int index, int total}) _incomingQueueRank(
@@ -9058,8 +9086,9 @@ class _UserDashboardState extends State<UserDashboard>
           );
         }
 
-        final incomingCount = _incomingListingReservationsForCart.length +
-            _incomingMarketOffersOnMine.length;
+        final incomingCount =
+            _filteredIncomingDeals(_incomingListingReservationsForCart).length +
+                _filteredIncomingDeals(_incomingMarketOffersOnMine).length;
         final incomingOffers =
             _filteredIncomingDeals(_incomingMarketOffersOnMine);
         final incomingListings =
@@ -9162,6 +9191,45 @@ class _UserDashboardState extends State<UserDashboard>
             ),
           );
         }
+        final acceptedIncomingMarket = _incomingMarketOffersOnMine
+            .where(_incomingDealAccepted)
+            .toList(growable: false);
+        final acceptedIncomingListings = _offers
+            .where((r) =>
+                (r['user_id'] ?? '').toString().trim().isNotEmpty &&
+                (r['user_id'] ?? '').toString().trim() != _uid &&
+                _incomingDealAccepted(r))
+            .toList(growable: false);
+        if (acceptedIncomingMarket.isNotEmpty) {
+          activeChildren.add(sectionTitle(
+            _isArabic ? 'شركاء اخترتهم لإتمام الصفقة' : 'Partners you selected',
+          ));
+          activeChildren.addAll(
+            _smartDashboardCardRows(
+              cards: [
+                for (final o in acceptedIncomingMarket)
+                  _buildIncomingMarketOfferCard(o),
+              ],
+              maxWidth: w,
+              context: context,
+            ),
+          );
+        }
+        if (acceptedIncomingListings.isNotEmpty) {
+          activeChildren.add(sectionTitle(
+            _isArabic ? 'مشترو الإعلانات المقبولون' : 'Accepted listing buyers',
+          ));
+          activeChildren.addAll(
+            _smartDashboardCardRows(
+              cards: [
+                for (final r in acceptedIncomingListings)
+                  _buildCartActiveReservationCard(r, ownerSide: true),
+              ],
+              maxWidth: w,
+              context: context,
+            ),
+          );
+        }
 
         final completedCount = _completedCart.length +
             _completedMarketOffersForCart.length +
@@ -9245,7 +9313,7 @@ class _UserDashboardState extends State<UserDashboard>
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${l10nCart.cartTabIncoming} ($incomingCount)',
+                        '${_isArabic ? 'العروض الواردة · بانتظار قرارك' : 'Incoming offers · awaiting your decision'} ($incomingCount)',
                         maxLines: 1,
                       ),
                     ),
@@ -9255,7 +9323,7 @@ class _UserDashboardState extends State<UserDashboard>
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${l10nCart.cartTabActive} (${_dealRatioLabel(used, maxDeals)})',
+                        '${_isArabic ? 'صفقاتي الجارية' : 'My active deals'} (${_dealRatioLabel(used, maxDeals)})',
                         maxLines: 1,
                       ),
                     ),
@@ -9305,6 +9373,7 @@ class _UserDashboardState extends State<UserDashboard>
     final msg = (o['message'] ?? '').toString().trim();
     final titleHint = (o['_request_title'] ?? '').toString().trim();
     final partner = (o['_offerer_display_name'] ?? '').toString().trim();
+    final partnerRole = _dealPartyRoleLabel(o['_offerer_account_type']);
     final canMessage = _dealOfferAllowsMessaging(st);
     final rank = _incomingQueueRank(o, listing: false);
     final requestedAt = _incomingDealCreatedAt(o);
@@ -9347,6 +9416,11 @@ class _UserDashboardState extends State<UserDashboard>
             text: partner,
             color: _brandPrimary,
           ),
+        _MiniChip(
+          icon: Icons.badge_outlined,
+          text: partnerRole,
+          color: _brandPrimary,
+        ),
       ],
       priceTable: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -9596,6 +9670,10 @@ class _UserDashboardState extends State<UserDashboard>
         ownerApproved: canMessage,
         showSecretQueueHint: false,
       ),
+      frozenWatermark: selectedOther,
+      frozenWatermarkText: _isArabic
+          ? 'معلّق: تم اختيار شريك آخر لإتمام الصفقة'
+          : 'Pending: another partner was selected',
       tryParseDt: _tryParseDt,
       timeAgo: _timeAgo,
       fmtDateTime: _fmtDateTime,

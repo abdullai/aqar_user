@@ -602,8 +602,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     String? viewerRegion,
     bool pinPaidRequests = true,
   }) {
-    final effectiveLimit = limit ??
-        (kIsWeb ? 40 : 120);
+    final effectiveLimit = limit ?? (kIsWeb ? 40 : 120);
     final region = (viewerRegion ?? _regionFilter).trim();
     final viewer = region.isNotEmpty ? region : _cityFilter.trim();
     final out = <HomeMixedFeedEntry>[
@@ -614,6 +613,32 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     ];
     // المستعجل/الفوري المدفوع أولاً في الرئيسية فقط (pinPaidRequests).
     out.sort((a, b) {
+      double? distanceFor(HomeMixedFeedEntry entry) {
+        final request = entry.request;
+        if (request != null) {
+          return InstantMarketRequestFeed.distanceKmTo(
+            request,
+            viewerLat: _myLat,
+            viewerLng: _myLng,
+          );
+        }
+        final listing = entry.listing;
+        final lat = listing?.latitude;
+        final lng = listing?.longitude;
+        if (_myLat == null || _myLng == null || lat == null || lng == null) {
+          return null;
+        }
+        return GeoHelper.distanceKm(
+          lat1: _myLat!,
+          lon1: _myLng!,
+          lat2: lat,
+          lon2: lng,
+        );
+      }
+
+      final aPriority = a.request?.requestPriority.feedRank ?? -1;
+      final bPriority = b.request?.requestPriority.feedRank ?? -1;
+      if (aPriority != bPriority) return bPriority.compareTo(aPriority);
       if (pinPaidRequests) {
         final aPaid = a.request != null &&
             InstantMarketRequestFeed.isPaidPriorityPin(a.request!);
@@ -627,6 +652,16 @@ extension _UserDashboardStateFilters on _UserDashboardState {
             viewerRegion: viewer,
           );
         }
+      }
+      final da = distanceFor(a);
+      final db = distanceFor(b);
+      if (da != null && db != null) {
+        final byDistance = da.compareTo(db);
+        if (byDistance != 0) return byDistance;
+      } else if (da != null) {
+        return -1;
+      } else if (db != null) {
+        return 1;
       }
       return b.sortAt.compareTo(a.sortAt);
     });
@@ -757,7 +792,8 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     return copy;
   }
 
-  List<HomeMixedFeedEntry> _pinRevealedMixedFirst(List<HomeMixedFeedEntry> src) {
+  List<HomeMixedFeedEntry> _pinRevealedMixedFirst(
+      List<HomeMixedFeedEntry> src) {
     if (!_homeRevealOwnActive || src.length < 2) return src;
     final pid = (_homeRevealOwnPropertyId ?? '').trim();
     final rid = (_homeRevealOwnMarketRequestId ?? '').trim();
@@ -830,7 +866,9 @@ extension _UserDashboardStateFilters on _UserDashboardState {
       return active;
     }
     if (_homeShowHiddenOnly) {
-      return active.where((r) => _hiddenMarketRequestIds.contains(r.id)).toList();
+      return active
+          .where((r) => _hiddenMarketRequestIds.contains(r.id))
+          .toList();
     }
     return active.where((r) {
       if (_isFreshPublishRevealRequest(r.id)) return true;

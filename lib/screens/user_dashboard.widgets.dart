@@ -763,6 +763,8 @@ class _ReservationCard extends StatelessWidget {
   final String Function(DateTime) fmtDateTime;
 
   final Widget? bodyExtra;
+  final bool frozenWatermark;
+  final String? frozenWatermarkText;
 
   const _ReservationCard({
     required this.bankColor,
@@ -779,6 +781,8 @@ class _ReservationCard extends StatelessWidget {
     required this.fmtDateTime,
     this.subtitle,
     this.bodyExtra,
+    this.frozenWatermark = false,
+    this.frozenWatermarkText,
   });
 
   @override
@@ -883,9 +887,11 @@ class _ReservationCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
@@ -950,7 +956,40 @@ class _ReservationCard extends StatelessWidget {
               ),
             ),
           ],
-        ),
+            ),
+          ),
+          if (frozenWatermark)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: cs.surface.withValues(alpha: 0.68),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cs.tertiaryContainer.withValues(alpha: 0.94),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        frozenWatermarkText ?? 'Pending with another partner',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: cs.onTertiaryContainer,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
