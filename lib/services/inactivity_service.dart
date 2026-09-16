@@ -55,6 +55,7 @@ class InactivityService {
 
   int _lastActivityMs = 0;
   int _lastPersistWallMs = 0;
+  int _activityRevision = 0;
   final DateTime _serviceStartedAt = DateTime.now();
 
   /// يمنع لمسة/لوحة مفاتيح من تصفير العدّاد أثناء إغلاق الشاشة أو تصغير المتصفح.
@@ -98,13 +99,16 @@ class InactivityService {
 
   Future<void> _bootFromPersistedClock() async {
     final now = DateTime.now().millisecondsSinceEpoch;
+    final bootRevision = _activityRevision;
     try {
       final prefs = await SharedPreferences.getInstance();
       final stored = prefs.getInt(kPrefLastActivityAtMs);
-      if (stored != null && stored > 0 && stored <= now) {
-        _lastActivityMs = stored;
-      } else {
-        _lastActivityMs = now;
+      if (_activityRevision == bootRevision) {
+        if (stored != null && stored > 0 && stored <= now) {
+          _lastActivityMs = stored;
+        } else {
+          _lastActivityMs = now;
+        }
       }
       final storedPrompt = prefs.getInt(kPrefPromptDeadlineMs);
       if (storedPrompt != null && storedPrompt > 0) {
@@ -253,6 +257,7 @@ class InactivityService {
 
   void userActivity() {
     if (_backgroundHold || _resumeAuditBusy || _dialogOpen) return;
+    _activityRevision++;
     _lastActivityMs = DateTime.now().millisecondsSinceEpoch;
     if (_promptDeadlineMs != null) {
       _promptDeadlineMs = null;
