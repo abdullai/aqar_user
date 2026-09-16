@@ -121,6 +121,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
         // The dashboard language is owned by the app-level language session;
         // route arguments are intentionally ignored when they disagree.
       }
+      if (!_resumeQuickBrowseHandled && args['resumeQuickBrowse'] == true) {
+        _resumeQuickBrowseHandled = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_openHomeShortsFeed());
+        });
+      }
     }
   }
 
@@ -155,7 +161,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
   /// بعد مغادرة الداشبورد: مسح تفضيلات/دخول سريع (لا يُنفَّذ على المسار الحرج للويب).
   Future<void> _logoutDeferredLocalCleanup() async {
     try {
-      await FastLoginService.clearAll().timeout(
+      await FastLoginService.clearAll(preserveResumeAccount: true).timeout(
         const Duration(seconds: 5),
         onTimeout: () {},
       );

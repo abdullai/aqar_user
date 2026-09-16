@@ -84,7 +84,8 @@ class FastLoginService {
   static const _kLastLoginMethod = 'last_login_method';
 
   /// بعد قفل الخمول: لا تُحوِّل شاشة الدخول تلقائياً إلى الدخول السريع.
-  static const _kForcePasswordLoginOnce = 'inactivity_force_password_login_once';
+  static const _kForcePasswordLoginOnce =
+      'inactivity_force_password_login_once';
 
   /// ربط طريقة الدخول بهذا التثبيت بعد أول دخول ناجح بكلمة المرور/OTP.
   static const _kTrustUid = 'login_trust_uid';
@@ -411,8 +412,7 @@ class FastLoginService {
     final p = await _prefs();
     final until = p.getInt(_kPinLockUntilMs) ?? 0;
     if (until <= 0) return 0;
-    final sec =
-        ((until - DateTime.now().millisecondsSinceEpoch) / 1000).ceil();
+    final sec = ((until - DateTime.now().millisecondsSinceEpoch) / 1000).ceil();
     return sec.clamp(0, kPinLockout.inSeconds);
   }
 
@@ -930,8 +930,12 @@ class FastLoginService {
   // -----------------------------
   // Clear
   // -----------------------------
-  static Future<void> clearAll() async {
+  static Future<void> clearAll({bool preserveResumeAccount = false}) async {
     final p = await _prefs();
+    final preservedName =
+        preserveResumeAccount ? p.getString(_kResumeDisplayName) : null;
+    final preservedUsername =
+        preserveResumeAccount ? p.getString(_kResumeUsername) : null;
     await p.remove(_kPinEnabled);
     await _deletePinHash();
     await p.remove(_kPinLength);
@@ -961,6 +965,12 @@ class FastLoginService {
 
     await p.setBool(kPrefBootstrapFastEnabled, false);
     await p.setBool(kPrefBootstrapPinSet, false);
+    if (preserveResumeAccount &&
+        (preservedName ?? '').trim().isNotEmpty &&
+        (preservedUsername ?? '').trim().isNotEmpty) {
+      await p.setString(_kResumeDisplayName, preservedName!.trim());
+      await p.setString(_kResumeUsername, preservedUsername!.trim());
+    }
     clearRuntimeUnlock();
   }
 

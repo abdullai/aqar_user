@@ -107,6 +107,7 @@ class _UserDashboardState extends State<UserDashboard>
   Timer? _homeFeedRealtimeDebounce;
   bool _didInitialLoad = false;
   bool _shortsRouteOpen = false;
+  bool _resumeQuickBrowseHandled = false;
   bool _reloading = false;
   String? _lastAuthUserId;
 

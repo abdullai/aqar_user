@@ -47,6 +47,7 @@ import '../core/auth/login_security_db.dart';
 import '../core/auth/in_app_otp_handoff.dart';
 import '../core/auth/otp_autofill.dart';
 import '../core/auth/otp_pin_layout.dart';
+import '../core/shorts/shorts_feed_prefs.dart';
 import '../core/auth/auth_challenge_service.dart';
 import '../widgets/aqar_text_field.dart';
 import '../core/gestures/app_keyboard_inset.dart';
@@ -1781,6 +1782,7 @@ class _VerifyScreenState extends State<VerifyScreen>
         'username': _username,
         'deviceId': _deviceId,
         'fullName': _fullName,
+        'resumeQuickBrowse': await ShortsFeedPrefs.isSessionActiveFor(uid),
       };
 
       if (!mounted) return;
