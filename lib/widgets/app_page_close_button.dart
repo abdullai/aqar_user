@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/navigation/safe_overlay_pop.dart';
+import '../core/navigation/web_in_app_nav.dart';
 
 /// زر إغلاق موحّد (X) لكل صفحة / نافذة / شيت.
 ///
@@ -22,8 +23,10 @@ class AppPageCloseButton extends StatelessWidget {
 
   final VoidCallback? onPressed;
   final String? tooltip;
+
   /// إن وُجد يُستخدم للأيقونة فقط؛ الموضع دائماً حسب اتجاه الواجهة.
   final Color? color;
+
   /// اختياري ومتقادم للوضع — لا يُقلَب الزر يدوياً. التلميح يُشتق من الاتجاه إن لزم.
   final bool? isArabic;
   final double iconSize;
@@ -40,10 +43,11 @@ class AppPageCloseButton extends StatelessWidget {
     double iconSize = 22,
   }) {
     if (!enabled) return null;
-    final canPop = onPressed != null || SafeOverlayPop.canPop(
-      root: Navigator.of(context, rootNavigator: true),
-      nested: Navigator.of(context),
-    );
+    final canPop = onPressed != null ||
+        SafeOverlayPop.canPop(
+          root: Navigator.of(context, rootNavigator: true),
+          nested: Navigator.of(context),
+        );
     if (!canPop) return null;
     return AppPageCloseButton(
       color: color,
@@ -92,7 +96,9 @@ class AppPageCloseButton extends StatelessWidget {
       ),
       onPressed: !enabled
           ? null
-          : (onPressed ?? () => _defaultPop(context)),
+          : () => WebInAppNav.runProgrammaticPop(
+                onPressed ?? () => _defaultPop(context),
+              ),
     );
   }
 }

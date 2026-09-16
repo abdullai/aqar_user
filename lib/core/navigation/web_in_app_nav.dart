@@ -25,6 +25,7 @@ abstract final class WebInAppNav {
   static bool _armed = false;
   static int _holdBack = 0;
   static int _sealDepth = 0;
+  static int _programmaticPopDepth = 0;
   static DateTime? _flutterPopAt;
 
   static bool get _sealing => _sealDepth > 0;
@@ -62,6 +63,17 @@ abstract final class WebInAppNav {
     _forward.clear();
   }
 
+  /// Marks a Flutter close action so its NavigatorObserver pop is not replayed
+  /// as a second browser-history back action.
+  static void runProgrammaticPop(VoidCallback action) {
+    _programmaticPopDepth++;
+    try {
+      action();
+    } finally {
+      if (_programmaticPopDepth > 0) _programmaticPopDepth--;
+    }
+  }
+
   static void sealBrowserToLogin() {
     if (!kIsWeb) return;
     _forward.clear();
@@ -96,6 +108,9 @@ abstract final class WebInAppNav {
     }
     // حوارات/شيتات/قوائم ليست صفحات — مزامنتها مع التاريخ تُغلق نموذج + أو الخريطة.
     if (route is PopupRoute) {
+      return;
+    }
+    if (_programmaticPopDepth > 0) {
       return;
     }
     _remember(route, nested: nested);

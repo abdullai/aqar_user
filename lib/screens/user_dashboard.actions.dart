@@ -790,26 +790,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
                 ),
                 onTap: () => Navigator.pop(ctx, 'developer'),
               ),
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: cs.primaryContainer,
-                  child: Icon(
-                    Icons.handshake_outlined,
-                    color: cs.onPrimaryContainer,
-                  ),
-                ),
-                title: Text(
-                  widget.isAr ? 'إتمام صفقة' : 'Complete a deal',
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text(
-                  widget.isAr
-                      ? 'متابعة وإتمام صفقاتك العقارية.'
-                      : 'Track and complete your real estate deals.',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                onTap: () => Navigator.pop(ctx, 'deal'),
-              ),
             ],
           ),
         );

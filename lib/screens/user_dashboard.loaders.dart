@@ -2131,9 +2131,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               platform_fee_amount,
               extra_fee_amount,
               total_amount,
-              owner_rejection_reason,
-              owner_rejected_at,
-              owner_rejected_by
+              total_amount
             ''')
               .eq('user_id', _uid)
               .inFilter('status', ['pending', 'paid', 'accepted'])
@@ -2154,19 +2152,17 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               extra_fee_amount,
               total_amount,
               deal_completed_at,
-              deal_completion_note,
-              owner_rejection_reason,
-              owner_rejected_at,
-              owner_rejected_by
+              deal_completion_note
             ''')
               .eq('user_id', _uid)
               .inFilter('status', ['completed', 'sold'])
               .order('created_at', ascending: false);
         }, tag: 'CART_COMPLETED'),
-        _net(() {
-          return _sb
-              .from('reservations')
-              .select('''
+        _net(() async {
+          try {
+            return await _sb
+                .from('reservations')
+                .select('''
               id,
               property_id,
               user_id,
@@ -2182,11 +2178,15 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               owner_rejected_at,
               owner_rejected_by
             ''')
-              .eq('user_id', _uid)
-              .inFilter('status', ['cancelled', 'rejected'])
-              .not('owner_rejection_reason', 'is', null)
-              .order('created_at', ascending: false)
-              .limit(50);
+                .eq('user_id', _uid)
+                .inFilter('status', ['cancelled', 'rejected'])
+                .not('owner_rejection_reason', 'is', null)
+                .order('created_at', ascending: false)
+                .limit(50);
+          } catch (_) {
+            // Older databases do not have exclusion columns yet.
+            return const <Map<String, dynamic>>[];
+          }
         }, tag: 'CART_EXCLUDED'),
       ]);
 
