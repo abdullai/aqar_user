@@ -171,11 +171,10 @@ class AqarTextField extends StatelessWidget {
       showCursor: showCursor,
       buildCounter: buildCounter,
       textCapitalization: textCapitalization,
-      onTapOutside: onTapOutside ??
-          (_) => AppOutsideUnfocus.unfocusEditable(),
+      onTapOutside: onTapOutside ?? (_) => AppOutsideUnfocus.unfocusEditable(),
       enableInteractiveSelection: enableInteractiveSelection,
       mouseCursor: SystemMouseCursors.text,
-      scrollPadding: aqarFieldScrollPadding(context),
+      scrollPadding: AppKeyboardInset.inputScrollPadding(context),
       cursorWidth: AqarEditableDefaults.cursorWidth(context),
       selectionHeightStyle: AqarEditableDefaults.heightStyle,
       selectionWidthStyle: AqarEditableDefaults.widthStyle,
@@ -316,9 +315,10 @@ class AqarTextFormField extends FormField<String> {
               textCapitalization: textCapitalization,
               enableInteractiveSelection: true,
               mouseCursor: SystemMouseCursors.text,
-              scrollPadding: aqarFieldScrollPadding(field.context),
+              scrollPadding: AppKeyboardInset.inputScrollPadding(field.context),
               cursorWidth: AqarEditableDefaults.cursorWidth(ctx),
-              cursorHeight: AqarEditableDefaults.cursorHeightFor(effectiveStyle),
+              cursorHeight:
+                  AqarEditableDefaults.cursorHeightFor(effectiveStyle),
               cursorRadius: const Radius.circular(1.2),
               cursorOpacityAnimates: !kIsWeb,
               selectionHeightStyle: AqarEditableDefaults.heightStyle,
@@ -399,7 +399,8 @@ class _AqarTextFormFieldState extends FormFieldState<String> {
       oldWidget.controller?.removeListener(_handleControllerChanged);
       widget.controller?.addListener(_handleControllerChanged);
       if (oldWidget.controller != null && widget.controller == null) {
-        _controller = TextEditingController.fromValue(oldWidget.controller!.value);
+        _controller =
+            TextEditingController.fromValue(oldWidget.controller!.value);
       }
       if (widget.controller != null && oldWidget.controller == null) {
         _controller?.dispose();

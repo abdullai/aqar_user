@@ -124,6 +124,7 @@ class _UserDashboardState extends State<UserDashboard>
 
   /// أثناء طبقة مفتوحة: لا تُعد التبويب إذا اختار المستخدم تبويباً من الشريط.
   bool _userChoseDashboardTab = false;
+  @override
   int _overlayNavDepth = 0;
 
   /// تمييز مؤقت لشريط التنقل أثناء شورتز (لا يُعاد للرئيسية بصرياً).

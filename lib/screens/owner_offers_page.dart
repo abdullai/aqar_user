@@ -34,8 +34,10 @@ import '../core/presence/presence_display_prefs.dart';
 class OwnerOffersPage extends StatefulWidget {
   final String requestId;
   final String lang;
+
   /// عند فتح الصفحة من BottomSheet في «صفحتي».
   final bool embeddedInSheet;
+
   /// بعد قبول عرض بنجاح (إغلاق الورقة وتحريك تبويب التعاقد في الواجهة الأم).
   final VoidCallback? onOfferAccepted;
 
@@ -332,8 +334,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                     const SizedBox(height: 12),
                     SwitchListTile.adaptive(
                       value: allowRetryHolder[0],
-                      onChanged: (v) =>
-                          setLocal(() => allowRetryHolder[0] = v),
+                      onChanged: (v) => setLocal(() => allowRetryHolder[0] = v),
                       title: Text(
                         _isAr
                             ? 'هل ترغب في إتاحة الفرصة للمسوق لرؤية إعلانك وإتمام صفقة أخرى؟'
@@ -359,7 +360,8 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                       maxLines: 3,
                       maxLength: 500,
                       decoration: InputDecoration(
-                        labelText: ListingWorkflowCopy.declineReasonLabel(_isAr),
+                        labelText:
+                            ListingWorkflowCopy.declineReasonLabel(_isAr),
                         hintText: _isAr
                             ? 'يظهر هذا السبب للمسوّق'
                             : 'Shown to the marketer',
@@ -487,17 +489,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     return effectivePropertyPriceSarForMarketingFee(r, _linkedProperty);
   }
 
-  String _listingReferenceLine() {
-    final code =
-        (_linkedProperty?['listing_public_code'] ?? '').toString().trim();
-    if (code.isNotEmpty) {
-      return _isAr ? 'رقم الإعلان: $code' : 'Listing no.: $code';
-    }
-    return _isAr
-        ? 'طلب تسويق عقاري — يُنشأ رقم الإعلان عند النشر'
-        : 'Marketing request — listing number is assigned at publish';
-  }
-
   List<String> _propertyImageUrls() {
     final prop = _linkedProperty;
     if (prop != null && prop['default_cover_used'] != true) {
@@ -558,10 +549,9 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
       ]) {
         addPaths(payload[key]);
       }
-      final prim =
-          (payload['primary_image'] ?? payload['primaryImage'] ?? '')
-              .toString()
-              .trim();
+      final prim = (payload['primary_image'] ?? payload['primaryImage'] ?? '')
+          .toString()
+          .trim();
       if (prim.isNotEmpty) {
         final u = toPublic(prim);
         if (u.isNotEmpty && !out.contains(u)) out.add(u);
@@ -704,12 +694,10 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final req = _request;
     if (req == null) return const SizedBox.shrink();
 
-    final title = (req['title'] ?? _linkedProperty?['title'] ?? '')
-        .toString()
-        .trim();
-    final city = (req['city'] ?? _linkedProperty?['city'] ?? '')
-        .toString()
-        .trim();
+    final title =
+        (_linkedProperty?['title'] ?? req['title'] ?? '').toString().trim();
+    final city =
+        (req['city'] ?? _linkedProperty?['city'] ?? '').toString().trim();
     final loc = (req['location'] ??
             req['address_line'] ??
             _linkedProperty?['location'] ??
@@ -729,10 +717,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final heroH = (screenW * 0.52).clamp(180.0, 280.0);
 
     final summaryRows = <RequestSummaryRow>[
-      RequestSummaryRow(
-        label: _isAr ? 'المرجع' : 'Reference',
-        value: _listingReferenceLine(),
-      ),
       if (title.isNotEmpty)
         RequestSummaryRow(
           label: _isAr ? 'العنوان' : 'Title',
@@ -771,9 +755,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
       ),
       RequestSummaryRow(
         label: _isAr ? 'عروض الشركاء' : 'Partner offers',
-        value: _isAr
-            ? '${_offers.length} عرض'
-            : '${_offers.length} offer(s)',
+        value: _isAr ? '${_offers.length} عرض' : '${_offers.length} offer(s)',
       ),
     ];
 
@@ -799,27 +781,30 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
               height: heroH,
               width: double.infinity,
               child: url != null
-                  ? CachedNetworkImage(
-                      imageUrl: url,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: heroH,
-                      placeholder: (_, __) => Container(
-                        color: _brandTeal.withValues(alpha: 0.12),
-                        alignment: Alignment.center,
-                        child: const SizedBox(
-                          width: 32,
-                          height: 32,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                  ? ColoredBox(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+                      child: CachedNetworkImage(
+                        imageUrl: url,
+                        fit: BoxFit.contain,
+                        width: double.infinity,
+                        height: heroH,
+                        placeholder: (_, __) => Container(
+                          color: _brandTeal.withValues(alpha: 0.12),
+                          alignment: Alignment.center,
+                          child: const SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
                         ),
-                      ),
-                      errorWidget: (_, __, ___) => Container(
-                        color: _brandTeal.withValues(alpha: 0.12),
-                        alignment: Alignment.center,
-                        child: const BrandingLogoImage(
-                          size: 120,
-                          fit: BoxFit.contain,
-                          errorIcon: Icons.apartment_rounded,
+                        errorWidget: (_, __, ___) => Container(
+                          color: _brandTeal.withValues(alpha: 0.12),
+                          alignment: Alignment.center,
+                          child: const BrandingLogoImage(
+                            size: 120,
+                            fit: BoxFit.contain,
+                            errorIcon: Icons.apartment_rounded,
+                          ),
                         ),
                       ),
                     )
@@ -980,12 +965,12 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                                       deadline: ctxModel.primaryDeadline,
                                       permitSoundContextId: widget.requestId,
                                     ),
-                                  const SizedBox(height: 12),
-                                  _buildDeclineCapBanner(cs),
-                                  const SizedBox(height: 4),
-                                ],
-                                _buildPropertyHero(cs),
-                                const SizedBox(height: 16),
+                                    const SizedBox(height: 12),
+                                    _buildDeclineCapBanner(cs),
+                                    const SizedBox(height: 4),
+                                  ],
+                                  _buildPropertyHero(cs),
+                                  const SizedBox(height: 16),
                                   Text(
                                     _isAr
                                         ? (_offers.isEmpty
@@ -1061,9 +1046,8 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final statusRaw = (o['status'] ?? '').toString();
     final winner = _isAcceptedWinner(o);
     final canAccept = _canTapAccept(o);
-    final canDecline = _canOwnerDecide(o) &&
-        !_anotherOfferWasSelected(id) &&
-        !_acceptInFlight;
+    final canDecline =
+        _canOwnerDecide(o) && !_anotherOfferWasSelected(id) && !_acceptInFlight;
     final shortStatus = ListingWorkflowCopy.offerStatusShort(_isAr, statusRaw);
     final longStatus = ListingWorkflowCopy.offerStatusLong(_isAr, statusRaw);
     final mid = (o['marketer_id'] ?? '').toString().trim();
@@ -1075,9 +1059,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         winner ? _brandTeal : cs.outlineVariant.withValues(alpha: 0.45);
 
     final avatarUrl = (o['_marketer_avatar_url'] ?? '').toString().trim();
-    final phone = winner
-        ? (o['_marketer_phone'] ?? '').toString().trim()
-        : '';
+    final phone = winner ? (o['_marketer_phone'] ?? '').toString().trim() : '';
     final license = (o['_marketer_license_no'] ?? '').toString().trim();
     final exp =
         DateTime.tryParse((o['expires_at'] ?? '').toString())?.toLocal();
@@ -1211,63 +1193,63 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
             RequestSummaryTable(
               title: _isAr ? 'بيانات الشريك والعرض' : 'Partner & offer details',
               rows: [
+                RequestSummaryRow(
+                  label: _isAr ? 'اسم الشريك' : 'Partner name',
+                  value: name.isNotEmpty
+                      ? name
+                      : ListingWorkflowCopy.t(
+                          _isAr,
+                          'شريك مسوّق',
+                          'Partner marketer',
+                        ),
+                  emphasize: true,
+                ),
+                RequestSummaryRow(
+                  label: _isAr ? 'نوع الجهة' : 'Entity type',
+                  value: _accountTypeHuman(o),
+                ),
+                RequestSummaryRow(
+                  label: _isAr ? 'صفة الظهور' : 'Name shown as',
+                  value: identity.source == PublicNameSource.display
+                      ? (_isAr ? 'اسم مستعار' : 'Alias')
+                      : (_isAr
+                          ? 'الاسم المعتمد (رباعي / مكتب / مؤسسة / شركة)'
+                          : 'Official (quad / office / institution / company)'),
+                ),
+                if (phone.isNotEmpty)
                   RequestSummaryRow(
-                    label: _isAr ? 'اسم الشريك' : 'Partner name',
-                    value: name.isNotEmpty
-                        ? name
-                        : ListingWorkflowCopy.t(
-                            _isAr,
-                            'شريك مسوّق',
-                            'Partner marketer',
-                          ),
-                    emphasize: true,
+                    label: _isAr ? 'الجوال' : 'Phone',
+                    value: _fmtNumericUi(phone),
                   ),
+                if (license.isNotEmpty)
                   RequestSummaryRow(
-                    label: _isAr ? 'نوع الجهة' : 'Entity type',
-                    value: _accountTypeHuman(o),
+                    label: _isAr ? 'ترخيص الشريك' : 'Partner license',
+                    value: normalizeAsciiDigits(license),
                   ),
+                RequestSummaryRow(
+                  label: _isAr ? 'حالة الشريك' : 'Partner status',
+                  value: longStatus,
+                ),
+                RequestSummaryRow(
+                  label: _isAr ? 'قيمة العرض' : 'Offer amount',
+                  value: _amountLine(o),
+                  emphasize: true,
+                ),
+                RequestSummaryRow(
+                  label: _isAr ? 'تاريخ التقديم' : 'Submitted date',
+                  value: _fmtDateOnly(o['created_at']) ?? '—',
+                ),
+                RequestSummaryRow(
+                  label: _isAr ? 'وقت التقديم' : 'Submitted time',
+                  value: _fmtTimeOnly(o['created_at']) ?? '—',
+                ),
+                if (rating != null && rating.count > 0)
                   RequestSummaryRow(
-                    label: _isAr ? 'صفة الظهور' : 'Name shown as',
-                    value: identity.source == PublicNameSource.display
-                        ? (_isAr ? 'اسم مستعار' : 'Alias')
-                        : (_isAr
-                            ? 'الاسم المعتمد (رباعي / مكتب / مؤسسة / شركة)'
-                            : 'Official (quad / office / institution / company)'),
+                    label: _isAr ? 'تقييم الشريك' : 'Partner rating',
+                    value: _isAr
+                        ? '${_fmtNumericUi(rating.avg.toStringAsFixed(1))} • ${_fmtNumericUi('${rating.count}')} تقييم'
+                        : '${rating.avg.toStringAsFixed(1)} • ${rating.count} ratings',
                   ),
-                  if (phone.isNotEmpty)
-                    RequestSummaryRow(
-                      label: _isAr ? 'الجوال' : 'Phone',
-                      value: _fmtNumericUi(phone),
-                    ),
-                  if (license.isNotEmpty)
-                    RequestSummaryRow(
-                      label: _isAr ? 'ترخيص الشريك' : 'Partner license',
-                      value: normalizeAsciiDigits(license),
-                    ),
-                  RequestSummaryRow(
-                    label: _isAr ? 'حالة الشريك' : 'Partner status',
-                    value: longStatus,
-                  ),
-                  RequestSummaryRow(
-                    label: _isAr ? 'قيمة العرض' : 'Offer amount',
-                    value: _amountLine(o),
-                    emphasize: true,
-                  ),
-                  RequestSummaryRow(
-                    label: _isAr ? 'تاريخ التقديم' : 'Submitted date',
-                    value: _fmtDateOnly(o['created_at']) ?? '—',
-                  ),
-                  RequestSummaryRow(
-                    label: _isAr ? 'وقت التقديم' : 'Submitted time',
-                    value: _fmtTimeOnly(o['created_at']) ?? '—',
-                  ),
-                  if (rating != null && rating.count > 0)
-                    RequestSummaryRow(
-                      label: _isAr ? 'تقييم الشريك' : 'Partner rating',
-                      value: _isAr
-                          ? '${_fmtNumericUi(rating.avg.toStringAsFixed(1))} • ${_fmtNumericUi('${rating.count}')} تقييم'
-                          : '${rating.avg.toStringAsFixed(1)} • ${rating.count} ratings',
-                    ),
               ],
             ),
             if (notes.isNotEmpty) ...[
@@ -1348,12 +1330,10 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                 children: [
                   if (canAccept)
                     FilledButton(
-                      onPressed: (_loading ||
-                              _refreshing ||
-                              busy ||
-                              _acceptInFlight)
-                          ? null
-                          : () => _accept(o),
+                      onPressed:
+                          (_loading || _refreshing || busy || _acceptInFlight)
+                              ? null
+                              : () => _accept(o),
                       style: FilledButton.styleFrom(
                         backgroundColor: _brandTeal,
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -1387,9 +1367,10 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                   if (canAccept && canDecline) const SizedBox(height: 10),
                   if (canDecline) ...[
                     OutlinedButton.icon(
-                      onPressed: (_loading || _refreshing || busy || _acceptInFlight)
-                          ? null
-                          : () => _decline(o),
+                      onPressed:
+                          (_loading || _refreshing || busy || _acceptInFlight)
+                              ? null
+                              : () => _decline(o),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: cs.error,
                         side: BorderSide(

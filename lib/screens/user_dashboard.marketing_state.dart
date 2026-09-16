@@ -5,6 +5,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
   // Base state contract from _UserDashboardState
   // =========================================================
   bool get _isGuest;
+  int get _overlayNavDepth;
 
   /// اسم التحية من الكاش — يظهر فوراً قبل اكتمال جلب الملف الشخصي.
   /// يُعرَّف هنا لأن [MarketingStateMixin] يمسحه عند تسجيل الخروج.
@@ -15,6 +16,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
   // =========================================================
   String _accountType = 'user';
   bool _verified = false;
+
   /// بعد أول جلب لنوع الحساب + سياق المؤسسة (زر + يعتمد عليها؛ تبويبات الشريط السفلي ثابتة العدد).
   bool _accountRoleLoaded = false;
   bool _orgNavResolved = false;
@@ -65,6 +67,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
 
   /// تبويب + في الشريط السفلي (إضافة إعلان/طلب) — يعتمد على الصلاحيات وليس على نوع الحساب وحده.
   bool get _showBottomNavAddSlot {
+    if (_overlayNavDepth > 0) return false;
     if (_isGuest) return true;
     if (!_accountRoleLoaded || !_orgNavResolved) return true;
 
@@ -220,6 +223,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
       OrgPermissionKeys.addListingRequests,
     );
   }
+
   void _resetOwnerRequestBuckets() {
     _ownerListingRequests = <Map<String, dynamic>>[];
     _loadingOwnerRequests = false;

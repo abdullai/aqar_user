@@ -107,6 +107,18 @@ abstract final class AppKeyboardInset {
     return base.copyWith(bottom: base.bottom + scrollContentBottomOf(context));
   }
 
+  /// Extra room for mobile browser keyboard accessory controls (Next/Previous).
+  static EdgeInsets inputScrollPadding(BuildContext context) {
+    final base = aqarKeyboardScrollBottom(context);
+    return EdgeInsets.only(left: 8, top: 10, right: 8, bottom: base);
+  }
+
+  static double aqarKeyboardScrollBottom(BuildContext context) {
+    final kb = bottomOf(context);
+    if (kb < 8) return 24;
+    return math.max(120.0, kb + 56.0);
+  }
+
   /// الحقل المركّز داخل حوار/ورقة — نعيد viewInsets حتى ترفع Flutter الحوارات الخام.
   static bool editingInOverlay() {
     final node = FocusManager.instance.primaryFocus;
@@ -134,7 +146,9 @@ class AppKeyboardScope extends InheritedWidget {
   final double inset;
 
   static double? maybeOf(BuildContext context) {
-    return context.dependOnInheritedWidgetOfExactType<AppKeyboardScope>()?.inset;
+    return context
+        .dependOnInheritedWidgetOfExactType<AppKeyboardScope>()
+        ?.inset;
   }
 
   @override
@@ -216,16 +230,14 @@ class _AppKeyboardHostState extends State<AppKeyboardHost>
       final windowH = view.physicalSize.height / view.devicePixelRatio;
       if (windowH > height + 24) height = windowH;
     }
-    final restoreInsets =
-        inset > 8 && AppKeyboardInset.editingInOverlay();
+    final restoreInsets = inset > 8 && AppKeyboardInset.editingInOverlay();
     return AppKeyboardScope(
       inset: inset,
       child: MediaQuery(
         data: mq.copyWith(
           size: Size(mq.size.width, height),
-          viewInsets: restoreInsets
-              ? EdgeInsets.only(bottom: inset)
-              : EdgeInsets.zero,
+          viewInsets:
+              restoreInsets ? EdgeInsets.only(bottom: inset) : EdgeInsets.zero,
           padding: mq.viewPadding,
         ),
         child: widget.child,
@@ -239,8 +251,7 @@ class AppKeyboardPadScope extends InheritedWidget {
   const AppKeyboardPadScope({super.key, required super.child});
 
   static bool maybeOf(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<AppKeyboardPadScope>() !=
-      null;
+      context.dependOnInheritedWidgetOfExactType<AppKeyboardPadScope>() != null;
 
   @override
   bool updateShouldNotify(AppKeyboardPadScope oldWidget) => false;
