@@ -9697,7 +9697,7 @@ class _UserDashboardState extends State<UserDashboard>
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${_isArabic ? 'العروض الواردة' : 'Incoming'} ($incomingCount)',
+                        '${_isArabic ? 'العروض' : 'Offers'} ($incomingCount)',
                         maxLines: 1,
                       ),
                     ),
@@ -9707,7 +9707,7 @@ class _UserDashboardState extends State<UserDashboard>
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${_isArabic ? 'صفقاتي الجارية' : 'Active deals'} (${_dealRatioLabel(used, maxDeals)})',
+                        '${_isArabic ? 'الصفقات' : 'Deals'} (${_dealRatioLabel(used, maxDeals)})',
                         maxLines: 1,
                       ),
                     ),
@@ -9722,22 +9722,43 @@ class _UserDashboardState extends State<UserDashboard>
                       ),
                     ),
                   ),
-                  ButtonSegment<int>(
-                    value: 3,
-                    label: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        '${_isArabic ? 'الاستبعادات' : 'Exclusions'} ($totalExclusionsCount)',
-                        maxLines: 1,
-                      ),
-                    ),
-                  ),
                 ],
-                selected: {pane},
+                selected: {pane == 3 ? 2 : pane},
                 onSelectionChanged: (s) {
                   if (s.isEmpty) return;
                   setState(() => _cartPaneIndex = s.first);
                 },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => setState(() => _cartPaneIndex = 3),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: pane == 3
+                        ? cs.errorContainer.withValues(alpha: 0.35)
+                        : null,
+                    side: BorderSide(
+                      color: pane == 3 ? cs.error : cs.outlineVariant,
+                    ),
+                  ),
+                  icon: Icon(
+                    Icons.block_rounded,
+                    size: 18,
+                    color: pane == 3 ? cs.error : cs.onSurfaceVariant,
+                  ),
+                  label: Text(
+                    '${_isArabic ? 'المستبعدة' : 'Excluded'} ($totalExclusionsCount)',
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: pane == 3 ? cs.error : cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               ),
             ),
             Expanded(

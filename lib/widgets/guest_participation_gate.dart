@@ -14,6 +14,22 @@ Widget _withFeeCatalog(
   );
 }
 
+/// بطاقة حوار مركزية معتمة (لا شفافية) تدعم الوضع الليلي/النهاري.
+Widget _guestGateDialogShell(BuildContext context, Widget child) {
+  final cs = Theme.of(context).colorScheme;
+  return Dialog(
+    backgroundColor: cs.surface,
+    surfaceTintColor: cs.surface,
+    elevation: 12,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: child,
+    ),
+  );
+}
+
 String _guestPayOnceLabel(PlatformFeeCatalog? cat,
     {required bool isAr, required bool forOffer}) {
   final p = cat?.guestPhrase(isAr: isAr) ?? '';
@@ -47,51 +63,54 @@ Future<GuestHomeOfferGateResult?> showGuestHomeOfferGateSheet({
   return showDialog<GuestHomeOfferGateResult>(
     context: context,
     builder: (ctx) {
-      return _withFeeCatalog(
-        builder: (cat) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    isAr ? 'إتمام الصفقة' : 'Complete deal',
-                    style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    isAr
-                        ? 'الرجاء تسجيل الدخول أو إنشاء حساب ثم العودة لإتمام الصفقة، أو اختر الدفع لمرة واحدة لفتح تبويب الصفقات وإكمال الإجراء من هذا الجهاز.'
-                        : 'Please sign in or create an account, then return to submit your offer — or pay once to unlock the Deals tab and submit from this device.',
-                    style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
-                          height: 1.38,
-                          fontWeight: FontWeight.w600,
-                          color: cs.onSurfaceVariant,
-                        ),
-                  ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestHomeOfferGateResult.login),
-                    icon: const Icon(Icons.login_rounded),
-                    label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton.icon(
-                    onPressed: () => Navigator.of(ctx)
-                        .pop(GuestHomeOfferGateResult.register),
-                    icon: const Icon(Icons.person_add_alt_1_outlined),
-                    label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
-                  ),
-                ],
+      return _guestGateDialogShell(
+        ctx,
+        _withFeeCatalog(
+          builder: (cat) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      isAr ? 'إتمام الصفقة' : 'Complete deal',
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      isAr
+                          ? 'الرجاء تسجيل الدخول أو إنشاء حساب ثم العودة لإتمام الصفقة، أو اختر الدفع لمرة واحدة لفتح تبويب الصفقات وإكمال الإجراء من هذا الجهاز.'
+                          : 'Please sign in or create an account, then return to submit your offer — or pay once to unlock the Deals tab and submit from this device.',
+                      style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                            height: 1.38,
+                            fontWeight: FontWeight.w600,
+                            color: cs.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: () =>
+                          Navigator.of(ctx).pop(GuestHomeOfferGateResult.login),
+                      icon: const Icon(Icons.login_rounded),
+                      label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(ctx)
+                          .pop(GuestHomeOfferGateResult.register),
+                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
     },
   );
@@ -106,62 +125,65 @@ Future<GuestAuthRequiredResult?> showGuestInstantDealAuthSheet({
   return showDialog<GuestAuthRequiredResult>(
     context: context,
     builder: (ctx) {
-      return _withFeeCatalog(
-        builder: (cat) {
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.bolt_rounded, color: cs.error, size: 28),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          isAr
-                              ? 'طلب فوري — بدون اشتراك'
-                              : 'Instant request — no subscription',
-                          style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.w900,
-                              ),
+      return _guestGateDialogShell(
+        ctx,
+        _withFeeCatalog(
+          builder: (cat) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.bolt_rounded, color: cs.error, size: 28),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            isAr
+                                ? 'طلب فوري — بدون اشتراك'
+                                : 'Instant request — no subscription',
+                            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    cat?.instantPaidGuestHint(isAr: isAr) ??
-                        (isAr
-                            ? 'هذا الطلب مدفوع — يمكنك إتمام الصفقة والدردشة مع مقدّم الطلب بدون أي اشتراك. سجّل الدخول أو أنشئ حساباً مجانياً للمتابعة.'
-                            : 'This is a paid instant request — you can complete the deal and chat with the requester with no subscription. Sign in or create a free account to continue.'),
-                    style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
-                          height: 1.38,
-                          fontWeight: FontWeight.w600,
-                          color: cs.onSurfaceVariant,
-                        ),
-                  ),
-                  const SizedBox(height: 18),
-                  FilledButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestAuthRequiredResult.login),
-                    icon: const Icon(Icons.login_rounded),
-                    label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton.icon(
-                    onPressed: () =>
-                        Navigator.of(ctx).pop(GuestAuthRequiredResult.register),
-                    icon: const Icon(Icons.person_add_alt_1_outlined),
-                    label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      cat?.instantPaidGuestHint(isAr: isAr) ??
+                          (isAr
+                              ? 'هذا الطلب مدفوع — يمكنك إتمام الصفقة والدردشة مع مقدّم الطلب بدون أي اشتراك. سجّل الدخول أو أنشئ حساباً مجانياً للمتابعة.'
+                              : 'This is a paid instant request — you can complete the deal and chat with the requester with no subscription. Sign in or create a free account to continue.'),
+                      style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                            height: 1.38,
+                            fontWeight: FontWeight.w600,
+                            color: cs.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton.icon(
+                      onPressed: () =>
+                          Navigator.of(ctx).pop(GuestAuthRequiredResult.login),
+                      icon: const Icon(Icons.login_rounded),
+                      label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(ctx)
+                          .pop(GuestAuthRequiredResult.register),
+                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       );
     },
   );
@@ -182,45 +204,48 @@ Future<GuestAuthRequiredResult?> showGuestAuthRequiredSheet({
   return showDialog<GuestAuthRequiredResult>(
     context: context,
     builder: (ctx) {
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                isAr ? 'تسجيل الدخول' : 'Sign in',
-                style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                isAr
-                    ? 'الرجاء تسجيل الدخول أو إنشاء حساب للاستفادة من كل الخدمات (إعلاناتي، صفقاتي، الدردشة، السلة، وغيرها).'
-                    : 'Please sign in or create an account to use My ads, Deals, chat, cart, and the rest of the app.',
-                style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
-                      height: 1.38,
-                      fontWeight: FontWeight.w600,
-                      color: cs.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: () =>
-                    Navigator.of(ctx).pop(GuestAuthRequiredResult.login),
-                icon: const Icon(Icons.login_rounded),
-                label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: () =>
-                    Navigator.of(ctx).pop(GuestAuthRequiredResult.register),
-                icon: const Icon(Icons.person_add_alt_1_outlined),
-                label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
-              ),
-            ],
+      return _guestGateDialogShell(
+        ctx,
+        SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  isAr ? 'تسجيل الدخول' : 'Sign in',
+                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  isAr
+                      ? 'الرجاء تسجيل الدخول أو إنشاء حساب للاستفادة من كل الخدمات (إعلاناتي، صفقاتي، الدردشة، السلة، وغيرها).'
+                      : 'Please sign in or create an account to use My ads, Deals, chat, cart, and the rest of the app.',
+                  style: Theme.of(ctx).textTheme.bodyMedium?.copyWith(
+                        height: 1.38,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.of(ctx).pop(GuestAuthRequiredResult.login),
+                  icon: const Icon(Icons.login_rounded),
+                  label: Text(isAr ? 'تسجيل الدخول' : 'Log in'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      Navigator.of(ctx).pop(GuestAuthRequiredResult.register),
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
+                  label: Text(isAr ? 'إنشاء حساب' : 'Create account'),
+                ),
+              ],
+            ),
           ),
         ),
       );
