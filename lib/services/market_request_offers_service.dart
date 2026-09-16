@@ -18,7 +18,7 @@ class MarketRequestOffersService {
     final res = await _sb
         .from('market_request_offers')
         .select(
-          'id,created_at,updated_at,status,message,price_offer,offerer_id,owner_accepted_at',
+          'id,created_at,updated_at,status,message,price_offer,offerer_id,owner_accepted_at,owner_rejection_reason,owner_rejected_at,owner_rejected_by',
         )
         .eq('market_request_id', id)
         .order('created_at', ascending: false);
@@ -27,8 +27,8 @@ class MarketRequestOffersService {
     return rows.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
-  /// عروض إتمام صفقة حيّة على طلبات يملكها المستخدم (تبويب العروض الواردة).
-  Future<List<Map<String, dynamic>>> listLiveOffersOnRequests(
+  /// عروض إتمام صفقة (حيّة ومستبعدة) على طلبات يملكها المستخدم.
+  Future<List<Map<String, dynamic>>> listAllOffersOnRequests(
     List<String> requestIds,
   ) async {
     final ids = requestIds
@@ -42,23 +42,42 @@ class MarketRequestOffersService {
       res = await _sb
           .from('market_request_offers')
           .select(
-            'id,created_at,updated_at,status,message,price_offer,offerer_id,market_request_id,owner_accepted_at',
+            'id,created_at,updated_at,status,message,price_offer,offerer_id,market_request_id,owner_accepted_at,owner_rejection_reason,owner_rejected_at,owner_rejected_by',
           )
           .inFilter('market_request_id', ids)
           .order('created_at', ascending: false)
           .limit(200);
     } catch (_) {
-      res = await _sb
-          .from('market_request_offers')
-          .select(
-            'id,created_at,status,message,price_offer,offerer_id,market_request_id',
-          )
-          .inFilter('market_request_id', ids)
-          .order('created_at', ascending: false)
-          .limit(200);
+      try {
+        res = await _sb
+            .from('market_request_offers')
+            .select(
+              'id,created_at,updated_at,status,message,price_offer,offerer_id,market_request_id,owner_accepted_at',
+            )
+            .inFilter('market_request_id', ids)
+            .order('created_at', ascending: false)
+            .limit(200);
+      } catch (_) {
+        res = await _sb
+            .from('market_request_offers')
+            .select(
+              'id,created_at,status,message,price_offer,offerer_id,market_request_id',
+            )
+            .inFilter('market_request_id', ids)
+            .order('created_at', ascending: false)
+            .limit(200);
+      }
     }
     final rows =
         (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    return rows;
+  }
+
+  /// عروض إتمام صفقة حيّة على طلبات يملكها المستخدم (تبويب العروض الواردة).
+  Future<List<Map<String, dynamic>>> listLiveOffersOnRequests(
+    List<String> requestIds,
+  ) async {
+    final rows = await listAllOffersOnRequests(requestIds);
     const live = {
       'submitted',
       'pending',
@@ -69,7 +88,9 @@ class MarketRequestOffersService {
     };
     return rows.where((o) {
       final st = (o['status'] ?? '').toString().toLowerCase().trim();
-      return live.contains(st);
+      final hasRejection =
+          (o['owner_rejection_reason'] ?? '').toString().trim().isNotEmpty;
+      return live.contains(st) && !hasRejection;
     }).toList(growable: false);
   }
 

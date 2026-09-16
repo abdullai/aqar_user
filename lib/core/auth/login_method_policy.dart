@@ -57,9 +57,8 @@ class LoginMethodSnapshot {
 
   bool get isNativeMobile => host == LoginHostKind.nativeMobile;
 
-  /// الاسم الرباعي + كلمة المرور فقط: جهاز معتمد بعد أول دخول ناجح.
-  bool get nameOnlyPassword =>
-      isNativeMobile && trustedThisInstall && firstPasswordDone && hasKnownUser;
+  /// الاسم الرباعي + كلمة المرور فقط: عند توفر هوية مستخدم محفوظة سابقة.
+  bool get nameOnlyPassword => hasKnownUser;
 
   bool get _lockEligible =>
       isNativeMobile && trustedThisInstall && firstPasswordDone && hasSession;

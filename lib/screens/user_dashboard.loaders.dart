@@ -241,8 +241,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .where(MarketingFlowService.countsForInboxUnreadBadge)
             .length;
         try {
-          final n = await MarketingFlowService(_sb)
-              .unreadInAppNotificationCount();
+          final n =
+              await MarketingFlowService(_sb).unreadInAppNotificationCount();
           _unreadNotificationsCount = n;
         } catch (_) {}
 
@@ -499,7 +499,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .from('reservations')
             .select('property_id, user_id, status, created_at, expires_at')
             .inFilter('property_id', ids)
-            .inFilter('status', ['pending', 'paid', 'accepted']).order('created_at',
+            .inFilter('status', ['pending', 'paid', 'accepted']).order(
+                'created_at',
                 ascending: false);
       }, showDialog: false, tag: 'ACTIVE_RES');
 
@@ -522,8 +523,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         counts[pid] = (counts[pid] ?? 0) + 1;
 
         final existing = byProp[pid];
-        final incomingAccepted =
-            DealMessagingGate.reservationApprovedByOwner(
+        final incomingAccepted = DealMessagingGate.reservationApprovedByOwner(
           (r['status'] ?? '').toString(),
         );
         final existingAccepted = existing != null &&
@@ -682,18 +682,16 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         raw.contains('شركة') ||
         raw.contains('مؤسسة');
     final office = (prof['office_name'] ?? '').toString().trim();
-    final nm = isOrg && office.isNotEmpty
-        ? office
-        : _displayNameFromProfile(prof);
+    final nm =
+        isOrg && office.isNotEmpty ? office : _displayNameFromProfile(prof);
     if (nm.isEmpty) return p;
 
     final current = (p.marketerEntityPublicLine(_isArabic) ?? '').trim();
     if (current.isNotEmpty && !isOrg) return p;
     if (isOrg && current.isNotEmpty) return p;
 
-    final merged = snap.isEmpty
-        ? <String, dynamic>{}
-        : Map<String, dynamic>.from(snap);
+    final merged =
+        snap.isEmpty ? <String, dynamic>{} : Map<String, dynamic>.from(snap);
     merged['fal_broker_full_name'] = nm;
     merged['fal_broker_name'] = nm;
     merged['marketer_display_name'] = nm;
@@ -1050,8 +1048,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
     }
     keep ??= _propertyCache[id];
-    if (keep != null &&
-        ListingPermissionsHelper.shouldShowInPublicHome(keep)) {
+    if (keep != null && ListingPermissionsHelper.shouldShowInPublicHome(keep)) {
       list.insert(0, keep);
     }
   }
@@ -1136,8 +1133,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       WebBootstrapDiag.warn('home.fetch', 'skipped — circuit open');
       _ssHomeFeed(() {
         _errorHome ??= _isArabic
-              ? 'تعذّر جلب الإعلانات مؤقتاً بعد خطأ مصادقة. انتظر دقيقة أو اضغط «تحديث».'
-              : 'Home listings are temporarily paused after an auth error. Wait a minute or tap Refresh.';
+            ? 'تعذّر جلب الإعلانات مؤقتاً بعد خطأ مصادقة. انتظر دقيقة أو اضغط «تحديث».'
+            : 'Home listings are temporarily paused after an auth error. Wait a minute or tap Refresh.';
       });
       return;
     }
@@ -1744,8 +1741,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           .where((s) => s.isNotEmpty)
           .toList();
 
-      final favEnrich =
-          await Future.wait<Map<String, Map<String, dynamic>>>([
+      final favEnrich = await Future.wait<Map<String, Map<String, dynamic>>>([
         _fetchActiveReservationsByPropertyIds(propIds),
         _ownerProfilesForRows(rows),
       ]);
@@ -1779,7 +1775,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // =========================================================
   // Mine + offers
   // =========================================================
-  Future<void> _loadMineAndOffers({bool force = false, bool silent = false}) async {
+  Future<void> _loadMineAndOffers(
+      {bool force = false, bool silent = false}) async {
     if (!force && !_shouldFetchMine() && _mine.isNotEmpty) return;
 
     if (!silent) {
@@ -2133,7 +2130,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               base_price,
               platform_fee_amount,
               extra_fee_amount,
-              total_amount
+              total_amount,
+              owner_rejection_reason,
+              owner_rejected_at,
+              owner_rejected_by
             ''')
               .eq('user_id', _uid)
               .inFilter('status', ['pending', 'paid', 'accepted'])
@@ -2154,16 +2154,45 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               extra_fee_amount,
               total_amount,
               deal_completed_at,
-              deal_completion_note
+              deal_completion_note,
+              owner_rejection_reason,
+              owner_rejected_at,
+              owner_rejected_by
             ''')
               .eq('user_id', _uid)
               .inFilter('status', ['completed', 'sold'])
               .order('created_at', ascending: false);
         }, tag: 'CART_COMPLETED'),
+        _net(() {
+          return _sb
+              .from('reservations')
+              .select('''
+              id,
+              property_id,
+              user_id,
+              status,
+              created_at,
+              updated_at,
+              expires_at,
+              base_price,
+              platform_fee_amount,
+              extra_fee_amount,
+              total_amount,
+              owner_rejection_reason,
+              owner_rejected_at,
+              owner_rejected_by
+            ''')
+              .eq('user_id', _uid)
+              .inFilter('status', ['cancelled', 'rejected'])
+              .not('owner_rejection_reason', 'is', null)
+              .order('created_at', ascending: false)
+              .limit(50);
+        }, tag: 'CART_EXCLUDED'),
       ]);
 
       final cartData = cartParallel[0];
       final completedData = cartParallel[1];
+      final excludedData = cartParallel[2];
 
       if (cartData == null) return;
 
@@ -2183,6 +2212,12 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               .map((e) => Map<String, dynamic>.from(e as Map))
               .toList();
 
+      final excludedRows = excludedData == null
+          ? <Map<String, dynamic>>[]
+          : (excludedData as List)
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+
       // لا تمسح صفاً محلياً فورياً إن تأخر ظهور الحجز من الخادم بعد «إتمام الصفقة».
       if (cartRows.isEmpty &&
           _cart.any((r) => (r['id'] ?? '').toString().startsWith('local-'))) {
@@ -2191,6 +2226,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           _completedCartPropertyById = {
             ..._completedCartPropertyById,
           };
+          _excludedUserReservationsForCart = excludedRows;
           _lastCartFetch = DateTime.now();
         });
         _flushHomeFeedMutationsSync();
@@ -2202,6 +2238,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .map((r) => (r['property_id'] ?? '').toString().trim())
             .where((s) => s.isNotEmpty),
         ...completedRows
+            .map((r) => (r['property_id'] ?? '').toString().trim())
+            .where((s) => s.isNotEmpty),
+        ...excludedRows
             .map((r) => (r['property_id'] ?? '').toString().trim())
             .where((s) => s.isNotEmpty),
       }.toList();
@@ -2253,6 +2292,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _cartPropertyById = byId;
         _completedCart = completedRows;
         _completedCartPropertyById = byId;
+        _excludedUserReservationsForCart = excludedRows;
         _cartCount = cartRows.length;
         _lastCartFetch = DateTime.now();
       });
@@ -2302,8 +2342,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               .gte('withdrawn_count', 2);
         }, tag: 'MR_OFFER_WITHDRAWALS', showDialog: false),
       ]);
-      final list = (results[0] as List?)
-              ?.cast<Map<String, dynamic>>() ??
+      final list = (results[0] as List?)?.cast<Map<String, dynamic>>() ??
           const <Map<String, dynamic>>[];
       final requesterIds = list
           .map((m) => (m['_requester_id'] ?? '').toString().trim())
@@ -2323,8 +2362,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           }
         } catch (_) {}
       }
-      final archived = (results[1] as List?)
-              ?.cast<Map<String, dynamic>>() ??
+      final archived = (results[1] as List?)?.cast<Map<String, dynamic>>() ??
           const <Map<String, dynamic>>[];
       final withdrawList = (results[2] as List?) ?? const [];
       final ids = list
@@ -2430,7 +2468,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     }
     try {
       var rows =
-          await MarketRequestOffersService(_sb).listLiveOffersOnRequests(ids);
+          await MarketRequestOffersService(_sb).listAllOffersOnRequests(ids);
       try {
         rows = await MarketRequestOffersService(_sb).enrichOfferRows(
           rows,

@@ -375,6 +375,7 @@ class MarketingFlowService {
             .from('market_request_offers')
             .select(
               'id,market_request_id,status,created_at,updated_at,message,price_offer,owner_accepted_at,'
+              'owner_rejection_reason,owner_rejected_at,owner_rejected_by,'
               'market_property_requests(id,title,description,purpose,property_type,'
               'city,districts,budget_min,budget_max,area_min_m2,created_at,updated_at,'
               'requester_id,show_requester_name,requester_public_name,'
@@ -385,14 +386,30 @@ class MarketingFlowService {
             .order('created_at', ascending: false)
             .limit(80);
       } catch (_) {
-        rows = await sb
-            .from('market_request_offers')
-            .select(
-              'id,market_request_id,status,created_at,message,price_offer',
-            )
-            .eq('offerer_id', uid)
-            .order('created_at', ascending: false)
-            .limit(80);
+        try {
+          rows = await sb
+              .from('market_request_offers')
+              .select(
+                'id,market_request_id,status,created_at,updated_at,message,price_offer,owner_accepted_at,'
+                'market_property_requests(id,title,description,purpose,property_type,'
+                'city,districts,budget_min,budget_max,area_min_m2,created_at,updated_at,'
+                'requester_id,show_requester_name,requester_public_name,'
+                'cover_image_storage_path,status,selected_offer_id,completed_at,'
+                'deal_completion_note)',
+              )
+              .eq('offerer_id', uid)
+              .order('created_at', ascending: false)
+              .limit(80);
+        } catch (_) {
+          rows = await sb
+              .from('market_request_offers')
+              .select(
+                'id,market_request_id,status,created_at,message,price_offer',
+              )
+              .eq('offerer_id', uid)
+              .order('created_at', ascending: false)
+              .limit(80);
+        }
       }
 
       final list = _asListOfMaps(rows);
@@ -436,7 +453,8 @@ class MarketingFlowService {
       note = (nested['deal_completion_note'] ?? '').toString().trim();
       completedAt = (nested['completed_at'] ?? '').toString().trim();
       requesterId = (nested['requester_id'] ?? '').toString().trim();
-      requesterPublic = (nested['requester_public_name'] ?? '').toString().trim();
+      requesterPublic =
+          (nested['requester_public_name'] ?? '').toString().trim();
     }
     return {
       ...m,
@@ -446,7 +464,8 @@ class MarketingFlowService {
       if (note.isNotEmpty) '_deal_completion_note': note,
       if (completedAt.isNotEmpty) '_request_completed_at': completedAt,
       if (requesterId.isNotEmpty) '_requester_id': requesterId,
-      if (requesterPublic.isNotEmpty) '_requester_display_name': requesterPublic,
+      if (requesterPublic.isNotEmpty)
+        '_requester_display_name': requesterPublic,
       if (requestRow != null) '_request_row': requestRow,
     };
   }
@@ -897,8 +916,7 @@ class MarketingFlowService {
         'default_cover_used,property_images(path,file_name,sort_order)';
     try {
       final req = await ownerListingRequestSnapshot(requestId);
-      final previewId =
-          (req?['preview_property_id'] ?? '').toString().trim();
+      final previewId = (req?['preview_property_id'] ?? '').toString().trim();
       if (previewId.isNotEmpty) {
         try {
           final byPreview = await sb
@@ -1345,8 +1363,8 @@ class MarketingFlowService {
         )
         .eq('request_id', requestId)
         .eq('marketer_id', uid)
-        .inFilter('status', ['submitted', 'pending'])
-        .order('created_at', ascending: false);
+        .inFilter('status', ['submitted', 'pending']).order('created_at',
+            ascending: false);
     final list = _asListOfMaps(rows);
     for (final o in list) {
       final rno = (o['round_no'] as num?)?.toInt() ?? 1;
@@ -1400,10 +1418,14 @@ class MarketingFlowService {
   /// سحب عرض المسوّق يدوياً (حالة `withdrawn`) — يُزال من تبويب «عروضي» بعد التحديث.
   Future<void> marketerWithdrawListingOffer(String offerId) async {
     final uid = _uidOrThrow();
-    await sb.from('listing_offers').update({
-      'status': 'withdrawn',
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', offerId).eq('marketer_id', uid);
+    await sb
+        .from('listing_offers')
+        .update({
+          'status': 'withdrawn',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', offerId)
+        .eq('marketer_id', uid);
   }
 
   /// قبول عرض (تحديث مرحلة الطلب) دون مسار العقد الكامل.
@@ -1651,8 +1673,7 @@ class MarketingFlowService {
   // ----------------------------
   Future<List<Map<String, dynamic>>> myInAppNotifications() async {
     final uid = _uidOrThrow();
-    const cols =
-        'id,username,user_id,type,title,body,data,created_at,is_read';
+    const cols = 'id,username,user_id,type,title,body,data,created_at,is_read';
     Future<List<Map<String, dynamic>>> pullByUserId() async {
       final rows = await sb
           .from('in_app_notifications')
@@ -1837,7 +1858,10 @@ class MarketingFlowService {
           .toLowerCase()
           .trim();
       if (tab == 'chat') return true;
-      if ((m['conversation_id'] ?? m['cid'] ?? '').toString().trim().isNotEmpty) {
+      if ((m['conversation_id'] ?? m['cid'] ?? '')
+          .toString()
+          .trim()
+          .isNotEmpty) {
         return true;
       }
     }
@@ -2149,10 +2173,14 @@ class MarketingFlowService {
     required bool allow,
   }) async {
     final uid = _uidOrThrow();
-    await sb.from('listing_requests').update({
-      'allow_previous_marketers_retry': allow,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }).eq('id', requestId).eq('owner_id', uid);
+    await sb
+        .from('listing_requests')
+        .update({
+          'allow_previous_marketers_retry': allow,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', requestId)
+        .eq('owner_id', uid);
   }
 
   /// نص العقد للمعاينة قبل الموافقة (بدون استدعاء `owner_select_offer`).
@@ -2297,7 +2325,10 @@ class MarketingFlowService {
         final city = '${merged['rega_city'] ?? ''}'.trim();
         if (city.isNotEmpty) reqPatch['city'] = city;
         if (reqPatch.length > 1) {
-          await sb.from('listing_requests').update(reqPatch).eq('id', requestId);
+          await sb
+              .from('listing_requests')
+              .update(reqPatch)
+              .eq('id', requestId);
         }
       } catch (_) {}
     } catch (_) {}
@@ -2331,8 +2362,7 @@ class MarketingFlowService {
       await sb.rpc('support_submit_complaint_v1', params: {
         'p_kind': 'complaint',
         'p_subject': 'تعارض تصريح إعلان REGA',
-        'p_body':
-            'طلب تسويق $requestId: وُجد تصريح صادر لمسوّق سابق'
+        'p_body': 'طلب تسويق $requestId: وُجد تصريح صادر لمسوّق سابق'
             '${permitNo.isEmpty ? '' : ' (رقم $permitNo)'}'
             ' بينما يُستكمل المسار بمسوّق آخر. يلزم مراجعة الهيئة والدعم.',
         'p_contact_channel': 'in_app',
@@ -2634,12 +2664,16 @@ class MarketingFlowService {
     if (cid.isEmpty || t.isEmpty) return null;
     Map<String, dynamic>? inserted;
     try {
-      final row = await sb.from('listing_contract_messages').insert({
-        'contract_id': cid,
-        'sender_id': uid,
-        'body': t,
-        'message_type': messageType,
-      }).select('id, contract_id, sender_id, body, message_type, created_at').maybeSingle();
+      final row = await sb
+          .from('listing_contract_messages')
+          .insert({
+            'contract_id': cid,
+            'sender_id': uid,
+            'body': t,
+            'message_type': messageType,
+          })
+          .select('id, contract_id, sender_id, body, message_type, created_at')
+          .maybeSingle();
       if (row != null) {
         inserted = Map<String, dynamic>.from(row);
       }
@@ -2953,8 +2987,7 @@ class MarketingFlowService {
       'marketing_commission_amount',
       'listing_guidance',
     ];
-    final fullSel =
-        {...baseCols, ...extraColumns, ...pricingCols}.join(',');
+    final fullSel = {...baseCols, ...extraColumns, ...pricingCols}.join(',');
     try {
       return await sb
           .from('listing_requests')
@@ -3008,8 +3041,8 @@ class MarketingFlowService {
         : const <String, dynamic>{};
 
     final entered = toD(req['price']) ?? toD(pricingMap['entered_price']);
-    final inclVat = toB(req['price_includes_vat']) ??
-        toB(pricingMap['price_includes_vat']);
+    final inclVat =
+        toB(req['price_includes_vat']) ?? toB(pricingMap['price_includes_vat']);
     final vRate = toD(req['vat_rate']) ?? toD(pricingMap['vat_rate']);
     final kind = (req['marketing_commission_kind'] ??
             pricingMap['marketing_commission_kind'] ??

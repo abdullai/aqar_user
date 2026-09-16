@@ -1492,10 +1492,16 @@ class _UserDashboardState extends State<UserDashboard>
   Map<String, Property> _cartPropertyById = {};
   List<Map<String, dynamic>> _completedCart = <Map<String, dynamic>>[];
   Map<String, Property> _completedCartPropertyById = {};
+  List<Map<String, dynamic>> _excludedUserReservationsForCart =
+      <Map<String, dynamic>>[];
   int _cartCount = 0;
   int _cartPaneIndex = 0;
   bool _incomingDealSortNewest = false;
-  String _incomingDealStatusFilter = 'all';
+  final String _incomingDealStatusFilter = 'all';
+  String _dealsTypeFilter = 'all';
+  String _dealsSortFilter = 'newest';
+  String _dealsExclusionRoleFilter = 'all';
+  String _dealsOngoingStatusFilter = 'all';
   bool _dealCompletionPromptOpen = false;
   bool _dealCompletionPromptConsumedThisVisit = false;
   DateTime? _lastAppHiddenAt;
@@ -4815,9 +4821,6 @@ class _UserDashboardState extends State<UserDashboard>
               _openSubscriptionsHub(initialIndex: 0);
             }
             break;
-          case 'quick_browse':
-            unawaited(_openHomeShortsFeed());
-            break;
           case 'login':
             _navigateToLogin();
             break;
@@ -5343,15 +5346,37 @@ class _UserDashboardState extends State<UserDashboard>
           ),
         ),
       ),
-      floatingActionButton: useSideNav && _showBottomNavAddSlot
-          ? FloatingActionButton(
-              onPressed: () {
-                AppHaptics.medium();
-                _openCenterPlus();
+      floatingActionButton: _showBottomNavAddSlot
+          ? Builder(
+              builder: (fabCtx) {
+                final isWide = MediaQuery.sizeOf(fabCtx).width >= 720;
+                if (isWide) {
+                  return FloatingActionButton.extended(
+                    onPressed: () {
+                      AppHaptics.medium();
+                      _openCenterPlus();
+                    },
+                    backgroundColor: cs.primary,
+                    foregroundColor: cs.onPrimary,
+                    icon: const Icon(Icons.add_rounded, size: 28),
+                    label: Text(
+                      _isArabic ? 'إضافة / إتمام صفقة' : 'New action',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  );
+                }
+                return FloatingActionButton(
+                  tooltip:
+                      _isArabic ? 'إضافة / إتمام صفقة' : 'Add / Complete deal',
+                  onPressed: () {
+                    AppHaptics.medium();
+                    _openCenterPlus();
+                  },
+                  backgroundColor: cs.primary,
+                  foregroundColor: cs.onPrimary,
+                  child: const Icon(Icons.add_rounded, size: 30),
+                );
               },
-              backgroundColor: cs.primary,
-              foregroundColor: cs.onPrimary,
-              child: const Icon(Icons.add_rounded, size: 32),
             )
           : null,
       bottomNavigationBar: useSideNav
@@ -8634,44 +8659,249 @@ class _UserDashboardState extends State<UserDashboard>
     Widget chip(String label, bool selected, VoidCallback onTap) {
       return FilterChip(
         selected: selected,
+        showCheckmark: false,
         label: Text(label, maxLines: 1),
         visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         onSelected: (_) => onTap(),
       );
     }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          chip(
-            l10n.dealIncomingSortOldest,
-            !_incomingDealSortNewest,
-            () => setState(() => _incomingDealSortNewest = false),
-          ),
-          chip(
-            l10n.dealIncomingSortNewest,
-            _incomingDealSortNewest,
-            () => setState(() => _incomingDealSortNewest = true),
-          ),
-          chip(
-            l10n.dealIncomingFilterAll,
-            _incomingDealStatusFilter == 'all',
-            () => setState(() => _incomingDealStatusFilter = 'all'),
-          ),
-          chip(
-            l10n.dealIncomingFilterWaiting,
-            _incomingDealStatusFilter == 'waiting',
-            () => setState(() => _incomingDealStatusFilter = 'waiting'),
-          ),
-          chip(
-            l10n.dealIncomingFilterAccepted,
-            _incomingDealStatusFilter == 'accepted',
-            () => setState(() => _incomingDealStatusFilter = 'accepted'),
-          ),
-        ],
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            chip(
+              _isArabic ? 'الترتيب: الأحدث' : 'Sort: Newest',
+              _dealsSortFilter == 'newest',
+              () => setState(() {
+                _dealsSortFilter = 'newest';
+                _incomingDealSortNewest = true;
+              }),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'الترتيب: الأقدم' : 'Sort: Oldest',
+              _dealsSortFilter == 'oldest',
+              () => setState(() {
+                _dealsSortFilter = 'oldest';
+                _incomingDealSortNewest = false;
+              }),
+            ),
+            const SizedBox(width: 8),
+            Container(
+                width: 1,
+                height: 20,
+                color: Theme.of(context).colorScheme.outlineVariant),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'الكل' : 'All types',
+              _dealsTypeFilter == 'all',
+              () => setState(() => _dealsTypeFilter = 'all'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'إعلانات' : 'Listings',
+              _dealsTypeFilter == 'listings',
+              () => setState(() => _dealsTypeFilter = 'listings'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'طلبات' : 'Requests',
+              _dealsTypeFilter == 'requests',
+              () => setState(() => _dealsTypeFilter = 'requests'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _activeDealFilterBar(AppLocalizations l10n) {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return FilterChip(
+        selected: selected,
+        showCheckmark: false,
+        label: Text(label, maxLines: 1),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        onSelected: (_) => onTap(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            chip(
+              _isArabic ? 'الكل' : 'All status',
+              _dealsOngoingStatusFilter == 'all',
+              () => setState(() => _dealsOngoingStatusFilter = 'all'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'بانتظار الرد' : 'Pending',
+              _dealsOngoingStatusFilter == 'pending',
+              () => setState(() => _dealsOngoingStatusFilter = 'pending'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'مقبولة' : 'Accepted',
+              _dealsOngoingStatusFilter == 'accepted',
+              () => setState(() => _dealsOngoingStatusFilter = 'accepted'),
+            ),
+            const SizedBox(width: 8),
+            Container(
+                width: 1,
+                height: 20,
+                color: Theme.of(context).colorScheme.outlineVariant),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'كل الأنواع' : 'All types',
+              _dealsTypeFilter == 'all',
+              () => setState(() => _dealsTypeFilter = 'all'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'إعلانات' : 'Listings',
+              _dealsTypeFilter == 'listings',
+              () => setState(() => _dealsTypeFilter = 'listings'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'طلبات' : 'Requests',
+              _dealsTypeFilter == 'requests',
+              () => setState(() => _dealsTypeFilter = 'requests'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _completedDealFilterBar(AppLocalizations l10n) {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return FilterChip(
+        selected: selected,
+        showCheckmark: false,
+        label: Text(label, maxLines: 1),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        onSelected: (_) => onTap(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            chip(
+              _isArabic ? 'الكل' : 'All types',
+              _dealsTypeFilter == 'all',
+              () => setState(() => _dealsTypeFilter = 'all'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'إعلانات' : 'Listings',
+              _dealsTypeFilter == 'listings',
+              () => setState(() => _dealsTypeFilter = 'listings'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'طلبات' : 'Requests',
+              _dealsTypeFilter == 'requests',
+              () => setState(() => _dealsTypeFilter = 'requests'),
+            ),
+            const SizedBox(width: 8),
+            Container(
+                width: 1,
+                height: 20,
+                color: Theme.of(context).colorScheme.outlineVariant),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'الأحدث' : 'Newest',
+              _dealsSortFilter == 'newest',
+              () => setState(() => _dealsSortFilter = 'newest'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'الأقدم' : 'Oldest',
+              _dealsSortFilter == 'oldest',
+              () => setState(() => _dealsSortFilter = 'oldest'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _exclusionsDealFilterBar(AppLocalizations l10n) {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return FilterChip(
+        selected: selected,
+        showCheckmark: false,
+        label: Text(label, maxLines: 1),
+        visualDensity: VisualDensity.compact,
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        onSelected: (_) => onTap(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            chip(
+              _isArabic ? 'الكل' : 'All exclusions',
+              _dealsExclusionRoleFilter == 'all',
+              () => setState(() => _dealsExclusionRoleFilter = 'all'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'استبعدتهم كمالك' : 'Excluded by me',
+              _dealsExclusionRoleFilter == 'excluded_by_me',
+              () =>
+                  setState(() => _dealsExclusionRoleFilter = 'excluded_by_me'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'تم استبعادي' : 'Excluded as applicant',
+              _dealsExclusionRoleFilter == 'excluded_me',
+              () => setState(() => _dealsExclusionRoleFilter = 'excluded_me'),
+            ),
+            const SizedBox(width: 8),
+            Container(
+                width: 1,
+                height: 20,
+                color: Theme.of(context).colorScheme.outlineVariant),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'إعلانات' : 'Listings',
+              _dealsTypeFilter == 'listings',
+              () => setState(() => _dealsTypeFilter =
+                  _dealsTypeFilter == 'listings' ? 'all' : 'listings'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'طلبات' : 'Requests',
+              _dealsTypeFilter == 'requests',
+              () => setState(() => _dealsTypeFilter =
+                  _dealsTypeFilter == 'requests' ? 'all' : 'requests'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -9087,13 +9317,27 @@ class _UserDashboardState extends State<UserDashboard>
           );
         }
 
-        final incomingCount =
-            _filteredIncomingDeals(_incomingListingReservationsForCart).length +
-                _filteredIncomingDeals(_incomingMarketOffersOnMine).length;
-        final incomingOffers =
-            _filteredIncomingDeals(_incomingMarketOffersOnMine);
-        final incomingListings =
-            _filteredIncomingDeals(_incomingListingReservationsForCart);
+        final incomingRawOffers = _incomingMarketOffersOnMine
+            .where((o) =>
+                (o['owner_rejection_reason'] ?? '').toString().trim().isEmpty)
+            .toList(growable: false);
+        final incomingRawListings = _incomingListingReservationsForCart
+            .where((r) =>
+                (r['owner_rejection_reason'] ?? '').toString().trim().isEmpty)
+            .toList(growable: false);
+
+        var filteredOffers = _filteredIncomingDeals(incomingRawOffers);
+        var filteredListings = _filteredIncomingDeals(incomingRawListings);
+
+        if (_dealsTypeFilter == 'listings') {
+          filteredOffers = const [];
+        } else if (_dealsTypeFilter == 'requests') {
+          filteredListings = const [];
+        }
+
+        final incomingCount = filteredOffers.length + filteredListings.length;
+        final incomingOffers = filteredOffers;
+        final incomingListings = filteredListings;
         final incomingChildren = <Widget>[
           _incomingDealFilterBar(l10nCart),
           if (!_hasIncomingDealCards)
@@ -9145,6 +9389,7 @@ class _UserDashboardState extends State<UserDashboard>
         ];
 
         final activeChildren = <Widget>[
+          _activeDealFilterBar(l10nCart),
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
             child: Text(
@@ -9168,12 +9413,41 @@ class _UserDashboardState extends State<UserDashboard>
               ),
             ),
         ];
-        if (_myPendingMarketOffersForCart.isNotEmpty) {
+
+        var myActiveRequests = _myPendingMarketOffersForCart;
+        var myActiveListings = _cart;
+        if (_dealsTypeFilter == 'listings') {
+          myActiveRequests = const [];
+        } else if (_dealsTypeFilter == 'requests') {
+          myActiveListings = const [];
+        }
+
+        if (_dealsOngoingStatusFilter == 'pending') {
+          myActiveRequests = myActiveRequests.where((m) {
+            final st = (m['status'] ?? '').toString().toLowerCase().trim();
+            return st == 'submitted' || st == 'pending' || st.isEmpty;
+          }).toList();
+          myActiveListings = myActiveListings.where((r) {
+            final st = (r['status'] ?? '').toString().toLowerCase().trim();
+            return st == 'pending';
+          }).toList();
+        } else if (_dealsOngoingStatusFilter == 'accepted') {
+          myActiveRequests = myActiveRequests.where((m) {
+            final st = (m['status'] ?? '').toString().toLowerCase().trim();
+            return st == 'accepted' || st == 'approved' || st == 'selected';
+          }).toList();
+          myActiveListings = myActiveListings.where((r) {
+            final st = (r['status'] ?? '').toString().toLowerCase().trim();
+            return st == 'accepted' || st == 'paid';
+          }).toList();
+        }
+
+        if (myActiveRequests.isNotEmpty) {
           activeChildren.add(sectionTitle(l10n.cartMarketOffersSectionTitle));
           activeChildren.addAll(
             _smartDashboardCardRows(
               cards: [
-                for (final o in _myPendingMarketOffersForCart)
+                for (final o in myActiveRequests)
                   _buildCartPendingMarketOfferCard(o),
               ],
               maxWidth: w,
@@ -9181,27 +9455,33 @@ class _UserDashboardState extends State<UserDashboard>
             ),
           );
         }
-        if (_cart.isNotEmpty) {
+        if (myActiveListings.isNotEmpty) {
           activeChildren.addAll(
             _smartDashboardCardRows(
               cards: [
-                for (final r in _cart) _buildCartActiveReservationCard(r),
+                for (final r in myActiveListings)
+                  _buildCartActiveReservationCard(r),
               ],
               maxWidth: w,
               context: context,
             ),
           );
         }
-        final acceptedIncomingMarket = _incomingMarketOffersOnMine
-            .where(_incomingDealAccepted)
-            .toList(growable: false);
-        final acceptedIncomingListings = _offers
-            .where((r) =>
-                (r['user_id'] ?? '').toString().trim().isNotEmpty &&
-                (r['user_id'] ?? '').toString().trim() != _uid &&
-                _incomingDealAccepted(r))
-            .toList(growable: false);
-        if (acceptedIncomingMarket.isNotEmpty) {
+        final acceptedIncomingMarket = (_dealsTypeFilter == 'listings')
+            ? <Map<String, dynamic>>[]
+            : _incomingMarketOffersOnMine
+                .where(_incomingDealAccepted)
+                .toList(growable: false);
+        final acceptedIncomingListings = (_dealsTypeFilter == 'requests')
+            ? <Map<String, dynamic>>[]
+            : _offers
+                .where((r) =>
+                    (r['user_id'] ?? '').toString().trim().isNotEmpty &&
+                    (r['user_id'] ?? '').toString().trim() != _uid &&
+                    _incomingDealAccepted(r))
+                .toList(growable: false);
+        if (acceptedIncomingMarket.isNotEmpty &&
+            _dealsOngoingStatusFilter != 'pending') {
           activeChildren.add(sectionTitle(
             _isArabic ? 'شركاء اخترتهم لإتمام الصفقة' : 'Partners you selected',
           ));
@@ -9216,7 +9496,8 @@ class _UserDashboardState extends State<UserDashboard>
             ),
           );
         }
-        if (acceptedIncomingListings.isNotEmpty) {
+        if (acceptedIncomingListings.isNotEmpty &&
+            _dealsOngoingStatusFilter != 'pending') {
           activeChildren.add(sectionTitle(
             _isArabic ? 'مشترو الإعلانات المقبولون' : 'Accepted listing buyers',
           ));
@@ -9232,10 +9513,21 @@ class _UserDashboardState extends State<UserDashboard>
           );
         }
 
-        final completedCount = _completedCart.length +
-            _completedMarketOffersForCart.length +
-            _completedOwnedMarketRequests.length;
+        var completedReqs = _completedOwnedMarketRequests;
+        var completedOffers = _completedMarketOffersForCart;
+        var completedProps = _completedCart;
+        if (_dealsTypeFilter == 'listings') {
+          completedReqs = const [];
+          completedOffers = const [];
+        } else if (_dealsTypeFilter == 'requests') {
+          completedProps = const [];
+        }
+
+        final completedCount = completedProps.length +
+            completedOffers.length +
+            completedReqs.length;
         final completedChildren = <Widget>[
+          _completedDealFilterBar(l10nCart),
           if (completedCount == 0)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 40),
@@ -9250,37 +9542,37 @@ class _UserDashboardState extends State<UserDashboard>
               ),
             )
           else ...[
-            if (_completedOwnedMarketRequests.isNotEmpty) ...[
+            if (completedReqs.isNotEmpty) ...[
               sectionTitle(
                 _isArabic ? 'طلباتي المنتهية' : 'My completed requests',
               ),
               ..._smartDashboardCardRows(
                 cards: [
-                  for (final r in _completedOwnedMarketRequests)
+                  for (final r in completedReqs)
                     _buildCompletedOwnedMarketRequestCard(r),
                 ],
                 maxWidth: w,
                 context: context,
               ),
             ],
-            if (_completedMarketOffersForCart.isNotEmpty) ...[
+            if (completedOffers.isNotEmpty) ...[
               sectionTitle(
                 _isArabic ? 'طلبات سوق منتهية' : 'Completed market requests',
               ),
               ..._smartDashboardCardRows(
                 cards: [
-                  for (final o in _completedMarketOffersForCart)
+                  for (final o in completedOffers)
                     _buildCompletedMarketOfferCard(o),
                 ],
                 maxWidth: w,
                 context: context,
               ),
             ],
-            if (_completedCart.isNotEmpty) ...[
+            if (completedProps.isNotEmpty) ...[
               sectionTitle(_isArabic ? 'صفقات منتهية' : 'Completed deals'),
               ..._smartDashboardCardRows(
                 cards: [
-                  for (final r in _completedCart)
+                  for (final r in completedProps)
                     _buildCompletedPurchaseCard(r),
                 ],
                 maxWidth: w,
@@ -9290,10 +9582,101 @@ class _UserDashboardState extends State<UserDashboard>
           ],
         ];
 
-        final pane = _cartPaneIndex.clamp(0, 2);
+        // --- Exclusions tab items ---
+        final excludedOffersOnMine = _incomingMarketOffersOnMine.where((o) {
+          final st = (o['status'] ?? '').toString().toLowerCase().trim();
+          final reason = (o['owner_rejection_reason'] ?? '').toString().trim();
+          return st == 'rejected' || st == 'excluded' || reason.isNotEmpty;
+        }).toList(growable: false);
+
+        final excludedReservationsOnMine = _offers.where((r) {
+          final st = (r['status'] ?? '').toString().toLowerCase().trim();
+          final reason = (r['owner_rejection_reason'] ?? '').toString().trim();
+          final buyer = (r['user_id'] ?? '').toString().trim();
+          return buyer != _uid &&
+              (st == 'cancelled' || st == 'rejected') &&
+              reason.isNotEmpty;
+        }).toList(growable: false);
+
+        final excludedMyOffers = _myArchivedMarketOffersForCart.where((o) {
+          final st = (o['status'] ?? '').toString().toLowerCase().trim();
+          final reason = (o['owner_rejection_reason'] ?? '').toString().trim();
+          return st == 'rejected' || st == 'excluded' || reason.isNotEmpty;
+        }).toList(growable: false);
+
+        final excludedMyReservations =
+            _excludedUserReservationsForCart.where((r) {
+          final reason = (r['owner_rejection_reason'] ?? '').toString().trim();
+          return reason.isNotEmpty;
+        }).toList(growable: false);
+
+        final totalExclusionsCount = excludedOffersOnMine.length +
+            excludedReservationsOnMine.length +
+            excludedMyOffers.length +
+            excludedMyReservations.length;
+
+        final excludedCards = <Widget>[];
+        if (_dealsExclusionRoleFilter == 'all' ||
+            _dealsExclusionRoleFilter == 'excluded_by_me') {
+          if (_dealsTypeFilter != 'listings') {
+            for (final o in excludedOffersOnMine) {
+              excludedCards.add(_buildExcludedDealCard(o,
+                  isListing: false, isOwnerExcluding: true));
+            }
+          }
+          if (_dealsTypeFilter != 'requests') {
+            for (final r in excludedReservationsOnMine) {
+              excludedCards.add(_buildExcludedDealCard(r,
+                  isListing: true, isOwnerExcluding: true));
+            }
+          }
+        }
+        if (_dealsExclusionRoleFilter == 'all' ||
+            _dealsExclusionRoleFilter == 'excluded_me') {
+          if (_dealsTypeFilter != 'listings') {
+            for (final o in excludedMyOffers) {
+              excludedCards.add(_buildExcludedDealCard(o,
+                  isListing: false, isOwnerExcluding: false));
+            }
+          }
+          if (_dealsTypeFilter != 'requests') {
+            for (final r in excludedMyReservations) {
+              excludedCards.add(_buildExcludedDealCard(r,
+                  isListing: true, isOwnerExcluding: false));
+            }
+          }
+        }
+
+        final exclusionsChildren = <Widget>[
+          _exclusionsDealFilterBar(l10nCart),
+          if (excludedCards.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 8),
+              child: Text(
+                _isArabic
+                    ? 'لا توجد استبعادات حالياً'
+                    : 'No excluded applicants',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            )
+          else ...[
+            ..._smartDashboardCardRows(
+              cards: excludedCards,
+              maxWidth: w,
+              context: context,
+            ),
+          ],
+        ];
+
+        final pane = _cartPaneIndex.clamp(0, 3);
         final paneChildren = switch (pane) {
           0 => incomingChildren,
+          1 => activeChildren,
           2 => completedChildren,
+          3 => exclusionsChildren,
           _ => activeChildren,
         };
 
@@ -9314,7 +9697,7 @@ class _UserDashboardState extends State<UserDashboard>
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${_isArabic ? 'العروض الواردة · بانتظار قرارك' : 'Incoming offers · awaiting your decision'} ($incomingCount)',
+                        '${_isArabic ? 'العروض الواردة' : 'Incoming'} ($incomingCount)',
                         maxLines: 1,
                       ),
                     ),
@@ -9324,7 +9707,7 @@ class _UserDashboardState extends State<UserDashboard>
                     label: FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '${_isArabic ? 'صفقاتي الجارية' : 'My active deals'} (${_dealRatioLabel(used, maxDeals)})',
+                        '${_isArabic ? 'صفقاتي الجارية' : 'Active deals'} (${_dealRatioLabel(used, maxDeals)})',
                         maxLines: 1,
                       ),
                     ),
@@ -9335,6 +9718,16 @@ class _UserDashboardState extends State<UserDashboard>
                       fit: BoxFit.scaleDown,
                       child: Text(
                         '${l10nCart.cartTabCompleted} ($completedCount)',
+                        maxLines: 1,
+                      ),
+                    ),
+                  ),
+                  ButtonSegment<int>(
+                    value: 3,
+                    label: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '${_isArabic ? 'الاستبعادات' : 'Exclusions'} ($totalExclusionsCount)',
                         maxLines: 1,
                       ),
                     ),
@@ -9360,6 +9753,256 @@ class _UserDashboardState extends State<UserDashboard>
           ],
         );
       },
+    );
+  }
+
+  Widget _buildExcludedDealCard(
+    Map<String, dynamic> item, {
+    required bool isListing,
+    required bool isOwnerExcluding,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final pid = (item['property_id'] ?? '').toString().trim();
+    final rid = (item['market_request_id'] ?? '').toString().trim();
+    final title = isListing
+        ? ((_cartPropertyById[pid]?.title) ??
+            (_myPropertyById[pid]?.title) ??
+            (_propertyCache[pid]?.title) ??
+            (_isArabic ? 'إعلان عقاري' : 'Property listing'))
+        : ((item['_request_title'] ?? item['title'] ?? '')
+                .toString()
+                .trim()
+                .isNotEmpty
+            ? (item['_request_title'] ?? item['title']).toString().trim()
+            : (_isArabic ? 'طلب عقاري' : 'Property request'));
+
+    final reason = (item['owner_rejection_reason'] ?? '').toString().trim();
+    final reasonText = reason.isNotEmpty
+        ? reason
+        : (_isArabic
+            ? 'تم الاستبعاد بدون ذكر تفاصيل'
+            : 'Excluded without reason details');
+
+    final applicantName = (item['_offerer_display_name'] ??
+            item['_applicant_display_name'] ??
+            item['applicant_name'] ??
+            item['user_id'] ??
+            '')
+        .toString()
+        .trim();
+    final accountType = (item['_offerer_account_type'] ??
+            item['account_type'] ??
+            item['user_account_type'] ??
+            '')
+        .toString();
+    final roleLabel = _dealPartyRoleLabel(accountType);
+
+    final rejectedAt = _tryParseDt(item['owner_rejected_at']) ??
+        _tryParseDt(item['updated_at']) ??
+        _tryParseDt(item['created_at']);
+    final dateStr = rejectedAt != null
+        ? DateHelper.fmtCivilDateTime(rejectedAt.toLocal(), isAr: _isArabic)
+        : '';
+
+    final price = _toDouble0(
+        item['price_offer'] ?? item['base_price'] ?? item['budget_max']);
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: cs.error.withValues(alpha: 0.35),
+          width: 1.2,
+        ),
+      ),
+      color: cs.errorContainer.withValues(alpha: 0.08),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () {
+          AppHaptics.light();
+          if (isListing && pid.isNotEmpty) {
+            final prop = _cartPropertyById[pid] ??
+                _myPropertyById[pid] ??
+                _propertyCache[pid];
+            if (prop != null) {
+              unawaited(_openDetails(prop));
+            }
+          } else if (!isListing && rid.isNotEmpty) {
+            unawaited(_openMarketRequestDetailById(rid));
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: cs.error.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.block_rounded, size: 14, color: cs.error),
+                        const SizedBox(width: 4),
+                        Text(
+                          isOwnerExcluding
+                              ? (_isArabic
+                                  ? 'استبعدت هذا المتقدم'
+                                  : 'Excluded by you')
+                              : (_isArabic
+                                  ? 'تم استبعادك من المالك'
+                                  : 'Excluded by owner'),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            color: cs.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: _brandPrimary.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      isListing
+                          ? (_isArabic ? 'إعلان عقاري' : 'Listing')
+                          : (_isArabic ? 'طلب عقاري' : 'Request'),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        color: _brandPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: cs.surface.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _isArabic ? 'سبب الاستبعاد:' : 'Exclusion reason:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: cs.error,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            reasonText,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: cs.onSurface,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (applicantName.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.person_outline,
+                              size: 14, color: cs.onSurfaceVariant),
+                          const SizedBox(width: 4),
+                          Text(
+                            applicantName,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                          if (roleLabel.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '· $roleLabel',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                    if (dateStr.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.access_time_rounded,
+                              size: 13, color: cs.onSurfaceVariant),
+                          const SizedBox(width: 4),
+                          Text(
+                            dateStr,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
+                          if (price > 0) ...[
+                            const Spacer(),
+                            Text(
+                              AppMoney.formatWithCurrencyCode(price,
+                                  isAr: _isArabic),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: _brandPrimary,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
