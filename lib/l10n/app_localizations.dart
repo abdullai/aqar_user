@@ -7992,7 +7992,7 @@ abstract class AppLocalizations {
   /// No description provided for @photographerJoinCta.
   ///
   /// In en, this message translates to:
-  /// **'Join as photographer'**
+  /// **'Property photographer'**
   String get photographerJoinCta;
 
   /// No description provided for @photographerRequestFromMedia.

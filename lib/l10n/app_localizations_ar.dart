@@ -4273,7 +4273,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get photographerOpenWorkspace => 'فتح صفحتي كمصور';
 
   @override
-  String get photographerJoinCta => 'انضم كمصور عقاري';
+  String get photographerJoinCta => 'مصور عقاري';
 
   @override
   String get photographerRequestFromMedia => 'طلب تصوير احترافي';

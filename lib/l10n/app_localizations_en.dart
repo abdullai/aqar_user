@@ -4321,7 +4321,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get photographerOpenWorkspace => 'Open my photographer page';
 
   @override
-  String get photographerJoinCta => 'Join as photographer';
+  String get photographerJoinCta => 'Property photographer';
 
   @override
   String get photographerRequestFromMedia => 'Request professional photography';

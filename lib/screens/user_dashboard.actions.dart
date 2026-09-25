@@ -702,95 +702,120 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final t = AppLocalizations.of(context)!;
     final showListing = guest || _canPlusSheetAddProperty;
     final showRequest = guest || _canPlusSheetAddRequest;
-    return showAppModalBottomSheet<String>(
+    return showAppDialog<String>(
       context: context,
-      showDragHandle: true,
       builder: (ctx) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (showListing)
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: cs.primaryContainer,
-                    child: Icon(
-                      Icons.domain_add_rounded,
-                      color: cs.onPrimaryContainer,
+        final maxHeight = MediaQuery.sizeOf(ctx).height * 0.78;
+
+        Widget choiceTile({
+          required IconData icon,
+          required Color background,
+          required Color foreground,
+          required String title,
+          required String subtitle,
+          required String value,
+        }) {
+          return ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            leading: CircleAvatar(
+              backgroundColor: background,
+              child: Icon(icon, color: foreground),
+            ),
+            title: Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+            onTap: () => Navigator.pop(ctx, value),
+          );
+        }
+
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: 460, maxHeight: maxHeight),
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.add_circle_outline_rounded,
+                            color: cs.primary),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            widget.isAr ? 'اختر الإجراء' : 'Choose an action',
+                            style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: widget.isAr ? 'إغلاق' : 'Close',
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
                     ),
-                  ),
-                  title: Text(
-                    t.navAdd,
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(
-                    widget.isAr
-                        ? 'نشر عقار للبيع أو الإيجار.'
-                        : 'Publish a property for sale or rent.',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  onTap: () => Navigator.pop(ctx, 'listing'),
-                ),
-              if (showRequest)
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: cs.secondaryContainer,
-                    child: Icon(
-                      Icons.travel_explore_rounded,
-                      color: cs.onSecondaryContainer,
+                    const Divider(height: 16),
+                    if (showListing)
+                      choiceTile(
+                        icon: Icons.domain_add_rounded,
+                        background: cs.primaryContainer,
+                        foreground: cs.onPrimaryContainer,
+                        title: t.navAdd,
+                        subtitle: widget.isAr
+                            ? 'نشر عقار للبيع أو الإيجار.'
+                            : 'Publish a property for sale or rent.',
+                        value: 'listing',
+                      ),
+                    if (showRequest)
+                      choiceTile(
+                        icon: Icons.travel_explore_rounded,
+                        background: cs.secondaryContainer,
+                        foreground: cs.onSecondaryContainer,
+                        title: widget.isAr ? 'طلب عقاري' : 'Property request',
+                        subtitle: widget.isAr
+                            ? 'ابحث عن عقار للشراء أو الإيجار.'
+                            : 'Find a property to buy or rent.',
+                        value: 'request',
+                      ),
+                    choiceTile(
+                      icon: Icons.photo_camera_outlined,
+                      background: cs.tertiaryContainer,
+                      foreground: cs.onTertiaryContainer,
+                      title: t.photographerJoinCta,
+                      subtitle: widget.isAr
+                          ? 'استقبل طلبات التصوير وسلّم وسائط العقار المحدد.'
+                          : 'Accept shoot requests and deliver media for assigned properties.',
+                      value: 'photographer',
                     ),
-                  ),
-                  title: Text(
-                    widget.isAr ? 'طلب عقاري' : 'Property request',
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                  subtitle: Text(
-                    widget.isAr
-                        ? 'أبحث عن عقار للشراء أو الإيجار.'
-                        : 'Looking to buy or rent.',
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  onTap: () => Navigator.pop(ctx, 'request'),
+                    choiceTile(
+                      icon: Icons.apartment_outlined,
+                      background: cs.surfaceContainerHighest,
+                      foreground: cs.onSurfaceVariant,
+                      title: t.developerComingSoonTitle,
+                      subtitle: t.developerComingSoonBody,
+                      value: 'developer',
+                    ),
+                  ],
                 ),
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: cs.tertiaryContainer,
-                  child: Icon(
-                    Icons.photo_camera_outlined,
-                    color: cs.onTertiaryContainer,
-                  ),
-                ),
-                title: Text(
-                  t.photographerJoinCta,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text(
-                  t.photographerReviewSla,
-                  style: const TextStyle(fontSize: 12),
-                ),
-                onTap: () => Navigator.pop(ctx, 'photographer'),
               ),
-              ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: cs.surfaceContainerHighest,
-                  child: Icon(
-                    Icons.apartment_outlined,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-                title: Text(
-                  t.developerComingSoonTitle,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-                subtitle: Text(
-                  t.developerComingSoonBody,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12),
-                ),
-                onTap: () => Navigator.pop(ctx, 'developer'),
-              ),
-            ],
+            ),
           ),
         );
       },

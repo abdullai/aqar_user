@@ -114,6 +114,7 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   // Tabs + filters
   // =========================
+  @override
   int _tabIndex = 0;
 
   /// التبويب الذي كان مفتوحاً قبل زر + حتى الإغلاق يعيد المستخدم إليه.

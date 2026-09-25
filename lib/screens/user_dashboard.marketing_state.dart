@@ -5,6 +5,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
   // Base state contract from _UserDashboardState
   // =========================================================
   bool get _isGuest;
+  int get _tabIndex;
   int get _overlayNavDepth;
 
   /// اسم التحية من الكاش — يظهر فوراً قبل اكتمال جلب الملف الشخصي.
@@ -67,7 +68,10 @@ mixin MarketingStateMixin on State<UserDashboard> {
 
   /// تبويب + في الشريط السفلي (إضافة إعلان/طلب) — يعتمد على الصلاحيات وليس على نوع الحساب وحده.
   bool get _showBottomNavAddSlot {
-    if (_overlayNavDepth > 0) return false;
+    if (_overlayNavDepth > 0 ||
+        (_tabIndex != 0 && _tabIndex != 1 && _tabIndex != 2)) {
+      return false;
+    }
     if (_isGuest) return true;
     if (!_accountRoleLoaded || !_orgNavResolved) return true;
 
