@@ -452,11 +452,13 @@ extension _UserDashboardStateActions on _UserDashboardState {
     var requests = _marketHomeRequests
         .where(marketRequestEligibleForPublicMap)
         .toList(growable: false);
+    var photographerRequests = <PhotoShootRequest>[];
 
     try {
-      final extra = await Future.wait([
+      final extra = await Future.wait<Object>([
         _loadPublishedPropertiesWithCoordinatesForMap(),
         _loadMarketRequestsWithCoordinatesForMap(),
+        if (!_isGuest) PhotographerService(_sb).myShootsForMap(),
       ]);
       properties = _mergePropertyListsForMap(
         properties,
@@ -466,6 +468,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
         requests,
         extra[1] as List<MarketPropertyRequestRow>,
       ).where(marketRequestEligibleForPublicMap).toList(growable: false);
+      if (!_isGuest && extra.length > 2) {
+        photographerRequests = extra[2] as List<PhotoShootRequest>;
+      }
     } catch (e) {
       if (kDebugMode) {
         print('[DBG][MAP_OPEN] widen fetch: $e');
@@ -480,13 +485,16 @@ extension _UserDashboardStateActions on _UserDashboardState {
         builder: (_) => PropertyMapDiscoveryPage(
           isAr: widget.isAr,
           embedAppBar: true,
-          initialKind: switch (_homeFeedKind) {
-            HomeFeedKind.listings => MapDiscoveryKind.listings,
-            HomeFeedKind.requests => MapDiscoveryKind.requests,
-            HomeFeedKind.all => MapDiscoveryKind.all,
-          },
+          initialKind: photographerRequests.isNotEmpty
+              ? MapDiscoveryKind.all
+              : switch (_homeFeedKind) {
+                  HomeFeedKind.listings => MapDiscoveryKind.listings,
+                  HomeFeedKind.requests => MapDiscoveryKind.requests,
+                  HomeFeedKind.all => MapDiscoveryKind.all,
+                },
           properties: properties,
           requests: requests,
+          photographerRequests: photographerRequests,
           requestCoverImageUrl: (r) =>
               ListingMediaUrls.marketRequestCoverNetworkUrl(r, _sb),
           onOpenProperty: (p) {

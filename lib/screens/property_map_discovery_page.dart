@@ -23,6 +23,7 @@ import '../core/utils/app_money.dart';
 import '../core/workflow/listing_workflow_stage.dart';
 import '../models/market_property_request_row.dart';
 import '../models/property.dart';
+import '../services/photographer_service.dart';
 import '../services/saudi_locations_service.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/instant_market_request_badge.dart';
@@ -49,7 +50,13 @@ const String _kElegantMapStyle = '''
 ''';
 
 bool propertyEligibleForPublicMap(Property p) {
-  if (p.deletedByUser || p.deleteApproved) return false;
+  if (p.deletedByUser ||
+      p.deleteApproved ||
+      p.soldAt != null ||
+      p.terminatedAt != null ||
+      p.cancelledAt != null) {
+    return false;
+  }
   final st = p.normalizedStatus;
   if (const {'sold', 'completed', 'deleted', 'closed', 'archived'}
       .contains(st)) {
@@ -96,6 +103,7 @@ class PropertyMapDiscoveryPage extends StatefulWidget {
     this.embedAppBar = false,
     this.properties = const <Property>[],
     this.requests = const <MarketPropertyRequestRow>[],
+    this.photographerRequests = const <PhotoShootRequest>[],
     this.focusProperty,
     this.focusRequest,
     this.onOpenProperty,
@@ -107,10 +115,12 @@ class PropertyMapDiscoveryPage extends StatefulWidget {
   });
 
   final bool isAr;
+
   /// عند `true`: لا سهم رجوع داخلي — يعتمد على الشريط العلوي للداشبورد.
   final bool embedAppBar;
   final List<Property> properties;
   final List<MarketPropertyRequestRow> requests;
+  final List<PhotoShootRequest> photographerRequests;
   final Property? focusProperty;
   final MarketPropertyRequestRow? focusRequest;
   final ValueChanged<Property>? onOpenProperty;
@@ -179,6 +189,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.properties != widget.properties ||
         oldWidget.requests != widget.requests ||
+        oldWidget.photographerRequests != widget.photographerRequests ||
         oldWidget.focusProperty != widget.focusProperty ||
         oldWidget.focusRequest != widget.focusRequest ||
         oldWidget.requestCoverImageUrl != widget.requestCoverImageUrl) {
@@ -190,9 +201,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
   List<_MapDiscoveryEntry> get _allEntries {
     return <_MapDiscoveryEntry>[
       ...widget.properties
-          .where(
-            (p) => widget.listingsOnly || propertyEligibleForPublicMap(p),
-          )
+          .where(propertyEligibleForPublicMap)
           .map((p) => _MapDiscoveryEntry.fromProperty(p, isAr: _isAr))
           .whereType<_MapDiscoveryEntry>(),
       if (!widget.listingsOnly) ...[
@@ -213,7 +222,36 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
               .whereType<_MapDiscoveryEntry>();
         })(),
       ],
+      if (!widget.listingsOnly) ...[
+        ...widget.photographerRequests
+            .where(_photographerShootEligibleForPublicMap)
+            .map((shoot) {
+          Property? property;
+          for (final candidate in widget.properties) {
+            if (candidate.id == shoot.propertyId) {
+              property = candidate;
+              break;
+            }
+          }
+          if (property == null || !propertyEligibleForPublicMap(property)) {
+            return null;
+          }
+          return _MapDiscoveryEntry.fromPhotographerRequest(
+            shoot,
+            property,
+            isAr: _isAr,
+          );
+        }).whereType<_MapDiscoveryEntry>(),
+      ],
     ];
+  }
+
+  bool _photographerShootEligibleForPublicMap(PhotoShootRequest shoot) {
+    if (shoot.propertyId.trim().isEmpty) return false;
+    return const {'pending', 'accepted', 'in_progress'}
+            .contains(shoot.status.toLowerCase()) ||
+        const {'pending_review', 'revision_requested'}
+            .contains(shoot.deliveryReviewStatus.toLowerCase());
   }
 
   List<_MapDiscoveryEntry> get _visibleEntries {
@@ -224,7 +262,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
       return switch (effectiveKind) {
         MapDiscoveryKind.all => true,
         MapDiscoveryKind.listings => e.property != null,
-        MapDiscoveryKind.requests => e.request != null,
+        MapDiscoveryKind.requests => e.request != null || e.shoot != null,
       };
     }).toList(growable: false);
   }
@@ -335,7 +373,8 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
             priceLine: e.mapMarkerPriceLine(isAr: _isAr),
             titleLine: e.mapMarkerTitleLine(isAr: _isAr),
             placeLine: e.mapMarkerPlaceLine(isAr: _isAr),
-            isRequest: e.request != null,
+            isRequest: e.request != null || e.shoot != null,
+            isPhotographerRequest: e.shoot != null,
             isInstantRequest: e.isInstantRequest,
             selected: selected,
             isAr: _isAr,
@@ -507,6 +546,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     required String placeLine,
     required bool isRequest,
     required bool isInstantRequest,
+    required bool isPhotographerRequest,
     required bool selected,
     required bool isAr,
     bool isSold = false,
@@ -520,11 +560,13 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
         ? const Color(0xFF64748B)
         : isReserved
             ? const Color(0xFFD97706)
-            : isInstantRequest
-                ? AqarBrandColors.alertRed
-                : isRequest
-                    ? const Color(0xFF6D28D9)
-                    : AqarBrandColors.primary;
+            : isPhotographerRequest
+                ? const Color(0xFF0F766E)
+                : isInstantRequest
+                    ? AqarBrandColors.alertRed
+                    : isRequest
+                        ? const Color(0xFF6D28D9)
+                        : AqarBrandColors.primary;
     final topColor = Color.lerp(baseColor, Colors.white, 0.14)!;
     const ink = Colors.white;
     final muted = Colors.white.withValues(alpha: 0.88);
@@ -560,11 +602,13 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
         ? (isAr ? 'مبيوع' : 'SOLD')
         : isReserved
             ? (isAr ? 'محجوز' : 'RSVD')
-            : isInstantRequest
-                ? (isAr ? 'فوري' : 'NOW')
-                : (isRequest
-                    ? (isAr ? 'طلب' : 'REQ')
-                    : (isAr ? 'إعلان' : 'AD'));
+            : isPhotographerRequest
+                ? (isAr ? 'تصوير' : 'PHOTO')
+                : isInstantRequest
+                    ? (isAr ? 'فوري' : 'NOW')
+                    : (isRequest
+                        ? (isAr ? 'طلب' : 'REQ')
+                        : (isAr ? 'إعلان' : 'AD'));
 
     final pBadge = paintLine(
       badgeText,
@@ -597,9 +641,8 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     final symbolH = pPrice.height;
     final symbolSize = SaudiRiyalSymbolIcon.canvasSizeFor(symbolH);
     const sarGap = 3.0 * dpr;
-    final currencyW = !showSar
-        ? 0.0
-        : (isAr ? symbolSize.width : (sarPainter?.width ?? 0));
+    final currencyW =
+        !showSar ? 0.0 : (isAr ? symbolSize.width : (sarPainter?.width ?? 0));
     final pTitle = paintLine(
       titleLine,
       fontSize: selected ? 11.4 : 10.6,
@@ -616,11 +659,14 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     );
 
     final contentW = math.max(
-      pPrice.width + currencyW + (showSar ? sarGap : 0) + pBadge.width + 48 * dpr,
+      pPrice.width +
+          currencyW +
+          (showSar ? sarGap : 0) +
+          pBadge.width +
+          48 * dpr,
       math.max(pTitle.width, pPlace.width),
     );
-    final width =
-        (math.min(280.0, math.max(128.0, contentW / dpr + 36)) * dpr);
+    final width = (math.min(280.0, math.max(128.0, contentW / dpr + 36)) * dpr);
     const tipH = 14.0 * dpr;
     const padX = 12.0 * dpr;
     const padTop = 9.0 * dpr;
@@ -763,9 +809,9 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     }
 
     final image = await recorder.endRecording().toImage(
-      width.ceil(),
-      height.ceil(),
-    );
+          width.ceil(),
+          height.ceil(),
+        );
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     final bytes = byteData!.buffer.asUint8List();
     return BitmapDescriptor.bytes(
@@ -776,9 +822,8 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
 
   void _setKind(MapDiscoveryKind kind) {
     // ضغطة ثانية على نفس الفلتر تُنهيه وتعود للكل.
-    final next = (!widget.listingsOnly && _kind == kind)
-        ? MapDiscoveryKind.all
-        : kind;
+    final next =
+        (!widget.listingsOnly && _kind == kind) ? MapDiscoveryKind.all : kind;
     setState(() {
       _kind = next;
       final visible = _visibleEntries;
@@ -881,10 +926,9 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
                     padding: const EdgeInsets.all(4),
                     child: Row(
                       children: [
-                        for (final kind in MapDiscoveryKind.values
-                            .where((k) =>
-                                !widget.listingsOnly ||
-                                k == MapDiscoveryKind.listings))
+                        for (final kind in MapDiscoveryKind.values.where((k) =>
+                            !widget.listingsOnly ||
+                            k == MapDiscoveryKind.listings))
                           Expanded(
                             child: Padding(
                               padding:
@@ -935,8 +979,8 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
             // لزر «موقعي» لمنع التداخل.
             PositionedDirectional(
               start: 12,
-              bottom: selectedCardSpace +
-                  MediaQuery.viewPaddingOf(context).bottom,
+              bottom:
+                  selectedCardSpace + MediaQuery.viewPaddingOf(context).bottom,
               child: SafeArea(
                 child: _MapTypeToggle(
                   isAr: _isAr,
@@ -950,8 +994,8 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
             ),
             PositionedDirectional(
               end: 12,
-              bottom: selectedCardSpace +
-                  MediaQuery.viewPaddingOf(context).bottom,
+              bottom:
+                  selectedCardSpace + MediaQuery.viewPaddingOf(context).bottom,
               child: SafeArea(
                 child: FloatingActionButton.small(
                   heroTag: 'mapDiscoveryLocateMe',
@@ -1039,6 +1083,7 @@ class _MapDiscoveryEntry {
     required this.imageUrl,
     this.property,
     this.request,
+    this.shoot,
     this.isSold = false,
     this.isReserved = false,
   });
@@ -1052,10 +1097,12 @@ class _MapDiscoveryEntry {
   final String imageUrl;
   final Property? property;
   final MarketPropertyRequestRow? request;
+  final PhotoShootRequest? shoot;
   final bool isSold;
   final bool isReserved;
 
   bool get isInstantRequest => request?.isInstantPaid ?? false;
+  bool get isPhotographerRequest => shoot != null;
 
   static _MapDiscoveryEntry? fromProperty(Property p, {required bool isAr}) {
     final lat = p.latitude;
@@ -1122,7 +1169,54 @@ class _MapDiscoveryEntry {
     );
   }
 
+  static _MapDiscoveryEntry? fromPhotographerRequest(
+    PhotoShootRequest shoot,
+    Property property, {
+    required bool isAr,
+  }) {
+    final lat = property.latitude;
+    final lng = property.longitude;
+    if (lat == null || lng == null || lat == 0 || lng == 0) return null;
+    final status = switch (shoot.deliveryReviewStatus) {
+      'pending_review' => isAr ? 'بانتظار موافقة الناشر' : 'Awaiting approval',
+      'revision_requested' => isAr ? 'مطلوب تعديل' : 'Changes requested',
+      _ => switch (shoot.status) {
+          'pending' => isAr ? 'بانتظار قبول المصور' : 'Awaiting photographer',
+          'accepted' || 'in_progress' => isAr ? 'جاري التصوير' : 'In progress',
+          _ => isAr ? 'طلب تصوير نشط' : 'Active shoot',
+        },
+    };
+    final quote = shoot.quotedAmountSar;
+    return _MapDiscoveryEntry(
+      key: 'photo_shoot_${shoot.id}',
+      position: LatLng(lat, lng),
+      title: PropertyListingDisplay.displayListingTitle(property, isAr),
+      city: LocaleContent.forUi(
+        PropertyListingDisplay.cityLine(property) == '-'
+            ? property.city
+            : PropertyListingDisplay.cityLine(property),
+        isAr: isAr,
+      ),
+      amountLabel: quote == null || quote <= 0
+          ? ''
+          : AppMoney.sarPhrase(quote.toStringAsFixed(0), isAr: isAr),
+      typeLabel:
+          isAr ? 'طلب تصوير عقاري · $status' : 'Property shoot · $status',
+      imageUrl: ListingMediaUrls.propertyImageNetworkUrl(
+            property,
+            Supabase.instance.client,
+          ) ??
+          '',
+      property: property,
+      shoot: shoot,
+    );
+  }
+
   String mapMarkerPriceLine({required bool isAr}) {
+    if (shoot != null) {
+      if (amountLabel.trim().isNotEmpty) return amountLabel;
+      return isAr ? 'طلب تصوير نشط' : 'Active shoot';
+    }
     if (amountLabel.trim().isNotEmpty) return amountLabel;
     if (request != null) {
       return isAr ? 'بدون حدّ للمبلغ المحدد' : 'No amount limit';
@@ -1132,6 +1226,7 @@ class _MapDiscoveryEntry {
 
   /// سطر العنوان على الدبوس: نوع + غرض بلا مدينة أو حي.
   String mapMarkerTitleLine({required bool isAr}) {
+    if (shoot != null) return isAr ? 'تصوير عقاري' : 'Property shoot';
     final p = property;
     if (p != null) {
       final core = PropertyListingDisplay.compactListingTitle(p, isAr);
@@ -1319,7 +1414,7 @@ class _MapDiscoveryCard extends StatelessWidget {
     final width = MediaQuery.sizeOf(context).width;
     final isCompact = width < 720;
     final imageSize = isCompact ? 96.0 : 132.0;
-    final isRequest = entry.request != null;
+    final isRequest = entry.request != null || entry.shoot != null;
 
     // ضغط على البطاقة (الصورة/البيانات/العنوان) يفتح التفاصيل الكاملة فوراً —
     // كأنّ المستخدم ضغط على بطاقة الإعلان في الرئيسية مباشرة. لا نَحجب هذا
@@ -1366,7 +1461,8 @@ class _MapDiscoveryCard extends StatelessWidget {
                       child: Row(
                         children: [
                           if (entry.isInstantRequest) ...[
-                            InstantMarketRequestBadge(isAr: isAr, compact: true),
+                            InstantMarketRequestBadge(
+                                isAr: isAr, compact: true),
                             const SizedBox(width: 6),
                           ],
                           Container(
@@ -1377,24 +1473,30 @@ class _MapDiscoveryCard extends StatelessWidget {
                             margin: const EdgeInsetsDirectional.only(end: 6),
                             decoration: BoxDecoration(
                               color: (isRequest
-                                      ? (entry.isInstantRequest
-                                          ? const Color(0xFFDC2626)
-                                          : const Color(0xFF7C3AED))
+                                      ? (entry.isPhotographerRequest
+                                          ? const Color(0xFF0F766E)
+                                          : entry.isInstantRequest
+                                              ? const Color(0xFFDC2626)
+                                              : const Color(0xFF7C3AED))
                                       : colorScheme.primary)
                                   .withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
                               isRequest
-                                  ? (entry.isInstantRequest
-                                      ? (isAr ? 'فوري' : 'Instant')
-                                      : (isAr ? 'طلب' : 'Request'))
+                                  ? (entry.isPhotographerRequest
+                                      ? (isAr ? 'تصوير' : 'Shoot')
+                                      : entry.isInstantRequest
+                                          ? (isAr ? 'فوري' : 'Instant')
+                                          : (isAr ? 'طلب' : 'Request'))
                                   : (isAr ? 'إعلان' : 'Listing'),
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w900,
                                 color: isRequest
-                                    ? const Color(0xFF7C3AED)
+                                    ? (entry.isPhotographerRequest
+                                        ? const Color(0xFF0F766E)
+                                        : const Color(0xFF7C3AED))
                                     : colorScheme.primary,
                               ),
                             ),
@@ -1468,9 +1570,8 @@ class _MapDiscoveryCard extends StatelessWidget {
                             Text(
                               [
                                 if (entry.city.trim().isNotEmpty &&
-                                    !entry.title
-                                        .toLowerCase()
-                                        .contains(entry.city.trim().toLowerCase()) &&
+                                    !entry.title.toLowerCase().contains(
+                                        entry.city.trim().toLowerCase()) &&
                                     !entry.title.contains(
                                         PropertyListingDisplay.placeWithBi(
                                             entry.city.trim())))
@@ -1489,6 +1590,19 @@ class _MapDiscoveryCard extends StatelessWidget {
                                 fontSize: 12.5,
                               ),
                             ),
+                            if (entry.shoot != null) ...[
+                              const SizedBox(height: 3),
+                              Text(
+                                entry.typeLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Color(0xFF0F766E),
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                             if (entry.amountLabel.isNotEmpty) ...[
                               const SizedBox(height: 4),
                               if (RegExp(r'\d').hasMatch(entry.amountLabel))
@@ -1533,13 +1647,17 @@ class _MapDiscoveryCard extends StatelessWidget {
                                           label: FittedBox(
                                             fit: BoxFit.scaleDown,
                                             child: Text(
-                                              isRequest
+                                              entry.isPhotographerRequest
                                                   ? (isAr
-                                                      ? 'تفاصيل الطلب'
-                                                      : 'Request details')
-                                                  : (isAr
-                                                      ? 'التفاصيل'
-                                                      : 'Details'),
+                                                      ? 'الإعلان المرتبط'
+                                                      : 'Linked listing')
+                                                  : isRequest
+                                                      ? (isAr
+                                                          ? 'تفاصيل الطلب'
+                                                          : 'Request details')
+                                                      : (isAr
+                                                          ? 'التفاصيل'
+                                                          : 'Details'),
                                               maxLines: 1,
                                               softWrap: false,
                                             ),
@@ -1695,8 +1813,7 @@ class _MapTypeToggle extends StatelessWidget {
             ),
           ),
         ),
-        if (selected)
-          Icon(Icons.check_rounded, size: 18, color: cs.primary),
+        if (selected) Icon(Icons.check_rounded, size: 18, color: cs.primary),
       ],
     );
   }

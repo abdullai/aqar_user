@@ -371,6 +371,21 @@ class PhotographerService {
     ];
   }
 
+  Future<List<PhotoShootRequest>> myShootsForMap() async {
+    await expireStaleShoots();
+    final uid = _sb.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return const [];
+    final rows = await _sb
+        .from('photo_shoot_requests')
+        .select()
+        .or('requester_id.eq.$uid,photographer_id.eq.$uid')
+        .order('created_at', ascending: false);
+    return [
+      for (final r in (rows as List))
+        PhotoShootRequest.fromMap(Map<String, dynamic>.from(r as Map)),
+    ];
+  }
+
   Future<List<PhotoShootRequest>> shootsAwaitingOwnerReview({
     required String propertyId,
   }) async {
