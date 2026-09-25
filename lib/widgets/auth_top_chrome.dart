@@ -19,14 +19,16 @@ enum AuthLoginSurface {
 class AuthTopChrome extends StatelessWidget {
   const AuthTopChrome({
     super.key,
-    required this.snapshot,
-    required this.onSelect,
+    this.snapshot,
+    this.onSelect,
     this.busy = false,
-  });
+    this.appearanceOnly = false,
+  }) : assert(appearanceOnly || (snapshot != null && onSelect != null));
 
-  final LoginMethodSnapshot snapshot;
-  final void Function(LoginMethodKind kind) onSelect;
+  final LoginMethodSnapshot? snapshot;
+  final void Function(LoginMethodKind kind)? onSelect;
   final bool busy;
+  final bool appearanceOnly;
 
   static const Color _bank = Color(0xFF0F766E);
 
@@ -34,15 +36,13 @@ class AuthTopChrome extends StatelessWidget {
   bool get _isLight =>
       UserAppearanceSession.resolvesLight(themeModeNotifier.value);
 
-  Color get _textPrimary =>
-      _isLight ? const Color(0xFF0B1220) : Colors.white;
+  Color get _textPrimary => _isLight ? const Color(0xFF0B1220) : Colors.white;
   Color get _textSecondary =>
       _isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
   Color get _iconColor =>
       _isLight ? const Color(0xFF64748B) : const Color(0xFFCBD5E1);
   Color get _fill => _isLight ? Colors.white : const Color(0xFF0F1425);
-  Color get _outline =>
-      _isLight ? const Color(0xFF0A0A0A) : Colors.white;
+  Color get _outline => _isLight ? const Color(0xFF0A0A0A) : Colors.white;
 
   @override
   Widget build(BuildContext context) {
@@ -63,11 +63,13 @@ class AuthTopChrome extends StatelessWidget {
             final themeLabel = iconOnly
                 ? ''
                 : switch (themeModeNotifier.value) {
-                    ThemeMode.system => t?.themeSystem ?? (_isAr ? 'النظام' : 'System'),
-                    ThemeMode.light => t?.themeLight ?? (_isAr ? 'نهاري' : 'Light'),
+                    ThemeMode.system =>
+                      t?.themeSystem ?? (_isAr ? 'النظام' : 'System'),
+                    ThemeMode.light =>
+                      t?.themeLight ?? (_isAr ? 'نهاري' : 'Light'),
                     ThemeMode.dark => t?.themeDark ?? (_isAr ? 'ليلي' : 'Dark'),
                   };
-            final methodLabel = iconOnly
+            final methodLabel = appearanceOnly || iconOnly
                 ? ''
                 : (short
                     ? (_isAr ? 'طريقة' : 'Method')
@@ -75,9 +77,11 @@ class AuthTopChrome extends StatelessWidget {
 
             return Semantics(
               container: true,
-              label: _isAr
-                  ? 'خيارات اللغة والمظهر وطريقة الدخول'
-                  : 'Language, appearance, and sign-in method',
+              label: appearanceOnly
+                  ? (_isAr ? 'خيارات اللغة والمظهر' : 'Language and appearance')
+                  : (_isAr
+                      ? 'خيارات اللغة والمظهر وطريقة الدخول'
+                      : 'Language, appearance, and sign-in method'),
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: _fill,
@@ -99,7 +103,8 @@ class AuthTopChrome extends StatelessWidget {
                     children: [
                       Expanded(
                         child: _segment(
-                          tooltip: t?.language ?? (_isAr ? 'اللغة' : 'Language'),
+                          tooltip:
+                              t?.language ?? (_isAr ? 'اللغة' : 'Language'),
                           icon: Icons.language_rounded,
                           label: langLabel,
                           iconSize: iconSize,
@@ -113,7 +118,8 @@ class AuthTopChrome extends StatelessWidget {
                       _vDivider(),
                       Expanded(
                         child: _segment(
-                          tooltip: t?.theme ?? (_isAr ? 'المظهر' : 'Appearance'),
+                          tooltip:
+                              t?.theme ?? (_isAr ? 'المظهر' : 'Appearance'),
                           icon: switch (themeModeNotifier.value) {
                             ThemeMode.system => Icons.brightness_auto_rounded,
                             ThemeMode.light => Icons.light_mode_rounded,
@@ -128,21 +134,23 @@ class AuthTopChrome extends StatelessWidget {
                               : () => _showThemeSheet(context, t: t),
                         ),
                       ),
-                      _vDivider(),
-                      Expanded(
-                        child: _segment(
-                          tooltip: _isAr ? 'طريقة الدخول' : 'Sign-in method',
-                          icon: snapshot.tabIcon,
-                          label: methodLabel,
-                          iconSize: iconSize,
-                          fontSize: fontSize,
-                          iconOnly: iconOnly,
-                          emphasize: true,
-                          onTap: busy
-                              ? null
-                              : () => _showMethodSheet(context, t: t),
+                      if (!appearanceOnly) ...[
+                        _vDivider(),
+                        Expanded(
+                          child: _segment(
+                            tooltip: _isAr ? 'طريقة الدخول' : 'Sign-in method',
+                            icon: snapshot!.tabIcon,
+                            label: methodLabel,
+                            iconSize: iconSize,
+                            fontSize: fontSize,
+                            iconOnly: iconOnly,
+                            emphasize: true,
+                            onTap: busy
+                                ? null
+                                : () => _showMethodSheet(context, t: t),
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -302,11 +310,13 @@ class AuthTopChrome extends StatelessWidget {
   }
 
   void _showMethodSheet(BuildContext context, {AppLocalizations? t}) {
-    final methods = snapshot.visibleMethods;
-    final host = snapshot.hostLabel(isAr: _isAr);
-    final trust = snapshot.trustedThisInstall && snapshot.firstPasswordDone
-        ? (_isAr ? 'جهاز معتمد' : 'Trusted device')
-        : (_isAr ? 'جهاز غير مسجّل بعد' : 'Device not registered yet');
+    final currentSnapshot = snapshot!;
+    final methods = currentSnapshot.visibleMethods;
+    final host = currentSnapshot.hostLabel(isAr: _isAr);
+    final trust =
+        currentSnapshot.trustedThisInstall && currentSnapshot.firstPasswordDone
+            ? (_isAr ? 'جهاز معتمد' : 'Trusted device')
+            : (_isAr ? 'جهاز غير مسجّل بعد' : 'Device not registered yet');
 
     _openSheet(
       context,
@@ -334,14 +344,14 @@ class AuthTopChrome extends StatelessWidget {
       case LoginMethodKind.password:
         icon = Icons.password_rounded;
         title = _isAr ? 'اسم المستخدم وكلمة المرور' : 'Username and password';
-        subtitle = snapshot.nameOnlyPassword
+        subtitle = snapshot!.nameOnlyPassword
             ? (_isAr
                 ? 'الاسم جاهز — أدخل كلمة المرور فقط'
                 : 'Name ready — enter password only')
             : (_isAr
                 ? 'الدخول بالرقم المميز وكلمة المرور'
                 : 'Sign in with your ID number and password');
-        selected = !snapshot.quickUnlockActive;
+        selected = !snapshot!.quickUnlockActive;
         break;
       case LoginMethodKind.nafath:
         icon = Icons.verified_user_outlined;
@@ -356,7 +366,7 @@ class AuthTopChrome extends StatelessWidget {
         subtitle = _isAr
             ? 'الرمز الذي فعّلته على هذا الجهاز'
             : 'The PIN you enabled on this device';
-        selected = snapshot.quickUnlockActive && snapshot.showPin;
+        selected = snapshot!.quickUnlockActive && snapshot!.showPin;
         break;
       case LoginMethodKind.face:
         icon = Icons.face_retouching_natural_rounded;
@@ -364,7 +374,7 @@ class AuthTopChrome extends StatelessWidget {
         subtitle = _isAr
             ? 'التعرّف مباشرة حسب إعدادك على هذا الجهاز'
             : 'Recognize immediately from this device';
-        selected = snapshot.quickUnlockActive && snapshot.showFace;
+        selected = snapshot!.quickUnlockActive && snapshot!.showFace;
         break;
       case LoginMethodKind.fingerprint:
         icon = Icons.fingerprint_rounded;
@@ -372,7 +382,7 @@ class AuthTopChrome extends StatelessWidget {
         subtitle = _isAr
             ? 'السمات الحيوية التي فعّلتها على هذا الجهاز'
             : 'Biometrics you enabled on this device';
-        selected = snapshot.quickUnlockActive && snapshot.showFingerprint;
+        selected = snapshot!.quickUnlockActive && snapshot!.showFingerprint;
         break;
       case LoginMethodKind.anotherUser:
         icon = Icons.switch_account_rounded;
@@ -390,7 +400,7 @@ class AuthTopChrome extends StatelessWidget {
       selected: selected,
       onTap: () {
         Navigator.pop(context);
-        onSelect(kind);
+        onSelect!(kind);
       },
     );
   }

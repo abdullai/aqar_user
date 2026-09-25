@@ -12,11 +12,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'package:aqar_user/main.dart';
 import 'package:aqar_user/widgets/app_logo_loading.dart';
+import 'package:aqar_user/widgets/auth_top_chrome.dart';
+import '../core/gestures/app_keyboard_stable.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../core/input/email_domain_catalog.dart';
 import '../l10n/app_localizations.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/password_arabic_script_guard.dart';
+import '../widgets/aqar_primary_scroll_scope.dart';
 import '../widgets/caps_aware_password_field.dart';
 import '../core/utils/signature_blue_ink.dart';
 import '../core/config/app_config.dart';
@@ -136,6 +139,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       showPasswordArabicNotAllowedDialog(context, isAr: _isAr);
     });
   }
+
   ThemeMode get _currentTheme => themeModeNotifier.value;
   bool get _isLight => _currentTheme == ThemeMode.light;
 
@@ -153,8 +157,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       _orgOnboarding == 'join' &&
       (_joinOrgId != null && _joinOrgId!.trim().isNotEmpty);
 
-  bool get _profKycRequired =>
-      _isProfessionalAccount && !_isJoinExistingOrg;
+  bool get _profKycRequired => _isProfessionalAccount && !_isJoinExistingOrg;
 
   /// مكتب / مؤسسة / شركة — يتطلب السجل التجاري الموحّد (استعلام وزارة التجارة).
   bool get _needsUnifiedCommercialReg =>
@@ -166,8 +169,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
   bool get _showProfessionalDetails =>
       !_isProfessionalAccount ||
       _isJoinExistingOrg ||
-      (_falVerified &&
-          (!_needsUnifiedCommercialReg || _commercialVerified));
+      (_falVerified && (!_needsUnifiedCommercialReg || _commercialVerified));
 
   Color get _pageBg =>
       _isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
@@ -584,8 +586,6 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     } catch (_) {}
   }
 
-  
-
   String _normalizeDigits(String input) {
     const arabic = {
       '٠': '0',
@@ -912,9 +912,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         _falEndDate = endDate;
         _falStatus = status.isEmpty ? null : status;
         if (errDetail != null && errDetail.isNotEmpty) {
-          _err = _isAr
-              ? 'رخصة فال: $errDetail'
-              : 'FAL verification: $errDetail';
+          _err =
+              _isAr ? 'رخصة فال: $errDetail' : 'FAL verification: $errDetail';
         } else {
           _err = _isAr
               ? 'رخصة فال غير صحيحة أو لم يتم العثور عليها.'
@@ -988,8 +987,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
   Future<void> _runCommercialLookup() async {
     if (!_falVerified || !_needsUnifiedCommercialReg) return;
-    final digits = _normalizeDigits(_unifiedCrCtrl.text)
-        .replaceAll(RegExp(r'[^0-9]'), '');
+    final digits =
+        _normalizeDigits(_unifiedCrCtrl.text).replaceAll(RegExp(r'[^0-9]'), '');
     if (digits.length != 10) {
       setState(() {
         _err = _isAr
@@ -1126,8 +1125,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
       // عند تعذُّر الاستجابة من الخدمة المباشرة (شبكة/أصل): نسمح بإكمال
       // التحقق يدوياً عبر صفحة الهيئة في WebView كاحتياطي اختياري.
-      final bool serverUnavailable =
-          !res.valid && (res.status == 'network_error' || res.status == 'bad_response');
+      final bool serverUnavailable = !res.valid &&
+          (res.status == 'network_error' || res.status == 'bad_response');
       if (serverUnavailable) {
         final Map<String, dynamic>? fallback =
             await Navigator.push<Map<String, dynamic>?>(
@@ -1173,23 +1172,23 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
       await sp.setString(
           'pending_p_full_name_ar', (data['p_full_name_ar'] ?? '').toString());
-      await sp.setString(
-          'pending_p_first_name_ar', (data['p_first_name_ar'] ?? '').toString());
+      await sp.setString('pending_p_first_name_ar',
+          (data['p_first_name_ar'] ?? '').toString());
       await sp.setString('pending_p_second_name_ar',
           (data['p_second_name_ar'] ?? '').toString());
-      await sp.setString(
-          'pending_p_third_name_ar', (data['p_third_name_ar'] ?? '').toString());
+      await sp.setString('pending_p_third_name_ar',
+          (data['p_third_name_ar'] ?? '').toString());
       await sp.setString('pending_p_fourth_name_ar',
           (data['p_fourth_name_ar'] ?? '').toString());
 
       await sp.setString(
           'pending_p_full_name_en', (data['p_full_name_en'] ?? '').toString());
-      await sp.setString(
-          'pending_p_first_name_en', (data['p_first_name_en'] ?? '').toString());
+      await sp.setString('pending_p_first_name_en',
+          (data['p_first_name_en'] ?? '').toString());
       await sp.setString('pending_p_second_name_en',
           (data['p_second_name_en'] ?? '').toString());
-      await sp.setString(
-          'pending_p_third_name_en', (data['p_third_name_en'] ?? '').toString());
+      await sp.setString('pending_p_third_name_en',
+          (data['p_third_name_en'] ?? '').toString());
       await sp.setString('pending_p_fourth_name_en',
           (data['p_fourth_name_en'] ?? '').toString());
 
@@ -1251,7 +1250,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       _teamInvitationId = null;
       _teamInvitePreview = null;
     });
-    final res = await OrgTeamService(Supabase.instance.client).verifyTeamInvitation(
+    final res =
+        await OrgTeamService(Supabase.instance.client).verifyTeamInvitation(
       nationalId: nid,
       mobile: phoneLocal,
     );
@@ -1307,7 +1307,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         .replaceAll(RegExp(r'[^0-9]'), '');
     final p1 = _p1.text.trim();
     final p2 = _p2.text.trim();
-    final unifiedNatDigits = normalizeUnifiedNationalInput(_unifiedNatCtrl.text);
+    final unifiedNatDigits =
+        normalizeUnifiedNationalInput(_unifiedNatCtrl.text);
 
     if (_isTeamMemberSignup) {
       if (!_teamInviteVerified || _teamInvitationId == null) {
@@ -1420,7 +1421,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     if (!_isValidEmail(email)) {
       setState(() {
         _busy = false;
-        _err = _isAr ? 'أدخل بريدًا إلكترونيًا صحيحًا.' : 'Enter a valid email.';
+        _err =
+            _isAr ? 'أدخل بريدًا إلكترونيًا صحيحًا.' : 'Enter a valid email.';
       });
       _emailFocus.requestFocus();
       return;
@@ -1469,7 +1471,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     if (p1.isEmpty || p2.isEmpty) {
       setState(() {
         _busy = false;
-        _err = _isAr ? 'الرجاء إدخال كلمة المرور مرتين.' : 'Enter password twice.';
+        _err =
+            _isAr ? 'الرجاء إدخال كلمة المرور مرتين.' : 'Enter password twice.';
       });
       _p1Focus.requestFocus();
       return;
@@ -1478,7 +1481,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     if (p1 != p2) {
       setState(() {
         _busy = false;
-        _err = _isAr ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.';
+        _err =
+            _isAr ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.';
       });
       _p2Focus.requestFocus();
       return;
@@ -1606,8 +1610,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         'p_fourth_name_en': null,
         'p_locale': locale,
         'account_type': _isTeamMemberSignup
-            ? (_teamInvitePreview?['org_account_type']?.toString() ??
-                'office')
+            ? (_teamInvitePreview?['org_account_type']?.toString() ?? 'office')
             : _accountType,
         'verification_status': 'none',
         'fal_license': _profKycRequired ? falLicense : null,
@@ -1631,15 +1634,14 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           'unified_commercial_reg_no': _normalizeDigits(_unifiedCrCtrl.text)
               .replaceAll(RegExp(r'[^0-9]'), ''),
           'commercial_reg_snapshot': _commercialSnapshot,
-          'commercial_reg_no': _commercialSnapshot?['commercial_reg_no']
-              ?.toString(),
+          'commercial_reg_no':
+              _commercialSnapshot?['commercial_reg_no']?.toString(),
         },
       };
 
       if (_isAr) {
         profileParams.addAll({
-          'p_full_name_ar':
-              parts['full4'] ?? parts['fullRaw'] ?? assembledName,
+          'p_full_name_ar': parts['full4'] ?? parts['fullRaw'] ?? assembledName,
           'p_first_name_ar': parts['first'],
           'p_second_name_ar': parts['second'],
           'p_third_name_ar': parts['third'],
@@ -1647,8 +1649,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         });
         if (enParts != null) {
           profileParams.addAll({
-            'p_full_name_en':
-                enParts['full4'] ?? enParts['fullRaw'],
+            'p_full_name_en': enParts['full4'] ?? enParts['fullRaw'],
             'p_first_name_en': enParts['first'],
             'p_second_name_en': enParts['second'],
             'p_third_name_en': enParts['third'],
@@ -1657,8 +1658,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         }
       } else {
         profileParams.addAll({
-          'p_full_name_en':
-              parts['full4'] ?? parts['fullRaw'] ?? assembledName,
+          'p_full_name_en': parts['full4'] ?? parts['fullRaw'] ?? assembledName,
           'p_first_name_en': parts['first'],
           'p_second_name_en': parts['second'],
           'p_third_name_en': parts['third'],
@@ -1673,9 +1673,9 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           'username': username,
           'phone': phoneE164,
           'account_type': _isTeamMemberSignup
-            ? (_teamInvitePreview?['org_account_type']?.toString() ??
-                'office')
-            : _accountType,
+              ? (_teamInvitePreview?['org_account_type']?.toString() ??
+                  'office')
+              : _accountType,
           'locale': locale,
           'full_name': parts['fullRaw'] ?? assembledName,
           'fal_license': _profKycRequired ? falLicense : null,
@@ -1767,17 +1767,17 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               ? 'تم إنشاء حسابك وربطه بالفريق. سجّل الدخول للمتابعة.'
               : 'Account created and linked to your team. Sign in to continue.')
           : _isJoinExistingOrg
-          ? (loc?.registerSignupJoinPendingSnackbar ??
-              (_isAr
-                  ? 'تم إنشاء الحساب. بعد تسجيل الدخول يُرسَل طلب الانضمام ويُفعَّل الحساب بموافقة المدير.'
-                  : 'Account created. After you sign in, your join request is sent and the owner must approve it.'))
-          : (signUpRes.session != null
-              ? (_isAr
-                  ? 'تم إنشاء الحساب وحفظ البيانات.'
-                  : 'Account created and profile saved.')
-              : (_isAr
-                  ? 'تم إنشاء الحساب. افتح البريد لتأكيده ثم سجّل الدخول.'
-                  : 'Account created. Confirm email then sign in.'));
+              ? (loc?.registerSignupJoinPendingSnackbar ??
+                  (_isAr
+                      ? 'تم إنشاء الحساب. بعد تسجيل الدخول يُرسَل طلب الانضمام ويُفعَّل الحساب بموافقة المدير.'
+                      : 'Account created. After you sign in, your join request is sent and the owner must approve it.'))
+              : (signUpRes.session != null
+                  ? (_isAr
+                      ? 'تم إنشاء الحساب وحفظ البيانات.'
+                      : 'Account created and profile saved.')
+                  : (_isAr
+                      ? 'تم إنشاء الحساب. افتح البريد لتأكيده ثم سجّل الدخول.'
+                      : 'Account created. Confirm email then sign in.'));
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1794,9 +1794,12 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         if (_isJoinExistingOrg) {
           final jid = _joinOrgId?.trim() ?? '';
           if (jid.isNotEmpty) {
-            await prefs.setString(OrgTeamService.prefPendingSignupOrgJoinId, jid);
+            await prefs.setString(
+                OrgTeamService.prefPendingSignupOrgJoinId, jid);
             final intro = loc?.registerPendingJoinIntro ??
-                (_isAr ? 'طلب انضمام عبر التسجيل.' : 'Join request via signup.');
+                (_isAr
+                    ? 'طلب انضمام عبر التسجيل.'
+                    : 'Join request via signup.');
             await prefs.setString(
               OrgTeamService.prefPendingSignupOrgJoinIntro,
               intro,
@@ -1874,10 +1877,12 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     required String hint,
     required IconData icon,
     Widget? suffix,
+    bool floatingLabel = false,
   }) {
     final hintSize = _hintFontSize(context);
     return InputDecoration(
-      hintText: hint,
+      hintText: floatingLabel ? null : hint,
+      labelText: floatingLabel ? hint : null,
       hintMaxLines: 1,
       hintStyle: TextStyle(
         color: _hintColor,
@@ -1885,6 +1890,20 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         fontSize: hintSize,
         overflow: TextOverflow.ellipsis,
       ),
+      labelStyle: floatingLabel
+          ? TextStyle(
+              color: _hintColor,
+              fontWeight: FontWeight.w800,
+              fontSize: hintSize.clamp(12.0, 14.0),
+            )
+          : null,
+      floatingLabelStyle: floatingLabel
+          ? TextStyle(
+              color: _bankColor,
+              fontWeight: FontWeight.w800,
+              fontSize: hintSize.clamp(12.0, 14.0),
+            )
+          : null,
       prefixIcon: Icon(icon, color: _iconColor, size: 22),
       suffixIcon: suffix,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -2011,6 +2030,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         context,
         hint: _isAr ? 'نوع الحساب' : 'Account type',
         icon: Icons.badge_outlined,
+        floatingLabel: true,
       ),
       items: [
         DropdownMenuItem(
@@ -2115,9 +2135,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
-            onPressed: (_busy || _verifyingFal)
-                ? null
-                : _verifyFalLicense,
+            onPressed: (_busy || _verifyingFal) ? null : _verifyFalLicense,
             icon: _verifyingFal
                 ? const SizedBox(
                     width: 22,
@@ -2289,6 +2307,20 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                     fontWeight: FontWeight.w800,
                   ),
                 ),
+                if ((_commercialSnapshot!['entity_name_ar'] ?? '')
+                    .toString()
+                    .trim()
+                    .isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_isAr ? 'اسم المنشأة المسجل' : 'Registered entity name'}: '
+                    '${_commercialSnapshot!['entity_name_ar']}',
+                    style: TextStyle(
+                      color: _textPrimary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
                 if ((_commercialSnapshot!['commercial_reg_no'] ?? '')
                     .toString()
                     .trim()
@@ -2462,8 +2494,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                         fontSize: 14,
                       ),
                     ),
-                    leading:
-                        const Icon(Icons.alternate_email_rounded, color: _bankColor, size: 22),
+                    leading: const Icon(Icons.alternate_email_rounded,
+                        color: _bankColor, size: 22),
                     onTap: () => onSelected(opt),
                   );
                 },
@@ -2480,10 +2512,22 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         _falVerified &&
         (!_needsUnifiedCommercialReg || _commercialVerified);
 
-    final title = _isAr ? 'الاسم الرباعي (كما في الهوية)' : 'Full legal name (4 parts)';
+    final title = _isProfessionalAccount
+        ? (_isAr ? 'اسم المفوّض الرباعي' : 'Authorized representative name')
+        : (_isAr
+            ? 'الاسم الرباعي (كما في الهوية)'
+            : 'Full legal name (4 parts)');
     final subtitle = _isAr
-        ? 'الأول، الثاني، الثالث، والأخير — يُستخدم في العقود والوثائق الرسمية.'
-        : 'First, second, third, and family name — used on contracts and official documents.';
+        ? (_isProfessionalAccount
+            ? (_needsUnifiedCommercialReg
+                ? 'اسم الشخص المفوّض كما في الهوية؛ اسم المنشأة يؤخذ من بيانات السجل عند التحقق.'
+                : 'أدخل اسمك كما في الهوية، ويُستخدم مع بيانات رخصة فال للتحقق المهني.')
+            : 'الأول، الثاني، الثالث، والأخير — يُستخدم في العقود والوثائق الرسمية.')
+        : (_isProfessionalAccount
+            ? (_needsUnifiedCommercialReg
+                ? 'Authorized person as shown on the ID; the entity name comes from verified registry data.'
+                : 'Enter your name as shown on your ID for professional FAL verification.')
+            : 'First, second, third, and family name — used on contracts and official documents.');
 
     Widget field({
       required TextEditingController controller,
@@ -2501,6 +2545,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           context,
           hint: hint,
           icon: Icons.person_outline_rounded,
+          floatingLabel: true,
         ),
         onFieldSubmitted: (_) {
           if (action == TextInputAction.done) {
@@ -2553,7 +2598,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.lock_outline_rounded, size: 18, color: _bankColor),
+                const Icon(Icons.lock_outline_rounded,
+                    size: 18, color: _bankColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -2572,51 +2618,67 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           ),
         ],
         const SizedBox(height: 12),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: field(
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final fields = [
+              field(
                 controller: _name1Ctrl,
                 focus: _name1Focus,
                 nextFocus: _name2Focus,
                 hint: _isAr ? 'الاسم الأول' : 'First name',
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: field(
+              field(
                 controller: _name2Ctrl,
                 focus: _name2Focus,
                 nextFocus: _name3Focus,
                 hint: _isAr ? 'الاسم الثاني' : 'Second name',
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: field(
+              field(
                 controller: _name3Ctrl,
                 focus: _name3Focus,
                 nextFocus: _name4Focus,
                 hint: _isAr ? 'الاسم الثالث' : 'Third name',
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: field(
+              field(
                 controller: _name4Ctrl,
                 focus: _name4Focus,
                 nextFocus: _p1Focus,
                 hint: _isAr ? 'الاسم الأخير' : 'Last name',
                 action: TextInputAction.done,
               ),
-            ),
-          ],
+            ];
+
+            if (constraints.maxWidth < 440) {
+              return Column(
+                children: [
+                  for (var i = 0; i < fields.length; i++) ...[
+                    if (i > 0) const SizedBox(height: 8),
+                    fields[i],
+                  ],
+                ],
+              );
+            }
+
+            return Column(
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: fields[0]),
+                    const SizedBox(width: 8),
+                    Expanded(child: fields[1]),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: fields[2]),
+                    const SizedBox(width: 8),
+                    Expanded(child: fields[3]),
+                  ],
+                ),
+              ],
+            );
+          },
         ),
       ],
     );
@@ -2689,9 +2751,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         if (mounted) {
           setState(() {
             _signupSigBusy = false;
-            _signupSigErr = _isAr
-                ? 'تعذر تصدير التوقيع.'
-                : 'Could not export signature.';
+            _signupSigErr =
+                _isAr ? 'تعذر تصدير التوقيع.' : 'Could not export signature.';
           });
         }
         return;
@@ -2740,8 +2801,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     if (b == null || b.isEmpty) {
       setState(() {
         _signupSigBusy = false;
-        _signupSigErr =
-            _isAr ? 'لا توجد بيانات للملف.' : 'No file data.';
+        _signupSigErr = _isAr ? 'لا توجد بيانات للملف.' : 'No file data.';
       });
       return;
     }
@@ -2809,7 +2869,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         const SizedBox(height: 12),
         if (!_signupSigPadArmed)
           FilledButton.tonalIcon(
-            onPressed: (_busy || _signupSigBusy) ? null : _armSignupSignaturePad,
+            onPressed:
+                (_busy || _signupSigBusy) ? null : _armSignupSignaturePad,
             style: FilledButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
               foregroundColor: _bankColor,
@@ -2822,15 +2883,19 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           )
         else
           OutlinedButton.icon(
-            onPressed: (_busy || _signupSigBusy) ? null : _disarmSignupSignaturePad,
+            onPressed:
+                (_busy || _signupSigBusy) ? null : _disarmSignupSignaturePad,
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
               foregroundColor: _textPrimary,
               side: BorderSide(color: dividerColor),
             ),
-            icon: const Icon(Icons.swipe_vertical_rounded, color: _bankColor, size: 20),
+            icon: const Icon(Icons.swipe_vertical_rounded,
+                color: _bankColor, size: 20),
             label: Text(
-              _isAr ? 'انتهيت — تفعيل التمرير في الصفحة' : 'Done — resume page scroll',
+              _isAr
+                  ? 'انتهيت — تفعيل التمرير في الصفحة'
+                  : 'Done — resume page scroll',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 color: _textPrimary,
@@ -2917,7 +2982,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               onPressed: (_busy || _signupSigBusy || !_signupSigPadArmed)
                   ? null
                   : _clearSignupPadOnly,
-              icon: Icon(Icons.format_clear_rounded, size: 20, color: _iconColor),
+              icon:
+                  Icon(Icons.format_clear_rounded, size: 20, color: _iconColor),
               label: Text(_isAr ? 'مسح اللوحة' : 'Clear pad'),
             ),
             FilledButton.icon(
@@ -2939,19 +3005,22 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
               ),
             ),
             OutlinedButton.icon(
-              onPressed: (_busy || _signupSigBusy) ? null : _pickSignupSignatureFile,
+              onPressed:
+                  (_busy || _signupSigBusy) ? null : _pickSignupSignatureFile,
               icon: const Icon(Icons.upload_file_rounded, size: 20),
               label: Text(_isAr ? 'رفع صورة' : 'Upload image'),
             ),
           ],
         ),
-        if (_pendingSignaturePng != null && _pendingSignaturePng!.isNotEmpty) ...[
+        if (_pendingSignaturePng != null &&
+            _pendingSignaturePng!.isNotEmpty) ...[
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _isLight ? const Color(0xFFF0FDF4) : const Color(0xFF0F1F17),
+              color:
+                  _isLight ? const Color(0xFFF0FDF4) : const Color(0xFF0F1F17),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: _isLight
@@ -3005,7 +3074,9 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                       size: 20,
                     ),
                     label: Text(
-                      _isAr ? 'إزالة التوقيع المحفوظ' : 'Remove saved signature',
+                      _isAr
+                          ? 'إزالة التوقيع المحفوظ'
+                          : 'Remove saved signature',
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         color: Theme.of(context).colorScheme.error,
@@ -3075,8 +3146,12 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       return const SizedBox.shrink();
     }
     final name = _isAr
-        ? (p['inviter_full_name_ar'] ?? p['inviter_full_name_en'] ?? '').toString().trim()
-        : (p['inviter_full_name_en'] ?? p['inviter_full_name_ar'] ?? '').toString().trim();
+        ? (p['inviter_full_name_ar'] ?? p['inviter_full_name_en'] ?? '')
+            .toString()
+            .trim()
+        : (p['inviter_full_name_en'] ?? p['inviter_full_name_ar'] ?? '')
+            .toString()
+            .trim();
     final phone = (p['inviter_phone'] ?? '').toString().trim();
     final reqAt = p['requested_at'];
     return Container(
@@ -3092,7 +3167,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.verified_user_outlined, color: _bankColor, size: 22),
+              const Icon(Icons.verified_user_outlined,
+                  color: _bankColor, size: 22),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -3136,9 +3212,8 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           const SizedBox(height: 12),
           if (!_teamJoinExpanded)
             FilledButton(
-              onPressed: _busy
-                  ? null
-                  : () => setState(() => _teamJoinExpanded = true),
+              onPressed:
+                  _busy ? null : () => setState(() => _teamJoinExpanded = true),
               child: Text(_isAr ? 'انضمام' : 'Join'),
             ),
         ],
@@ -3222,7 +3297,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
     );
   }
 
-  Widget _card({required double maxWidth, required bool allowScroll}) {
+  Widget _card({required double maxWidth}) {
     final cardColor = _isLight
         ? Colors.white.withValues(alpha: 0.98)
         : const Color(0xFF171A22).withValues(alpha: 0.98);
@@ -3252,20 +3327,20 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
                       ? 'أدخل هويتك وجوالك ثم تحقق من العضوية.'
                       : 'Enter your ID and mobile, then verify membership.'))
               : _isProfessionalAccount
-              ? (_showProfessionalDetails
-                  ? (_needsUnifiedCommercialReg && !_commercialVerified
-                      ? (_isAr
-                          ? 'بعد التحقق من فال: أدخل الرقم الموحّد للسجل واستعلام وزارة التجارة.'
-                          : 'After FAL: enter unified CR number and run Ministry of Commerce lookup.')
+                  ? (_showProfessionalDetails
+                      ? (_needsUnifiedCommercialReg && !_commercialVerified
+                          ? (_isAr
+                              ? 'بعد التحقق من فال: أدخل الرقم الموحّد للسجل واستعلام وزارة التجارة.'
+                              : 'After FAL: enter unified CR number and run Ministry of Commerce lookup.')
+                          : (_isAr
+                              ? 'أكمل رقم الهوية والبريد وكلمة المرور.'
+                              : 'Complete national ID, email, and password.'))
                       : (_isAr
-                          ? 'أكمل رقم الهوية والبريد وكلمة المرور.'
-                          : 'Complete national ID, email, and password.'))
+                          ? 'للحسابات المهنية: تحقق من رخصة فال عبر صفحة الهيئة أولًا.'
+                          : 'Professional accounts: verify FAL via the official REGA page first.'))
                   : (_isAr
-                      ? 'للحسابات المهنية: تحقق من رخصة فال عبر صفحة الهيئة أولًا.'
-                      : 'Professional accounts: verify FAL via the official REGA page first.'))
-              : (_isAr
-                  ? 'أدخل بياناتك لتسجيل الحساب.'
-                  : 'Enter your details to create your account.'),
+                      ? 'أدخل بياناتك لتسجيل الحساب.'
+                      : 'Enter your details to create your account.'),
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14,
@@ -3437,8 +3512,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
           ),
         ),
         const SizedBox(height: 10),
-        Align(
-          alignment: _isAr ? Alignment.centerRight : Alignment.centerLeft,
+        Center(
           child: TextButton(
             onPressed: _busy
                 ? null
@@ -3465,12 +3539,12 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
 
     final child = Padding(
       padding: const EdgeInsets.all(20),
-      child: allowScroll
-          ? SingleChildScrollView(
-              physics: const ClampingScrollPhysics(),
-              child: content,
-            )
-          : content,
+      child: SingleChildScrollView(
+        primary: true,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        physics: const ClampingScrollPhysics(),
+        child: content,
+      ),
     );
 
     return ConstrainedBox(
@@ -3496,39 +3570,42 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
             valueListenable: themeModeNotifier,
             builder: (context, _, __) {
               return Scaffold(
+                resizeToAvoidBottomInset: false,
                 backgroundColor: _pageBg,
-                body: SafeArea(
-                  child: Stack(
-                    children: [
-                      LayoutBuilder(
-                        builder: (context, c) {
-                          final w = c.maxWidth;
-                          final h = c.maxHeight;
-                          final allowScroll = h < 820;
-                          final maxWidth = (w >= 780) ? 620.0 : 640.0;
-
-                          return Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(18),
-                              child: _card(
-                                maxWidth: maxWidth,
-                                allowScroll: allowScroll,
+                body: AppKeyboardStableScope(
+                  child: AqarPrimaryScrollScope(
+                    child: SafeArea(
+                      child: Column(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 620),
+                                child:
+                                    const AuthTopChrome(appearanceOnly: true),
                               ),
                             ),
-                          );
-                        },
-                      ),
-                      PositionedDirectional(
-                        top: 4,
-                        end: 8,
-                        child: TextButton(
-                          onPressed: () => unawaited(
-                            setAppLang(_isAr ? 'en' : 'ar'),
                           ),
-                          child: Text(_isAr ? 'English' : 'العربية'),
-                        ),
+                          Expanded(
+                            child: LayoutBuilder(
+                              builder: (context, c) {
+                                final w = c.maxWidth;
+                                final maxWidth = (w >= 780) ? 620.0 : 640.0;
+
+                                return Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(18),
+                                    child: _card(maxWidth: maxWidth),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               );
