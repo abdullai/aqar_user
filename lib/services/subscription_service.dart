@@ -251,7 +251,7 @@ class SubscriptionService {
   ///   • المالك الفردي / المستخدم العام → لا باقات (مجاني + طلب فوري من الكتالوج)
   static List<int> allowedSortOrdersForAccountType(String? accountType) {
     if (AppRoleHelper.isPhotographerAccount(accountType)) {
-      return const [1];
+      return const [31, 32, 33];
     }
     final k = AppRoleHelper.fromAccountType(accountType);
     switch (k) {
@@ -283,7 +283,10 @@ class SubscriptionService {
         sortOrder == 2 ||
         sortOrder == 3 ||
         sortOrder == 4 ||
-        sortOrder == 14;
+        sortOrder == 14 ||
+        sortOrder == 31 ||
+        sortOrder == 32 ||
+        sortOrder == 33;
   }
 
   /// هل هذا sort_order تَوب-أب طلبات عقارية إضافية؟
@@ -346,7 +349,10 @@ class SubscriptionService {
     String? accountType,
   ) async {
     try {
-      final rpc = await _sb.rpc('list_subscription_catalog_plans');
+      final rpc = await _sb.rpc(
+        'list_subscription_catalog_plans',
+        params: {'p_account_type': accountType},
+      );
       return _dedupePlansBySortOrder(_plansFromCatalogRpc(rpc));
     } catch (_) {
       return const [];
@@ -366,10 +372,35 @@ class SubscriptionService {
     }
   }
 
+  Future<bool> hasPhotographerTrialBeenUsed() async {
+    if (_user?.id == null) return true;
+    try {
+      final res = await _sb.rpc('photographer_trial_already_used');
+      if (res is bool) return res;
+      return res?.toString().toLowerCase() == 'true';
+    } catch (_) {
+      return true;
+    }
+  }
+
   /// تفعيل تجربة 3 أيام (مرة واحدة). يستدعي activate_marketing_trial_subscription.
   Future<Map<String, dynamic>> activateMarketingTrialSubscription() async {
     try {
       final res = await _sb.rpc('activate_marketing_trial_subscription');
+      if (res is Map) {
+        return Map<String, dynamic>.from(
+          res.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'unexpected_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> activatePhotographerTrialSubscription() async {
+    try {
+      final res = await _sb.rpc('activate_photographer_trial_subscription');
       if (res is Map) {
         return Map<String, dynamic>.from(
           res.map((k, v) => MapEntry(k.toString(), v)),

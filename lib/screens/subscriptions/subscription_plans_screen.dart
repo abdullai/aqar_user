@@ -115,7 +115,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     return 'When deal quota runs out: buy «Deal top-up» from the plans below. Applies immediately.';
   }
 
-  SubscriptionBillingContext? get _ctx => _billingCtx ?? widget.billingContext;
+  SubscriptionBillingContext? get _ctx =>
+      _isPhotographerPlan ? null : (_billingCtx ?? widget.billingContext);
 
   bool get _isMarketingRole =>
       AppRoleHelper.isMarketingAccountType(widget.accountType);
@@ -124,7 +125,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       AppRoleHelper.isPhotographerAccount(widget.accountType);
 
   bool get _isTrialEligibleAccount {
-    if (_isPhotographerPlan) return false;
+    if (_isPhotographerPlan) return true;
     if (AppRoleHelper.isOwnerFreeTierAccount(widget.accountType)) return false;
     if (_isMarketingRole) return true;
     final k = AppRoleHelper.fromAccountType(widget.accountType);
@@ -179,7 +180,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   /// سجل تجربة قديم منتهٍ (is_trial=true && ends_at <= now).
   /// لا تُظهر للأشخاص الذين لم يستخدموها بعد، ولا أثناء التجربة الفعّالة.
   bool get _showTrialExhaustedBadge {
-    if (!_isMarketingRole || _loading) return false;
+    if ((!_isMarketingRole && !_isPhotographerPlan) || _loading) return false;
     if (_hasActiveTrial) return false;
     if (SubscriptionService.subscriptionRowGrantsMarketingAccess(_current)) {
       return false;
@@ -247,7 +248,9 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       _billingCtx = ctx;
     } else if (_isTrialEligibleAccount) {
       try {
-        used = await _svc.hasUserUsedTrial();
+        used = _isPhotographerPlan
+            ? await _svc.hasPhotographerTrialBeenUsed()
+            : await _svc.hasUserUsedTrial();
       } catch (_) {
         used = false;
       }
@@ -294,25 +297,31 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                _isAr
-                    ? 'لديك صلاحية استخدام الميزة المدفوعة لمدة ٣ أيام فقط. عند انتهائها لا بد من الاشتراك للمتابعة.'
-                    : 'You will have access to the paid feature for 3 days only. After it ends, a subscription is required to continue.',
+                _isPhotographerPlan
+                    ? (_isAr
+                        ? 'تجربة مصور عقاري لمدة ٣ أيام لاستقبال طلبات التصوير وتسليم الوسائط. تنتهي تلقائيًا، ويمكنك الاشتراك بعدها للاستمرار.'
+                        : 'Try photographer requests and media delivery for 3 days. Access ends automatically; subscribe afterward to continue.')
+                    : (_isAr
+                        ? 'لديك صلاحية استخدام الميزة المدفوعة لمدة ٣ أيام فقط. عند انتهائها لا بد من الاشتراك للمتابعة.'
+                        : 'You will have access to the paid feature for 3 days only. After it ends, a subscription is required to continue.'),
               ),
-              const SizedBox(height: 12),
-              Text(
-                _isAr ? 'حدود التجربة:' : 'Trial limits:',
-                style: const TextStyle(fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 6),
-              Text(_isAr
-                  ? '• لا يمكن إضافة عضو إلى الفريق.'
-                  : '• Cannot add team members.'),
-              Text(_isAr
-                  ? '• إعلان عقاري واحد فقط داخل تبويب «صفحتي» (تستفيد منه في كل التبويبات: تعاقد، عروض، رسائل…).'
-                  : '• Only 1 real-estate listing under "My desk" (full access on it: contract, offers, chat…).'),
-              Text(_isAr
-                  ? '• طلبات عقارية غير محدودة.'
-                  : '• Unlimited real-estate requests.'),
+              if (!_isPhotographerPlan) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _isAr ? 'حدود التجربة:' : 'Trial limits:',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                Text(_isAr
+                    ? '• لا يمكن إضافة عضو إلى الفريق.'
+                    : '• Cannot add team members.'),
+                Text(_isAr
+                    ? '• إعلان عقاري واحد فقط داخل تبويب «صفحتي» (تستفيد منه في كل التبويبات: تعاقد، عروض، رسائل…).'
+                    : '• Only 1 real-estate listing under "My desk" (full access on it: contract, offers, chat…).'),
+                Text(_isAr
+                    ? '• طلبات عقارية غير محدودة.'
+                    : '• Unlimited real-estate requests.'),
+              ],
               const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.all(10),
@@ -321,9 +330,13 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  _isAr
-                      ? 'تنبيه: التجربة لمرّة واحدة فقط لهذا المستخدم — لا يمكن تكرارها.'
-                      : 'Note: This trial is one-time per user — cannot be repeated.',
+                  _isPhotographerPlan
+                      ? (_isAr
+                          ? 'تنبيه: تجربة المصور مرة واحدة لهذا المستخدم، ولا تستهلك تجربة نوع حسابه الأساسي.'
+                          : 'Note: The photographer trial is one-time and separate from the primary account trial.')
+                      : (_isAr
+                          ? 'تنبيه: التجربة لمرّة واحدة فقط لهذا المستخدم — لا يمكن تكرارها.'
+                          : 'Note: This trial is one-time per user — cannot be repeated.'),
                   style: TextStyle(color: cs.onErrorContainer),
                 ),
               ),
@@ -351,7 +364,9 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     if (!mounted || !agreed) return;
 
     setState(() => _activatingTrial = true);
-    final res = await _svc.activateMarketingTrialSubscription();
+    final res = _isPhotographerPlan
+        ? await _svc.activatePhotographerTrialSubscription()
+        : await _svc.activateMarketingTrialSubscription();
     if (!mounted) return;
     final ok = res['ok'] == true;
     final err = res['error']?.toString();
@@ -360,12 +375,21 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     if (ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_isAr
-              ? 'تم تفعيل تجربة ٣ أيام — تستطيع الآن استخدام الميزات.'
-              : '3-day trial activated. You can use paid features now.'),
+          content: Text(_isPhotographerPlan
+              ? (_isAr
+                  ? 'تم تفعيل تجربة المصور ٣ أيام.'
+                  : '3-day photographer trial activated.')
+              : (_isAr
+                  ? 'تم تفعيل تجربة ٣ أيام — تستطيع الآن استخدام الميزات.'
+                  : '3-day trial activated. You can use paid features now.')),
         ),
       );
       await _load();
+      if (_isPhotographerPlan &&
+          widget.resumeAfterPurchase != null &&
+          mounted) {
+        Navigator.of(context).pop(widget.resumeAfterPurchase);
+      }
     } else {
       String msg;
       if (err == 'trial_already_used') {
@@ -376,6 +400,18 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
         msg = _isAr
             ? 'لديك اشتراك مدفوع — لا حاجة للتجربة.'
             : 'You already have an active paid subscription.';
+      } else if (err == 'photographer_profile_not_verified') {
+        msg = _isAr
+            ? 'يجب توثيق حساب المصور أولاً.'
+            : 'Your photographer profile must be verified first.';
+      } else if (err == 'photographer_subscription_active') {
+        msg = _isAr
+            ? 'لديك اشتراك مصور فعال بالفعل.'
+            : 'You already have an active photographer subscription.';
+      } else if (err == 'photographer_trial_plan_missing') {
+        msg = _isAr
+            ? 'باقة تجربة المصور غير مفعّلة في الكتالوج.'
+            : 'The photographer trial plan is not active in the catalog.';
       } else {
         msg = _isAr
             ? 'تعذّر التفعيل: ${err ?? 'unknown'}'
@@ -894,9 +930,13 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        _isAr
-                            ? 'فعّل التجربة لمرة واحدة وجرّب أهم الميزات: إعلان عقاري واحد + طلبات غير محدودة. تنتهي تلقائياً بعد ٣ أيام بدون أي خصم.'
-                            : 'Activate the one-time trial: 1 listing + unlimited requests. Ends automatically after 3 days, no charge.',
+                        _isPhotographerPlan
+                            ? (_isAr
+                                ? 'فعّل تجربة المصور لمرة واحدة واستقبل طلبات التصوير وسلّم الوسائط لمدة ٣ أيام؛ تنتهي تلقائيًا دون خصم.'
+                                : 'Activate the one-time photographer trial to receive requests and deliver media for 3 days; it ends automatically without a charge.')
+                            : (_isAr
+                                ? 'فعّل التجربة لمرة واحدة وجرّب أهم الميزات: إعلان عقاري واحد + طلبات غير محدودة. تنتهي تلقائياً بعد ٣ أيام بدون أي خصم.'
+                                : 'Activate the one-time trial: 1 listing + unlimited requests. Ends automatically after 3 days, no charge.'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       const SizedBox(height: 12),
