@@ -15,6 +15,7 @@
     "editor.defaultFormatter": "Dart-Code.dart-code"
   },
   "chat.tools.terminal.autoApprove": {
-    "Tee-Object": true
+    "Tee-Object": true,
+    ".\\scripts\\deploy-web.ps1": true
   }
 }

@@ -102,6 +102,29 @@ async function lastUsedSavedCard(
   return { id, card_token: token };
 }
 
+async function configuredAutoPayCard(
+  svc: ReturnType<typeof createClient>,
+  userId: string,
+  subscriptionId: string,
+): Promise<{ id: string; card_token: string } | null> {
+  const { data: sub } = await svc
+    .from("user_subscriptions")
+    .select("auto_pay_card_id")
+    .eq("id", subscriptionId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const cardId = String((sub as Record<string, unknown> | null)?.auto_pay_card_id ?? "").trim();
+  if (!cardId) return null;
+  const { data: card } = await svc
+    .from("saved_cards")
+    .select("id,card_token")
+    .eq("id", cardId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const token = String((card as Record<string, unknown> | null)?.card_token ?? "").trim();
+  return card && token ? { id: cardId, card_token: token } : null;
+}
+
 async function hasRecentPendingBilling(
   svc: ReturnType<typeof createClient>,
   subscriptionId: string,
@@ -193,7 +216,8 @@ serve(async (req) => {
       continue;
     }
 
-    const card = await lastUsedSavedCard(svc, userId);
+    const card = await configuredAutoPayCard(svc, userId, subId) ??
+      await lastUsedSavedCard(svc, userId);
     if (!card) {
       await svc.from("user_subscriptions").update({
         auto_renew_last_failure_at: new Date().toISOString(),

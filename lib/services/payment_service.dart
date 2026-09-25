@@ -2,7 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform, kDebugMode, kIsWeb, kReleaseMode;
+    show
+        TargetPlatform,
+        defaultTargetPlatform,
+        kDebugMode,
+        kIsWeb,
+        kReleaseMode;
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:moyasar/moyasar.dart';
@@ -143,7 +148,8 @@ class PaymentService {
         }
         return {'ok': false, 'error': 'bad_response'};
       }
-      if (purposeTrim == 'save_card_only' || purposeTrim == 'save_card_verify') {
+      if (purposeTrim == 'save_card_only' ||
+          purposeTrim == 'save_card_verify') {
         final res = await _sb.rpc(
           'create_pending_billing_catalog_fee',
           params: {
@@ -332,25 +338,38 @@ class PaymentService {
         return isAr
             ? 'تعذر إكمال الدفع، ولم يتم تفعيل الاشتراك.'
             : 'Payment could not be completed, and the subscription was not activated.';
+      case 'subscription_not_modifiable':
+        return isAr
+            ? 'لا يمكن تعديل الدفع التلقائي لاشتراك منتهٍ أو غير فعّال.'
+            : 'Auto-pay cannot be changed for an expired or inactive subscription.';
+      case 'subscription_not_found_or_not_owner':
+        return isAr
+            ? 'تعذّر العثور على الاشتراك الحالي. حدّث الصفحة وحاول مجدداً.'
+            : 'The current subscription could not be found. Refresh and try again.';
+      case 'card_not_found_or_not_owner':
+        return isAr
+            ? 'بطاقة الدفع المحددة غير متاحة. اختر بطاقة أخرى.'
+            : 'The selected payment card is unavailable. Choose another card.';
+      case 'payment_action_failed':
+        return isAr
+            ? 'تعذّر تحديث إعداد الدفع. حاول مرة أخرى.'
+            : 'Could not update the payment setting. Try again.';
       case 'partial_refund_unsupported':
         return isAr
             ? 'لا يمكن استرجاع رصيد مستخدم جزئياً.'
             : 'A partially used credit cannot be refunded.';
       case 'unmounted':
-        return isAr ? 'أُغلقت الشاشة قبل اكتمال العملية.' : 'The screen closed before finishing.';
+        return isAr
+            ? 'أُغلقت الشاشة قبل اكتمال العملية.'
+            : 'The screen closed before finishing.';
       case 'payment_failed':
         return isAr ? 'تعذّر إتمام الدفع.' : 'Payment failed.';
       default:
-        if (c.startsWith('moyasar_validation:') || c.startsWith('moyasar_api:')) {
-          final detail = c.contains(':') ? c.split(':').skip(1).join(':').trim() : '';
-          if (detail.isNotEmpty) {
-            return isAr
-                ? 'رفض البنك أو البوابة: $detail'
-                : 'Bank or gateway declined: $detail';
-          }
+        if (c.startsWith('moyasar_validation:') ||
+            c.startsWith('moyasar_api:')) {
           return isAr
-              ? 'بيانات الدفع مرفوضة من البنك أو البوابة.'
-              : 'The bank or payment gateway rejected these details.';
+              ? 'رفض البنك أو بوابة الدفع العملية. تحقق من البيانات أو جرّب بطاقة أخرى.'
+              : 'The bank or payment gateway declined this charge. Check the details or try another card.';
         }
         if (RegExp(r'^[a-z0-9_]+$', caseSensitive: false).hasMatch(c) &&
             !c.contains(' ')) {
@@ -358,7 +377,9 @@ class PaymentService {
               ? 'تعذّر إتمام العملية. حاول مرة أخرى.'
               : 'Could not complete this action. Try again.';
         }
-        return c;
+        return isAr
+            ? 'تعذّر إتمام العملية. حاول مرة أخرى أو استخدم طريقة دفع أخرى.'
+            : 'Could not complete the operation. Try again or use another payment method.';
     }
   }
 
@@ -367,15 +388,17 @@ class PaymentService {
     final uid = _user?.id;
     if (uid == null) return 0;
     try {
-      final rows = await _sb
-          .from(_cards)
-          .select('id,card_token')
-          .eq('user_id', uid);
+      final rows =
+          await _sb.from(_cards).select('id,card_token').eq('user_id', uid);
       var n = 0;
       for (final row in rows as List) {
         final m = Map<String, dynamic>.from(row as Map);
         if (!isMockCardToken(m['card_token'])) continue;
-        await _sb.from(_cards).delete().eq('id', '${m['id']}').eq('user_id', uid);
+        await _sb
+            .from(_cards)
+            .delete()
+            .eq('id', '${m['id']}')
+            .eq('user_id', uid);
         n++;
       }
       return n;
@@ -523,8 +546,7 @@ class PaymentService {
   }
 
   /// هل يمكن خصم هذه البطاقة عبر ميسّر (token حقيقي من البوابة)؟
-  static bool isMoyasarReadyCardToken(dynamic token) =>
-      !isMockCardToken(token);
+  static bool isMoyasarReadyCardToken(dynamic token) => !isMockCardToken(token);
 
   /// هل انتهت صلاحية البطاقة المحفوظة؟
   static bool isCardExpired(Map<String, dynamic> row) {
@@ -623,7 +645,8 @@ class PaymentService {
     }
   }
 
-  static Map<String, dynamic>? _parseEdgeFunctionErrorBody(FunctionException e) {
+  static Map<String, dynamic>? _parseEdgeFunctionErrorBody(
+      FunctionException e) {
     final raw = e.details;
     if (raw is Map) {
       return Map<String, dynamic>.from(
@@ -677,7 +700,8 @@ class PaymentService {
     }
     final digits = cardNumberDigits.replaceAll(RegExp(r'\D'), '');
     final bin = digits.length >= 6 ? digits.substring(0, 6) : digits;
-    final last4 = digits.length >= 4 ? digits.substring(digits.length - 4) : digits;
+    final last4 =
+        digits.length >= 4 ? digits.substring(digits.length - 4) : digits;
     final scheme = detectCardSchemeFromPan(digits);
     final token = PaymentGatewayMock.issueCardToken(
       cardBin: bin,
@@ -689,18 +713,22 @@ class PaymentService {
       if (setDefault) {
         await _sb.from(_cards).update({'is_default': false}).eq('user_id', uid);
       }
-      final row = await _sb.from(_cards).insert({
-        'user_id': uid,
-        'card_token': token,
-        'card_bin': bin,
-        'last_four': last4,
-        'card_scheme': scheme,
-        'card_holder_name': holderName.trim(),
-        'expiry_month': expiryMonth,
-        'expiry_year': expiryYear,
-        'label': label?.trim().isEmpty ?? true ? null : label!.trim(),
-        'is_default': setDefault,
-      }).select().maybeSingle();
+      final row = await _sb
+          .from(_cards)
+          .insert({
+            'user_id': uid,
+            'card_token': token,
+            'card_bin': bin,
+            'last_four': last4,
+            'card_scheme': scheme,
+            'card_holder_name': holderName.trim(),
+            'expiry_month': expiryMonth,
+            'expiry_year': expiryYear,
+            'label': label?.trim().isEmpty ?? true ? null : label!.trim(),
+            'is_default': setDefault,
+          })
+          .select()
+          .maybeSingle();
       return {'ok': true, 'row': row};
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
@@ -754,7 +782,8 @@ class PaymentService {
     try {
       await _sb
           .from(_cards)
-          .update({'label': (trimmed == null || trimmed.isEmpty) ? null : trimmed})
+          .update(
+              {'label': (trimmed == null || trimmed.isEmpty) ? null : trimmed})
           .eq('id', cardId)
           .eq('user_id', uid);
       return {'ok': true};
@@ -796,17 +825,21 @@ class PaymentService {
     Map<String, dynamic>? inserted;
     try {
       inserted = Map<String, dynamic>.from(
-        (await _sb.from(_tx).insert({
-          'user_id': uid,
-          'subscription_id': subscriptionId,
-          'amount': amount,
-          'currency': currency,
-          'status': 'pending',
-          'payment_method': paymentMethod ?? 'card',
-          'card_id': cardId,
-          'title_ar': titleAr,
-          'title_en': titleEn,
-        }).select().single()) as Map,
+        (await _sb
+            .from(_tx)
+            .insert({
+              'user_id': uid,
+              'subscription_id': subscriptionId,
+              'amount': amount,
+              'currency': currency,
+              'status': 'pending',
+              'payment_method': paymentMethod ?? 'card',
+              'card_id': cardId,
+              'title_ar': titleAr,
+              'title_en': titleEn,
+            })
+            .select()
+            .single()) as Map,
       );
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
@@ -918,20 +951,24 @@ class PaymentService {
     );
     final gatewayId = PaymentGatewayMock.mockGatewayTransactionId();
     try {
-      await _sb.from(_tx).update({
-        'status': ok ? 'success' : 'failed',
-        'payment_method': paymentMethod ?? 'card',
-        'card_id': cardId,
-        'title_ar': titleAr,
-        'title_en': titleEn,
-        'gateway_transaction_id': gatewayId,
-        'gateway_response': {
-          'mock': true,
-          'ok': ok,
-          'purpose': purpose,
-        },
-        'completed_at': DateTime.now().toUtc().toIso8601String(),
-      }).eq('id', bid).eq('user_id', uid);
+      await _sb
+          .from(_tx)
+          .update({
+            'status': ok ? 'success' : 'failed',
+            'payment_method': paymentMethod ?? 'card',
+            'card_id': cardId,
+            'title_ar': titleAr,
+            'title_en': titleEn,
+            'gateway_transaction_id': gatewayId,
+            'gateway_response': {
+              'mock': true,
+              'ok': ok,
+              'purpose': purpose,
+            },
+            'completed_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', bid)
+          .eq('user_id', uid);
     } catch (e) {
       return {'ok': false, 'error': e.toString(), 'transaction_id': bid};
     }
@@ -1008,16 +1045,20 @@ class PaymentService {
     Map<String, dynamic>? inserted;
     try {
       inserted = Map<String, dynamic>.from(
-        (await _sb.from(_tx).insert({
-          'user_id': uid,
-          'subscription_id': subscriptionId,
-          'amount': amount,
-          'currency': currency,
-          'status': 'pending',
-          'payment_method': wallet,
-          'title_ar': titleAr,
-          'title_en': titleEn,
-        }).select().single()) as Map,
+        (await _sb
+            .from(_tx)
+            .insert({
+              'user_id': uid,
+              'subscription_id': subscriptionId,
+              'amount': amount,
+              'currency': currency,
+              'status': 'pending',
+              'payment_method': wallet,
+              'title_ar': titleAr,
+              'title_en': titleEn,
+            })
+            .select()
+            .single()) as Map,
       );
     } catch (e) {
       return {'ok': false, 'error': e.toString()};
@@ -1123,8 +1164,7 @@ class PaymentService {
         type: InAppNotifTypes.billingPaymentSuccess,
         data: {
           WorkflowNotificationKeys.deepRoute: InAppDeepRoutes.subscriptionsHub,
-          'account_type':
-              AccountRoleCache.snapshot?.accountType ?? 'user',
+          'account_type': AccountRoleCache.snapshot?.accountType ?? 'user',
           'title_ar': titleAr ?? 'تم تأكيد الدفع',
           'title_en': titleEn ?? 'Payment confirmed',
           'body_ar':
@@ -1205,12 +1245,13 @@ class PaymentService {
       cairoBold = pw.Font.ttf(await rootBundle.load('fonts/Cairo-Bold.ttf'));
     } catch (_) {}
     try {
-      arabic =
-          pw.Font.ttf(await rootBundle.load('assets/fonts/arabic_pdf_regular.ttf'));
+      arabic = pw.Font.ttf(
+          await rootBundle.load('assets/fonts/arabic_pdf_regular.ttf'));
     } catch (_) {}
     pw.Font? noto;
     try {
-      noto = pw.Font.ttf(await rootBundle.load('fonts/NotoNaskhArabic_wght.ttf'));
+      noto =
+          pw.Font.ttf(await rootBundle.load('fonts/NotoNaskhArabic_wght.ttf'));
     } catch (_) {}
     final helv = pw.Font.helvetica();
     final helvBold = pw.Font.helveticaBold();
@@ -1539,7 +1580,8 @@ class PaymentService {
                       rows[i]['method'] ?? '',
                     ],
                 ],
-                headerStyle: pw.TextStyle(font: bold, fontSize: 9, color: PdfColors.white),
+                headerStyle: pw.TextStyle(
+                    font: bold, fontSize: 9, color: PdfColors.white),
                 headerDecoration: pw.BoxDecoration(color: _invoiceBrand),
                 cellStyle: pw.TextStyle(font: base, fontSize: 8),
                 cellHeight: 24,
@@ -1577,7 +1619,8 @@ class PaymentService {
           pw.Center(
             child: pw.Text(
               AppBranding.copyrightLine(isAr: isAr),
-              style: pw.TextStyle(font: base, fontSize: 8, color: PdfColors.grey600),
+              style: pw.TextStyle(
+                  font: base, fontSize: 8, color: PdfColors.grey600),
             ),
           ),
         ],
@@ -1599,10 +1642,12 @@ class PaymentService {
     final bold = fonts.bold;
     final logo = await _invoiceLogo();
     final doc = pw.Document(theme: _invoiceTheme(fonts));
-    final title = isAr ? (titleAr ?? 'لا توجد فواتير') : (titleEn ?? 'No invoices');
+    final title =
+        isAr ? (titleAr ?? 'لا توجد فواتير') : (titleEn ?? 'No invoices');
     final body = isAr
         ? (bodyAr ?? 'لا توجد فواتير للطباعة في هذا التبويب حالياً.')
-        : (bodyEn ?? 'There are no invoices to print in this tab at the moment.');
+        : (bodyEn ??
+            'There are no invoices to print in this tab at the moment.');
 
     doc.addPage(
       pw.Page(
@@ -1624,7 +1669,8 @@ class PaymentService {
             pw.Spacer(),
             pw.Text(
               '﷽',
-              style: pw.TextStyle(font: bold, fontSize: 22, color: _invoiceBrand),
+              style:
+                  pw.TextStyle(font: bold, fontSize: 22, color: _invoiceBrand),
               textAlign: pw.TextAlign.center,
             ),
             pw.SizedBox(height: 12),

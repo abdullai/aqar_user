@@ -172,7 +172,8 @@ class AqarTextField extends StatelessWidget {
       buildCounter: buildCounter,
       textCapitalization: textCapitalization,
       onTapOutside: onTapOutside ?? (_) => AppOutsideUnfocus.unfocusEditable(),
-      enableInteractiveSelection: enableInteractiveSelection,
+      enableInteractiveSelection:
+          obscureText ? false : enableInteractiveSelection,
       mouseCursor: SystemMouseCursors.text,
       scrollPadding: AppKeyboardInset.inputScrollPadding(context),
       cursorWidth: AqarEditableDefaults.cursorWidth(context),
@@ -188,7 +189,9 @@ class AqarTextField extends StatelessWidget {
         obscureText: obscureText,
         numeric: numeric,
       ),
-      contextMenuBuilder: AqarEditableDefaults.contextMenu,
+      contextMenuBuilder: obscureText
+          ? AqarEditableDefaults.hiddenContextMenu
+          : AqarEditableDefaults.contextMenu,
       onEditingComplete: resolvedAction == TextInputAction.next
           ? () {
               AppHaptics.selection();
@@ -313,7 +316,7 @@ class AqarTextFormField extends FormField<String> {
                   numeric || obscureText ? false : enableSuggestions,
               autocorrect: numeric || obscureText ? false : autocorrect,
               textCapitalization: textCapitalization,
-              enableInteractiveSelection: true,
+              enableInteractiveSelection: !obscureText,
               mouseCursor: SystemMouseCursors.text,
               scrollPadding: AppKeyboardInset.inputScrollPadding(field.context),
               cursorWidth: AqarEditableDefaults.cursorWidth(ctx),
@@ -333,7 +336,9 @@ class AqarTextFormField extends FormField<String> {
                 obscureText: obscureText,
                 numeric: numeric,
               ),
-              contextMenuBuilder: AqarEditableDefaults.contextMenu,
+              contextMenuBuilder: obscureText
+                  ? AqarEditableDefaults.hiddenContextMenu
+                  : AqarEditableDefaults.contextMenu,
               onTapOutside: (_) => AppOutsideUnfocus.unfocusEditable(),
               onEditingComplete: resolvedAction == TextInputAction.next
                   ? () {

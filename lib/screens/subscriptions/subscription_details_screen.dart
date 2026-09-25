@@ -77,7 +77,9 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
       case 'active':
         return _isAr ? 'نشط' : 'Active';
       case 'cancelled':
-        return _isAr ? 'ملغى (حتى نهاية المدة)' : 'Cancelled (until period end)';
+        return _isAr
+            ? 'ملغى (حتى نهاية المدة)'
+            : 'Cancelled (until period end)';
       case 'pending':
         return _isAr ? 'قيد المعالجة' : 'Pending';
       case 'expired':
@@ -129,12 +131,8 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
       SnackBar(
         content: Text(
           desired
-              ? (_isAr
-                  ? 'تم تفعيل الدفع التلقائي.'
-                  : 'Auto-pay enabled.')
-              : (_isAr
-                  ? 'تم إيقاف الدفع التلقائي.'
-                  : 'Auto-pay disabled.'),
+              ? (_isAr ? 'تم تفعيل الدفع التلقائي.' : 'Auto-pay enabled.')
+              : (_isAr ? 'تم إيقاف الدفع التلقائي.' : 'Auto-pay disabled.'),
         ),
       ),
     );
@@ -322,7 +320,7 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
                 ),
             ],
           ),
-          if (SubscriptionUiHelpers.isRecurringSubscription(_row)) ...[
+          if (SubscriptionUiHelpers.canModifyAutoPay(_row)) ...[
             _autoPayCard(cs, autoPayEnabled),
             const SizedBox(height: 8),
             _cancelCard(
@@ -368,8 +366,8 @@ class _SubscriptionDetailsScreenState extends State<SubscriptionDetailsScreen> {
     dynamic cancelRequestedAt,
     dynamic retentionUsedAt,
   }) {
-    final cancelled = (_row?['status'] ?? '').toString().toLowerCase() ==
-        'cancelled';
+    final cancelled =
+        (_row?['status'] ?? '').toString().toLowerCase() == 'cancelled';
     final hasRequest = cancelRequestedAt != null;
     final canCancel = SubscriptionUiHelpers.showCancelSubscriptionButton(
       row: _row,

@@ -28,6 +28,7 @@ migrate_working_dir/
 # =====================
 analyze-*.txt
 dart-fix-preview.txt
+build_web_log.txt
 
 # =====================
 # VS Code (اختياري)

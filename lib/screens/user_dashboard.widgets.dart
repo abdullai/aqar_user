@@ -892,70 +892,71 @@ class _ReservationCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.all(12),
             child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: bankColor.withValues(alpha: light ? 0.14 : 0.20),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: bankColor.withValues(alpha: 0.26),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: bankColor.withValues(alpha: light ? 0.14 : 0.20),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: bankColor.withValues(alpha: 0.26),
+                    ),
+                  ),
+                  child: Icon(icon, color: bankColor),
                 ),
-              ),
-              child: Icon(icon, color: bankColor),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: strongText,
-                        ),
-                  ),
-                  if (subtitle != null) ...[
-                    const SizedBox(height: 4),
-                    subtitle!,
-                  ],
-                  if (bodyExtra != null) ...[
-                    const SizedBox(height: 8),
-                    bodyExtra!,
-                  ],
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 8, runSpacing: 8, children: chips),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: light
-                          ? const Color(0xFFF7F7F7)
-                          : cs.surfaceContainerHighest.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: cs.outlineVariant.withValues(alpha: 0.55),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w900,
+                              color: strongText,
+                            ),
                       ),
-                    ),
-                    child: priceTable,
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 4),
+                        subtitle!,
+                      ],
+                      if (bodyExtra != null) ...[
+                        const SizedBox(height: 8),
+                        bodyExtra!,
+                      ],
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 8, runSpacing: 8, children: chips),
+                      const SizedBox(height: 10),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: light
+                              ? const Color(0xFFF7F7F7)
+                              : cs.surfaceContainerHighest
+                                  .withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: cs.outlineVariant.withValues(alpha: 0.55),
+                          ),
+                        ),
+                        child: priceTable,
+                      ),
+                      if (actions.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _DealCardActions(
+                          actions: actions,
+                          buildAction: buildAction,
+                        ),
+                      ],
+                    ],
                   ),
-                  if (actions.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    _DealCardActions(
-                      actions: actions,
-                      buildAction: buildAction,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
             ),
           ),
           if (frozenWatermark)
@@ -3899,8 +3900,7 @@ class _RealEstateCard extends StatelessWidget {
               currentUserId: isGuest ? null : currentUserId,
               isGuest: isGuest,
             ) &&
-            onAddToCart != null &&
-            (isGuest || canShowCartButton);
+            onAddToCart != null;
     final canBidFromCard =
         ListingPermissionsHelper.shouldShowHomeListingBidButton(
               property: property,

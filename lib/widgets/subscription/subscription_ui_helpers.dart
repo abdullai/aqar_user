@@ -59,14 +59,18 @@ abstract final class SubscriptionUiHelpers {
     final date = formatBillingDate(endRaw, isAr: isAr);
 
     if (status == 'expired') {
-      return isAr ? 'انتهى اشتراكك في $date' : 'Your subscription ended on $date';
+      return isAr
+          ? 'انتهى اشتراكك في $date'
+          : 'Your subscription ended on $date';
     }
     if (status == 'cancelled' || cancelReq != null) {
       return isAr
           ? 'ينتهي اشتراكك في $date'
           : 'Your subscription expires on $date';
     }
-    return isAr ? 'يتجدد اشتراكك في $date' : 'Your subscription renews on $date';
+    return isAr
+        ? 'يتجدد اشتراكك في $date'
+        : 'Your subscription renews on $date';
   }
 
   /// اشتراك متكرر (شهري/سنوي) — ليس «مرة واحدة».
@@ -74,6 +78,14 @@ abstract final class SubscriptionUiHelpers {
     if (row == null) return false;
     final p = '${row['period'] ?? ''}'.trim().toLowerCase();
     return p != 'lifetime_one_time' && p != 'one_time';
+  }
+
+  static bool canModifyAutoPay(Map<String, dynamic>? row) {
+    if (row == null || !isRecurringSubscription(row)) return false;
+    final status = '${row['status'] ?? ''}'.trim().toLowerCase();
+    if (status != 'active' && status != 'cancelled') return false;
+    final endsAt = SubscriptionService.subscriptionExclusiveEndUtc(row);
+    return endsAt == null || DateTime.now().toUtc().isBefore(endsAt);
   }
 
   /// إظهار «إلغاء الاشتراك» فقط عند تفعيل التجديد التلقائي.

@@ -67,6 +67,13 @@ abstract final class AqarEditableDefaults {
     );
   }
 
+  static Widget hiddenContextMenu(
+    BuildContext context,
+    EditableTextState state,
+  ) {
+    return const SizedBox.shrink();
+  }
+
   static TextMagnifierConfiguration magnifier() {
     if (kIsWeb) return TextMagnifierConfiguration.disabled;
     return TextMagnifier.adaptiveMagnifierConfiguration;
@@ -78,12 +85,14 @@ abstract final class AqarEditableDefaults {
     return null;
   }
 
-  static SmartDashesType dashes({required bool obscureText, required bool numeric}) {
+  static SmartDashesType dashes(
+      {required bool obscureText, required bool numeric}) {
     if (obscureText || numeric) return SmartDashesType.disabled;
     return SmartDashesType.enabled;
   }
 
-  static SmartQuotesType quotes({required bool obscureText, required bool numeric}) {
+  static SmartQuotesType quotes(
+      {required bool obscureText, required bool numeric}) {
     if (obscureText || numeric) return SmartQuotesType.disabled;
     return SmartQuotesType.enabled;
   }

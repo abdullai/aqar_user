@@ -32,7 +32,7 @@ class SubscriptionLifecycleService {
             'p_payment_method_id': paymentMethodId,
         },
       );
-        if (res is Map) {
+      if (res is Map) {
         final m = Map<String, dynamic>.from(
           res.map((k, v) => MapEntry(k.toString(), v)),
         );
@@ -53,11 +53,19 @@ class SubscriptionLifecycleService {
       }
       return const AutoPayResult(ok: false, enabled: false, discountPercent: 0);
     } catch (e) {
+      final message = e.toString().toLowerCase();
+      final error = message.contains('subscription_not_modifiable')
+          ? 'subscription_not_modifiable'
+          : message.contains('subscription_not_found_or_not_owner')
+              ? 'subscription_not_found_or_not_owner'
+              : message.contains('card_not_found_or_not_owner')
+                  ? 'card_not_found_or_not_owner'
+                  : 'payment_action_failed';
       return AutoPayResult(
         ok: false,
         enabled: false,
         discountPercent: 0,
-        error: e.toString(),
+        error: error,
       );
     }
   }
@@ -84,7 +92,8 @@ class SubscriptionLifecycleService {
       );
       if (res is Map) {
         return PlanQuote.fromMap(
-          Map<String, dynamic>.from(res.map((k, v) => MapEntry(k.toString(), v))),
+          Map<String, dynamic>.from(
+              res.map((k, v) => MapEntry(k.toString(), v))),
         );
       }
     } catch (_) {}
@@ -135,7 +144,8 @@ class SubscriptionLifecycleService {
       );
       if (res is Map) {
         return CancellationOffer.fromMap(
-          Map<String, dynamic>.from(res.map((k, v) => MapEntry(k.toString(), v))),
+          Map<String, dynamic>.from(
+              res.map((k, v) => MapEntry(k.toString(), v))),
         );
       }
       return CancellationOffer.failure('unexpected_response');
@@ -159,7 +169,8 @@ class SubscriptionLifecycleService {
       );
       if (res is Map) {
         return CancellationConfirmation.fromMap(
-          Map<String, dynamic>.from(res.map((k, v) => MapEntry(k.toString(), v))),
+          Map<String, dynamic>.from(
+              res.map((k, v) => MapEntry(k.toString(), v))),
         );
       }
       return CancellationConfirmation.failure('unexpected_response');

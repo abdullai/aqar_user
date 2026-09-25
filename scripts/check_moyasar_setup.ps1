@@ -10,7 +10,7 @@ try {
   $cfg = Invoke-RestMethod -Uri "$hostUrl/supabase_config.json" -TimeoutSec 45
   $source = "remote"
 } catch {
-  Write-Host "  Remote read timed out or failed — checking local web\supabase_config.json" -ForegroundColor Yellow
+  Write-Host "  Remote read timed out or failed - checking local web\supabase_config.json" -ForegroundColor Yellow
   if (Test-Path $localCfgPath) {
     $cfg = Get-Content $localCfgPath -Raw | ConvertFrom-Json
     $source = "local (rebuild+deploy if remote differs)"
@@ -21,10 +21,11 @@ try {
 try {
   $pk = "$($cfg.MOYASAR_PUBLISHABLE_KEY)"
   $cb = "$($cfg.MOYASAR_CALLBACK_URL)"
+  $pkPreview = if ($pk.Length -gt 10) { $pk.Substring(0, 10) + '...' } else { $pk }
   if ($pk.StartsWith("pk_test_")) {
-    Write-Host "  publishable: TEST mode ($($pk.Substring(0,10))...) [$source]" -ForegroundColor Green
+    Write-Host "  publishable: TEST mode ($pkPreview) [$source]" -ForegroundColor Green
   } elseif ($pk.StartsWith("pk_live_")) {
-    Write-Host "  publishable: LIVE mode ($($pk.Substring(0,10))...) - needs Moyasar activation or HTTP 405 [$source]" -ForegroundColor Yellow
+    Write-Host "  publishable: LIVE mode ($pkPreview) - needs Moyasar activation or HTTP 405 [$source]" -ForegroundColor Yellow
   } else {
     Write-Host "  publishable: NOT SET [$source]" -ForegroundColor Red
   }

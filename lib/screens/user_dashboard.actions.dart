@@ -1547,17 +1547,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
       return;
     }
 
-    if (_isMarketingAccountType) {
-      _showNotification(
-        widget.isAr ? 'غير مسموح' : 'Not Allowed',
-        widget.isAr
-            ? 'حساب التسويق لا يمكنه استخدام «صفقاتي».'
-            : 'Marketing accounts cannot use the cart.',
-        isError: true,
-      );
-      return;
-    }
-
     if (p.ownerId == _uid) {
       _showNotification(
         widget.isAr ? 'غير مسموح' : 'Not Allowed',

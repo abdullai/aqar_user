@@ -194,9 +194,7 @@ serve(async (req) => {
     p_billing_transaction_id: eventBillingId,
     p_payload: payload,
   });
-  if (recorded?.data?.duplicate === true && SUCCESS_TYPES.has(type)) {
-    return json(200, { ok: true, duplicate: true, type });
-  }
+  const duplicateEvent = recorded?.data?.duplicate === true;
 
   if (IGNORE_TYPES.has(type)) {
     return json(200, { ok: true, ignored: true, type });
@@ -392,7 +390,7 @@ serve(async (req) => {
   if (row.status === "success" && row.fulfillment_applied_at) {
     return json(200, {
       ok: true,
-      duplicate: true,
+      duplicate: duplicateEvent,
       billing_transaction_id: billingId,
     });
   }
