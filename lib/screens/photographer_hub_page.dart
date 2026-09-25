@@ -4,15 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/subscription/marketing_subscription_resume_intent.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/date_helper.dart';
 import '../core/utils/rpc_user_message.dart';
 import '../l10n/app_localizations.dart';
 import '../services/photographer_service.dart';
+import '../services/subscription_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/aqar_text_field.dart';
 import '../widgets/certified_photographer_name.dart';
+import 'subscriptions/subscriptions_root_screen.dart';
 import 'photographer_deliver_page.dart';
 import 'photographer_join_page.dart';
 
@@ -39,6 +42,9 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
   PhotographerProfile? _profile;
   List<PhotoShootRequest> _shots = const [];
   var _loading = true;
+  var _subscriptionRequired = false;
+  RealtimeChannel? _shootsRealtimeChannel;
+  StreamSubscription<Map<String, dynamic>>? _subscriptionEvents;
   DateTime _calDay = DateTime(
     DateTime.now().year,
     DateTime.now().month,
@@ -59,20 +65,61 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
     _tick = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() {});
     });
+    _subscribeRealtime();
     _reload();
+  }
+
+  void _subscribeRealtime() {
+    final client = Supabase.instance.client;
+    final uid = client.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return;
+
+    SubscriptionService.ensureRealtimeChannelFor(client, uid);
+    _subscriptionEvents = SubscriptionService.subscriptionEvents.listen((_) {
+      if (mounted) unawaited(_reload(silent: true));
+    });
+    try {
+      final channel = client.channel('photographer_shoots_$uid');
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'photo_shoot_requests',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'photographer_id',
+          value: uid,
+        ),
+        callback: (_) {
+          if (mounted) unawaited(_reload(silent: true));
+        },
+      );
+      channel.subscribe();
+      _shootsRealtimeChannel = channel;
+    } catch (_) {}
   }
 
   @override
   void dispose() {
     _tick?.cancel();
+    _subscriptionEvents?.cancel();
+    try {
+      _shootsRealtimeChannel?.unsubscribe();
+    } catch (_) {}
     _tabs.dispose();
     super.dispose();
   }
 
-  Future<void> _reload() async {
-    setState(() => _loading = true);
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent) setState(() => _loading = true);
     try {
       final p = await _svc.myProfile();
+      var subscriptionRequired = false;
+      if (p?.isVerified == true) {
+        final subscription = await SubscriptionService(Supabase.instance.client)
+            .getCurrentSubscriptionForPlanUserType('photographer');
+        subscriptionRequired =
+            !SubscriptionService.subscriptionRowInPaidAccess(subscription);
+      }
       final shots = p == null
           ? const <PhotoShootRequest>[]
           : await _svc.myShootsAsPhotographer();
@@ -80,11 +127,82 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
       setState(() {
         _profile = p;
         _shots = shots;
+        _subscriptionRequired = subscriptionRequired;
         _loading = false;
       });
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _openPhotographerPlans() async {
+    await Navigator.of(context).push<MarketingSubscriptionResumeIntent?>(
+      MaterialPageRoute<MarketingSubscriptionResumeIntent?>(
+        builder: (_) => SubscriptionsRootScreen(
+          lang: widget.lang,
+          accountType: 'photographer',
+          embedAppBar: true,
+          resumeAfterPurchase: const MarketingSubscriptionResumeIntent(
+            kind: MarketingSubscriptionResumeKind.postPaidUnlock,
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    SubscriptionService.invalidateSubscriptionCache();
+    await _reload();
+  }
+
+  Widget _subscriptionRequiredPage(AppLocalizations l10n) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: widget.embedAppBar
+          ? null
+          : AppBar(
+              automaticallyImplyLeading: false,
+              leading: AppPageCloseButton(isArabic: _isAr),
+              title: Text(l10n.photographerHubTitle),
+            ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.photo_camera_outlined, size: 44, color: cs.primary),
+                const SizedBox(height: 12),
+                Text(
+                  _isAr
+                      ? 'اشتراك المصور العقاري غير فعّال'
+                      : 'Photographer subscription is inactive',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _isAr
+                      ? 'جدّد الاشتراك أو اختر باقة المصور لمتابعة استقبال الطلبات وتسليم الوسائط.'
+                      : 'Renew or choose a photographer plan to receive requests and deliver media.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: cs.onSurfaceVariant, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: _openPhotographerPlans,
+                  icon: const Icon(Icons.subscriptions_outlined),
+                  label: Text(
+                      _isAr ? 'عرض باقات المصور' : 'View photographer plans'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   List<PhotoShootRequest> _of(Iterable<String> st) =>
@@ -267,8 +385,42 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
                       : r.locationText,
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
+                if (r.propertyId.trim().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_isAr ? 'العقار المرتبط' : 'Linked property'}: ${r.propertyId}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Text(r.shootKinds.join(' · ')),
+                if (r.deliveryReviewStatus == 'pending_review') ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _isAr
+                        ? 'تم التسليم — بانتظار موافقة الناشر قبل ظهوره في الإعلان.'
+                        : 'Delivered — awaiting publisher approval before it appears on the listing.',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+                if (r.deliveryReviewStatus == 'revision_requested') ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '${_isAr ? 'التعديل المطلوب' : 'Requested changes'}: ${r.deliveryRevisionNote}',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
                 if (r.quotedAmountSar != null)
                   Text(
                     '${l10n.photographerQuoteAgreed}: ${AppMoney.sarPhrase(r.quotedAmountSar!.toStringAsFixed(0), isAr: _isAr)}',
@@ -317,11 +469,17 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
                       ),
                     ],
                   )
-                else if (r.status == 'accepted' || r.status == 'in_progress')
+                else if ((r.status == 'accepted' ||
+                        r.status == 'in_progress') &&
+                    r.deliveryReviewStatus != 'pending_review')
                   FilledButton.icon(
                     onPressed: () => _deliver(r),
                     icon: const Icon(Icons.cloud_upload_outlined),
-                    label: Text(l10n.photographerUploadMedia),
+                    label: Text(
+                      r.deliveryReviewStatus == 'revision_requested'
+                          ? (_isAr ? 'إعادة إرسال الوسائط' : 'Resubmit media')
+                          : l10n.photographerUploadMedia,
+                    ),
                   ),
               ],
             ),
@@ -407,6 +565,7 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    if (_subscriptionRequired) return _subscriptionRequiredPage(l10n);
     if (_loading && _profile == null && _shots.isEmpty) {
       return const Scaffold(body: Center(child: AppLogoLoading()));
     }

@@ -1981,7 +1981,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get trackingOfferDetails => 'Offer details';
 
   @override
-  String get listingCreatedBy => 'Listing created by';
+  String get listingCreatedBy => 'Listing created by:';
 
   @override
   String get listingCreatedByOffice => 'Listing created by real estate office';

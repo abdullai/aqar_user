@@ -697,7 +697,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
   }
 
-  Future<String?> _showPlusComposerChoices({required bool guest}) {
+  Future<String?> _showPlusComposerChoices({
+    required bool guest,
+    int photographerRequestCount = 0,
+  }) {
     final cs = Theme.of(context).colorScheme;
     final t = AppLocalizations.of(context)!;
     final showListing = guest || _canPlusSheetAddProperty;
@@ -800,8 +803,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
                       foreground: cs.onTertiaryContainer,
                       title: t.photographerJoinCta,
                       subtitle: widget.isAr
-                          ? 'استقبل طلبات التصوير وسلّم وسائط العقار المحدد.'
-                          : 'Accept shoot requests and deliver media for assigned properties.',
+                          ? 'طلبات تصوير مفتوحة: $photographerRequestCount · استقبل الطلبات وسلّم الوسائط'
+                          : '$photographerRequestCount open property shoots · receive requests and deliver media',
                       value: 'photographer',
                     ),
                     choiceTile(
@@ -823,15 +826,84 @@ extension _UserDashboardStateActions on _UserDashboardState {
   }
 
   Future<void> _openPlusPhotographer() async {
-    PhotographerProfile? p;
+    PhotographerProfile? profile;
     try {
-      p = await PhotographerService(_sb).myProfile();
+      profile = await PhotographerService(_sb).myProfile();
     } catch (_) {}
     if (!mounted) return;
+    if (profile == null || !profile.isVerified) {
+      await _pushPlusForm<void>(
+        (_) => PhotographerJoinPage(lang: widget.lang, embedAppBar: true),
+      );
+      return;
+    }
+
+    final subscriptionService = SubscriptionService(_sb);
+    var subscription =
+        await subscriptionService.getCurrentSubscriptionForPlanUserType(
+      'photographer',
+    );
+    if (!SubscriptionService.subscriptionRowInPaidAccess(
+      subscription,
+    )) {
+      if (!mounted) return;
+      final hasExpired = subscription != null;
+      final goToPlans = await showAppDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: const Icon(Icons.photo_camera_outlined),
+          title: Text(widget.isAr
+              ? 'اشتراك المصور العقاري'
+              : 'Photographer subscription'),
+          content: Text(
+            widget.isAr
+                ? (hasExpired
+                    ? 'انتهى اشتراك المصور العقاري. جدّده لمتابعة استقبال الطلبات وتسليم الوسائط.'
+                    : 'تحتاج إلى اشتراك مصور عقاري فعّال لاستقبال الطلبات وتسليم الوسائط.')
+                : (hasExpired
+                    ? 'Your photographer subscription has expired. Renew it to receive requests and deliver media.'
+                    : 'An active photographer subscription is required to receive requests and deliver media.'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(widget.isAr ? 'لاحقاً' : 'Later'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.subscriptions_outlined),
+              label: Text(
+                  widget.isAr ? 'عرض باقات المصور' : 'View photographer plans'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || goToPlans != true) return;
+
+      await _pushBody<MarketingSubscriptionResumeIntent?>(
+        MaterialPageRoute<MarketingSubscriptionResumeIntent?>(
+          settings: const RouteSettings(name: '/dashboard/photographer-plans'),
+          builder: (_) => SubscriptionsRootScreen(
+            lang: widget.lang,
+            accountType: 'photographer',
+            embedAppBar: false,
+            resumeAfterPurchase: const MarketingSubscriptionResumeIntent(
+              kind: MarketingSubscriptionResumeKind.postPaidUnlock,
+            ),
+          ),
+        ),
+      );
+      if (!mounted) return;
+      SubscriptionService.invalidateSubscriptionCache();
+      subscription = await subscriptionService
+          .getCurrentSubscriptionForPlanUserType('photographer');
+      if (!SubscriptionService.subscriptionRowInPaidAccess(subscription)) {
+        return;
+      }
+    }
+
     await _pushPlusForm<void>(
-      (_) => p != null && p.isVerified
-          ? PhotographerHubPage(lang: widget.lang, embedAppBar: true)
-          : PhotographerJoinPage(lang: widget.lang, embedAppBar: true),
+      (_) => PhotographerHubPage(lang: widget.lang, embedAppBar: true),
     );
   }
 
@@ -918,7 +990,32 @@ extension _UserDashboardStateActions on _UserDashboardState {
       return;
     }
 
-    final choice = await _showPlusComposerChoices(guest: false);
+    var photographerRequestCount = 0;
+    try {
+      final photographerSubscription = await SubscriptionService(_sb)
+          .getCurrentSubscriptionForPlanUserType('photographer');
+      if (SubscriptionService.subscriptionRowGrantsMarketingAccess(
+        photographerSubscription,
+      )) {
+        final shoots = await PhotographerService(_sb).myShootsAsPhotographer();
+        photographerRequestCount = shoots
+            .where(
+              (shoot) =>
+                  shoot.propertyId.trim().isNotEmpty &&
+                  (const {'pending', 'accepted', 'in_progress'}
+                          .contains(shoot.status) ||
+                      const {'pending_review', 'revision_requested'}
+                          .contains(shoot.deliveryReviewStatus)),
+            )
+            .length;
+      }
+    } catch (_) {}
+    if (!mounted) return;
+
+    final choice = await _showPlusComposerChoices(
+      guest: false,
+      photographerRequestCount: photographerRequestCount,
+    );
 
     if (!mounted || choice == null) return;
 

@@ -85,6 +85,9 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
   Future<void> _book(PhotographerProfile p) async {
     final l10n = AppLocalizations.of(context)!;
     final quote = _quoteFor(p);
+    var allowMedia = false;
+    var allowCoverChange = false;
+    var allowReplaceExisting = false;
     final kinds = [
       for (final k in _kinds)
         if (k == 'tour_3d') 'tour' else k,
@@ -92,26 +95,94 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
     if (kinds.isEmpty) kinds.add('photos');
     final ok = await showAppDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(l10n.photographerQuoteTitle),
-        content: Text(
-          l10n.photographerQuoteBody(
-            p.displayName,
-            quote <= 0
-                ? '—'
-                : AppMoney.sarPhrase(quote.toStringAsFixed(0), isAr: _isAr),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text(l10n.photographerQuoteTitle),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  l10n.photographerQuoteBody(
+                    p.displayName,
+                    quote <= 0
+                        ? '—'
+                        : AppMoney.sarPhrase(
+                            quote.toStringAsFixed(0),
+                            isAr: _isAr,
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: allowMedia,
+                  title: Text(
+                    _isAr
+                        ? 'أوافق على إضافة الوسائط المطلوبة لهذا الإعلان بعد مراجعتي واعتمادي لها.'
+                        : 'I allow the requested media to be added to this listing only after my review and approval.',
+                  ),
+                  onChanged: (value) => setLocal(() {
+                    allowMedia = value ?? false;
+                    if (!allowMedia) {
+                      allowCoverChange = false;
+                      allowReplaceExisting = false;
+                    }
+                  }),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: allowCoverChange,
+                  title: Text(
+                    _isAr
+                        ? 'أسمح بتغيير الغلاف إلى وسائط المصور عند اعتمادها.'
+                        : 'Allow the approved photographer media to become the listing cover.',
+                  ),
+                  onChanged: !allowMedia
+                      ? null
+                      : (value) => setLocal(
+                            () => allowCoverChange = value ?? false,
+                          ),
+                ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: allowReplaceExisting,
+                  title: Text(
+                    _isAr
+                        ? 'أسمح باستبدال الصور الحالية لهذا الإعلان عند الاعتماد.'
+                        : 'Allow existing listing photos to be replaced upon approval.',
+                  ),
+                  onChanged: !allowMedia
+                      ? null
+                      : (value) => setLocal(
+                            () => allowReplaceExisting = value ?? false,
+                          ),
+                ),
+                Text(
+                  _isAr
+                      ? 'الإذن خاص بهذا الإعلان وطلب التصوير فقط. لن تُنشر الوسائط قبل موافقتك من صفحة العقار.'
+                      : 'Permission applies only to this listing and shoot request. Media stays unpublished until you approve it from the property page.',
+                  style: TextStyle(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.photographerDialogCancel),
+            ),
+            FilledButton(
+              onPressed: allowMedia ? () => Navigator.pop(ctx, true) : null,
+              child: Text(l10n.photographerSendRequest),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(l10n.photographerDialogCancel),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(l10n.photographerSendRequest),
-          ),
-        ],
       ),
     );
     if (ok != true) return;
@@ -128,6 +199,9 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
       'max_photos': 30,
       'max_videos': kinds.contains('video') ? 1 : 0,
       'include_tour': kinds.contains('tour'),
+      'owner_media_consent': allowMedia,
+      'owner_cover_change_consent': allowCoverChange,
+      'owner_replace_media_consent': allowReplaceExisting,
     };
     final pid = (widget.propertyId ?? '').trim();
     if (pid.isEmpty && widget.onQueued != null) {
@@ -153,6 +227,9 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
         maxPhotos: 30,
         maxVideos: kinds.contains('video') ? 1 : 0,
         includeTour: kinds.contains('tour'),
+        ownerMediaConsent: allowMedia,
+        ownerCoverChangeConsent: allowCoverChange,
+        ownerReplaceMediaConsent: allowReplaceExisting,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -246,7 +323,8 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
                     onPressed: () async {
                       final d = await showDatePicker(
                         context: context,
-                        initialDate: DateTime.now().add(const Duration(days: 1)),
+                        initialDate:
+                            DateTime.now().add(const Duration(days: 1)),
                         firstDate: DateTime.now(),
                         lastDate: DateTime.now().add(const Duration(days: 180)),
                       );
@@ -257,7 +335,8 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
                       );
                       if (t == null || !mounted) return;
                       setState(() {
-                        _when = DateTime(d.year, d.month, d.day, t.hour, t.minute);
+                        _when =
+                            DateTime(d.year, d.month, d.day, t.hour, t.minute);
                       });
                     },
                     icon: const Icon(Icons.event_outlined),
@@ -300,7 +379,8 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
                                   p: p,
                                   fromLat: widget.latitude,
                                   fromLng: widget.longitude,
-                                )!.toStringAsFixed(1),
+                                )!
+                                    .toStringAsFixed(1),
                               ),
                             if (p.ratingCount > 0)
                               l10n.photographerRatingLine(

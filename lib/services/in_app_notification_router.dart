@@ -37,7 +37,8 @@ class InAppNotificationRouter {
     final id = (row['id'] ?? '').toString().trim();
     if (id.isEmpty) return;
     try {
-      await MarketingFlowService(Supabase.instance.client).markNotificationRead(id);
+      await MarketingFlowService(Supabase.instance.client)
+          .markNotificationRead(id);
       InAppNotificationHub.onInboxInvalidate?.call();
     } catch (_) {}
   }
@@ -86,20 +87,19 @@ class InAppNotificationRouter {
 
     final data = _dataMap(enriched);
     final type = (enriched['type'] ?? '').toString();
-    final entityType = (enriched['entity_type'] ??
-            data['entity_type'] ??
-            '')
-        .toString();
+    final entityType =
+        (enriched['entity_type'] ?? data['entity_type'] ?? '').toString();
     final entityId =
         (enriched['entity_id'] ?? data['entity_id'] ?? '').toString().trim();
-    final deepRoute =
-        (data[WorkflowNotificationKeys.deepRoute] ?? '').toString().trim().toLowerCase();
+    final deepRoute = (data[WorkflowNotificationKeys.deepRoute] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
 
     final typeLower = type.trim().toLowerCase();
     final isAr = lang.toLowerCase() != 'en';
 
-    final convId =
-        (data[InAppDataKeys.conversationId] ?? '').toString().trim();
+    final convId = (data[InAppDataKeys.conversationId] ?? '').toString().trim();
     final mainTabChat =
         (data['main_tab'] ?? '').toString().trim().toLowerCase() == 'chat';
     final opensChatDeepLink = deepRoute == 'chat' || mainTabChat;
@@ -116,11 +116,9 @@ class InAppNotificationRouter {
                 '')
             .toString()
             .trim();
-        final propChat = (data[WorkflowNotificationKeys.propertyId] ?? '')
-            .toString()
-            .trim();
-        final mkt =
-            (data['market_request_id'] ?? '').toString().trim();
+        final propChat =
+            (data[WorkflowNotificationKeys.propertyId] ?? '').toString().trim();
+        final mkt = (data['market_request_id'] ?? '').toString().trim();
         await ChatNavigation.push(
           context,
           isAr: isAr,
@@ -183,7 +181,8 @@ class InAppNotificationRouter {
     }
 
     if (deepRoute == InAppDeepRoutes.listingRequestStatus) {
-      final rid = (data[WorkflowNotificationKeys.requestId] ?? '').toString().trim();
+      final rid =
+          (data[WorkflowNotificationKeys.requestId] ?? '').toString().trim();
       if (rid.isNotEmpty) {
         await _pushRootNamed<void>(
           context,
@@ -214,8 +213,9 @@ class InAppNotificationRouter {
         type == InAppNotifTypes.offerSubmitted ||
         type == InAppNotifTypes.offerReceived ||
         type == InAppNotifTypes.contractCreated) {
-      final rid =
-          (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim();
+      final rid = (data[WorkflowNotificationKeys.requestId] ?? entityId)
+          .toString()
+          .trim();
       if (rid.isNotEmpty) {
         await _pushRootNamed<void>(
           context,
@@ -236,9 +236,13 @@ class InAppNotificationRouter {
     }
 
     if (deepRoute == InAppDeepRoutes.submitPermits &&
-        (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim().isNotEmpty) {
-      final rid =
-          (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim();
+        (data[WorkflowNotificationKeys.requestId] ?? entityId)
+            .toString()
+            .trim()
+            .isNotEmpty) {
+      final rid = (data[WorkflowNotificationKeys.requestId] ?? entityId)
+          .toString()
+          .trim();
       await _pushRootNamed<void>(
         context,
         AppRoutes.submitPermits,
@@ -248,9 +252,13 @@ class InAppNotificationRouter {
     }
 
     if (deepRoute == InAppDeepRoutes.submitOffer &&
-        (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim().isNotEmpty) {
-      final rid =
-          (data[WorkflowNotificationKeys.requestId] ?? entityId).toString().trim();
+        (data[WorkflowNotificationKeys.requestId] ?? entityId)
+            .toString()
+            .trim()
+            .isNotEmpty) {
+      final rid = (data[WorkflowNotificationKeys.requestId] ?? entityId)
+          .toString()
+          .trim();
       await _pushRootNamed<void>(
         context,
         AppRoutes.submitOffer,
@@ -336,6 +344,9 @@ class InAppNotificationRouter {
         typeLower == InAppNotifTypes.photoShootRequested ||
         typeLower == InAppNotifTypes.photoShootAccepted ||
         typeLower == InAppNotifTypes.photoShootRejected ||
+        typeLower == InAppNotifTypes.photoShootRevisionRequested ||
+        typeLower == InAppNotifTypes.photoShootMediaAuthorized ||
+        typeLower == InAppNotifTypes.photoShootApproved ||
         typeLower == InAppNotifTypes.photographerVerified ||
         typeLower == InAppNotifTypes.photographerRejected ||
         typeLower == InAppNotifTypes.photographerRated) {

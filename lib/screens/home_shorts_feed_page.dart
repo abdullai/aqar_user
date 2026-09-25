@@ -11,6 +11,7 @@ import '../core/gestures/app_keyboard_inset.dart';
 import '../core/gestures/app_keyboard_popups.dart';
 import '../core/gestures/soft_keyboard_ensure_visible.dart';
 import '../core/listing/listing_media_urls.dart';
+import '../core/listing/in_app_tour.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/navigation/safe_overlay_pop.dart';
 import '../core/shorts/shorts_canned_comments.dart';
@@ -25,6 +26,8 @@ import '../widgets/app_page_close_button.dart';
 import '../widgets/aqar_text_field.dart';
 import '../widgets/shorts_feed_video_player.dart';
 import '../widgets/shorts_tour_pane.dart';
+import '../widgets/listing_watermark_overlay.dart';
+import '../widgets/in_app_tour_viewer.dart';
 
 /// عنصر واحد في فيد الشورتز (إعلان أو طلب سوق).
 class HomeShortsItem {
@@ -94,8 +97,8 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
   void initState() {
     super.initState();
     _favs = {...widget.favoriteIds};
-    _index = widget.initialIndex
-        .clamp(0, (widget.items.length - 1).clamp(0, 9999));
+    _index =
+        widget.initialIndex.clamp(0, (widget.items.length - 1).clamp(0, 9999));
     _page = PageController(initialPage: _index);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     unawaited(_loadCommentCounts());
@@ -117,7 +120,8 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
     unawaited(ShortsFeedPrefs.setSessionActive(false));
     if (!mounted) return;
     final root = Navigator.of(context, rootNavigator: true);
-    if (root.canPop() && !SafeOverlayPop.isShellRoute(SafeOverlayPop.peekTop(root))) {
+    if (root.canPop() &&
+        !SafeOverlayPop.isShellRoute(SafeOverlayPop.peekTop(root))) {
       root.pop();
       return;
     }
@@ -205,6 +209,17 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
     }
     if (raw.isEmpty) return null;
     if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    return null;
+  }
+
+  InAppTour? _inAppTour(HomeShortsItem item) {
+    final property = item.property;
+    if (property == null) return null;
+    final primary = InAppTour.fromGuidance(property.listingGuidance);
+    if (primary != null && primary.isNotEmpty) return primary;
+    for (final tour in property.photographerTours) {
+      if (tour.isNotEmpty) return tour;
+    }
     return null;
   }
 
@@ -360,8 +375,10 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                       final imgs = _imageUrls(item);
                       final video = _videoUrl(item);
                       final tour = _tourUrl(item);
-                      final showTour =
-                          tour != null && tour.isNotEmpty && _mediaKind == 2;
+                      final inAppTour = _inAppTour(item);
+                      final showTour = ((tour != null && tour.isNotEmpty) ||
+                              inAppTour != null) &&
+                          _mediaKind == 2;
                       final showVideo = video != null &&
                           video.isNotEmpty &&
                           _mediaKind != 2 &&
@@ -370,16 +387,41 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                           _favs.contains(item.property!.id);
                       final comments = _commentCounts[item.id] ?? 0;
                       final amount = _priceAmount(item);
+                      final property = item.property;
+                      final rawPropertyImages = property == null
+                          ? const <String>[]
+                          : ListingMediaUrls.propertyCardImagePaths(property);
+                      final visiblePhotographerMediaPath = showVideo
+                          ? (property?.videoUrl ?? '')
+                          : showTour && inAppTour != null
+                              ? (inAppTour.scenes.isEmpty
+                                  ? ''
+                                  : inAppTour.scenes.first.imageRef)
+                              : (rawPropertyImages.isEmpty
+                                  ? ''
+                                  : rawPropertyImages.first);
+                      final photographerCredit = property == null
+                          ? ''
+                          : property.photographerAttributionForMedia(
+                              visiblePhotographerMediaPath,
+                            );
                       return Stack(
                         fit: StackFit.expand,
                         children: [
                           Positioned.fill(
                             child: showTour
-                                ? ShortsTourPane(
-                                    url: tour,
-                                    isAr: widget.isAr,
-                                    active: i == _index,
-                                  )
+                                ? inAppTour != null
+                                    ? InAppTourViewer(
+                                        tour: inAppTour,
+                                        isAr: widget.isAr,
+                                        photographerCreditForMedia: property
+                                            ?.photographerAttributionForMedia,
+                                      )
+                                    : ShortsTourPane(
+                                        url: tour!,
+                                        isAr: widget.isAr,
+                                        active: i == _index,
+                                      )
                                 : showVideo
                                     ? ShortsFeedVideoPlayer(
                                         videoUrl: video,
@@ -443,6 +485,15 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                               ),
                             ),
                           ),
+                          if (photographerCredit.isNotEmpty)
+                            Positioned.fill(
+                              child: ListingWatermarkOverlay(
+                                headline: widget.isAr
+                                    ? 'حقوق الصورة: $photographerCredit'
+                                    : 'Photo credit: $photographerCredit',
+                                isAr: widget.isAr,
+                              ),
+                            ),
                           if (!showTour)
                             Positioned.fill(
                               child: GestureDetector(
@@ -460,7 +511,8 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                               children: [
                                 if (imgs.isNotEmpty ||
                                     video != null ||
-                                    tour != null)
+                                    tour != null ||
+                                    inAppTour != null)
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 10),
                                     child: Wrap(
@@ -471,19 +523,24 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                           _mediaChip(
                                             widget.isAr ? 'صور' : 'Photos',
                                             !showVideo && !showTour,
-                                            () => setState(() => _mediaKind = 0),
+                                            () =>
+                                                setState(() => _mediaKind = 0),
                                           ),
                                         if (video != null)
                                           _mediaChip(
                                             widget.isAr ? 'فيديو' : 'Video',
                                             showVideo,
-                                            () => setState(() => _mediaKind = 1),
+                                            () =>
+                                                setState(() => _mediaKind = 1),
                                           ),
-                                        if (tour != null)
+                                        if (tour != null || inAppTour != null)
                                           _mediaChip(
-                                            widget.isAr ? 'جولة 360' : '360 tour',
+                                            widget.isAr
+                                                ? 'جولة 360'
+                                                : '360 tour',
                                             showTour,
-                                            () => setState(() => _mediaKind = 2),
+                                            () =>
+                                                setState(() => _mediaKind = 2),
                                           ),
                                       ],
                                     ),
@@ -548,8 +605,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                 children: [
                                   _roundAction(
                                     icon: Icons.open_in_new_rounded,
-                                    label:
-                                        widget.isAr ? 'تفاصيل' : 'Open',
+                                    label: widget.isAr ? 'تفاصيل' : 'Open',
                                     pad: layout.actionPad,
                                     iconSize: layout.actionIcon,
                                     onTap: () => unawaited(_openItem(item)),
@@ -586,23 +642,19 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                   ],
                                   _roundAction(
                                     icon: Icons.mode_comment_outlined,
-                                    label:
-                                        widget.isAr ? 'تعليق' : 'Comment',
+                                    label: widget.isAr ? 'تعليق' : 'Comment',
                                     count: comments > 0 ? comments : null,
                                     pad: layout.actionPad,
                                     iconSize: layout.actionIcon,
-                                    onTap: () =>
-                                        unawaited(_openComments(item)),
+                                    onTap: () => unawaited(_openComments(item)),
                                   ),
                                   SizedBox(height: layout.gap),
                                   _roundAction(
                                     icon: Icons.ios_share_rounded,
-                                    label:
-                                        widget.isAr ? 'مشاركة' : 'Share',
+                                    label: widget.isAr ? 'مشاركة' : 'Share',
                                     pad: layout.actionPad,
                                     iconSize: layout.actionIcon,
-                                    onTap: () =>
-                                        widget.onShare?.call(item),
+                                    onTap: () => widget.onShare?.call(item),
                                   ),
                                   if (!widget.mineIds.contains(item.id)) ...[
                                     SizedBox(height: layout.gap),
@@ -635,8 +687,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                       icon: _muted
                                           ? Icons.volume_off_rounded
                                           : Icons.volume_up_rounded,
-                                      label:
-                                          widget.isAr ? 'صوت' : 'Audio',
+                                      label: widget.isAr ? 'صوت' : 'Audio',
                                       pad: layout.actionPad,
                                       iconSize: layout.actionIcon,
                                       onTap: () =>
@@ -674,8 +725,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                           const SizedBox(height: 4),
                           SingleChildScrollView(
                             scrollDirection: Axis.horizontal,
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
                             child: Row(
                               children: [
                                 _filterChip(
@@ -687,20 +737,17 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                   _filterChip(
                                     widget.isAr ? 'خاصتي' : 'Mine',
                                     _scope == 'mine',
-                                    () =>
-                                        _setFilter(() => _scope = 'mine'),
+                                    () => _setFilter(() => _scope = 'mine'),
                                   ),
                                 _filterChip(
                                   widget.isAr ? 'إعلانات' : 'Listings',
                                   _scope == 'listings',
-                                  () => _setFilter(
-                                      () => _scope = 'listings'),
+                                  () => _setFilter(() => _scope = 'listings'),
                                 ),
                                 _filterChip(
                                   widget.isAr ? 'طلبات' : 'Requests',
                                   _scope == 'requests',
-                                  () => _setFilter(
-                                      () => _scope = 'requests'),
+                                  () => _setFilter(() => _scope = 'requests'),
                                 ),
                                 _filterChip(
                                   widget.isAr ? 'بيع' : 'Sale',
@@ -735,9 +782,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
     return Padding(
       padding: const EdgeInsetsDirectional.only(end: 6),
       child: Material(
-        color: selected
-            ? Colors.white
-            : Colors.black.withValues(alpha: 0.55),
+        color: selected ? Colors.white : Colors.black.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(999),
         child: InkWell(
           onTap: onTap,
@@ -920,7 +965,9 @@ class _ShortsCommentsSheetState extends State<_ShortsCommentsSheet> {
     final rent = widget.item.property != null
         ? PropertyListingDisplay.purposeFilterKey(widget.item.property!) ==
             'rent'
-        : ((widget.item.request?.purpose ?? '').toLowerCase().contains('rent') ||
+        : ((widget.item.request?.purpose ?? '')
+                .toLowerCase()
+                .contains('rent') ||
             (widget.item.request?.purpose ?? '').contains('إيجار'));
     final canned = ShortsCannedComments.forItem(
       isAr: widget.isAr,

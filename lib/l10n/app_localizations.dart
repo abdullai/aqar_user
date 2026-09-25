@@ -3701,7 +3701,7 @@ abstract class AppLocalizations {
   /// No description provided for @listingCreatedBy.
   ///
   /// In en, this message translates to:
-  /// **'Listing created by'**
+  /// **'Listing created by:'**
   String get listingCreatedBy;
 
   /// No description provided for @listingCreatedByOffice.

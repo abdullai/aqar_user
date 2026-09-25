@@ -1960,7 +1960,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get trackingOfferDetails => 'تفاصيل العرض';
 
   @override
-  String get listingCreatedBy => 'أُنشئ الإعلان بواسطة';
+  String get listingCreatedBy => 'أُنشئ الإعلان بوٍاسطة:';
 
   @override
   String get listingCreatedByOffice => 'أُنشئ الإعلان بواسطة المكتب العقاري';

@@ -97,10 +97,12 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     final once = _catalogPrice(13, period: 'one_time');
     final mLabel = monthly == null
         ? ''
-        : AppMoney.formatWithCurrencyCode(monthly, isAr: _isAr, maxFractionDigits: 0);
+        : AppMoney.formatWithCurrencyCode(monthly,
+            isAr: _isAr, maxFractionDigits: 0);
     final oLabel = once == null
         ? ''
-        : AppMoney.formatWithCurrencyCode(once, isAr: _isAr, maxFractionDigits: 0);
+        : AppMoney.formatWithCurrencyCode(once,
+            isAr: _isAr, maxFractionDigits: 0);
     if (_isAr) {
       if (monthly != null && once != null) {
         return 'عند نفاد حصة «إتمام الصفقة»: اشترِ «إضافة صفقات» — شهري $mLabel (+10 صفقات) أو مرة واحدة $oLabel (+5 صفقات). تُفعَّل فوراً.';
@@ -113,13 +115,16 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     return 'When deal quota runs out: buy «Deal top-up» from the plans below. Applies immediately.';
   }
 
-  SubscriptionBillingContext? get _ctx =>
-      _billingCtx ?? widget.billingContext;
+  SubscriptionBillingContext? get _ctx => _billingCtx ?? widget.billingContext;
 
   bool get _isMarketingRole =>
       AppRoleHelper.isMarketingAccountType(widget.accountType);
 
+  bool get _isPhotographerPlan =>
+      AppRoleHelper.isPhotographerAccount(widget.accountType);
+
   bool get _isTrialEligibleAccount {
+    if (_isPhotographerPlan) return false;
     if (AppRoleHelper.isOwnerFreeTierAccount(widget.accountType)) return false;
     if (_isMarketingRole) return true;
     final k = AppRoleHelper.fromAccountType(widget.accountType);
@@ -127,8 +132,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   }
 
   /// التجربة فعّالة الآن لهذا المستخدم.
-  bool get _hasActiveTrial =>
-      SubscriptionService.isActiveTrial(_current);
+  bool get _hasActiveTrial => SubscriptionService.isActiveTrial(_current);
 
   /// بانر «جرّب 3 أيام» — متاح للأدوار التسويقية وللفرد بعد ترحيل v6.
   /// يُخفى عن: من له اشتراك مدفوع فعّال، من سبق له استهلاك التجربة.
@@ -156,6 +160,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
   /// عضو فريق: الباقة للمنشأة — لا اشتراك/دفع شخصي (يمنع شاشة ميسّر لباقة دور آخر).
   bool get _teamMemberBlocksCheckout {
+    if (_isPhotographerPlan) return false;
     final c = _ctx;
     if (c != null && c.ok) {
       return c.isTeamMember || c.billingMode == 'team_member';
@@ -164,6 +169,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   }
 
   bool get _paymentBlockedByFal {
+    if (_isPhotographerPlan) return false;
     final c = _ctx;
     if (c != null && c.ok) return c.falBlocksPayment;
     return false;
@@ -212,18 +218,22 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
     Map<String, dynamic>? cur;
     try {
-      cur = await _svc.getCurrentSubscription(
-        organizationId: widget.organizationId,
-      );
+      cur = _isPhotographerPlan
+          ? await _svc.getCurrentSubscriptionForPlanUserType('photographer')
+          : await _svc.getCurrentSubscription(
+              organizationId: widget.organizationId,
+            );
     } catch (_) {
       cur = null;
     }
 
     SubscriptionBillingContext? ctx;
     try {
-      ctx = widget.billingContext != null && widget.billingContext!.ok
-          ? widget.billingContext
-          : await _svc.resolveBillingContext();
+      ctx = _isPhotographerPlan
+          ? null
+          : widget.billingContext != null && widget.billingContext!.ok
+              ? widget.billingContext
+              : await _svc.resolveBillingContext();
     } catch (_) {
       ctx = null;
     }
@@ -273,9 +283,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
             Icon(Icons.card_giftcard_outlined, color: cs.primary),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(_isAr
-                  ? 'تفعيل التجربة ٣ أيام'
-                  : 'Activate 3-day trial'),
+              child:
+                  Text(_isAr ? 'تفعيل التجربة ٣ أيام' : 'Activate 3-day trial'),
             ),
           ],
         ),
@@ -383,9 +392,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     final formatted = endLocal == null
         ? ''
         : DateHelper.fmtCivilDateTime(endLocal, isAr: _isAr);
-    final diff = end == null
-        ? Duration.zero
-        : end.difference(DateTime.now().toUtc());
+    final diff =
+        end == null ? Duration.zero : end.difference(DateTime.now().toUtc());
     final days = diff.inDays;
     final hours = diff.inHours - days * 24;
     final remaining = days > 0
@@ -415,9 +423,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(_isAr
-                ? 'المتبقي: $remaining'
-                : 'Remaining: $remaining'),
+            Text(_isAr ? 'المتبقي: $remaining' : 'Remaining: $remaining'),
             if (formatted.isNotEmpty)
               Text(
                 _isAr ? 'تنتهي: $formatted' : 'Ends: $formatted',
@@ -488,7 +494,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+          child:
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -560,9 +567,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   Widget _falComplianceBanner(ColorScheme cs) {
     final c = _ctx;
     final exp = c?.falLicenseExpiresAt?.toLocal();
-    final expStr = exp == null
-        ? ''
-        : DateHelper.fmtCivilDate(exp, isAr: _isAr);
+    final expStr = exp == null ? '' : DateHelper.fmtCivilDate(exp, isAr: _isAr);
     final blocked = _paymentBlockedByFal;
     return Card(
       color: blocked
@@ -577,7 +582,9 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
             Row(
               children: [
                 Icon(
-                  blocked ? Icons.gpp_bad_outlined : Icons.warning_amber_outlined,
+                  blocked
+                      ? Icons.gpp_bad_outlined
+                      : Icons.warning_amber_outlined,
                   color: blocked ? cs.error : cs.tertiary,
                 ),
                 const SizedBox(width: 8),
@@ -641,8 +648,9 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     );
   }
 
-  String _planName(Map<String, dynamic> p) =>
-      _isAr ? AppBranding.planNameFromRow(p, isAr: true) : AppBranding.planNameFromRow(p, isAr: false);
+  String _planName(Map<String, dynamic> p) => _isAr
+      ? AppBranding.planNameFromRow(p, isAr: true)
+      : AppBranding.planNameFromRow(p, isAr: false);
 
   double _planPriceAmount(Map<String, dynamic> p) {
     final program = (p['plan_program'] ?? 'monthly').toString().trim();
@@ -675,8 +683,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     return true;
   }
 
-  bool get _hasAnyOneTimePlan =>
-      _plans.any((p) => (p['plan_program'] ?? '').toString() == 'lifetime_one_time');
+  bool get _hasAnyOneTimePlan => _plans
+      .any((p) => (p['plan_program'] ?? '').toString() == 'lifetime_one_time');
 
   /// سياسة الاشتراك — من [PlanDisplayCopy] حسب بيانات الباقة.
   String _subscriptionPolicyLine(Map<String, dynamic> p) =>
@@ -749,580 +757,609 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     }
     return AqarPrimaryScrollScope(
       child: RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(
-            SubscriptionService.planAudienceLabel(
-              isAr: _isAr,
-              accountType: widget.accountType,
-            ),
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: cs.primary,
-                ),
-          ),
-          const SizedBox(height: 8),
-          if (widget.upgradeOnly)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Text(
-                t.subscriptionsUpgradeCta,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<String>(
-              showSelectedIcon: false,
-              style: const ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                padding: WidgetStatePropertyAll(
-                  EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                ),
-              ),
-              segments: [
-                ButtonSegment<String>(
-                  value: 'monthly',
-                  label: _periodSegLabel(t.subscriptionsMonthly),
-                ),
-                ButtonSegment<String>(
-                  value: 'yearly',
-                  label: _periodSegLabel(t.subscriptionsYearly),
-                ),
-                if (_hasAnyOneTimePlan)
-                  ButtonSegment<String>(
-                    value: 'one_time',
-                    label: _periodSegLabel(_isAr ? 'مرة واحدة' : 'One-time'),
-                  ),
-              ],
-              selected: {
-                (_period == 'one_time' && !_hasAnyOneTimePlan)
-                    ? 'yearly'
-                    : _period,
-              },
-              onSelectionChanged: (s) {
-                if (s.isEmpty) return;
-                setState(() => _period = s.first);
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _period == 'one_time'
-                ? (_isAr
-                    ? 'دفع لمرة واحدة برصيد محدود لإتمام الصفقات على طلبات السوق — لا يُجدَّد ولا ينتهي بالوقت.'
-                    : 'One-time payment with a limited deal balance for market requests — no renewal, no time expiry.')
-                : _period == 'monthly'
-                    ? (_isAr
-                        ? 'الفوترة الشهرية هي الافتراضية. السنوي أوفر بنسبة ٢٠٪ إن ناسبك الالتزام.'
-                        : 'Monthly is the default. Yearly saves 20% if you prefer an annual commitment.')
-                    : t.subscriptionsYearlyDiscountNote,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-          ),
-          if (widget.marketOfferPlansOnly) ...[
-            Card(
-              color: cs.primaryContainer.withValues(alpha: 0.35),
-              margin: const EdgeInsets.only(bottom: 12),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Text(
-                  _dealTopupHint(),
-                  style: SubscriptionUiHelpers.denseBody(context),
-                ),
-              ),
-            ),
-          ],
-          if (!_isMarketingRole) ...[
-            const SizedBox(height: 6),
+        onRefresh: _load,
+        child: ListView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.all(16),
+          children: [
             Text(
-              _isAr
-                  ? 'تنبيه عدالة: الاشتراك يفتح حصة لإتمام الصفقات ولا يضمن إغلاق أي صفقة. الاختيار يبقى لصاحب الطلب.'
-                  : 'Fairness notice: a subscription grants deal quota only and does not guarantee a closed deal. The requester always picks the party.',
+              SubscriptionService.planAudienceLabel(
+                isAr: _isAr,
+                accountType: widget.accountType,
+              ),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: cs.primary,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            if (widget.upgradeOnly)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  t.subscriptionsUpgradeCta,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                style: const ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  ),
+                ),
+                segments: [
+                  ButtonSegment<String>(
+                    value: 'monthly',
+                    label: _periodSegLabel(t.subscriptionsMonthly),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'yearly',
+                    label: _periodSegLabel(t.subscriptionsYearly),
+                  ),
+                  if (_hasAnyOneTimePlan)
+                    ButtonSegment<String>(
+                      value: 'one_time',
+                      label: _periodSegLabel(_isAr ? 'مرة واحدة' : 'One-time'),
+                    ),
+                ],
+                selected: {
+                  (_period == 'one_time' && !_hasAnyOneTimePlan)
+                      ? 'yearly'
+                      : _period,
+                },
+                onSelectionChanged: (s) {
+                  if (s.isEmpty) return;
+                  setState(() => _period = s.first);
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _period == 'one_time'
+                  ? (_isAr
+                      ? 'دفع لمرة واحدة برصيد محدود لإتمام الصفقات على طلبات السوق — لا يُجدَّد ولا ينتهي بالوقت.'
+                      : 'One-time payment with a limited deal balance for market requests — no renewal, no time expiry.')
+                  : _period == 'monthly'
+                      ? (_isAr
+                          ? 'الفوترة الشهرية هي الافتراضية. السنوي أوفر بنسبة ٢٠٪ إن ناسبك الالتزام.'
+                          : 'Monthly is the default. Yearly saves 20% if you prefer an annual commitment.')
+                      : t.subscriptionsYearlyDiscountNote,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: cs.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
                   ),
             ),
-          ],
-          const SizedBox(height: 16),
-          if (_showTeamMemberNote) ...[
-            _teamMemberNoteBanner(cs),
-            const SizedBox(height: 8),
-          ],
-          if (_ctx?.falWarnsSoon == true || _paymentBlockedByFal)
-            _falComplianceBanner(cs),
-          if (_hasActiveTrial) _activeTrialBanner(cs),
-          if (_showTrialBanner) ...[
-            Card(
-              color: cs.primaryContainer.withValues(alpha: 0.45),
-              margin: const EdgeInsets.only(bottom: 14),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.card_giftcard_outlined, color: cs.primary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            _isAr
-                                ? 'جرّب ${AppBranding.shortNameAr} ٣ أيام مجاناً'
-                                : 'Try ${AppBranding.shortNameEn} free for 3 days',
+            if (widget.marketOfferPlansOnly) ...[
+              Card(
+                color: cs.primaryContainer.withValues(alpha: 0.35),
+                margin: const EdgeInsets.only(bottom: 12),
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Text(
+                    _dealTopupHint(),
+                    style: SubscriptionUiHelpers.denseBody(context),
+                  ),
+                ),
+              ),
+            ],
+            if (!_isMarketingRole) ...[
+              const SizedBox(height: 6),
+              Text(
+                _isAr
+                    ? 'تنبيه عدالة: الاشتراك يفتح حصة لإتمام الصفقات ولا يضمن إغلاق أي صفقة. الاختيار يبقى لصاحب الطلب.'
+                    : 'Fairness notice: a subscription grants deal quota only and does not guarantee a closed deal. The requester always picks the party.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                      fontStyle: FontStyle.italic,
+                    ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (_showTeamMemberNote) ...[
+              _teamMemberNoteBanner(cs),
+              const SizedBox(height: 8),
+            ],
+            if (_ctx?.falWarnsSoon == true || _paymentBlockedByFal)
+              _falComplianceBanner(cs),
+            if (_hasActiveTrial) _activeTrialBanner(cs),
+            if (_showTrialBanner) ...[
+              Card(
+                color: cs.primaryContainer.withValues(alpha: 0.45),
+                margin: const EdgeInsets.only(bottom: 14),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.card_giftcard_outlined, color: cs.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _isAr
+                                  ? 'جرّب ${AppBranding.shortNameAr} ٣ أيام مجاناً'
+                                  : 'Try ${AppBranding.shortNameEn} free for 3 days',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isAr
+                            ? 'فعّل التجربة لمرة واحدة وجرّب أهم الميزات: إعلان عقاري واحد + طلبات غير محدودة. تنتهي تلقائياً بعد ٣ أيام بدون أي خصم.'
+                            : 'Activate the one-time trial: 1 listing + unlimited requests. Ends automatically after 3 days, no charge.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: _activatingTrial ? null : _activateTrial,
+                        icon: _activatingTrial
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.play_arrow_outlined),
+                        label: Text(
+                          _isAr ? 'تفعيل تجربة ٣ أيام' : 'Activate 3-day trial',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            if (_showTrialExhaustedBadge) _trialExhaustedBadge(cs),
+            if (_plans.where(_planMatchesCurrentPeriod).isEmpty) ...[
+              Card(
+                color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+                margin: const EdgeInsets.only(bottom: 14),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        _isAr
+                            ? 'لا توجد باقات مدفوعة ظاهرة حالياً'
+                            : 'No paid plans are visible right now',
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isAr
+                            ? 'اسحب للأسفل للتحديث. إن استمرت المشكلة تأكد من تفعيل الباقات في قاعدة البيانات أو تواصل مع الدعم.'
+                            : 'Pull to refresh. If this persists, ensure plans are active in the database or contact support.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: cs.onSurfaceVariant,
+                              height: 1.35,
+                            ),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _load,
+                        icon: const Icon(Icons.refresh),
+                        label: Text(_isAr ? 'تحديث الباقات' : 'Refresh plans'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            ..._plans.where(_planMatchesCurrentPeriod).map((p) {
+              final id = '${p['id']}';
+              final curId = '${_current?['plan_id'] ?? ''}';
+              final curPlanMap = _current?['plan'] is Map
+                  ? Map<String, dynamic>.from(_current!['plan'] as Map)
+                  : <String, dynamic>{};
+              final isCurrent = _inPaidPeriod(_current) &&
+                  (curId == id ||
+                      (curPlanMap.isNotEmpty &&
+                          SubscriptionService.planSortOrder(p) ==
+                              SubscriptionService.planSortOrder(curPlanMap)));
+              final end =
+                  '${_current?['end_date'] ?? _current?['ends_at'] ?? ''}';
+              final canUpgrade = SubscriptionUiHelpers.showUpgradePlanButton(
+                currentRow: _current,
+                targetPlan: p,
+                inPaidPeriod: _inPaidPeriod,
+                planSortOrder: SubscriptionService.planSortOrder,
+              );
+              final isAddon = CheckoutJourney.isAddOnPlan(p);
+              final blockedLowerMain = _inPaidPeriod(_current) &&
+                  !isCurrent &&
+                  !canUpgrade &&
+                  !isAddon;
+              final upgradeCharge = canUpgrade && curPlanMap.isNotEmpty
+                  ? SubscriptionService.computePlanChangeCharge(
+                      subscriptionRow: _current!,
+                      oldPlan: curPlanMap,
+                      newPlan: p,
+                      targetPeriod: _period,
+                    )
+                  : null;
+              final isPeriodSwitch = isCurrent &&
+                  _inPaidPeriod(_current) &&
+                  '${_current?['period'] ?? ''}'.trim() == 'monthly' &&
+                  _period == 'yearly' &&
+                  curPlanMap.isNotEmpty;
+              final periodSwitchCharge = isPeriodSwitch
+                  ? SubscriptionService.computePlanChangeCharge(
+                      subscriptionRow: _current!,
+                      oldPlan: curPlanMap,
+                      newPlan: curPlanMap,
+                      targetPeriod: 'yearly',
+                    )
+                  : null;
+              return Card(
+                margin: const EdgeInsets.only(bottom: 14),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: AlignmentDirectional.centerStart,
+                              child: Text(
+                                _planName(p),
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: _isAr ? 'تفاصيل الباقة' : 'Plan details',
+                            icon: Icon(Icons.info_outline, color: cs.primary),
+                            onPressed: () {
+                              PaymentOverlay.push<void>(
+                                context,
+                                name: '/subscriptions/plan-details',
+                                page: PlanDetailsScreen(
+                                  lang: widget.lang,
+                                  plan: p,
+                                  selectedPeriod: _period,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          AppMoneyLine(
+                            amount: _planPriceAmount(p),
+                            currencyCode: 'SAR',
+                            isAr: _isAr,
+                            maxFractionDigits: 0,
                             style: Theme.of(context)
                                 .textTheme
                                 .titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w900),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isAr
-                          ? 'فعّل التجربة لمرة واحدة وجرّب أهم الميزات: إعلان عقاري واحد + طلبات غير محدودة. تنتهي تلقائياً بعد ٣ أيام بدون أي خصم.'
-                          : 'Activate the one-time trial: 1 listing + unlimited requests. Ends automatically after 3 days, no charge.',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 12),
-                    FilledButton.icon(
-                      onPressed: _activatingTrial ? null : _activateTrial,
-                      icon: _activatingTrial
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.play_arrow_outlined),
-                      label: Text(
-                        _isAr ? 'تفعيل تجربة ٣ أيام' : 'Activate 3-day trial',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          if (_showTrialExhaustedBadge) _trialExhaustedBadge(cs),
-          if (_plans.where(_planMatchesCurrentPeriod).isEmpty) ...[
-            Card(
-              color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-              margin: const EdgeInsets.only(bottom: 14),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      _isAr
-                          ? 'لا توجد باقات مدفوعة ظاهرة حالياً'
-                          : 'No paid plans are visible right now',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isAr
-                          ? 'اسحب للأسفل للتحديث. إن استمرت المشكلة تأكد من تفعيل الباقات في قاعدة البيانات أو تواصل مع الدعم.'
-                          : 'Pull to refresh. If this persists, ensure plans are active in the database or contact support.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                            height: 1.35,
-                          ),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: _load,
-                      icon: const Icon(Icons.refresh),
-                      label: Text(_isAr ? 'تحديث الباقات' : 'Refresh plans'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          ..._plans.where(_planMatchesCurrentPeriod).map((p) {
-            final id = '${p['id']}';
-            final curId = '${_current?['plan_id'] ?? ''}';
-            final curPlanMap = _current?['plan'] is Map
-                ? Map<String, dynamic>.from(_current!['plan'] as Map)
-                : <String, dynamic>{};
-            final isCurrent = _inPaidPeriod(_current) &&
-                (curId == id ||
-                    (curPlanMap.isNotEmpty &&
-                        SubscriptionService.planSortOrder(p) ==
-                            SubscriptionService.planSortOrder(curPlanMap)));
-            final end =
-                '${_current?['end_date'] ?? _current?['ends_at'] ?? ''}';
-            final canUpgrade = SubscriptionUiHelpers.showUpgradePlanButton(
-              currentRow: _current,
-              targetPlan: p,
-              inPaidPeriod: _inPaidPeriod,
-              planSortOrder: SubscriptionService.planSortOrder,
-            );
-            final isAddon = CheckoutJourney.isAddOnPlan(p);
-            final blockedLowerMain = _inPaidPeriod(_current) &&
-                !isCurrent &&
-                !canUpgrade &&
-                !isAddon;
-            final upgradeCharge = canUpgrade && curPlanMap.isNotEmpty
-                ? SubscriptionService.computePlanChangeCharge(
-                    subscriptionRow: _current!,
-                    oldPlan: curPlanMap,
-                    newPlan: p,
-                    targetPeriod: _period,
-                  )
-                : null;
-            final isPeriodSwitch = isCurrent &&
-                _inPaidPeriod(_current) &&
-                '${_current?['period'] ?? ''}'.trim() == 'monthly' &&
-                _period == 'yearly' &&
-                curPlanMap.isNotEmpty;
-            final periodSwitchCharge = isPeriodSwitch
-                ? SubscriptionService.computePlanChangeCharge(
-                    subscriptionRow: _current!,
-                    oldPlan: curPlanMap,
-                    newPlan: curPlanMap,
-                    targetPeriod: 'yearly',
-                  )
-                : null;
-            return Card(
-              margin: const EdgeInsets.only(bottom: 14),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: AlignmentDirectional.centerStart,
-                            child: Text(
-                              _planName(p),
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: _isAr ? 'تفاصيل الباقة' : 'Plan details',
-                          icon: Icon(Icons.info_outline, color: cs.primary),
-                          onPressed: () {
-                            PaymentOverlay.push<void>(
-                              context,
-                              name: '/subscriptions/plan-details',
-                              page: PlanDetailsScreen(
-                                lang: widget.lang,
-                                plan: p,
-                                selectedPeriod: _period,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        AppMoneyLine(
-                          amount: _planPriceAmount(p),
-                          currencyCode: 'SAR',
-                          isAr: _isAr,
-                          maxFractionDigits: 0,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                color: cs.primary,
-                                fontWeight: FontWeight.w900,
-                              ),
-                        ),
-                        const SizedBox(width: 4),
-                        Expanded(
-                          child: Text(
-                            (p['plan_program'] ?? 'monthly').toString() ==
-                                    'lifetime_one_time'
-                                ? ' · ${_isAr ? 'دفع مرة واحدة' : 'one-time payment'}'
-                                : ' / ${_period == 'yearly' ? t.subscriptionsYearly.split(' ').first : t.subscriptionsMonthly}',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                ?.copyWith(
                                   color: cs.primary,
-                                  fontWeight: FontWeight.w800,
+                                  fontWeight: FontWeight.w900,
                                 ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _subscriptionPolicyLine(p),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      _propertyListingsLine(p, t),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      _listingRequestsLine(p),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      _marketOffersLine(p),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (_comprehensivePlanNote(p) != null)
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              (p['plan_program'] ?? 'monthly').toString() ==
+                                      'lifetime_one_time'
+                                  ? ' · ${_isAr ? 'دفع مرة واحدة' : 'one-time payment'}'
+                                  : ' / ${_period == 'yearly' ? t.subscriptionsYearly.split(' ').first : t.subscriptionsMonthly}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    color: cs.primary,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
                       Text(
-                        _comprehensivePlanNote(p)!,
+                        _subscriptionPolicyLine(p),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                    if (_planShowsFalSupport(p) &&
-                        p['has_fal_license'] != true &&
-                        !SubscriptionService.isComprehensivePlanSortOrder(
-                          int.tryParse('${p['sort_order'] ?? 0}') ?? 0,
-                        ))
-                      _falContactRow(cs),
-                    const SizedBox(height: 12),
-                    if (!isCurrent)
-                      _teamMemberBlocksCheckout
-                          ? Text(
-                              _isAr
-                                  ? 'الاشتراك يُدار من مدير المنشأة حسب صلاحياتك — لا دفع مباشر من حساب العضو.'
-                                  : 'Your org owner manages the subscription for your role — members cannot pay from this account.',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: cs.onSurfaceVariant,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.35,
-                                  ),
-                            )
-                          : blockedLowerMain
-                          ? Text(
-                              _isAr
-                                  ? 'باقتك الحالية أعلى أو مساوية — لا اشتراك جديد هنا. استخدم الترقية لباقة أعلى أو «شراء الإضافة» للصفقات الإضافية.'
-                                  : 'Your current plan is equal or higher — no new subscribe here. Upgrade a higher tier or buy an add-on for extra deals.',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                    color: cs.onSurfaceVariant,
-                                    fontWeight: FontWeight.w700,
-                                    height: 1.35,
-                                  ),
-                            )
-                          : FilledButton(
-                        onPressed: _paymentBlockedByFal
-                            ? null
-                            : () async {
-                          final ok = await PaymentOverlay.push<bool>(
-                            context,
-                            name: '/subscriptions/checkout',
-                            page: PaymentCheckoutScreen(
-                                lang: widget.lang,
-                                accountType: widget.accountType,
-                                plan: p,
-                                period: _billingPeriodForCheckout(),
-                                organizationId: widget.organizationId,
-                                upgradeSubscriptionId:
-                                    canUpgrade ? '${_current?['id']}' : null,
-                                chargeAmountOverride:
-                                    canUpgrade ? upgradeCharge : null,
-                                billingContext: _ctx,
-                            ),
-                          );
-                          await _afterCheckoutPop(ok);
-                        },
-                        child: Text(
-                          canUpgrade
-                              ? t.subscriptionsUpgradeCta
-                              : isAddon
-                                  ? (_isAr ? 'شراء الإضافة' : 'Buy add-on')
-                                  : t.subscriptionsSubscribeNow,
-                        ),
-                      )
-                    else ...[
-                      if (isPeriodSwitch && periodSwitchCharge != null) ...[
-                        Text(
-                          _isAr
-                              ? 'المتبقي من الفترة الشهرية يُخصم من سعر السنة. المستحق: '
-                                  '${AppMoney.formatWithCurrencyCode(periodSwitchCharge, isAr: true, maxFractionDigits: 0)}'
-                              : 'Remaining monthly value is credited toward yearly. Due: '
-                                  '${AppMoney.formatWithCurrencyCode(periodSwitchCharge, isAr: false, maxFractionDigits: 0)}',
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
-                                height: 1.35,
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        FilledButton(
-                          onPressed: _teamMemberBlocksCheckout
-                              ? null
-                              : () async {
-                            final ok = await PaymentOverlay.push<bool>(
-                              context,
-                              name: '/subscriptions/checkout',
-                              page: PaymentCheckoutScreen(
-                                  lang: widget.lang,
-                                  accountType: widget.accountType,
-                                  plan: p,
-                                  period: 'yearly',
-                                  organizationId: widget.organizationId,
-                                  periodSwitchSubscriptionId:
-                                      '${_current?['id']}',
-                                  chargeAmountOverride: periodSwitchCharge,
-                                  billingContext: _ctx,
-                              ),
-                            );
-                            await _afterCheckoutPop(ok);
-                          },
-                          child: Text(
-                            _isAr
-                                ? 'دفع الفرق والتحويل لسنوي'
-                                : 'Pay difference & switch to yearly',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
                       Text(
-                        SubscriptionUiHelpers.billingCycleStatusLine(
-                          isAr: _isAr,
-                          row: _current,
-                        ),
-                        style: SubscriptionUiHelpers.denseBody(context),
+                        _propertyListingsLine(p, t),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 6),
-                      Builder(
-                        builder: (context) {
-                          if (!SubscriptionUiHelpers.isRecurringSubscription(
-                            _current,
-                          )) {
-                            return const SizedBox.shrink();
-                          }
-                          final autoRenewOn =
-                              SubscriptionService.subscriptionAutoRenewEnabled(
-                            _current,
-                          );
-                          final canRenew = _canRenewSubscription(_current);
-                          final canCancel =
-                              SubscriptionUiHelpers.showCancelSubscriptionButton(
-                            row: _current,
-                          );
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (autoRenewOn && !canRenew)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text(
+                      Text(
+                        _listingRequestsLine(p),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        _marketOffersLine(p),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (_comprehensivePlanNote(p) != null)
+                        Text(
+                          _comprehensivePlanNote(p)!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (_planShowsFalSupport(p) &&
+                          p['has_fal_license'] != true &&
+                          !SubscriptionService.isComprehensivePlanSortOrder(
+                            int.tryParse('${p['sort_order'] ?? 0}') ?? 0,
+                          ))
+                        _falContactRow(cs),
+                      const SizedBox(height: 12),
+                      if (!isCurrent)
+                        _teamMemberBlocksCheckout
+                            ? Text(
+                                _isAr
+                                    ? 'الاشتراك يُدار من مدير المنشأة حسب صلاحياتك — لا دفع مباشر من حساب العضو.'
+                                    : 'Your org owner manages the subscription for your role — members cannot pay from this account.',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                              )
+                            : blockedLowerMain
+                                ? Text(
                                     _isAr
-                                        ? 'التجديد التلقائي مفعّل — لا حاجة للتجديد اليدوي'
-                                        : 'Auto-renewal is on — no manual renewal needed',
+                                        ? 'باقتك الحالية أعلى أو مساوية — لا اشتراك جديد هنا. استخدم الترقية لباقة أعلى أو «شراء الإضافة» للصفقات الإضافية.'
+                                        : 'Your current plan is equal or higher — no new subscribe here. Upgrade a higher tier or buy an add-on for extra deals.',
                                     style: Theme.of(context)
                                         .textTheme
-                                        .labelSmall
+                                        .bodySmall
                                         ?.copyWith(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
+                                          color: cs.onSurfaceVariant,
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.35,
                                         ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              if (canRenew)
-                                FilledButton.tonal(
-                                  onPressed: _teamMemberBlocksCheckout
-                                      ? null
-                                      : () async {
-                                    final sid = '${_current?['id']}';
-                                    if (sid.isEmpty) return;
+                                  )
+                                : FilledButton(
+                                    onPressed: _paymentBlockedByFal
+                                        ? null
+                                        : () async {
+                                            final ok =
+                                                await PaymentOverlay.push<bool>(
+                                              context,
+                                              name: '/subscriptions/checkout',
+                                              page: PaymentCheckoutScreen(
+                                                lang: widget.lang,
+                                                accountType: widget.accountType,
+                                                plan: p,
+                                                period:
+                                                    _billingPeriodForCheckout(),
+                                                organizationId:
+                                                    widget.organizationId,
+                                                upgradeSubscriptionId:
+                                                    canUpgrade
+                                                        ? '${_current?['id']}'
+                                                        : null,
+                                                chargeAmountOverride: canUpgrade
+                                                    ? upgradeCharge
+                                                    : null,
+                                                billingContext:
+                                                    _isPhotographerPlan
+                                                        ? null
+                                                        : _ctx,
+                                              ),
+                                            );
+                                            await _afterCheckoutPop(ok);
+                                          },
+                                    child: Text(
+                                      canUpgrade
+                                          ? t.subscriptionsUpgradeCta
+                                          : isAddon
+                                              ? (_isAr
+                                                  ? 'شراء الإضافة'
+                                                  : 'Buy add-on')
+                                              : t.subscriptionsSubscribeNow,
+                                    ),
+                                  )
+                      else ...[
+                        if (isPeriodSwitch && periodSwitchCharge != null) ...[
+                          Text(
+                            _isAr
+                                ? 'المتبقي من الفترة الشهرية يُخصم من سعر السنة. المستحق: '
+                                    '${AppMoney.formatWithCurrencyCode(periodSwitchCharge, isAr: true, maxFractionDigits: 0)}'
+                                : 'Remaining monthly value is credited toward yearly. Due: '
+                                    '${AppMoney.formatWithCurrencyCode(periodSwitchCharge, isAr: false, maxFractionDigits: 0)}',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
+                          ),
+                          const SizedBox(height: 8),
+                          FilledButton(
+                            onPressed: _teamMemberBlocksCheckout
+                                ? null
+                                : () async {
                                     final ok = await PaymentOverlay.push<bool>(
                                       context,
                                       name: '/subscriptions/checkout',
                                       page: PaymentCheckoutScreen(
-                                          lang: widget.lang,
-                                          accountType: widget.accountType,
-                                          plan: p,
-                                          period: _billingPeriodForCheckout(),
-                                          organizationId: widget.organizationId,
-                                          renewSubscriptionId: sid,
-                                          billingContext: _ctx,
+                                        lang: widget.lang,
+                                        accountType: widget.accountType,
+                                        plan: p,
+                                        period: 'yearly',
+                                        organizationId: widget.organizationId,
+                                        periodSwitchSubscriptionId:
+                                            '${_current?['id']}',
+                                        chargeAmountOverride:
+                                            periodSwitchCharge,
+                                        billingContext:
+                                            _isPhotographerPlan ? null : _ctx,
                                       ),
                                     );
                                     await _afterCheckoutPop(ok);
                                   },
-                                  child: Text(t.subscriptionsRenew),
-                                ),
-                              if (canCancel) ...[
-                                if (canRenew) const SizedBox(height: 8),
-                                OutlinedButton(
-                                  onPressed: () async {
-                                    final sid = '${_current?['id']}';
-                                    if (sid.isEmpty) return;
-                                    final messenger =
-                                        ScaffoldMessenger.of(context);
-                                    final ok = await SubscriptionCancelFlow.run(
-                                      context: context,
-                                      t: t,
-                                      svc: _svc,
-                                      subscriptionId: sid,
-                                      endDateLabel: end.isEmpty
-                                          ? '—'
-                                          : SubscriptionUiHelpers
-                                              .formatBillingDate(
-                                            end,
-                                            isAr: _isAr,
+                            child: Text(
+                              _isAr
+                                  ? 'دفع الفرق والتحويل لسنوي'
+                                  : 'Pay difference & switch to yearly',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        Text(
+                          SubscriptionUiHelpers.billingCycleStatusLine(
+                            isAr: _isAr,
+                            row: _current,
+                          ),
+                          style: SubscriptionUiHelpers.denseBody(context),
+                        ),
+                        const SizedBox(height: 6),
+                        Builder(
+                          builder: (context) {
+                            if (!SubscriptionUiHelpers.isRecurringSubscription(
+                              _current,
+                            )) {
+                              return const SizedBox.shrink();
+                            }
+                            final autoRenewOn = SubscriptionService
+                                .subscriptionAutoRenewEnabled(
+                              _current,
+                            );
+                            final canRenew = _canRenewSubscription(_current);
+                            final canCancel = SubscriptionUiHelpers
+                                .showCancelSubscriptionButton(
+                              row: _current,
+                            );
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                if (autoRenewOn && !canRenew)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 8),
+                                    child: Text(
+                                      _isAr
+                                          ? 'التجديد التلقائي مفعّل — لا حاجة للتجديد اليدوي'
+                                          : 'Auto-renewal is on — no manual renewal needed',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
                                           ),
-                                      organizationId: widget.organizationId,
-                                    );
-                                    if (!mounted) return;
-                                    messenger.showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          ok
-                                              ? (_isAr
-                                                  ? 'تم طلب الإلغاء — تبقى المزايا حتى نهاية الفترة.'
-                                                  : 'Cancellation scheduled — access stays until period end.')
-                                              : (_isAr
-                                                  ? 'لم يُكمل الإلغاء.'
-                                                  : 'Cancellation not completed.'),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ),
+                                if (canRenew)
+                                  FilledButton.tonal(
+                                    onPressed: _teamMemberBlocksCheckout
+                                        ? null
+                                        : () async {
+                                            final sid = '${_current?['id']}';
+                                            if (sid.isEmpty) return;
+                                            final ok =
+                                                await PaymentOverlay.push<bool>(
+                                              context,
+                                              name: '/subscriptions/checkout',
+                                              page: PaymentCheckoutScreen(
+                                                lang: widget.lang,
+                                                accountType: widget.accountType,
+                                                plan: p,
+                                                period:
+                                                    _billingPeriodForCheckout(),
+                                                organizationId:
+                                                    widget.organizationId,
+                                                renewSubscriptionId: sid,
+                                                billingContext:
+                                                    _isPhotographerPlan
+                                                        ? null
+                                                        : _ctx,
+                                              ),
+                                            );
+                                            await _afterCheckoutPop(ok);
+                                          },
+                                    child: Text(t.subscriptionsRenew),
+                                  ),
+                                if (canCancel) ...[
+                                  if (canRenew) const SizedBox(height: 8),
+                                  OutlinedButton(
+                                    onPressed: () async {
+                                      final sid = '${_current?['id']}';
+                                      if (sid.isEmpty) return;
+                                      final messenger =
+                                          ScaffoldMessenger.of(context);
+                                      final ok =
+                                          await SubscriptionCancelFlow.run(
+                                        context: context,
+                                        t: t,
+                                        svc: _svc,
+                                        subscriptionId: sid,
+                                        endDateLabel: end.isEmpty
+                                            ? '—'
+                                            : SubscriptionUiHelpers
+                                                .formatBillingDate(
+                                                end,
+                                                isAr: _isAr,
+                                              ),
+                                        organizationId: widget.organizationId,
+                                      );
+                                      if (!mounted) return;
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            ok
+                                                ? (_isAr
+                                                    ? 'تم طلب الإلغاء — تبقى المزايا حتى نهاية الفترة.'
+                                                    : 'Cancellation scheduled — access stays until period end.')
+                                                : (_isAr
+                                                    ? 'لم يُكمل الإلغاء.'
+                                                    : 'Cancellation not completed.'),
+                                          ),
                                         ),
-                                      ),
-                                    );
-                                    if (ok) await _load();
-                                  },
-                                  child: Text(t.subscriptionsCancel),
-                                ),
+                                      );
+                                      if (ok) await _load();
+                                    },
+                                    child: Text(t.subscriptionsCancel),
+                                  ),
+                                ],
                               ],
-                            ],
-                          );
-                        },
-                      ),
+                            );
+                          },
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            );
-          }),
-        ],
+              );
+            }),
+          ],
+        ),
       ),
-    ),
     );
   }
 }

@@ -66,28 +66,14 @@ mixin MarketingStateMixin on State<UserDashboard> {
     return _middleNavDeskLike;
   }
 
-  /// تبويب + في الشريط السفلي (إضافة إعلان/طلب) — يعتمد على الصلاحيات وليس على نوع الحساب وحده.
+  /// مدخل + يبقى متاحاً للوصول إلى خدمات التصوير؛ خيارات الإعلان/الطلب
+  /// نفسها تظل محكومة بصلاحيات الحساب.
   bool get _showBottomNavAddSlot {
     if (_overlayNavDepth > 0 ||
         (_tabIndex != 0 && _tabIndex != 1 && _tabIndex != 2)) {
       return false;
     }
-    if (_isGuest) return true;
-    if (!_accountRoleLoaded || !_orgNavResolved) return true;
-
-    if (_orgNavIsOwner) return true;
-    if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
-    if (AppRoleHelper.isStandaloneMarketer(_accountType)) return true;
-
-    if (AppRoleHelper.isOrgEntity(_accountType)) {
-      return AppRoleHelper.orgPermissionsAllowMiddleNav(
-        _orgMembershipPermissions,
-      );
-    }
-
-    return AppRoleHelper.orgPermissionsAllowMiddleNav(
-      _orgMembershipPermissions,
-    );
+    return true;
   }
 
   /// هل يُستخدم زر «إدارتي» كلوحة (مكتب/مسوّق/معلن فردي) — يظهر الآن كتبويب منفصل عن +.
@@ -178,18 +164,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
     if (_orgNavIsOwner) return true;
     if (AppRoleHelper.isOwnerIndividual(_accountType)) return true;
     if (AppRoleHelper.isStandaloneMarketer(_accountType)) return true;
-    return OrgPermissionManager.can(
-          _orgMembershipPermissions,
-          OrgPermissionKeys.addAds,
-        ) ||
-        OrgPermissionManager.can(
-          _orgMembershipPermissions,
-          OrgPermissionKeys.manageTeam,
-        ) ||
-        OrgPermissionManager.can(
-          _orgMembershipPermissions,
-          OrgPermissionKeys.viewAnalytics,
-        );
+    return true;
   }
 
   bool get _showBottomNavMySubmissionsSlot {

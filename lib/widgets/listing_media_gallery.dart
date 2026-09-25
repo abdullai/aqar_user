@@ -19,6 +19,7 @@ class ListingMediaGallery extends StatefulWidget {
     this.fit = BoxFit.cover,
     this.initialIndex = 0,
     this.watermark,
+    this.watermarkBuilder,
     this.emptyChild,
   });
 
@@ -30,6 +31,7 @@ class ListingMediaGallery extends StatefulWidget {
   final BoxFit fit;
   final int initialIndex;
   final Widget? watermark;
+  final Widget? Function(BuildContext context, int index)? watermarkBuilder;
   final Widget? emptyChild;
 
   @override
@@ -145,7 +147,8 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
                       url: urls[i],
                       fit: widget.fit,
                       error: ColoredBox(
-                        color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+                        color:
+                            cs.surfaceContainerHighest.withValues(alpha: 0.35),
                         child: const BrandingLogoImage(
                           fillFrame: true,
                           errorIcon: Icons.broken_image_outlined,
@@ -155,7 +158,11 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
                   );
                 },
               ),
-              if (widget.watermark != null) widget.watermark!,
+              if (widget.watermarkBuilder != null)
+                widget.watermarkBuilder!(context, _index) ??
+                    const SizedBox.shrink()
+              else if (widget.watermark != null)
+                widget.watermark!,
               if (urls.length > 1) ...[
                 Positioned(
                   left: 6,
@@ -422,7 +429,8 @@ class _ListingImageLightboxState extends State<ListingImageLightbox> {
                             duration: const Duration(milliseconds: 220),
                             curve: Curves.easeOut,
                           ),
-                  icon: const Icon(Icons.chevron_left, color: Colors.white, size: 36),
+                  icon: const Icon(Icons.chevron_left,
+                      color: Colors.white, size: 36),
                 ),
               ),
               Align(
@@ -434,7 +442,8 @@ class _ListingImageLightboxState extends State<ListingImageLightbox> {
                             duration: const Duration(milliseconds: 220),
                             curve: Curves.easeOut,
                           ),
-                  icon: const Icon(Icons.chevron_right, color: Colors.white, size: 36),
+                  icon: const Icon(Icons.chevron_right,
+                      color: Colors.white, size: 36),
                 ),
               ),
             ],

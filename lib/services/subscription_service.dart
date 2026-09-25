@@ -18,6 +18,7 @@ class SubscriptionService {
   static DateTime? _currentSubFetchCooldownUntil;
   static final Map<String, Future<Map<String, dynamic>?>> _currentSubInFlight =
       {};
+
   /// آخر اشتراك ناجح لكل مفتاح — يُعاد أثناء cooldown بدل null (كان يُظهر «التجربة مستنفذة» بعد التفعيل مباشرة).
   static final Map<String, Map<String, dynamic>?> _currentSubCache = {};
 
@@ -157,10 +158,9 @@ class SubscriptionService {
         'organization_id': (organizationId != null && organizationId.isNotEmpty)
             ? organizationId
             : null,
-        'subscription_id':
-            (subscriptionId != null && subscriptionId.isNotEmpty)
-                ? subscriptionId
-                : null,
+        'subscription_id': (subscriptionId != null && subscriptionId.isNotEmpty)
+            ? subscriptionId
+            : null,
         'event_type': eventType,
         'payload': payload ?? const <String, dynamic>{},
       });
@@ -409,7 +409,8 @@ class SubscriptionService {
 
   Future<Map<String, dynamic>?> getPlanById(String planId) async {
     try {
-      final row = await _sb.from(_plans).select().eq('id', planId).maybeSingle();
+      final row =
+          await _sb.from(_plans).select().eq('id', planId).maybeSingle();
       if (row == null) return null;
       return Map<String, dynamic>.from(row as Map);
     } catch (_) {
@@ -453,8 +454,40 @@ class SubscriptionService {
     }
   }
 
+  /// Latest subscription for an opted-in service audience, separate from the
+  /// user's primary account plan (for example, photographer on an owner account).
+  Future<Map<String, dynamic>?> getCurrentSubscriptionForPlanUserType(
+    String userType,
+  ) async {
+    final uid = _user?.id;
+    if (uid == null) return null;
+    final audience = userType.trim().toLowerCase();
+    if (audience.isEmpty) return null;
+
+    try {
+      final rows = await _loadSubscriptionRowsForContext(
+        uid,
+        withPlan: true,
+      );
+      final matching = <Map<String, dynamic>>[];
+      for (final raw in rows) {
+        final row = Map<String, dynamic>.from(raw as Map);
+        final planRaw = row['plan'];
+        if (planRaw is! Map) continue;
+        final plan = Map<String, dynamic>.from(planRaw);
+        if ('${plan['user_type'] ?? ''}'.trim().toLowerCase() == audience) {
+          matching.add(row);
+        }
+      }
+      return pickPreferredSubscriptionRow(matching);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// يفضّل اشتراكاً يمنح وصولاً فعلياً (مدفوع أو تجربة)؛ وإلا أحدث صف.
-  static Map<String, dynamic>? pickPreferredSubscriptionRow(List<dynamic> rows) {
+  static Map<String, dynamic>? pickPreferredSubscriptionRow(
+      List<dynamic> rows) {
     if (rows.isEmpty) return null;
     Map<String, dynamic>? bestAccess;
     DateTime? bestEnd;
@@ -463,8 +496,7 @@ class SubscriptionService {
     for (final raw in rows) {
       final row = Map<String, dynamic>.from(raw as Map);
       final end = subscriptionExclusiveEndUtc(row);
-      if (end != null &&
-          (latestEnd == null || end.isAfter(latestEnd))) {
+      if (end != null && (latestEnd == null || end.isAfter(latestEnd))) {
         latestEnd = end;
         latest = row;
       }
@@ -692,7 +724,10 @@ class SubscriptionService {
         if (m['can_subscribe'] != true) {
           final reason = '${m['reason'] ?? ''}';
           if (reason == 'team_member_uses_owner_subscription') {
-            return {'ok': false, 'error': 'team_member_not_allowed_to_subscribe'};
+            return {
+              'ok': false,
+              'error': 'team_member_not_allowed_to_subscribe'
+            };
           }
           if (reason == 'topup_requires_main_subscription') {
             return {'ok': false, 'error': 'topup_requires_main_subscription'};
@@ -701,7 +736,8 @@ class SubscriptionService {
             final upgradeOnly = m['upgrade_only'] == true;
             return {
               'ok': false,
-              'error': upgradeOnly ? 'use_upgrade_flow' : 'active_plan_conflict',
+              'error':
+                  upgradeOnly ? 'use_upgrade_flow' : 'active_plan_conflict',
             };
           }
         } else {
@@ -712,7 +748,11 @@ class SubscriptionService {
     } catch (_) {}
 
     // طبقة 2: مقارنة محلّية كاحتياط
-    final cur = await getCurrentSubscription(organizationId: organizationId);
+    final targetPlan = await getPlanById(planId);
+    final cur = '${targetPlan?['user_type'] ?? ''}'.trim().toLowerCase() ==
+            'photographer'
+        ? await getCurrentSubscriptionForPlanUserType('photographer')
+        : await getCurrentSubscription(organizationId: organizationId);
     if (!subscriptionRowInPaidAccess(cur)) return {'ok': true};
     final curPlanId = '${cur!['plan_id'] ?? ''}'.trim();
     if (curPlanId != planId) {
@@ -768,7 +808,8 @@ class SubscriptionService {
 
   /// عرض «خصم الاحتفاظ» مرّة واحدة لمالك الاشتراك عند ضغط «إلغاء».
   /// يُرجع: {ok, available, discount_percent, used_at, …}
-  Future<Map<String, dynamic>> offerCancellationRetention(String subscriptionId) async {
+  Future<Map<String, dynamic>> offerCancellationRetention(
+      String subscriptionId) async {
     try {
       final res = await _sb.rpc(
         'subscription_offer_cancellation_retention',
@@ -1117,10 +1158,9 @@ class SubscriptionService {
     if (payRes['ok'] != true) {
       return {'ok': false, 'error': payRes['error'] ?? 'payment_failed'};
     }
-    final paidBillingId =
-        billingId.isNotEmpty
-            ? billingId
-            : '${payRes['transaction_id'] ?? ''}'.trim();
+    final paidBillingId = billingId.isNotEmpty
+        ? billingId
+        : '${payRes['transaction_id'] ?? ''}'.trim();
     if (paidBillingId.isEmpty) {
       return {'ok': false, 'error': 'billing_required'};
     }
@@ -1153,9 +1193,8 @@ class SubscriptionService {
         'fulfill_paid_billing',
         params: {'p_billing_transaction_id': billingTransactionId},
       );
-      final map = res is Map
-          ? Map<String, dynamic>.from(res)
-          : <String, dynamic>{};
+      final map =
+          res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
       if (map['ok'] != true) {
         return {
           'ok': false,
@@ -1199,9 +1238,8 @@ class SubscriptionService {
           'p_churn_detail': churnDetail,
         },
       );
-      final map = res is Map
-          ? Map<String, dynamic>.from(res)
-          : <String, dynamic>{};
+      final map =
+          res is Map ? Map<String, dynamic>.from(res) : <String, dynamic>{};
       if (map['ok'] != true) {
         return {'ok': false, 'error': '${map['error'] ?? 'cancel_failed'}'};
       }
@@ -1280,8 +1318,9 @@ class SubscriptionService {
     if (payRes['ok'] != true) {
       return {'ok': false, 'error': payRes['error'] ?? 'payment_failed'};
     }
-    final paidId =
-        billingId.isNotEmpty ? billingId : '${payRes['transaction_id'] ?? ''}'.trim();
+    final paidId = billingId.isNotEmpty
+        ? billingId
+        : '${payRes['transaction_id'] ?? ''}'.trim();
     if (paidId.isEmpty) return {'ok': false, 'error': 'billing_required'};
     return fulfillPaidBilling(
       billingTransactionId: paidId,
@@ -1377,8 +1416,9 @@ class SubscriptionService {
     if (payRes['ok'] != true) {
       return {'ok': false, 'error': payRes['error'] ?? 'payment_failed'};
     }
-    final paidId =
-        billingId.isNotEmpty ? billingId : '${payRes['transaction_id'] ?? ''}'.trim();
+    final paidId = billingId.isNotEmpty
+        ? billingId
+        : '${payRes['transaction_id'] ?? ''}'.trim();
     if (paidId.isEmpty) return {'ok': false, 'error': 'billing_required'};
     return fulfillPaidBilling(
       billingTransactionId: paidId,

@@ -7,11 +7,13 @@ import '../core/listing/in_app_tour.dart';
 import '../core/listing/listing_media_urls.dart';
 import '../l10n/app_localizations.dart';
 import 'app_page_close_button.dart';
+import 'listing_watermark_overlay.dart';
 
 Future<void> openInAppTourViewer({
   required BuildContext context,
   required InAppTour tour,
   required bool isAr,
+  String Function(String source)? photographerCreditForMedia,
 }) {
   return showGeneralDialog<void>(
     context: context,
@@ -20,7 +22,11 @@ Future<void> openInAppTourViewer({
     barrierColor: Colors.black.withValues(alpha: 0.86),
     useRootNavigator: true,
     pageBuilder: (ctx, _, __) {
-      return InAppTourViewer(tour: tour, isAr: isAr);
+      return InAppTourViewer(
+        tour: tour,
+        isAr: isAr,
+        photographerCreditForMedia: photographerCreditForMedia,
+      );
     },
   );
 }
@@ -30,10 +36,12 @@ class InAppTourViewer extends StatefulWidget {
     super.key,
     required this.tour,
     required this.isAr,
+    this.photographerCreditForMedia,
   });
 
   final InAppTour tour;
   final bool isAr;
+  final String Function(String source)? photographerCreditForMedia;
 
   @override
   State<InAppTourViewer> createState() => _InAppTourViewerState();
@@ -96,6 +104,9 @@ class _InAppTourViewerState extends State<InAppTourViewer>
                     sb,
                     scene.imageRef,
                   );
+                  final photographerCredit =
+                      widget.photographerCreditForMedia?.call(scene.imageRef) ??
+                          '';
                   return InteractiveViewer(
                     minScale: 1,
                     maxScale: 4,
@@ -113,6 +124,15 @@ class _InAppTourViewerState extends State<InAppTourViewer>
                               Icons.image_not_supported_outlined,
                               color: Colors.white54,
                               size: 48,
+                            ),
+                          ),
+                        if (photographerCredit.isNotEmpty)
+                          Positioned.fill(
+                            child: ListingWatermarkOverlay(
+                              isAr: ar,
+                              headline: ar
+                                  ? 'حقوق الصورة: $photographerCredit'
+                                  : 'Photo credit: $photographerCredit',
                             ),
                           ),
                         ...scene.hotspots.map((h) {

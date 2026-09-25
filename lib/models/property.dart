@@ -217,8 +217,10 @@ class Property {
 
   /// غلاف القائمة/التفاصيل يفضّل الفيديو (من [listingGuidance.cover_primary]).
   bool get coverPrimaryPrefersVideo {
-    final v =
-        (listingGuidance?['cover_primary'] ?? 'image').toString().trim().toLowerCase();
+    final v = (listingGuidance?['cover_primary'] ?? 'image')
+        .toString()
+        .trim()
+        .toLowerCase();
     return v == 'video';
   }
 
@@ -228,7 +230,92 @@ class Property {
       (images.isEmpty || coverPrimaryPrefersVideo);
 
   bool get hasInAppVirtualTour =>
-      InAppTour.fromGuidance(listingGuidance)?.isNotEmpty == true;
+      InAppTour.fromGuidance(listingGuidance)?.isNotEmpty == true ||
+      photographerTours.isNotEmpty;
+
+  List<String> get photographerMediaPaths {
+    final paths = <String>[];
+    final raw = listingGuidance?['photographer_media_paths'];
+    if (raw is List) {
+      paths.addAll(
+        raw
+            .map((value) => value.toString().trim())
+            .where((value) => value.isNotEmpty),
+      );
+    }
+    paths.addAll(photographerVideoPaths);
+    return paths.toSet().toList(growable: false);
+  }
+
+  List<String> get photographerVideoPaths {
+    final videos = <String>[];
+    final direct =
+        (listingGuidance?['photographer_video_path'] ?? '').toString().trim();
+    if (direct.isNotEmpty) videos.add(direct);
+    final deliveries = listingGuidance?['photographer_media_deliveries'];
+    if (deliveries is List) {
+      for (final raw in deliveries) {
+        if (raw is! Map) continue;
+        final path = (raw['video_path'] ?? '').toString().trim();
+        if (path.isNotEmpty) videos.add(path);
+      }
+    }
+    return videos.toSet().toList(growable: false);
+  }
+
+  List<InAppTour> get photographerTours {
+    final tours = <InAppTour>[];
+    final raw = listingGuidance?['photographer_tours'];
+    if (raw is List) {
+      for (final item in raw) {
+        final tour = InAppTour.fromRaw(item);
+        if (tour != null && tour.isNotEmpty) tours.add(tour);
+      }
+    }
+    return tours;
+  }
+
+  Map<String, String> get photographerMediaAttributions {
+    final out = <String, String>{};
+    final deliveries = listingGuidance?['photographer_media_deliveries'];
+    if (deliveries is List) {
+      for (final raw in deliveries) {
+        if (raw is! Map) continue;
+        final name = (raw['photographer_name'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        final images = raw['image_paths'];
+        if (images is List) {
+          for (final image in images) {
+            final path = image.toString().trim();
+            if (path.isNotEmpty) out[path] = name;
+          }
+        }
+        final video = (raw['video_path'] ?? '').toString().trim();
+        if (video.isNotEmpty) out[video] = name;
+      }
+    }
+    return out;
+  }
+
+  String photographerAttributionForMedia(String source) {
+    final sourcePath = Uri.tryParse(source.trim())?.path ?? source.trim();
+    for (final entry in photographerMediaAttributions.entries) {
+      final mediaPath = Uri.tryParse(entry.key)?.path ?? entry.key;
+      if (sourcePath == mediaPath || sourcePath.endsWith('/$mediaPath')) {
+        return entry.value;
+      }
+    }
+    return '';
+  }
+
+  bool isPhotographerMediaPath(String source) {
+    final sourcePath = Uri.tryParse(source.trim())?.path ?? source.trim();
+    if (sourcePath.isEmpty) return false;
+    return photographerMediaPaths.any((rawPath) {
+      final mediaPath = Uri.tryParse(rawPath)?.path ?? rawPath;
+      return sourcePath == mediaPath || sourcePath.endsWith('/$mediaPath');
+    });
+  }
 
   bool get showsVirtualTourBadge =>
       hasInAppVirtualTour || (virtualTourUrl ?? '').trim().isNotEmpty;
@@ -238,7 +325,10 @@ class Property {
         .toString()
         .trim()
         .toLowerCase();
-    return st == 'pending' || st == 'accepted' || st == 'in_progress';
+    return st == 'pending' ||
+        st == 'accepted' ||
+        st == 'in_progress' ||
+        st == 'pending_review';
   }
 
   String photographerShootBadge({required bool isAr}) {
@@ -246,6 +336,11 @@ class Property {
         .toString()
         .trim()
         .toLowerCase();
+    if (st == 'pending_review') {
+      return isAr
+          ? 'بانتظار موافقة الناشر على الوسائط'
+          : 'Awaiting publisher media approval';
+    }
     if (st == 'accepted' || st == 'in_progress') {
       return isAr ? 'جاري التصوير' : 'Shoot in progress';
     }
@@ -502,7 +597,8 @@ class Property {
   /// الإجمالي النهائي: الأساسي ± الضريبة + عمولة التسويق (المبلغ الذي يستحقّه البائع/المسوّق).
   /// — لا تستخدمه في عرض البطاقات؛ هو خاص بصفحة تفاصيل الإعلان والفواتير
   ///   والإيصالات فقط حسب القاعدة الموحَّدة لعرض الأسعار.
-  double get finalTotalPrice => _round2(totalWithVat + marketingCommissionTotal);
+  double get finalTotalPrice =>
+      _round2(totalWithVat + marketingCommissionTotal);
 
   /// السعر المعروض على بطاقات الإعلان عندما يكون للعقار تفصيل فاتورة محفوظ.
   /// يطابق [finalTotalPrice] حتى لا تبدو البطاقة أرخص من صفحة التفاصيل.
@@ -516,8 +612,7 @@ class Property {
 
   /// `true` عندما يوجد فعلاً عنصر إضافي (ضريبة مضافة أو عمولة) ليُعرَض في الفاتورة.
   /// — يبقى `true` أيضاً عند «شامل الضريبة» لأن سطر الضريبة الداخلية يظهر للمستفيد.
-  bool get hasInvoiceDetails =>
-      vatAmount > 0 || marketingCommissionTotal > 0;
+  bool get hasInvoiceDetails => vatAmount > 0 || marketingCommissionTotal > 0;
 
   // -- نهاية حسابات الفاتورة ---------------------------------------------------
 
@@ -805,6 +900,7 @@ class Property {
             v.endsWith('.avi') ||
             v.endsWith('.mkv');
       }
+
       if (path != null && path.isNotEmpty) {
         if (!looksVideo(path)) out.add(path);
       } else if (fileName != null && fileName.isNotEmpty) {

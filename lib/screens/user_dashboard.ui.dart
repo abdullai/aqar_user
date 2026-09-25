@@ -7823,7 +7823,57 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   Widget _buildMyAdsHub() {
     _ensureSubTabControllers();
-    return _buildMyAdsMarketingHub(sortedMineForHub());
+    final publisherPage = _buildMyAdsMarketingHub(sortedMineForHub());
+    if (_isGuest) return publisherPage;
+
+    final cs = Theme.of(context).colorScheme;
+    final compact = MediaQuery.sizeOf(context).width < 420;
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          Material(
+            color: cs.surface,
+            child: TabBar(
+              isScrollable: false,
+              labelColor: cs.primary,
+              unselectedLabelColor: cs.onSurfaceVariant,
+              tabs: [
+                Tab(
+                  icon: const Icon(Icons.list_alt_outlined),
+                  text: compact
+                      ? (_isArabic ? 'صفحتي' : 'My page')
+                      : (_isArabic ? 'كمعلن / مسوّق' : 'Publisher / marketer'),
+                ),
+                Tab(
+                  icon: const Icon(Icons.photo_camera_outlined),
+                  text: compact
+                      ? (_isArabic ? 'كمصور' : 'Photographer')
+                      : AppLocalizations.of(context)!.photographerHubTitle,
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                KeyedSubtree(
+                  key: const ValueKey<String>('my-page-publisher-role'),
+                  child: publisherPage,
+                ),
+                KeyedSubtree(
+                  key: const ValueKey<String>('my-page-photographer-role'),
+                  child: PhotographerHubPage(
+                    lang: widget.lang,
+                    embedAppBar: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // =========================

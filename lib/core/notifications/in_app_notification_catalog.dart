@@ -31,6 +31,7 @@ abstract final class InAppDeepRoutes {
 abstract final class InAppNotifTypes {
   static const String workflow = 'workflow';
   static const String offerSubmitted = 'offer_submitted';
+
   /// نفس الدلالة عند الإدراج من SQL (`submit_listing_offer`).
   static const String offerReceived = 'offer_received';
   static const String contractCreated = 'contract_created';
@@ -43,10 +44,12 @@ abstract final class InAppNotifTypes {
   static const String propertyCreated = 'property_created';
   static const String offerAccepted = 'offer_accepted';
   static const String offerDeclined = 'offer_declined';
+
   /// اعتذار المالك عن عرض (يُدرَج من SQL `owner_decline_listing_offer` عند p_decline_kind = apology).
   static const String offerApologyFromOwner = 'offer_apology_from_owner';
   static const String permitPackageSubmitted = 'permit_package_submitted';
   static const String listingPublished = 'listing_published';
+
   /// بلاغ مستخدم على إعلان منشور (تنبيه للمسوّق/المعلن المسؤول).
   static const String listingReported = 'listing_reported';
 
@@ -61,6 +64,11 @@ abstract final class InAppNotifTypes {
   static const String photoShootAccepted = 'photo_shoot_accepted';
   static const String photoShootRejected = 'photo_shoot_rejected';
   static const String photoShootDelivered = 'photo_shoot_delivered';
+  static const String photoShootApproved = 'photo_shoot_approved';
+  static const String photoShootRevisionRequested =
+      'photo_shoot_revision_requested';
+  static const String photoShootMediaAuthorized =
+      'photo_shoot_media_authorized';
   static const String photoShootExpired = 'photo_shoot_expired';
   static const String photographerVerified = 'photographer_verified';
   static const String photographerRejected = 'photographer_rejected';
@@ -108,11 +116,8 @@ abstract final class InAppNotificationCatalog {
     final data = Map<String, dynamic>.from(parseDataColumn(row));
 
     final type = (row['type'] ?? '').toString();
-    final entityType = (row['entity_type'] ??
-            data['entity_type'] ??
-            '')
-        .toString()
-        .trim();
+    final entityType =
+        (row['entity_type'] ?? data['entity_type'] ?? '').toString().trim();
     final entityId =
         (row['entity_id'] ?? data['entity_id'] ?? '').toString().trim();
 
@@ -149,7 +154,10 @@ abstract final class InAppNotificationCatalog {
         tl == 'chat_message' ||
         tl == 'message') {
       setDeep(InAppDeepRoutes.chat);
-      if ((data[WorkflowNotificationKeys.mainTab] ?? '').toString().trim().isEmpty) {
+      if ((data[WorkflowNotificationKeys.mainTab] ?? '')
+          .toString()
+          .trim()
+          .isEmpty) {
         data[WorkflowNotificationKeys.mainTab] = WorkflowMainSections.chat;
       }
     }
@@ -193,8 +201,12 @@ abstract final class InAppNotificationCatalog {
     }
     if (tl == InAppNotifTypes.reservation || tl == 'booking') {
       setDeep(InAppDeepRoutes.userDashboard);
-      if ((data[WorkflowNotificationKeys.mainTab] ?? '').toString().trim().isEmpty) {
-        data[WorkflowNotificationKeys.mainTab] = WorkflowMainSections.reservations;
+      if ((data[WorkflowNotificationKeys.mainTab] ?? '')
+          .toString()
+          .trim()
+          .isEmpty) {
+        data[WorkflowNotificationKeys.mainTab] =
+            WorkflowMainSections.reservations;
       }
     }
     if (tl == InAppNotifTypes.billingPaymentSuccess ||
@@ -219,7 +231,10 @@ abstract final class InAppNotificationCatalog {
     }
 
     if (!hasDeep &&
-        (data[WorkflowNotificationKeys.deepRoute] ?? '').toString().trim().isEmpty) {
+        (data[WorkflowNotificationKeys.deepRoute] ?? '')
+            .toString()
+            .trim()
+            .isEmpty) {
       if (tl == InAppNotifTypes.offerSubmitted ||
           tl == InAppNotifTypes.offerReceived) {
         data[WorkflowNotificationKeys.deepRoute] = InAppDeepRoutes.ownerOffers;
@@ -245,7 +260,8 @@ abstract final class InAppNotificationCatalog {
           data[WorkflowNotificationKeys.deepRoute] =
               InAppDeepRoutes.listingRequestStatus;
         } else {
-          data[WorkflowNotificationKeys.deepRoute] = InAppDeepRoutes.ownerOffers;
+          data[WorkflowNotificationKeys.deepRoute] =
+              InAppDeepRoutes.ownerOffers;
         }
       } else if (tl == InAppNotifTypes.permitSubmitted) {
         data[WorkflowNotificationKeys.deepRoute] =

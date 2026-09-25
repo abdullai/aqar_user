@@ -52,6 +52,7 @@ class PhotographerProfile {
     return DateTime.now().toUtc().difference(at.toUtc()) >
         const Duration(hours: 24);
   }
+
   bool get isVerified => status == 'verified';
   bool get isRejected => status == 'rejected';
 
@@ -105,6 +106,13 @@ class PhotoShootRequest {
     this.maxPhotos = 30,
     this.maxVideos = 1,
     this.includeTour = false,
+    this.propertyOwnerId = '',
+    this.ownerMediaConsent = false,
+    this.ownerCoverChangeConsent = false,
+    this.ownerReplaceMediaConsent = false,
+    this.deliveryReviewStatus = 'not_submitted',
+    this.deliveryRevisionNote = '',
+    this.deliveredMedia = const {},
   });
 
   final String id;
@@ -126,6 +134,13 @@ class PhotoShootRequest {
   final int maxPhotos;
   final int maxVideos;
   final bool includeTour;
+  final String propertyOwnerId;
+  final bool ownerMediaConsent;
+  final bool ownerCoverChangeConsent;
+  final bool ownerReplaceMediaConsent;
+  final String deliveryReviewStatus;
+  final String deliveryRevisionNote;
+  final Map<String, dynamic> deliveredMedia;
 
   DateTime? get respondDeadline =>
       createdAt?.toUtc().add(const Duration(hours: 24));
@@ -173,6 +188,16 @@ class PhotoShootRequest {
       includeTour: m['include_tour'] == true ||
           kinds.contains('tour') ||
           kinds.contains('tour_3d'),
+      propertyOwnerId: (m['property_owner_id'] ?? '').toString(),
+      ownerMediaConsent: m['owner_media_consent'] == true,
+      ownerCoverChangeConsent: m['owner_cover_change_consent'] == true,
+      ownerReplaceMediaConsent: m['owner_replace_media_consent'] == true,
+      deliveryReviewStatus:
+          (m['delivery_review_status'] ?? 'not_submitted').toString(),
+      deliveryRevisionNote: (m['delivery_revision_note'] ?? '').toString(),
+      deliveredMedia: m['delivered_media'] is Map
+          ? Map<String, dynamic>.from(m['delivered_media'] as Map)
+          : const {},
     );
   }
 }
@@ -274,6 +299,9 @@ class PhotographerService {
     int maxPhotos = 30,
     int maxVideos = 1,
     bool includeTour = false,
+    bool ownerMediaConsent = false,
+    bool ownerCoverChangeConsent = false,
+    bool ownerReplaceMediaConsent = false,
   }) async {
     final normalized = [
       for (final k in kinds)
@@ -295,6 +323,9 @@ class PhotographerService {
         'p_max_photos': maxPhotos,
         'p_max_videos': maxVideos,
         'p_include_tour': includeTour || normalized.contains('tour'),
+        'p_owner_media_consent': ownerMediaConsent,
+        'p_owner_cover_change_consent': ownerCoverChangeConsent,
+        'p_owner_replace_media_consent': ownerReplaceMediaConsent,
       },
     );
     return raw.toString();
@@ -340,6 +371,79 @@ class PhotographerService {
     ];
   }
 
+  Future<List<PhotoShootRequest>> shootsAwaitingOwnerReview({
+    required String propertyId,
+  }) async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    final pid = propertyId.trim();
+    if (uid.isEmpty || pid.isEmpty) return const [];
+    final rows = await _sb
+        .from('photo_shoot_requests')
+        .select()
+        .eq('property_id', pid)
+        .eq('delivery_review_status', 'pending_review')
+        .or('requester_id.eq.$uid,property_owner_id.eq.$uid')
+        .order('created_at', ascending: false);
+    return [
+      for (final r in (rows as List))
+        PhotoShootRequest.fromMap(Map<String, dynamic>.from(r as Map)),
+    ];
+  }
+
+  Future<List<PhotoShootRequest>> shootsNeedingOwnerConsent({
+    required String propertyId,
+  }) async {
+    final uid = _sb.auth.currentUser?.id ?? '';
+    final pid = propertyId.trim();
+    if (uid.isEmpty || pid.isEmpty) return const [];
+    final rows = await _sb
+        .from('photo_shoot_requests')
+        .select()
+        .eq('property_id', pid)
+        .eq('owner_media_consent', false)
+        .inFilter('status', const ['accepted', 'in_progress'])
+        .or('requester_id.eq.$uid,property_owner_id.eq.$uid')
+        .order('created_at', ascending: false);
+    return [
+      for (final r in (rows as List))
+        PhotoShootRequest.fromMap(Map<String, dynamic>.from(r as Map)),
+    ];
+  }
+
+  Future<void> grantDeliveryConsent({
+    required String requestId,
+    required bool allowCoverChange,
+    required bool allowReplaceExistingMedia,
+  }) async {
+    await _sb.rpc(
+      'owner_grant_photo_shoot_media_consent',
+      params: {
+        'p_request_id': requestId,
+        'p_allow_cover_change': allowCoverChange,
+        'p_allow_replace_existing_media': allowReplaceExistingMedia,
+      },
+    );
+  }
+
+  Future<void> reviewDelivery({
+    required String requestId,
+    required bool approve,
+    bool replaceExistingMedia = false,
+    bool setCover = false,
+    String? revisionNote,
+  }) async {
+    await _sb.rpc(
+      'owner_review_photographer_delivery',
+      params: {
+        'p_request_id': requestId,
+        'p_approve': approve,
+        'p_replace_existing_media': replaceExistingMedia,
+        'p_set_cover': setCover,
+        'p_revision_note': revisionNote,
+      },
+    );
+  }
+
   Future<void> respond({
     required String requestId,
     required bool accept,
@@ -364,7 +468,7 @@ class PhotographerService {
     String? technicalNotes,
   }) async {
     await _sb.rpc(
-      'photographer_deliver_shoot',
+      'photographer_submit_delivery_for_review',
       params: {
         'p_request_id': requestId,
         'p_image_paths': imagePaths,
@@ -409,8 +513,10 @@ class PhotographerService {
     final dLat = _rad(fromLat - a);
     final dLng = _rad(fromLng - b);
     final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_rad(a)) * math.cos(_rad(fromLat)) *
-            math.sin(dLng / 2) * math.sin(dLng / 2);
+        math.cos(_rad(a)) *
+            math.cos(_rad(fromLat)) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2);
     return 2 * r * math.asin(math.sqrt(h.clamp(0, 1)));
   }
 

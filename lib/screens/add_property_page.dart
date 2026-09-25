@@ -141,10 +141,10 @@ String _formSliceTitle(AddPropertyFormSlice s, bool isAr) {
 
 String _formSliceHint(AddPropertyFormSlice s, bool isAr) {
   switch (s) {
-      case AddPropertyFormSlice.classification:
-        return isAr
-            ? 'الغرض (بيع أو إيجار)، النوع، والاستخدام.'
-            : 'Purpose (sale or rent), type, and usage.';
+    case AddPropertyFormSlice.classification:
+      return isAr
+          ? 'الغرض (بيع أو إيجار)، النوع، والاستخدام.'
+          : 'Purpose (sale or rent), type, and usage.';
     case AddPropertyFormSlice.location:
       return isAr
           ? 'منطقة، محافظة، مدينة، حي (يُكمَل تلقائياً بعد الخريطة إن وُجدت).'
@@ -214,16 +214,22 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   // العملة والتفاوض والمزاد
   String _currency = 'SAR';
   bool _negotiable = false;
+
   /// على السوم (بدون سعر ثابت محدد).
   bool _priceOnSum = false;
+
   /// قبول التمويل العقاري.
   bool _acceptsMortgageFinance = false;
+
   /// إقرار: لا مانع من التصرف/الانتفاع.
   bool _noLegalObstacles = false;
+
   /// صفة المعلن: owner | broker | authorized
   String _advertiserRole = 'owner';
+
   /// موقع تقريبي (لا يُعرض بدقة على خريطة الإعلانات).
   bool _locationIsApproximate = false;
+
   /// إظهار اسم/صفة المعلن مع التوثيق على بطاقات الرئيسية (اختياري — مغلق افتراضياً).
   bool _showOwnerNameOnCards = false;
   PublicNameSource _pubNameSource = PublicNameSource.official;
@@ -233,6 +239,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   String _displayAliasCached = '';
   String _primaryPhoneCached = '';
   String _secondaryPhoneCached = '';
+
   /// عمر العقار كفئة واجهة: new | 1_5 | 6_10 | 11_20 | 20_plus
   String? _propertyAgeBucket;
   bool _isAuction = false;
@@ -248,6 +255,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   static const double _kMarketingCommissionRate = 0.025;
   // — قفل النشر: يبقى مرفوعاً حتى انتهاء حوار النجاح ورمز الإعلان كي لا يُنشر مرتين.
   bool _publishLock = false;
+
   /// بعد نجاح النشر: اسمح بـ pop للرئيسية حتى لو بقيت الحقول ممتلئة.
   bool _publishSucceeded = false;
   bool _termsAccepted = false;
@@ -545,20 +553,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     {'code': 'investment', 'ar': 'استثمار', 'en': 'Investment'},
   ];
 
-  bool get _purposeIsRent =>
-      _purpose == 'rent' || _purpose.contains('rent');
+  bool get _purposeIsRent => _purpose == 'rent' || _purpose.contains('rent');
 
-  DateTime? get _rentEndComputed =>
-      _rentStart == null || !_purposeIsRent
-          ? null
-          : MarketRequestRentSchedule.endOf(
-              term: _rentTerm,
-              start: _rentStart!,
-              days: _rentDays,
-              weeks: _rentWeeks,
-              months: _rentMonths,
-              years: _rentYears,
-            );
+  DateTime? get _rentEndComputed => _rentStart == null || !_purposeIsRent
+      ? null
+      : MarketRequestRentSchedule.endOf(
+          term: _rentTerm,
+          start: _rentStart!,
+          days: _rentDays,
+          weeks: _rentWeeks,
+          months: _rentMonths,
+          years: _rentYears,
+        );
 
   void _applyPurposeGroup(String code) {
     if (code == 'rent') {
@@ -844,9 +850,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _virtualTourUrl.text = '${d['virtual_tour_url'] ?? ''}';
     _inAppTour = InAppTour.fromRaw(d['in_app_tour']);
     final shoot = d['pending_photo_shoot'];
-    _pendingPhotoShoot = shoot is Map
-        ? Map<String, dynamic>.from(shoot)
-        : null;
+    _pendingPhotoShoot = shoot is Map ? Map<String, dynamic>.from(shoot) : null;
     _latCtrl.text = '${d['lat'] ?? ''}';
     _lngCtrl.text = '${d['lng'] ?? ''}';
     _planNumber.text = '${d['plan_number'] ?? ''}';
@@ -877,7 +881,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     _rentDays = (d['rent_days'] as num?)?.toInt().clamp(1, 6) ?? _rentDays;
     _rentWeeks = (d['rent_weeks'] as num?)?.toInt().clamp(1, 3) ?? _rentWeeks;
-    _rentMonths = (d['rent_months'] as num?)?.toInt().clamp(1, 12) ?? _rentMonths;
+    _rentMonths =
+        (d['rent_months'] as num?)?.toInt().clamp(1, 12) ?? _rentMonths;
     _rentYears = (d['rent_years'] as num?)?.toInt().clamp(1, 10) ?? _rentYears;
     final rs = '${d['rent_start'] ?? ''}';
     if (rs.isNotEmpty) {
@@ -916,7 +921,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     _consentMarketNoLicense = d['consent_market_no_license'] == true;
     _showPhoneOnMarket = d['show_phone_on_market'] == true;
-    _regaAdLicenseNo.text = '${d['rega_ad_license_no'] ?? _regaAdLicenseNo.text}';
+    _regaAdLicenseNo.text =
+        '${d['rega_ad_license_no'] ?? _regaAdLicenseNo.text}';
     _ejarContractNo.text = '${d['ejar_contract_no'] ?? ''}';
     _ejarUnitNo.text = '${d['ejar_unit_no'] ?? ''}';
     _ejarFloorNo.text = '${d['ejar_floor_no'] ?? ''}';
@@ -1196,14 +1202,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (_marketingFlowActive) {
       final city = (_selectedCity ?? _city.text).trim();
       final typeLabel = PropertyTypeCatalog.label(_type, _isAr);
-      final purposeLabel = _purposeTypes
-          .firstWhere(
-            (e) => e['code'] == _purpose,
-            orElse: () => {'ar': '', 'en': ''},
-          );
-      final pLabel = _isAr
-          ? (purposeLabel['ar'] ?? '')
-          : (purposeLabel['en'] ?? '');
+      final purposeLabel = _purposeTypes.firstWhere(
+        (e) => e['code'] == _purpose,
+        orElse: () => {'ar': '', 'en': ''},
+      );
+      final pLabel =
+          _isAr ? (purposeLabel['ar'] ?? '') : (purposeLabel['en'] ?? '');
       final parts = <String>[
         if (typeLabel.isNotEmpty) typeLabel,
         if (city.isNotEmpty) city,
@@ -1222,7 +1226,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _adLicenseSource = _AdLicenseSource.inApp;
     _hasRegaAdLicense = true;
     _regaPayloadForInsert = Map<String, dynamic>.from(m);
-    final adNo = (m['rega_ad_license_number'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+    final adNo = (m['rega_ad_license_number'] ?? '')
+        .toString()
+        .replaceAll(RegExp(r'\D'), '');
     if (adNo.length == 10) _regaAdLicenseNo.text = adNo;
 
     final pu = (m['rega_unit_price'] ?? '').toString();
@@ -1373,7 +1379,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _regaVerifyOk = res.valid;
         _regaVerifyBanner = res.valid
             ? (res.licenseStatusText ??
-                (_isAr ? 'تم التحقق: الرخصة سارية' : 'Verified: active license'))
+                (_isAr
+                    ? 'تم التحقق: الرخصة سارية'
+                    : 'Verified: active license'))
             : (_isAr
                 ? 'تعذر الجلب من الهيئة. أكمل الحقول يدوياً ثم التالي.'
                 : 'Authority lookup failed. Continue with manual fields, then Next.');
@@ -1750,9 +1758,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           }
         }
         if (_showParkingYearRow && _yearBuilt == null) {
-          setState(() => _error = _isAr
-              ? 'سنة البناء مطلوبة'
-              : 'Year built is required');
+          setState(() =>
+              _error = _isAr ? 'سنة البناء مطلوبة' : 'Year built is required');
           return false;
         }
         return _formKeyDetails.currentState?.validate() ?? false;
@@ -1924,8 +1931,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       onAcceptsMortgageFinanceChanged: (v) =>
           setState(() => _acceptsMortgageFinance = v),
       propertyAgeBucket: _propertyAgeBucket,
-      onPropertyAgeBucketChanged: (v) =>
-          setState(() => _propertyAgeBucket = v),
+      onPropertyAgeBucketChanged: (v) => setState(() => _propertyAgeBucket = v),
       onSuggestSmartTitle: () => setState(() {
         _maybeSuggestSmartTitle(force: true);
       }),
@@ -2194,8 +2200,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   bool _licensedAdPayloadComplete() {
-    String digits(dynamic raw) =>
-        raw.toString().replaceAll(RegExp(r'\D'), '');
+    String digits(dynamic raw) => raw.toString().replaceAll(RegExp(r'\D'), '');
     final ad = digits(
       _regaPayloadForInsert['rega_ad_license_number'] ?? _regaAdLicenseNo.text,
     );
@@ -3939,9 +3944,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     } else {
       details['furnished'] = null;
     }
-    details['floor'] = PropertyTypeCatalog.showsUnitFloorFieldEffective(_type)
-        ? _floor
-        : null;
+    details['floor'] =
+        PropertyTypeCatalog.showsUnitFloorFieldEffective(_type) ? _floor : null;
     details['total_floors'] =
         PropertyTypeCatalog.showsTotalFloorsFieldEffective(_type)
             ? _totalFloors
@@ -4003,8 +4007,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   String _friendlyListingRequestSaveError(Object e) {
     final raw = e.toString().toLowerCase();
-    if (raw.contains('duplicate_listing_content') ||
-        raw.contains('23505')) {
+    if (raw.contains('duplicate_listing_content') || raw.contains('23505')) {
       return _isAr
           ? 'هذا الإعلان مرفوع سابقاً بنفس رقم الصك وتاريخه وبياناته. راجع صفحتك أو عدّل البيانات قبل النشر.'
           : 'This listing was already submitted with the same deed number, date, and details. Check My Page or change the data before publishing.';
@@ -4024,9 +4027,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       }
       return m.isNotEmpty
           ? m
-          : (_isAr ? 'تعذر حفظ طلب التسويق.' : 'Could not save the marketing request.');
+          : (_isAr
+              ? 'تعذر حفظ طلب التسويق.'
+              : 'Could not save the marketing request.');
     }
-    return _isAr ? 'تعذر حفظ طلب التسويق.' : 'Could not save the marketing request.';
+    return _isAr
+        ? 'تعذر حفظ طلب التسويق.'
+        : 'Could not save the marketing request.';
   }
 
   String _listingMediaUploadError(Object e) {
@@ -4234,10 +4241,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     final deed = normalizeDeedNumber(_deedNumber.text);
     final deedDate = _deedDate == null
-      ? null
-      : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
-        .toIso8601String()
-        .substring(0, 10);
+        ? null
+        : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+            .toIso8601String()
+            .substring(0, 10);
     if (deed.isEmpty) return null;
     await DeedNumberIntegrity.verifyWithAuthority(deedNumber: deed);
     final hit = await DeedNumberIntegrity.findActiveSaleLikeDuplicate(
@@ -4283,10 +4290,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final area = _parseDouble(_area.text);
     final deed = normalizeDeedNumber(_deedNumber.text);
     final deedDate = _deedDate == null
-      ? null
-      : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
-        .toIso8601String()
-        .substring(0, 10);
+        ? null
+        : DateTime(_deedDate!.year, _deedDate!.month, _deedDate!.day)
+            .toIso8601String()
+            .substring(0, 10);
     final fingerprint = _currentPublishFingerprint();
     final memHit = _lastSuccessfulPublishFingerprint == fingerprint;
     final stored = await PublishContentFingerprintStore.readIfFresh();
@@ -4340,9 +4347,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final list = (res as List).cast<Map<String, dynamic>>();
       for (final row in list) {
         final st = (row['status'] ?? '').toString().toLowerCase();
-        if (st.contains('cancel') ||
-            st.contains('reject') ||
-            st == 'deleted') {
+        if (st.contains('cancel') || st.contains('reject') || st == 'deleted') {
           continue;
         }
         if (_rowMatchesCurrentListingContent(
@@ -4372,20 +4377,17 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     String deed,
     String? deedDate,
   ) {
-    final sameTitle =
-        (row['title'] ?? '').toString().trim().toLowerCase() ==
-            title.toLowerCase();
-    final sameCity =
-        (row['city'] ?? '').toString().trim().toLowerCase() ==
-            city.toLowerCase();
+    final sameTitle = (row['title'] ?? '').toString().trim().toLowerCase() ==
+        title.toLowerCase();
+    final sameCity = (row['city'] ?? '').toString().trim().toLowerCase() ==
+        city.toLowerCase();
     final rowPrice = (row['price'] as num?)?.toDouble() ?? -1;
     final rowArea = (row['area'] as num?)?.toDouble() ?? -1;
     final samePrice = (rowPrice - price).abs() < 0.01;
     final sameArea = (rowArea - area).abs() < 0.01;
     if (!(sameTitle && sameCity && samePrice && sameArea)) return false;
     if (deed.isEmpty) return true;
-    final rowDeed =
-        normalizeDeedNumber((row['deed_number'] ?? '').toString());
+    final rowDeed = normalizeDeedNumber((row['deed_number'] ?? '').toString());
     if (rowDeed.isEmpty) return true;
     if (rowDeed != deed) return false;
     if (deedDate == null) return true;
@@ -4623,8 +4625,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           return;
         }
         final requestId = insertedReq['id'] as String;
-        final reqPub =
-            (insertedReq['listing_request_public_code'] ?? '').toString().trim();
+        final reqPub = (insertedReq['listing_request_public_code'] ?? '')
+            .toString()
+            .trim();
         OrgActivityService.logListingRequestCreated(requestId);
         try {
           await MarketingFlowService(_sb).notifyOwnerListingRequestSubmitted(
@@ -4662,19 +4665,20 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             if (tour.isNotEmpty) 'virtual_tour_url': tour,
             'listing_guidance': _listingGuidanceWithBoundMedia(media),
             if (media != null) 'media_integrity': media.integrity,
-            if (media != null && media.hasRealMedia) 'default_cover_used': false,
+            if (media != null && media.hasRealMedia)
+              'default_cover_used': false,
           });
         } catch (_) {}
-    if (!mounted) return;
-    // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
-    final fp = _currentPublishFingerprint();
-    _lastSuccessfulPublishFingerprint = fp;
-    unawaited(PublishContentFingerprintStore.save(fp));
-    await _showRequestSuccess(
-      requestId: requestId,
-      listingRequestPublicCode: reqPub.isEmpty ? null : reqPub,
-    );
-    return;
+        if (!mounted) return;
+        // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
+        final fp = _currentPublishFingerprint();
+        _lastSuccessfulPublishFingerprint = fp;
+        unawaited(PublishContentFingerprintStore.save(fp));
+        await _showRequestSuccess(
+          requestId: requestId,
+          listingRequestPublicCode: reqPub.isEmpty ? null : reqPub,
+        );
+        return;
       }
       if (widget.marketingFlow?.publishToHomeFeed == true &&
           !_licensedAdPayloadComplete()) {
@@ -4701,12 +4705,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       );
       Map<String, dynamic> inserted;
       try {
-        inserted =
-            await _sb
-                .from('properties')
-                .insert(payload)
-                .select('id,listing_public_code')
-                .single();
+        inserted = await _sb
+            .from('properties')
+            .insert(payload)
+            .select('id,listing_public_code')
+            .single();
       } catch (e) {
         final msg = e.toString().toLowerCase();
         if (msg.contains('contact_phone') && msg.contains('does not exist')) {
@@ -4755,12 +4758,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             payload.remove('contact_phone');
           }
         }
-        inserted =
-            await _sb
-                .from('properties')
-                .insert(payload)
-                .select('id,listing_public_code')
-                .single();
+        inserted = await _sb
+            .from('properties')
+            .insert(payload)
+            .select('id,listing_public_code')
+            .single();
       }
       final propertyId = inserted['id'] as String;
       OrgActivityService.logListingCreated(propertyId);
@@ -4792,9 +4794,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         media = _PreparedListingMedia(
           imagePaths: const [],
           imageHashes: const [],
-          videoPath: _videoUrl.text.trim().isEmpty
-              ? null
-              : _videoUrl.text.trim(),
+          videoPath:
+              _videoUrl.text.trim().isEmpty ? null : _videoUrl.text.trim(),
         );
       }
       try {
@@ -4831,24 +4832,28 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             latitude: (pending['latitude'] as num?)?.toDouble(),
             longitude: (pending['longitude'] as num?)?.toDouble(),
             preferredAt: DateTime.tryParse('${pending['preferred_at'] ?? ''}'),
-            quotedAmountSar:
-                (pending['quoted_amount_sar'] as num?)?.toDouble(),
+            quotedAmountSar: (pending['quoted_amount_sar'] as num?)?.toDouble(),
             maxPhotos: (pending['max_photos'] as num?)?.toInt() ?? 30,
             maxVideos: (pending['max_videos'] as num?)?.toInt() ?? 1,
             includeTour: pending['include_tour'] == true,
+            ownerMediaConsent: pending['owner_media_consent'] == true,
+            ownerCoverChangeConsent:
+                pending['owner_cover_change_consent'] == true,
+            ownerReplaceMediaConsent:
+                pending['owner_replace_media_consent'] == true,
           );
         } catch (_) {}
       }
-    if (!mounted) return;
-    // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
-    final fp = _currentPublishFingerprint();
-    _lastSuccessfulPublishFingerprint = fp;
-    unawaited(PublishContentFingerprintStore.save(fp));
-    final pub = (inserted['listing_public_code'] ?? '').toString().trim();
-    await _showSuccessChoice(
-      listingPublicCode: pub.isEmpty ? null : pub,
-      propertyId: propertyId,
-    );
+      if (!mounted) return;
+      // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
+      final fp = _currentPublishFingerprint();
+      _lastSuccessfulPublishFingerprint = fp;
+      unawaited(PublishContentFingerprintStore.save(fp));
+      final pub = (inserted['listing_public_code'] ?? '').toString().trim();
+      await _showSuccessChoice(
+        listingPublicCode: pub.isEmpty ? null : pub,
+        propertyId: propertyId,
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -5276,588 +5281,678 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                   )
                 : null,
             title: Text(_isAr ? 'إضافة إعلان' : 'Add Listing'),
-          actions: [
-            IconButton(
-              tooltip: _isAr ? 'حفظ المسودة' : 'Save draft',
-              onPressed: (_saving || _publishLock)
-                  ? null
-                  : () => unawaited(_persistListingDraft()),
-              icon: const Icon(Icons.save_outlined),
-            ),
-            if (pane == 6)
+            actions: [
               IconButton(
-                tooltip: _isAr ? 'إضافة صور أو فيديو' : 'Add images or video',
-                icon: (_picking || _uploadingVideo)
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: AppLogoLoading(compact: true, size: 22),
-                      )
-                    : const Icon(Icons.perm_media_outlined),
-                onPressed: (_saving || _picking || _uploadingVideo)
+                tooltip: _isAr ? 'حفظ المسودة' : 'Save draft',
+                onPressed: (_saving || _publishLock)
                     ? null
-                    : _showPickMediaMenu,
+                    : () => unawaited(_persistListingDraft()),
+                icon: const Icon(Icons.save_outlined),
               ),
-          ],
-        ),
-        body: AppKeyboardPad(
-          extra: 8,
-          child: Stack(
-          children: [
-            SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: _scrollCtrl,
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 980),
-                      child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                _HeaderCard(
-                  isAr: _isAr,
-                  marketerPublishName: _marketerPublishName,
+              if (pane == 6)
+                IconButton(
+                  tooltip: _isAr ? 'إضافة صور أو فيديو' : 'Add images or video',
+                  icon: (_picking || _uploadingVideo)
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: AppLogoLoading(compact: true, size: 22),
+                        )
+                      : const Icon(Icons.perm_media_outlined),
+                  onPressed: (_saving || _picking || _uploadingVideo)
+                      ? null
+                      : _showPickMediaMenu,
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  _isAr
-                      ? 'الخطوة $displayStep من $stepCount · ${_wizardScreenTitle(_isAr)}'
-                      : 'Step $displayStep of $stepCount · ${_wizardScreenTitle(_isAr)}',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                ComposerStepConstellation(
-                  step: displayStep,
-                  total: stepCount,
-                  accent: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 12),
-                KeyedSubtree(
-                  key: _formCardKey,
+            ],
+          ),
+          body: AppKeyboardPad(
+            extra: 8,
+            child: Stack(
+              children: [
+                SafeArea(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Visibility(
-                        visible: pane == 0,
-                        maintainState: true,
-                        child: KeyedSubtree(
-                          key: _regaCardKey,
-                          child: _AdLicenseStepCard(
-                            isAr: _isAr,
-                            hasRegaAdLicense: _hasRegaAdLicense,
-                            onHasRegaAdLicenseChanged: (v) => setState(() {
-                              _hasRegaAdLicense = v;
-                              _licenseStepError = null;
-                              _error = null;
-                              if (v == true) {
-                                _adLicenseSource = _AdLicenseSource.inApp;
-                                _consentMarketNoLicense = false;
-                              } else if (v == false) {
-                                _adLicenseSource = _AdLicenseSource.none;
-                                _regaVerifyOk = null;
-                                _regaVerifyBanner = null;
-                              } else {
-                                _adLicenseSource = _AdLicenseSource.unset;
-                              }
-                            }),
-                            licenseController: _regaAdLicenseNo,
-                            consentMarket: _consentMarketNoLicense,
-                            onConsentMarketChanged: (v) => setState(() {
-                              _consentMarketNoLicense = v;
-                              _licenseStepError = null;
-                            }),
-                            showPhoneOnMarket: _showPhoneOnMarket,
-                            onShowPhoneOnMarketChanged: (v) =>
-                                setState(() => _showPhoneOnMarket = v),
-                            fieldError: _licenseStepError,
-                            regaChecking: _regaChecking,
-                            regaVerifyBanner: _regaVerifyBanner,
-                            regaVerifyOk: _regaVerifyOk,
-                            onVerify: _scheduleRegaLicenseVerify,
-                            onOpenRegaImport: _openRegaImportPage,
-                          ),
-                        ),
-                      ),
-                      Visibility(
-                        visible: pane == 1,
-                        maintainState: true,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildPropertyFormSlice(
-                              AddPropertyFormSlice.classification,
-                              _formKeyClassification,
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton.icon(
-                              onPressed: _saving ? null : _showExtendedUsesDialog,
-                              icon: const Icon(Icons.open_in_new, size: 20),
-                              label: Text(
-                                _isAr
-                                    ? 'استخدامات موسّعة وتفاصيل إضافية'
-                                    : 'Extended uses & extra detail',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Visibility(
-                        visible: pane == 2 || pane == 23,
-                        maintainState: true,
-                        child: KeyedSubtree(
-                          key: _coordsKey,
-                          child: _CoordsCard(
-                            isAr: _isAr,
-                            saving: _saving,
-                            enabled: _useMapCoords,
-                            locationIsApproximate: _locationIsApproximate,
-                            latController: _latCtrl,
-                            lngController: _lngCtrl,
-                            lat: _lat,
-                            lng: _lng,
-                            formKey: _formKeyCoords,
-                            onToggle: (v) {
-                              if (!v) {
-                                setState(() {
-                                  _useMapCoords = false;
-                                  _lat = null;
-                                  _lng = null;
-                                  _latCtrl.clear();
-                                  _lngCtrl.clear();
-                                });
-                                return;
-                              }
-                              setState(() {
-                                _useMapCoords = true;
-                                _lat = null;
-                                _lng = null;
-                                _latCtrl.clear();
-                                _lngCtrl.clear();
-                                _error = null;
-                              });
-                              WidgetsBinding.instance.addPostFrameCallback((_) {
-                                if (mounted) {
-                                  _openMapPicker(kingdomOverview: true);
-                                }
-                              });
-                            },
-                            onPick: () => _openMapPicker(
-                              kingdomOverview:
-                                  _lat == null && _lng == null && _useMapCoords,
-                            ),
-                            onLatChanged: _onLatChanged,
-                            onLngChanged: _onLngChanged,
-                          ),
-                        ),
-                      ),
-                      Visibility(
-                        visible: pane == 3 || pane == 23,
-                        maintainState: true,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildPropertyFormSlice(
-                              AddPropertyFormSlice.location,
-                              _formKeyLocation,
-                            ),
-                            const SizedBox(height: 12),
-                            _EjarOptionalFieldsCard(
-                              isAr: _isAr,
-                              saving: _saving,
-                              contractCtrl: _ejarContractNo,
-                              unitCtrl: _ejarUnitNo,
-                              floorCtrl: _ejarFloorNo,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Visibility(
-                        visible: pane == 4,
-                        maintainState: true,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildPropertyFormSlice(
-                              AddPropertyFormSlice.pricing,
-                              _formKeyPricing,
-                            ),
-                            RegaOfficialBenchCard(
-                              isAr: _isAr,
-                              city: (_selectedCity ?? _city.text).trim(),
-                              typeCode: _type,
-                              isRent: _purposeIsRent,
-                            ),
-                          ],
-                        ),
-                      ),
-                      Visibility(
-                        visible: pane == 5,
-                        maintainState: true,
-                        child: _buildPropertyFormSlice(
-                          AddPropertyFormSlice.details,
-                          _formKeyDetails,
-                        ),
-                      ),
-                      Visibility(
-                        visible: pane == 6,
-                        maintainState: true,
-                        child: KeyedSubtree(
-                          key: _listingMediaKey,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              if (_requiresExternalLicenseBundle) ...[
-                                _ExternalLicenseMediaBanner(isAr: _isAr),
-                                const SizedBox(height: 12),
-                              ],
-                              _ListingMediaCard(
-                                isAr: _isAr,
-                                images: _images,
-                                saving: _saving,
-                                picking: _picking,
-                                uploadingVideo: _uploadingVideo,
-                                hasVideo: _hasUploadedVideo,
-                                showCoverHeroPicker: _images.isNotEmpty &&
-                                    _videoUrl.text.trim().isNotEmpty,
-                                coverHeroIsVideo: _coverHeroIsVideo,
-                                onCoverHeroIsVideoChanged: (v) =>
-                                    setState(() => _coverHeroIsVideo = v),
-                                onPickImages: _showPickImagesMenu,
-                                onPickVideo: _showVideoPickMenu,
-                                onClearVideo: _clearUploadedVideo,
-                                onRemoveImage: _removeImageAt,
-                                onMoveImage: _moveImage,
-                              ),
-                              const SizedBox(height: 10),
-                              OutlinedButton.icon(
-                                onPressed: _saving
-                                    ? null
-                                    : () async {
-                                        final refs = [
-                                          for (var i = 0;
-                                              i < _images.length;
-                                              i++)
-                                            '$i',
-                                        ];
-                                        final bytes = <String, Uint8List>{
-                                          for (var i = 0;
-                                              i < _images.length;
-                                              i++)
-                                            '$i': _images[i].bytes,
-                                        };
-                                        final tour =
-                                            await showInAppTourBuilderSheet(
-                                          context: context,
-                                          isAr: _isAr,
-                                          imageRefs: refs,
-                                          initial: _inAppTour,
-                                          previewBytes: bytes,
-                                        );
-                                        if (tour != null && mounted) {
-                                          setState(() => _inAppTour = tour);
-                                        }
-                                      },
-                                icon: const Icon(Icons.threed_rotation_outlined),
-                                label: Text(
-                                  AppLocalizations.of(context)!.inAppTourBuild,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                AppLocalizations.of(context)!.inAppTourEngineHint,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                  height: 1.35,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              FilledButton.tonalIcon(
-                                onPressed: _saving
-                                    ? null
-                                    : () async {
-                                        final loc = [
-                                          _city.text.trim(),
-                                          _location.text.trim(),
-                                        ].where((s) => s.isNotEmpty).join(' · ');
-                                        await Navigator.of(context)
-                                            .push<Object?>(
-                                          MaterialPageRoute<Object?>(
-                                            builder: (_) => PhotoShootBookPage(
-                                              lang: widget.lang,
-                                              locationText: loc,
-                                              latitude: double.tryParse(
-                                                  _latCtrl.text.trim()),
-                                              longitude: double.tryParse(
-                                                  _lngCtrl.text.trim()),
-                                              onQueued: (d) => setState(
-                                                () => _pendingPhotoShoot = d,
-                                              ),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          controller: _scrollCtrl,
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 980),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _HeaderCard(
+                                    isAr: _isAr,
+                                    marketerPublishName: _marketerPublishName,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _isAr
+                                        ? 'الخطوة $displayStep من $stepCount · ${_wizardScreenTitle(_isAr)}'
+                                        : 'Step $displayStep of $stepCount · ${_wizardScreenTitle(_isAr)}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ComposerStepConstellation(
+                                    step: displayStep,
+                                    total: stepCount,
+                                    accent:
+                                        Theme.of(context).colorScheme.primary,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  KeyedSubtree(
+                                    key: _formCardKey,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        Visibility(
+                                          visible: pane == 0,
+                                          maintainState: true,
+                                          child: KeyedSubtree(
+                                            key: _regaCardKey,
+                                            child: _AdLicenseStepCard(
+                                              isAr: _isAr,
+                                              hasRegaAdLicense:
+                                                  _hasRegaAdLicense,
+                                              onHasRegaAdLicenseChanged: (v) =>
+                                                  setState(() {
+                                                _hasRegaAdLicense = v;
+                                                _licenseStepError = null;
+                                                _error = null;
+                                                if (v == true) {
+                                                  _adLicenseSource =
+                                                      _AdLicenseSource.inApp;
+                                                  _consentMarketNoLicense =
+                                                      false;
+                                                } else if (v == false) {
+                                                  _adLicenseSource =
+                                                      _AdLicenseSource.none;
+                                                  _regaVerifyOk = null;
+                                                  _regaVerifyBanner = null;
+                                                } else {
+                                                  _adLicenseSource =
+                                                      _AdLicenseSource.unset;
+                                                }
+                                              }),
+                                              licenseController:
+                                                  _regaAdLicenseNo,
+                                              consentMarket:
+                                                  _consentMarketNoLicense,
+                                              onConsentMarketChanged: (v) =>
+                                                  setState(() {
+                                                _consentMarketNoLicense = v;
+                                                _licenseStepError = null;
+                                              }),
+                                              showPhoneOnMarket:
+                                                  _showPhoneOnMarket,
+                                              onShowPhoneOnMarketChanged: (v) =>
+                                                  setState(() =>
+                                                      _showPhoneOnMarket = v),
+                                              fieldError: _licenseStepError,
+                                              regaChecking: _regaChecking,
+                                              regaVerifyBanner:
+                                                  _regaVerifyBanner,
+                                              regaVerifyOk: _regaVerifyOk,
+                                              onVerify:
+                                                  _scheduleRegaLicenseVerify,
+                                              onOpenRegaImport:
+                                                  _openRegaImportPage,
                                             ),
                                           ),
-                                        );
-                                      },
-                                icon: const Icon(Icons.photo_camera_outlined),
-                                label: Text(
-                                  AppLocalizations.of(context)!
-                                      .photographerRequestFromMedia,
-                                ),
-                              ),
-                              if (_requiresExternalLicenseBundle) ...[
-                                const SizedBox(height: 14),
-                                _LicensePdfUploadRow(
-                                  isAr: _isAr,
-                                  storagePath: _licensePdfStoragePath,
-                                  uploading: _uploadingLicensePdf,
-                                  busy: _saving ||
-                                      _picking ||
-                                      _uploadingVideo ||
-                                      _uploadingLicensePdf,
-                                  onPick: _pickAndUploadLicensePdf,
-                                  onClear: _clearLicensePdf,
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (_error != null) _ErrorBox(text: _error!, isAr: _isAr),
-                if (_wizardStep >= _kWizardLastStep) ...[
-                  const SizedBox(height: 12),
-                  _DealPublishExtrasCard(
-                    isAr: _isAr,
-                    saving: _saving || _publishLock,
-                    noLegalObstacles: _noLegalObstacles,
-                    onNoLegalObstaclesChanged: (v) =>
-                        setState(() => _noLegalObstacles = v),
-                    advertiserRoleLabel: _advertiserRoleLabel,
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile.adaptive(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      _isAr
-                          ? 'إظهار اسمي في السوق العقاري وتفاصيل الإعلان'
-                          : 'Show my name on the market and listing details',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        height: 1.25,
-                      ),
-                    ),
-                    subtitle: Text(
-                      _isAr
-                          ? 'اختياري. الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو المستعار. الجوال لا يظهر للعامة.'
-                          : 'Optional. Official name or alias. Phone stays hidden from the public.',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    value: _showOwnerNameOnCards,
-                    onChanged: (_saving || _publishLock)
-                        ? null
-                        : (v) => setState(() => _showOwnerNameOnCards = v),
-                  ),
-                  const SizedBox(height: 8),
-                  PublisherIdentityOptionsCard(
-                    isAr: _isAr,
-                    compact: true,
-                    enabled: !(_saving || _publishLock),
-                    hidePhoneOptions: true,
-                    marketContactLocked: true,
-                    nameSource: _pubNameSource,
-                    phoneSource: _pubPhoneSource,
-                    publishPresence: _publishPresenceOnCards,
-                    officialName: _officialNameCached,
-                    displayAlias: _displayAliasCached,
-                    primaryPhone: _primaryPhoneCached,
-                    secondaryPhone: _secondaryPhoneCached,
-                    onNameSourceChanged: (v) async {
-                      await PublisherIdentityPrefs.instance.setNameSource(v);
-                      if (!mounted) return;
-                      setState(() => _pubNameSource = v);
-                    },
-                    onPublishPresenceChanged: (v) async {
-                      await PublisherIdentityPrefs.instance
-                          .setPublishPresenceOnCards(v);
-                      if (!mounted) return;
-                      setState(() => _publishPresenceOnCards = v);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TermsAcceptanceCheckbox(
-                    isAr: _isAr,
-                    value: _termsAccepted,
-                    onChanged: (_saving || _publishLock)
-                        ? null
-                        : (v) => setState(() => _termsAccepted = v == true),
-                    onOpenTerms: () {
-                      Navigator.of(context).push<void>(
-                        MaterialPageRoute<void>(
-                          builder: (_) =>
-                              PlatformPoliciesScreen(isAr: _isAr),
-                        ),
-                      );
-                    },
-                  ),
-                ],
-                if (kIsWeb && pane == 6) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _isAr
-                        ? 'على الويب: اختر الملفات من جهازك للرفع.'
-                        : 'On web: pick files from your device to upload.',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                    ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Material(
-                elevation: 8,
-                color: cs.surface,
-                shadowColor: Colors.black26,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                  child: LayoutBuilder(
-                    builder: (context, c) {
-                      final narrow = c.maxWidth < 520;
-                      final nextBtn = _wizardStep < _kWizardLastStep
-                          ? FilledButton(
-                              onPressed: (_saving ||
-                                      _publishLock ||
-                                      _picking ||
-                                      _uploadingVideo ||
-                                      _uploadingLicensePdf)
-                                  ? null
-                                  : _wizardNext,
-                              child: Text(_isAr ? 'التالي' : 'Next'),
-                            )
-                          : FilledButton(
-                              onPressed: (_saving ||
-                                      _publishLock ||
-                                      _picking ||
-                                      _uploadingVideo ||
-                                      _uploadingLicensePdf ||
-                                      !_canSubmit)
-                                  ? null
-                                  : _submit,
-                              child: (_saving || _publishLock)
-                                  ? Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const SizedBox(
-                                          width: 22,
-                                          height: 22,
-                                          child: AppLogoLoading(
-                                              compact: true, size: 20),
                                         ),
-                                        const SizedBox(width: 8),
-                                        Flexible(
-                                          child: Text(
-                                            _isAr
-                                                ? 'جاري مراجعة التفاصيل والنشر…'
-                                                : 'Reviewing details & publishing…',
-                                            overflow: TextOverflow.ellipsis,
+                                        Visibility(
+                                          visible: pane == 1,
+                                          maintainState: true,
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              _buildPropertyFormSlice(
+                                                AddPropertyFormSlice
+                                                    .classification,
+                                                _formKeyClassification,
+                                              ),
+                                              const SizedBox(height: 8),
+                                              OutlinedButton.icon(
+                                                onPressed: _saving
+                                                    ? null
+                                                    : _showExtendedUsesDialog,
+                                                icon: const Icon(
+                                                    Icons.open_in_new,
+                                                    size: 20),
+                                                label: Text(
+                                                  _isAr
+                                                      ? 'استخدامات موسّعة وتفاصيل إضافية'
+                                                      : 'Extended uses & extra detail',
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Visibility(
+                                          visible: pane == 2 || pane == 23,
+                                          maintainState: true,
+                                          child: KeyedSubtree(
+                                            key: _coordsKey,
+                                            child: _CoordsCard(
+                                              isAr: _isAr,
+                                              saving: _saving,
+                                              enabled: _useMapCoords,
+                                              locationIsApproximate:
+                                                  _locationIsApproximate,
+                                              latController: _latCtrl,
+                                              lngController: _lngCtrl,
+                                              lat: _lat,
+                                              lng: _lng,
+                                              formKey: _formKeyCoords,
+                                              onToggle: (v) {
+                                                if (!v) {
+                                                  setState(() {
+                                                    _useMapCoords = false;
+                                                    _lat = null;
+                                                    _lng = null;
+                                                    _latCtrl.clear();
+                                                    _lngCtrl.clear();
+                                                  });
+                                                  return;
+                                                }
+                                                setState(() {
+                                                  _useMapCoords = true;
+                                                  _lat = null;
+                                                  _lng = null;
+                                                  _latCtrl.clear();
+                                                  _lngCtrl.clear();
+                                                  _error = null;
+                                                });
+                                                WidgetsBinding.instance
+                                                    .addPostFrameCallback((_) {
+                                                  if (mounted) {
+                                                    _openMapPicker(
+                                                        kingdomOverview: true);
+                                                  }
+                                                });
+                                              },
+                                              onPick: () => _openMapPicker(
+                                                kingdomOverview: _lat == null &&
+                                                    _lng == null &&
+                                                    _useMapCoords,
+                                              ),
+                                              onLatChanged: _onLatChanged,
+                                              onLngChanged: _onLngChanged,
+                                            ),
+                                          ),
+                                        ),
+                                        Visibility(
+                                          visible: pane == 3 || pane == 23,
+                                          maintainState: true,
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              _buildPropertyFormSlice(
+                                                AddPropertyFormSlice.location,
+                                                _formKeyLocation,
+                                              ),
+                                              const SizedBox(height: 12),
+                                              _EjarOptionalFieldsCard(
+                                                isAr: _isAr,
+                                                saving: _saving,
+                                                contractCtrl: _ejarContractNo,
+                                                unitCtrl: _ejarUnitNo,
+                                                floorCtrl: _ejarFloorNo,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Visibility(
+                                          visible: pane == 4,
+                                          maintainState: true,
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              _buildPropertyFormSlice(
+                                                AddPropertyFormSlice.pricing,
+                                                _formKeyPricing,
+                                              ),
+                                              RegaOfficialBenchCard(
+                                                isAr: _isAr,
+                                                city: (_selectedCity ??
+                                                        _city.text)
+                                                    .trim(),
+                                                typeCode: _type,
+                                                isRent: _purposeIsRent,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Visibility(
+                                          visible: pane == 5,
+                                          maintainState: true,
+                                          child: _buildPropertyFormSlice(
+                                            AddPropertyFormSlice.details,
+                                            _formKeyDetails,
+                                          ),
+                                        ),
+                                        Visibility(
+                                          visible: pane == 6,
+                                          maintainState: true,
+                                          child: KeyedSubtree(
+                                            key: _listingMediaKey,
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                if (_requiresExternalLicenseBundle) ...[
+                                                  _ExternalLicenseMediaBanner(
+                                                      isAr: _isAr),
+                                                  const SizedBox(height: 12),
+                                                ],
+                                                _ListingMediaCard(
+                                                  isAr: _isAr,
+                                                  images: _images,
+                                                  saving: _saving,
+                                                  picking: _picking,
+                                                  uploadingVideo:
+                                                      _uploadingVideo,
+                                                  hasVideo: _hasUploadedVideo,
+                                                  showCoverHeroPicker:
+                                                      _images.isNotEmpty &&
+                                                          _videoUrl.text
+                                                              .trim()
+                                                              .isNotEmpty,
+                                                  coverHeroIsVideo:
+                                                      _coverHeroIsVideo,
+                                                  onCoverHeroIsVideoChanged:
+                                                      (v) => setState(() =>
+                                                          _coverHeroIsVideo =
+                                                              v),
+                                                  onPickImages:
+                                                      _showPickImagesMenu,
+                                                  onPickVideo:
+                                                      _showVideoPickMenu,
+                                                  onClearVideo:
+                                                      _clearUploadedVideo,
+                                                  onRemoveImage: _removeImageAt,
+                                                  onMoveImage: _moveImage,
+                                                ),
+                                                const SizedBox(height: 10),
+                                                OutlinedButton.icon(
+                                                  onPressed: _saving
+                                                      ? null
+                                                      : () async {
+                                                          final refs = [
+                                                            for (var i = 0;
+                                                                i <
+                                                                    _images
+                                                                        .length;
+                                                                i++)
+                                                              '$i',
+                                                          ];
+                                                          final bytes = <String,
+                                                              Uint8List>{
+                                                            for (var i = 0;
+                                                                i <
+                                                                    _images
+                                                                        .length;
+                                                                i++)
+                                                              '$i': _images[i]
+                                                                  .bytes,
+                                                          };
+                                                          final tour =
+                                                              await showInAppTourBuilderSheet(
+                                                            context: context,
+                                                            isAr: _isAr,
+                                                            imageRefs: refs,
+                                                            initial: _inAppTour,
+                                                            previewBytes: bytes,
+                                                          );
+                                                          if (tour != null &&
+                                                              mounted) {
+                                                            setState(() =>
+                                                                _inAppTour =
+                                                                    tour);
+                                                          }
+                                                        },
+                                                  icon: const Icon(Icons
+                                                      .threed_rotation_outlined),
+                                                  label: Text(
+                                                    AppLocalizations.of(
+                                                            context)!
+                                                        .inAppTourBuild,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Text(
+                                                  AppLocalizations.of(context)!
+                                                      .inAppTourEngineHint,
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant,
+                                                    height: 1.35,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                FilledButton.tonalIcon(
+                                                  onPressed: _saving
+                                                      ? null
+                                                      : () async {
+                                                          final loc = [
+                                                            _city.text.trim(),
+                                                            _location.text
+                                                                .trim(),
+                                                          ]
+                                                              .where((s) =>
+                                                                  s.isNotEmpty)
+                                                              .join(' · ');
+                                                          await Navigator.of(
+                                                                  context)
+                                                              .push<Object?>(
+                                                            MaterialPageRoute<
+                                                                Object?>(
+                                                              builder: (_) =>
+                                                                  PhotoShootBookPage(
+                                                                lang:
+                                                                    widget.lang,
+                                                                locationText:
+                                                                    loc,
+                                                                latitude: double
+                                                                    .tryParse(
+                                                                        _latCtrl
+                                                                            .text
+                                                                            .trim()),
+                                                                longitude: double
+                                                                    .tryParse(
+                                                                        _lngCtrl
+                                                                            .text
+                                                                            .trim()),
+                                                                onQueued: (d) =>
+                                                                    setState(
+                                                                  () =>
+                                                                      _pendingPhotoShoot =
+                                                                          d,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          );
+                                                        },
+                                                  icon: const Icon(Icons
+                                                      .photo_camera_outlined),
+                                                  label: Text(
+                                                    AppLocalizations.of(
+                                                            context)!
+                                                        .photographerRequestFromMedia,
+                                                  ),
+                                                ),
+                                                if (_requiresExternalLicenseBundle) ...[
+                                                  const SizedBox(height: 14),
+                                                  _LicensePdfUploadRow(
+                                                    isAr: _isAr,
+                                                    storagePath:
+                                                        _licensePdfStoragePath,
+                                                    uploading:
+                                                        _uploadingLicensePdf,
+                                                    busy: _saving ||
+                                                        _picking ||
+                                                        _uploadingVideo ||
+                                                        _uploadingLicensePdf,
+                                                    onPick:
+                                                        _pickAndUploadLicensePdf,
+                                                    onClear: _clearLicensePdf,
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ],
-                                    )
-                                  : Text(
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  if (_error != null)
+                                    _ErrorBox(text: _error!, isAr: _isAr),
+                                  if (_wizardStep >= _kWizardLastStep) ...[
+                                    const SizedBox(height: 12),
+                                    _DealPublishExtrasCard(
+                                      isAr: _isAr,
+                                      saving: _saving || _publishLock,
+                                      noLegalObstacles: _noLegalObstacles,
+                                      onNoLegalObstaclesChanged: (v) =>
+                                          setState(() => _noLegalObstacles = v),
+                                      advertiserRoleLabel: _advertiserRoleLabel,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    SwitchListTile.adaptive(
+                                      contentPadding: EdgeInsets.zero,
+                                      title: Text(
+                                        _isAr
+                                            ? 'إظهار اسمي في السوق العقاري وتفاصيل الإعلان'
+                                            : 'Show my name on the market and listing details',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          height: 1.25,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        _isAr
+                                            ? 'اختياري. الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو المستعار. الجوال لا يظهر للعامة.'
+                                            : 'Optional. Official name or alias. Phone stays hidden from the public.',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w600),
+                                      ),
+                                      value: _showOwnerNameOnCards,
+                                      onChanged: (_saving || _publishLock)
+                                          ? null
+                                          : (v) => setState(
+                                              () => _showOwnerNameOnCards = v),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    PublisherIdentityOptionsCard(
+                                      isAr: _isAr,
+                                      compact: true,
+                                      enabled: !(_saving || _publishLock),
+                                      hidePhoneOptions: true,
+                                      marketContactLocked: true,
+                                      nameSource: _pubNameSource,
+                                      phoneSource: _pubPhoneSource,
+                                      publishPresence: _publishPresenceOnCards,
+                                      officialName: _officialNameCached,
+                                      displayAlias: _displayAliasCached,
+                                      primaryPhone: _primaryPhoneCached,
+                                      secondaryPhone: _secondaryPhoneCached,
+                                      onNameSourceChanged: (v) async {
+                                        await PublisherIdentityPrefs.instance
+                                            .setNameSource(v);
+                                        if (!mounted) return;
+                                        setState(() => _pubNameSource = v);
+                                      },
+                                      onPublishPresenceChanged: (v) async {
+                                        await PublisherIdentityPrefs.instance
+                                            .setPublishPresenceOnCards(v);
+                                        if (!mounted) return;
+                                        setState(
+                                            () => _publishPresenceOnCards = v);
+                                      },
+                                    ),
+                                    const SizedBox(height: 12),
+                                    TermsAcceptanceCheckbox(
+                                      isAr: _isAr,
+                                      value: _termsAccepted,
+                                      onChanged: (_saving || _publishLock)
+                                          ? null
+                                          : (v) => setState(
+                                              () => _termsAccepted = v == true),
+                                      onOpenTerms: () {
+                                        Navigator.of(context).push<void>(
+                                          MaterialPageRoute<void>(
+                                            builder: (_) =>
+                                                PlatformPoliciesScreen(
+                                                    isAr: _isAr),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                  if (kIsWeb && pane == 6) ...[
+                                    const SizedBox(height: 12),
+                                    Text(
                                       _isAr
-                                          ? 'نشر الإعلان'
-                                          : 'Publish listing'),
-                            );
-                      final backBtn = OutlinedButton(
-                        onPressed: (_wizardStep > 0 && !_saving)
-                            ? _wizardPrev
-                            : null,
-                        child: Text(_isAr ? 'السابق' : 'Back'),
-                      );
-                      if (narrow) {
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            nextBtn,
-                            const SizedBox(height: 8),
-                            backBtn,
-                          ],
-                        );
-                      }
-                      return Row(
-                        children: [
-                          Expanded(child: backBtn),
-                          const SizedBox(width: 12),
-                          Expanded(flex: 2, child: nextBtn),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-            if (_saving)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.black.withValues(alpha: 0.35),
-                  child: Center(
-                    child: Material(
-                      elevation: 8,
-                      borderRadius: BorderRadius.circular(16),
-                      color: cs.surface,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const AppLogoLoading(compact: true, size: 44),
-                            const SizedBox(height: 14),
-                            Text(
-                              _isAr
-                                  ? 'جاري مراجعة التفاصيل والنشر'
-                                  : 'Reviewing details & publishing',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 15,
+                                          ? 'على الويب: اختر الملفات من جهازك للرفع.'
+                                          : 'On web: pick files from your device to upload.',
+                                      textAlign: TextAlign.center,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                              color: cs.onSurfaceVariant),
+                                    ),
+                                  ],
+                                  const SizedBox(height: 8),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
+                        ),
+                      ),
+                      Material(
+                        elevation: 8,
+                        color: cs.surface,
+                        shadowColor: Colors.black26,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                          child: LayoutBuilder(
+                            builder: (context, c) {
+                              final narrow = c.maxWidth < 520;
+                              final nextBtn = _wizardStep < _kWizardLastStep
+                                  ? FilledButton(
+                                      onPressed: (_saving ||
+                                              _publishLock ||
+                                              _picking ||
+                                              _uploadingVideo ||
+                                              _uploadingLicensePdf)
+                                          ? null
+                                          : _wizardNext,
+                                      child: Text(_isAr ? 'التالي' : 'Next'),
+                                    )
+                                  : FilledButton(
+                                      onPressed: (_saving ||
+                                              _publishLock ||
+                                              _picking ||
+                                              _uploadingVideo ||
+                                              _uploadingLicensePdf ||
+                                              !_canSubmit)
+                                          ? null
+                                          : _submit,
+                                      child: (_saving || _publishLock)
+                                          ? Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const SizedBox(
+                                                  width: 22,
+                                                  height: 22,
+                                                  child: AppLogoLoading(
+                                                      compact: true, size: 20),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Flexible(
+                                                  child: Text(
+                                                    _isAr
+                                                        ? 'جاري مراجعة التفاصيل والنشر…'
+                                                        : 'Reviewing details & publishing…',
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          : Text(_isAr
+                                              ? 'نشر الإعلان'
+                                              : 'Publish listing'),
+                                    );
+                              final backBtn = OutlinedButton(
+                                onPressed: (_wizardStep > 0 && !_saving)
+                                    ? _wizardPrev
+                                    : null,
+                                child: Text(_isAr ? 'السابق' : 'Back'),
+                              );
+                              if (narrow) {
+                                return Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    nextBtn,
+                                    const SizedBox(height: 8),
+                                    backBtn,
+                                  ],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  Expanded(child: backBtn),
+                                  const SizedBox(width: 12),
+                                  Expanded(flex: 2, child: nextBtn),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_saving)
+                  Positioned.fill(
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      child: Center(
+                        child: Material(
+                          elevation: 8,
+                          borderRadius: BorderRadius.circular(16),
+                          color: cs.surface,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const AppLogoLoading(compact: true, size: 44),
+                                const SizedBox(height: 14),
+                                Text(
+                                  _isAr
+                                      ? 'جاري مراجعة التفاصيل والنشر'
+                                      : 'Reviewing details & publishing',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
-        ),
-      ),
       ),
     );
   }
@@ -5945,9 +6040,8 @@ class _AdLicenseStepCard extends StatelessWidget {
             inputFormatters: latinDigitsOnlyFormatters(maxLength: 10),
             textAlign: TextAlign.center,
             decoration: InputDecoration(
-              labelText: isAr
-                  ? 'أدخل رقم ترخيص الإعلان'
-                  : 'Enter ad license number',
+              labelText:
+                  isAr ? 'أدخل رقم ترخيص الإعلان' : 'Enter ad license number',
               hintText: isAr
                   ? 'رقم ترخيص الإعلان المكون من 10 أرقام'
                   : '10-digit ad license number',
@@ -6370,7 +6464,7 @@ class _HeaderCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isAr ? 'نشر بواسطة' : 'Published by',
+                        isAr ? 'أُنشئ الإعلان بواسطة:' : 'Listing created by:',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -6541,7 +6635,8 @@ class _ListingMediaCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: cs.surfaceContainerHighest.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.35)),
+                border: Border.all(
+                    color: cs.outlineVariant.withValues(alpha: 0.35)),
               ),
               child: Row(
                 children: [
@@ -6580,7 +6675,8 @@ class _ListingMediaCard extends StatelessWidget {
               decoration: BoxDecoration(
                 color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
+                border:
+                    Border.all(color: cs.outlineVariant.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -7066,9 +7162,8 @@ class _DealPublishExtrasCard extends StatelessWidget {
           const SizedBox(height: 10),
           CheckboxListTile(
             value: noLegalObstacles,
-            onChanged: saving
-                ? null
-                : (v) => onNoLegalObstaclesChanged(v == true),
+            onChanged:
+                saving ? null : (v) => onNoLegalObstaclesChanged(v == true),
             controlAffinity: ListTileControlAffinity.leading,
             contentPadding: EdgeInsets.zero,
             title: Text(
@@ -8403,8 +8498,8 @@ class _FormCard extends StatelessWidget {
                     onTap: saving ? null : onPickDeedDate,
                     borderRadius: BorderRadius.circular(12),
                     child: InputDecorator(
-                      decoration: deco(isAr ? 'تاريخ الصك' : 'Deed date')
-                          .copyWith(
+                      decoration:
+                          deco(isAr ? 'تاريخ الصك' : 'Deed date').copyWith(
                         errorText: field.errorText,
                         hintText: isAr ? 'اختر التاريخ' : 'Select date',
                         suffixIcon: deedDate != null && !saving
@@ -8471,16 +8566,13 @@ class _FormCard extends StatelessWidget {
                       ? (autoFillTitle
                           ? 'عنوان الإعلان (يُعبّأ تلقائياً)'
                           : 'عنوان الإعلان')
-                      : (autoFillTitle
-                          ? 'Title (auto-filled)'
-                          : 'Title'),
+                      : (autoFillTitle ? 'Title (auto-filled)' : 'Title'),
                 ).copyWith(
                   suffixIcon: (autoFillTitle || onSuggestSmartTitle == null)
                       ? null
                       : IconButton(
-                          tooltip: isAr
-                              ? 'اقتراح عنوان ذكي'
-                              : 'Suggest smart title',
+                          tooltip:
+                              isAr ? 'اقتراح عنوان ذكي' : 'Suggest smart title',
                           onPressed: saving ? null : onSuggestSmartTitle,
                           icon: const Icon(Icons.auto_awesome_outlined),
                         ),
@@ -8632,19 +8724,19 @@ class _FormCard extends StatelessWidget {
                     currencyCode: currency,
                   );
 
-                  final livePreview = (price.text.trim().isEmpty ||
-                          priceIncludesVat == null)
-                      ? const SizedBox.shrink()
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: ListingPricingBreakdown(
-                            invoice: liveInvoice,
-                            isAr: isAr,
-                            title: isAr
-                                ? 'معاينة الفاتورة (حسب اختيارك)'
-                                : 'Live invoice preview',
-                          ),
-                        );
+                  final livePreview =
+                      (price.text.trim().isEmpty || priceIncludesVat == null)
+                          ? const SizedBox.shrink()
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: ListingPricingBreakdown(
+                                invoice: liveInvoice,
+                                isAr: isAr,
+                                title: isAr
+                                    ? 'معاينة الفاتورة (حسب اختيارك)'
+                                    : 'Live invoice preview',
+                              ),
+                            );
 
                   final stackedHeader = narrow
                       ? Column(
@@ -8910,8 +9002,9 @@ class _FormCard extends StatelessWidget {
                     final narrow = c.maxWidth < 700;
                     final showUnitFloor =
                         PropertyTypeCatalog.showsUnitFloorFieldEffective(type);
-                    final showTotal = PropertyTypeCatalog
-                        .showsTotalFloorsFieldEffective(type);
+                    final showTotal =
+                        PropertyTypeCatalog.showsTotalFloorsFieldEffective(
+                            type);
 
                     final floorField = DropdownButtonFormField<int>(
                       initialValue: floor,
@@ -9081,8 +9174,7 @@ class _VatInclusionQuestion extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.receipt_long_outlined,
-                  size: 18, color: cs.primary),
+              Icon(Icons.receipt_long_outlined, size: 18, color: cs.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -9109,8 +9201,7 @@ class _VatInclusionQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == true,
                 enabled: !saving,
-                onSelected: (_) =>
-                    onChanged(value == true ? null : true),
+                onSelected: (_) => onChanged(value == true ? null : true),
               ),
               StableSelectChip(
                 label: isAr ? 'لا — بدون ضريبة' : 'No — without VAT',
@@ -9118,8 +9209,7 @@ class _VatInclusionQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == false,
                 enabled: !saving,
-                onSelected: (_) =>
-                    onChanged(value == false ? null : false),
+                onSelected: (_) => onChanged(value == false ? null : false),
               ),
             ],
           ),
@@ -9205,8 +9295,7 @@ class _CommissionKindQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == 'none',
                 enabled: !saving,
-                onSelected: (_) =>
-                    onChanged(value == 'none' ? '' : 'none'),
+                onSelected: (_) => onChanged(value == 'none' ? '' : 'none'),
               ),
               StableSelectChip(
                 label: isAr ? 'عمولة 2.5%' : '2.5% commission',
@@ -9223,8 +9312,7 @@ class _CommissionKindQuestion extends StatelessWidget {
                 showLeadingCheck: false,
                 selected: value == 'fixed',
                 enabled: !saving,
-                onSelected: (_) =>
-                    onChanged(value == 'fixed' ? '' : 'fixed'),
+                onSelected: (_) => onChanged(value == 'fixed' ? '' : 'fixed'),
               ),
             ],
           ),
@@ -9245,12 +9333,14 @@ class _CommissionKindQuestion extends StatelessWidget {
               ),
               validator: (v) {
                 if (value != 'fixed') return null;
-                final s = _AddPropertyPageState.normalizeNumbers(v ?? '')
-                    .trim();
+                final s =
+                    _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
                 if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
                 final n = double.tryParse(s);
                 if (n == null || n <= 0) {
-                  return isAr ? 'أدخل مبلغاً موجباً' : 'Enter a positive amount';
+                  return isAr
+                      ? 'أدخل مبلغاً موجباً'
+                      : 'Enter a positive amount';
                 }
                 return null;
               },

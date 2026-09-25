@@ -2652,47 +2652,9 @@ class _RealEstateCard extends StatelessWidget {
     return publishedByCaptionFor(p, isAr);
   }
 
-  /// سطر «أُنشئ الإعلان بواسطة …» حسب نوع الجهة الفعلي.
+  /// سطر إسناد موحّد يتبعه اسم الناشر الفعلي.
   static String publishedByCaptionFor(Property p, bool isAr) {
-    final snap = p.marketingLicenseSnapshot ?? const <String, dynamic>{};
-    final raw = (snap['marketer_entity_type'] ??
-            snap['entity_type'] ??
-            snap['organization_type'] ??
-            snap['broker_entity_type'] ??
-            '')
-        .toString()
-        .toLowerCase()
-        .trim();
-    if (raw.contains('office') ||
-        raw.contains('مكتب') ||
-        raw == 'broker_office') {
-      return isAr
-          ? 'أُنشئ الإعلان بواسطة المكتب العقاري'
-          : 'Listing created by real estate office';
-    }
-    if (raw.contains('company') ||
-        raw.contains('شركة') ||
-        raw == 'broker_company') {
-      return isAr
-          ? 'أُنشئ الإعلان بواسطة الشركة العقارية'
-          : 'Listing created by real estate company';
-    }
-    if (raw.contains('institution') ||
-        raw.contains('establishment') ||
-        raw.contains('مؤسسة') ||
-        raw == 'broker_institution') {
-      return isAr
-          ? 'أُنشئ الإعلان بواسطة المؤسسة العقارية'
-          : 'Listing created by real estate establishment';
-    }
-    if ((p.publishedByMarketerId ?? '').trim().isNotEmpty) {
-      return isAr
-          ? 'أُنشئ الإعلان بواسطة المسوق'
-          : 'Listing created by marketer';
-    }
-    return isAr
-        ? 'أُنشئ الإعلان بواسطة المعلن'
-        : 'Listing created by advertiser';
+    return isAr ? 'أُنشئ الإعلان بواسطة:' : 'Listing created by:';
   }
 
   static List<Map<String, String>> listingLicenseEntries(
@@ -2932,7 +2894,9 @@ class _RealEstateCard extends StatelessWidget {
           isAr: isAr,
           allowInlineVideo: !kIsWeb,
           listingIdForWatermark: property.id,
-          showListingWatermark: false,
+          showListingWatermark: property.photographerMediaPaths.isNotEmpty,
+          photographerMediaAttributions: property.photographerMediaAttributions,
+          photographerMediaPaths: property.photographerMediaPaths,
           preferStaticPrimaryImage: preferStaticPrimaryImage,
         ),
         ListingMediaStoryOrbit(
@@ -3453,7 +3417,7 @@ class _RealEstateCard extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          '${publishedByCaptionFor(property, isAr)}: ${marketerLine.trim()}',
+                          '${publishedByCaptionFor(property, isAr)} ${marketerLine.trim()}',
                           maxLines: 1,
                           softWrap: false,
                           overflow: TextOverflow.ellipsis,
@@ -3581,7 +3545,7 @@ class _RealEstateCard extends StatelessWidget {
         if (!hideAdvertiserRow && advertiserName.trim().isNotEmpty) ...[
           const SizedBox(height: 4),
           Text(
-            '${publishedByCaptionFor(property, isAr)}: $advertiserName',
+            '${publishedByCaptionFor(property, isAr)} $advertiserName',
             maxLines: 1,
             softWrap: false,
             overflow: TextOverflow.ellipsis,
@@ -4074,6 +4038,8 @@ class _PropertyImage extends StatelessWidget {
 
   final String? listingIdForWatermark;
   final bool showListingWatermark;
+  final Map<String, String> photographerMediaAttributions;
+  final List<String> photographerMediaPaths;
 
   /// عند true مع عدة صور: نعرض الأولى فقط (بدون PageView/نقاط).
   final bool preferStaticPrimaryImage;
@@ -4089,6 +4055,8 @@ class _PropertyImage extends StatelessWidget {
     this.allowInlineVideo = true,
     this.listingIdForWatermark,
     this.showListingWatermark = false,
+    this.photographerMediaAttributions = const {},
+    this.photographerMediaPaths = const [],
     this.preferStaticPrimaryImage = false,
     this.preferVideoCover = false,
   });
@@ -4120,16 +4088,34 @@ class _PropertyImage extends StatelessWidget {
     return s.substring(s.length - 8);
   }
 
-  Widget _withWatermark(Widget child) {
-    if (!showListingWatermark) return child;
+  Widget? _photographerWatermark(String source) {
+    if (!showListingWatermark) return null;
+    final sourcePath = Uri.tryParse(source.trim())?.path ?? source.trim();
+    for (final rawPath in photographerMediaPaths) {
+      final mediaPath = Uri.tryParse(rawPath)?.path ?? rawPath;
+      if (sourcePath != mediaPath && !sourcePath.endsWith('/$mediaPath')) {
+        continue;
+      }
+      final attribution = photographerMediaAttributions[rawPath]?.trim() ?? '';
+      if (attribution.isEmpty) return null;
+      return ListingWatermarkOverlay(
+        traceId: _wmTrace(listingIdForWatermark),
+        isAr: isAr,
+        headline:
+            isAr ? 'حقوق الصورة: $attribution' : 'Photo credit: $attribution',
+      );
+    }
+    return null;
+  }
+
+  Widget _withWatermark(Widget child, {required String source}) {
+    final watermark = _photographerWatermark(source);
+    if (watermark == null) return child;
     return Stack(
       fit: StackFit.expand,
       children: [
         child,
-        ListingWatermarkOverlay(
-          traceId: _wmTrace(listingIdForWatermark),
-          isAr: isAr,
-        ),
+        watermark,
       ],
     );
   }
@@ -4180,6 +4166,7 @@ class _PropertyImage extends StatelessWidget {
             ),
           ),
         ),
+        source: vid,
       );
     }
 
@@ -4199,6 +4186,7 @@ class _PropertyImage extends StatelessWidget {
             ),
           ),
         ),
+        source: vid,
       );
     }
 
@@ -4217,14 +4205,19 @@ class _PropertyImage extends StatelessWidget {
         );
 
     if (normalized.length == 1 || preferStaticPrimaryImage) {
-      return _withWatermark(oneImage(normalized.first));
+      return _withWatermark(
+        oneImage(normalized.first),
+        source: cleanUrls.first,
+      );
     }
 
-    return _withWatermark(
-      _ListingImagePager(
-        urls: normalized,
-        buildOne: oneImage,
-      ),
+    return _ListingImagePager(
+      urls: normalized,
+      buildOne: oneImage,
+      watermarkForUrl: (url) {
+        final index = normalized.indexOf(url);
+        return index < 0 ? null : _photographerWatermark(cleanUrls[index]);
+      },
     );
   }
 }
@@ -4234,10 +4227,12 @@ class _ListingImagePager extends StatefulWidget {
   const _ListingImagePager({
     required this.urls,
     required this.buildOne,
+    this.watermarkForUrl,
   });
 
   final List<String> urls;
   final Widget Function(String url) buildOne;
+  final Widget? Function(String url)? watermarkForUrl;
 
   @override
   State<_ListingImagePager> createState() => _ListingImagePagerState();
@@ -4271,6 +4266,9 @@ class _ListingImagePagerState extends State<_ListingImagePager> {
           onPageChanged: (i) => setState(() => _page = i),
           itemBuilder: (context, i) => widget.buildOne(widget.urls[i]),
         ),
+        if (widget.watermarkForUrl != null)
+          widget.watermarkForUrl!(widget.urls[_page]) ??
+              const SizedBox.shrink(),
         if (n > 1)
           PositionedDirectional(
             bottom: 8,
