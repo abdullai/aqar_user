@@ -5384,14 +5384,14 @@ class _UserDashboardState extends State<UserDashboard>
               },
             )
           : null,
-      bottomNavigationBar: useSideNav
+      bottomNavigationBar: useSideNav || bodyNavCanPop
           ? null
           : LayoutBuilder(
               builder: (context, constraints) => buildBottomNavBar(constraints),
             ),
     );
 
-    final mainChrome = useSideNav
+    final mainChrome = useSideNav && !bodyNavCanPop
         ? Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

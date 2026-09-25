@@ -9311,35 +9311,21 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             if (rowWidgets.isNotEmpty) {
               rowWidgets.add(const SizedBox(height: spacing));
             }
-            final end =
-                start + cross > rows.length ? rows.length : start + cross;
             rowWidgets.add(
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var j = 0; j < cross; j++) ...[
-                      if (j > 0) const SizedBox(width: spacing),
-                      Expanded(
-                        child: start + j < end
-                            ? _buildMarketerRowCard(
-                                rows[start + j],
-                                type:
-                                    (rows[start + j]['_hubKind'] as String?) ??
-                                        type,
-                                compact: false,
-                                index: start + j,
-                                marketerInvitesTabLayout:
-                                    marketerInvitesTabLayout,
-                                marketerMyOffersTabLayout:
-                                    marketerMyOffersTabLayout,
-                                marketerHubUnifiedMarketCard:
-                                    marketerHubUnifiedMarketCard,
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-                    ],
-                  ],
+              _listingFeedCardsRow(
+                cross: cross,
+                start: start,
+                total: rows.length,
+                spacing: spacing,
+                equalH: null,
+                cardAt: (index) => _buildMarketerRowCard(
+                  rows[index],
+                  type: (rows[index]['_hubKind'] as String?) ?? type,
+                  compact: false,
+                  index: index,
+                  marketerInvitesTabLayout: marketerInvitesTabLayout,
+                  marketerMyOffersTabLayout: marketerMyOffersTabLayout,
+                  marketerHubUnifiedMarketCard: marketerHubUnifiedMarketCard,
                 ),
               ),
             );
@@ -10494,7 +10480,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                           child: InkWell(
                             onTap: bt,
                             child: AspectRatio(
-                              aspectRatio: 16 / 10,
+                              aspectRatio: _homeListingHeroAspectRatio(
+                                context,
+                                isRequest: true,
+                              ),
                               child: _buildMarketingPreviewImage(
                                 previewImageUrls,
                                 type: type,

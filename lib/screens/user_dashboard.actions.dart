@@ -64,10 +64,11 @@ extension _UserDashboardStateActions on _UserDashboardState {
   Future<void> _afterPlusComposerClosed(Object? res) async {
     if (!mounted) return;
     if (res == 'closed') {
+      final origin = _tabBeforePlusComposer ?? 0;
       _ss(() {
-        _tabIndex = 0;
+        _tabIndex = origin;
         _bottomNavTransientIndex = null;
-        if (kIsWeb) _webVisitedTabs.add(0);
+        if (kIsWeb) _webVisitedTabs.add(origin);
       });
       return;
     }

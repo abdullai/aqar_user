@@ -11,7 +11,6 @@ import 'package:aqar_user/l10n/app_localizations.dart';
 
 import '../core/location/map_picker_geolocation.dart';
 import '../core/location/map_engine_hint.dart';
-import '../core/navigation/safe_overlay_pop.dart';
 import '../core/navigation/web_in_app_nav.dart';
 import '../widgets/app_page_close_button.dart';
 import '../core/permissions/runtime_permission_helper.dart';
@@ -580,7 +579,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
           automaticallyImplyLeading: false,
           leading: AppPageCloseButton(
             isArabic: isAr,
-            onPressed: () => SafeOverlayPop.pop(context),
+            onPressed: _confirm,
           ),
           title: Text(isAr ? 'تحديد الموقع' : 'Select location'),
           actions: [
@@ -656,182 +655,186 @@ class _MapPickerPageState extends State<MapPickerPage> {
                         child: ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 520),
                           child: Column(
-                        children: [
-                          if (_mapEngineHint ==
-                                  MapEngineHint.huaweiPetalPreferred &&
-                              t != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Material(
-                                elevation: 2,
-                                borderRadius: BorderRadius.circular(12),
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .tertiaryContainer
-                                    .withValues(alpha: 0.95),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
+                            children: [
+                              if (_mapEngineHint ==
+                                      MapEngineHint.huaweiPetalPreferred &&
+                                  t != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Material(
+                                    elevation: 2,
+                                    borderRadius: BorderRadius.circular(12),
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .tertiaryContainer
+                                        .withValues(alpha: 0.95),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Icon(
+                                                Icons.info_outline_rounded,
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .onTertiaryContainer,
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  t.mapPickerHuaweiNoGmsBanner,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w700,
+                                                    height: 1.35,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onTertiaryContainer,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 8),
+                                          FilledButton.tonalIcon(
+                                            onPressed:
+                                                _openExternalMapsAtSelection,
+                                            icon:
+                                                const Icon(Icons.map_outlined),
+                                            label: Text(
+                                              isAr
+                                                  ? 'فتح في خرائط Petal / بديل'
+                                                  : 'Open in Petal Maps / fallback',
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
-                                    children: [
-                                      Row(
+                                ),
+                              if (_mapLoadStalled && t != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 8),
+                                  child: Material(
+                                    elevation: 2,
+                                    borderRadius: BorderRadius.circular(12),
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .errorContainer
+                                        .withValues(alpha: 0.92),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Icon(
-                                            Icons.info_outline_rounded,
+                                            Icons.map_outlined,
                                             color: Theme.of(context)
                                                 .colorScheme
-                                                .onTertiaryContainer,
+                                                .onErrorContainer,
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
                                             child: Text(
-                                              t.mapPickerHuaweiNoGmsBanner,
+                                              t.mapPickerMapLoadStalledBanner,
                                               style: TextStyle(
                                                 fontWeight: FontWeight.w700,
                                                 height: 1.35,
                                                 color: Theme.of(context)
                                                     .colorScheme
-                                                    .onTertiaryContainer,
+                                                    .onErrorContainer,
                                               ),
                                             ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(height: 8),
-                                      FilledButton.tonalIcon(
-                                        onPressed: _openExternalMapsAtSelection,
-                                        icon: const Icon(Icons.map_outlined),
-                                        label: Text(
-                                          isAr
-                                              ? 'فتح في خرائط Petal / بديل'
-                                              : 'Open in Petal Maps / fallback',
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (_mapLoadStalled && t != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Material(
-                                elevation: 2,
-                                borderRadius: BorderRadius.circular(12),
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .errorContainer
-                                    .withValues(alpha: 0.92),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 10,
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Icon(
-                                        Icons.map_outlined,
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .onErrorContainer,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: Text(
-                                          t.mapPickerMapLoadStalledBanner,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            height: 1.35,
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onErrorContainer,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          Material(
-                            elevation: 4,
-                            borderRadius: BorderRadius.circular(14),
-                            child: AqarTextField(
-                              controller: _searchCtrl,
-                              onChanged: _search,
-                              decoration: InputDecoration(
-                                hintText: isAr
-                                    ? 'ابحث عن الأحياء أو المدن أو المناطق'
-                                    : 'Search neighborhoods, cities, or regions',
-                                border: InputBorder.none,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 14,
-                                ),
-                                prefixIcon: const Icon(Icons.search),
-                              ),
-                            ),
-                          ),
-                          if (_results.isNotEmpty)
-                            Container(
-                              margin: const EdgeInsets.only(top: 6),
-                              constraints: const BoxConstraints(maxHeight: 280),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    blurRadius: 8,
-                                    color: Colors.black12,
-                                  ),
-                                ],
-                              ),
-                              child: ListView.builder(
-                                padding: EdgeInsets.zero,
-                                shrinkWrap: true,
-                                itemCount: _results.length,
-                                itemBuilder: (_, i) {
-                                  final e = _results[i];
-                                  return ListTile(
-                                    title: Text((e['city'] ?? '').toString()),
-                                    subtitle: Text(
-                                      [
-                                        (e['district'] ?? '').toString(),
-                                        (e['region'] ?? '').toString(),
-                                      ]
-                                          .where((s) => s.trim().isNotEmpty)
-                                          .join(' - '),
                                     ),
-                                    onTap: () => _selectLocation(e),
-                                  );
-                                },
+                                  ),
+                                ),
+                              Material(
+                                elevation: 4,
+                                borderRadius: BorderRadius.circular(14),
+                                child: AqarTextField(
+                                  controller: _searchCtrl,
+                                  onChanged: _search,
+                                  decoration: InputDecoration(
+                                    hintText: isAr
+                                        ? 'ابحث عن الأحياء أو المدن أو المناطق'
+                                        : 'Search neighborhoods, cities, or regions',
+                                    border: InputBorder.none,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 14,
+                                    ),
+                                    prefixIcon: const Icon(Icons.search),
+                                  ),
+                                ),
                               ),
-                            ),
-                          if (_locationHint != null &&
-                              _locationHint!.trim().isNotEmpty)
-                            Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.only(top: 8),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.65),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                _locationHint!,
-                                style: const TextStyle(color: Colors.white),
-                              ),
-                            ),
-                        ],
-                      ),
+                              if (_results.isNotEmpty)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 6),
+                                  constraints:
+                                      const BoxConstraints(maxHeight: 280),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        blurRadius: 8,
+                                        color: Colors.black12,
+                                      ),
+                                    ],
+                                  ),
+                                  child: ListView.builder(
+                                    padding: EdgeInsets.zero,
+                                    shrinkWrap: true,
+                                    itemCount: _results.length,
+                                    itemBuilder: (_, i) {
+                                      final e = _results[i];
+                                      return ListTile(
+                                        title:
+                                            Text((e['city'] ?? '').toString()),
+                                        subtitle: Text(
+                                          [
+                                            (e['district'] ?? '').toString(),
+                                            (e['region'] ?? '').toString(),
+                                          ]
+                                              .where((s) => s.trim().isNotEmpty)
+                                              .join(' - '),
+                                        ),
+                                        onTap: () => _selectLocation(e),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              if (_locationHint != null &&
+                                  _locationHint!.trim().isNotEmpty)
+                                Container(
+                                  width: double.infinity,
+                                  margin: const EdgeInsets.only(top: 8),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.65),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    _locationHint!,
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -871,7 +874,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Text(
