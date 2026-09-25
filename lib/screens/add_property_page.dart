@@ -362,7 +362,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   String? _error;
 
   /// 0: رخصة — 1: تصنيف/غرض — 2: خريطة+موقع — 3: صك/تسعير — 4: تفاصيل — 5: وسائط
-  int _wizardStep = 0;
+  int _wizardStep = 2;
 
   /// «بيع / إيجار / شراء» في مسار المسوّق المرخّص.
   String _primaryPurposeGroup = 'sale';
@@ -831,7 +831,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   void _applyListingDraft(Map<String, dynamic> d) {
-    _wizardStep = (d['wizard_step'] as num?)?.toInt() ?? 0;
+    _wizardStep = (d['wizard_step'] as num?)?.toInt() ?? 2;
     _title.text = '${d['title'] ?? ''}';
     _desc.text = '${d['desc'] ?? ''}';
     _region.text = '${d['region'] ?? ''}';
@@ -1011,7 +1011,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _addressLine.clear();
     _price.clear();
     _area.clear();
-    _wizardStep = 0;
+    _wizardStep = 2;
     _termsAccepted = false;
     _images.clear();
     if (mounted) setState(() {});
@@ -1031,7 +1031,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       return;
     }
     if (!_hasUnsavedWizardInput()) {
-      SafeOverlayPop.pop(context);
+      SafeOverlayPop.pop(context, 'closed');
       return;
     }
     await _handleListingFormExit();
@@ -1048,6 +1048,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     if (choice == FormExitChoice.saveDraft) {
       await _persistListingDraft();
+      if (mounted) SafeOverlayPop.pop(context, 'closed');
       return;
     }
     await _clearListingDraftAndForm();
@@ -1086,7 +1087,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       },
     );
     if (!ok && mounted) {
-      Navigator.pop(context);
+      Navigator.pop(context, 'closed');
     }
   }
 
@@ -2562,8 +2563,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       }
     }
     if (!mounted) return;
-    final res = await Navigator.of(context, rootNavigator: true)
-        .push<Map<String, dynamic>>(
+    final res = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         fullscreenDialog: true,
         settings: const RouteSettings(name: '/map-picker'),
@@ -2625,6 +2625,17 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         await _fillLocationFromNearest();
       }
       _maybeSuggestSmartTitle();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(
+            _isAr
+                ? 'تم تحديد الموقع${_locationIsApproximate ? ' (تقريبي)' : ''}'
+                : 'Location selected${_locationIsApproximate ? ' (approximate)' : ''}',
+          ),
+        ),
+      );
     }
   }
 
@@ -3377,7 +3388,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _regaVerifyOk = null;
       _error = null;
       _termsAccepted = false;
-      _wizardStep = 0;
+      _wizardStep = 2;
       _hasRegaAdLicense = null;
       _consentMarketNoLicense = false;
       _showPhoneOnMarket = false;

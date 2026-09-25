@@ -63,6 +63,14 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
   Future<void> _afterPlusComposerClosed(Object? res) async {
     if (!mounted) return;
+    if (res == 'closed') {
+      _ss(() {
+        _tabIndex = 0;
+        _bottomNavTransientIndex = null;
+        if (kIsWeb) _webVisitedTabs.add(0);
+      });
+      return;
+    }
     final published = res == true ||
         res == 'home' ||
         (res is PostPublishNavResult && res.revealOnHome);

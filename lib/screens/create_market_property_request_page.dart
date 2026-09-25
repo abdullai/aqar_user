@@ -169,7 +169,7 @@ class _CreateMarketPropertyRequestPageState
   Uint8List? _coverBytes;
   String? _coverFileName;
 
-  int _step = 0;
+  int _step = 2;
   static const int _stepCount = 4;
   bool _pickingCover = false;
   String? _instantCreditId;
@@ -346,7 +346,7 @@ class _CreateMarketPropertyRequestPageState
   }
 
   void _applyDraft(Map<String, dynamic> d) {
-    _step = (d['step'] as num?)?.toInt().clamp(0, _stepCount - 1) ?? 0;
+    _step = (d['step'] as num?)?.toInt().clamp(0, _stepCount - 1) ?? 2;
     _titleCtrl.text = '${d['title'] ?? ''}';
     _descCtrl.text = '${d['desc'] ?? ''}';
     _budgetMinCtrl.text = '${d['budget_min'] ?? ''}';
@@ -444,7 +444,7 @@ class _CreateMarketPropertyRequestPageState
     _districtsCtrl.clear();
     _coverBytes = null;
     _coverFileName = null;
-    _step = 0;
+    _step = 2;
     _purchase = true;
     _requestPriority = MarketPropertyRequestPriority.standard;
     _typeKey = 'villa';
@@ -490,7 +490,7 @@ class _CreateMarketPropertyRequestPageState
       return;
     }
     if (_isEditing || !_hasUnsavedWizardInput()) {
-      SafeOverlayPop.pop(context);
+      SafeOverlayPop.pop(context, 'closed');
       return;
     }
     await _handleFormExitFromPop();
@@ -507,6 +507,7 @@ class _CreateMarketPropertyRequestPageState
     }
     if (choice == FormExitChoice.saveDraft) {
       await _persistDraft();
+      if (mounted) SafeOverlayPop.pop(context, 'closed');
       return;
     }
     await _clearDraftAndForm();
@@ -538,8 +539,8 @@ class _CreateMarketPropertyRequestPageState
   Future<void> _loadAvailableInstantCredit() async {
     setState(() => _loadingInstantCredit = true);
     try {
-      final res = await InstantMarketRequestPaymentService(_sb)
-          .getAvailableCredit();
+      final res =
+          await InstantMarketRequestPaymentService(_sb).getAvailableCredit();
       if (!mounted) return;
       if (res['ok'] == true && res['has_credit'] == true) {
         setState(() {
@@ -565,12 +566,14 @@ class _CreateMarketPropertyRequestPageState
           SnackBar(
             content: Text(
               _isAr
-                      ? (err.isEmpty
-                          ? PlatformFeeCatalog.of(context).instantPayIncomplete(isAr: true)
-                          : 'لم يُكتمل الدفع: $err')
-                      : (err.isEmpty
-                          ? PlatformFeeCatalog.of(context).instantPayIncomplete(isAr: false)
-                          : 'Payment not completed: $err'),
+                  ? (err.isEmpty
+                      ? PlatformFeeCatalog.of(context)
+                          .instantPayIncomplete(isAr: true)
+                      : 'لم يُكتمل الدفع: $err')
+                  : (err.isEmpty
+                      ? PlatformFeeCatalog.of(context)
+                          .instantPayIncomplete(isAr: false)
+                      : 'Payment not completed: $err'),
             ),
           ),
         );
@@ -599,7 +602,8 @@ class _CreateMarketPropertyRequestPageState
     final confirm = await showAppDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_isAr ? 'إلغاء رصيد الطلب الفوري' : 'Cancel instant credit'),
+        title:
+            Text(_isAr ? 'إلغاء رصيد الطلب الفوري' : 'Cancel instant credit'),
         content: Text(
           PlatformFeeCatalog.of(context).unusedPaymentReversal(isAr: _isAr),
         ),
@@ -610,14 +614,15 @@ class _CreateMarketPropertyRequestPageState
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(_isAr ? 'إلغاء الطلب واسترجاع المبلغ' : 'Cancel & refund'),
+            child:
+                Text(_isAr ? 'إلغاء الطلب واسترجاع المبلغ' : 'Cancel & refund'),
           ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
-    final res = await InstantMarketRequestPaymentService(_sb)
-        .refundUnusedCredit(cid);
+    final res =
+        await InstantMarketRequestPaymentService(_sb).refundUnusedCredit(cid);
     if (!mounted) return;
     if (res['ok'] == true) {
       setState(() {
@@ -652,22 +657,23 @@ class _CreateMarketPropertyRequestPageState
     showAppDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(PlatformFeeCatalog.of(ctx, listen: true).instantTitle(isAr: _isAr)),
+        title: Text(
+            PlatformFeeCatalog.of(ctx, listen: true).instantTitle(isAr: _isAr)),
         content: SingleChildScrollView(
           child: Text(
             _isAr
                 ? '• يظهر طلبك في أعلى الرئيسية مع تمييز بصري.\n'
-                  '• يلزم دفع ${PlatformFeeCatalog.of(ctx).instantPhrase(isAr: true)} لكل طلب فوري (مرة واحدة).\n'
-                  '• إذا دفعت ولم تنشر الطلب، يبقى الرصيد لطلب فوري آخر.\n'
-                  '• زر «إلغاء الطلب» يظهر فقط قبل الاستفادة — لاسترجاع المبلغ.\n'
-                  '• بعد النشر لا يمكن الاسترجاع — الدفع مرتبط بالطلب المنشور.\n'
-                  '• الفاتورة والإيصال متاحان بعد الدفع (طباعة/تصدير).'
+                    '• يلزم دفع ${PlatformFeeCatalog.of(ctx).instantPhrase(isAr: true)} لكل طلب فوري (مرة واحدة).\n'
+                    '• إذا دفعت ولم تنشر الطلب، يبقى الرصيد لطلب فوري آخر.\n'
+                    '• زر «إلغاء الطلب» يظهر فقط قبل الاستفادة — لاسترجاع المبلغ.\n'
+                    '• بعد النشر لا يمكن الاسترجاع — الدفع مرتبط بالطلب المنشور.\n'
+                    '• الفاتورة والإيصال متاحان بعد الدفع (طباعة/تصدير).'
                 : '• Your request stays at the top of home with a visual highlight.\n'
-                  '• ${PlatformFeeCatalog.of(ctx).instantPhrase(isAr: false)} one-time payment per instant request.\n'
-                  '• If you pay but do not publish, credit applies to another instant request.\n'
-                  '• «Cancel request» appears only before use — to refund.\n'
-                  '• After publishing, no refund — payment is tied to the live request.\n'
-                  '• Invoice/receipt available after payment (print/export).',
+                    '• ${PlatformFeeCatalog.of(ctx).instantPhrase(isAr: false)} one-time payment per instant request.\n'
+                    '• If you pay but do not publish, credit applies to another instant request.\n'
+                    '• «Cancel request» appears only before use — to refund.\n'
+                    '• After publishing, no refund — payment is tied to the live request.\n'
+                    '• Invoice/receipt available after payment (print/export).',
           ),
         ),
         actions: [
@@ -1352,8 +1358,7 @@ class _CreateMarketPropertyRequestPageState
     if (cur != null && cur.lat != 0 && cur.lng != 0) {
       initial = LatLng(cur.lat, cur.lng);
     }
-    final res = await Navigator.of(context, rootNavigator: true)
-        .push<Map<String, dynamic>>(
+    final res = await Navigator.of(context).push<Map<String, dynamic>>(
       MaterialPageRoute(
         fullscreenDialog: true,
         settings: const RouteSettings(name: '/map-picker'),
@@ -1417,8 +1422,9 @@ class _CreateMarketPropertyRequestPageState
   void _maybeSuggestSmartTitle({bool force = false}) {
     if (!force && _titleCtrl.text.trim().isNotEmpty) return;
     final typeLabel = PropertyTypeCatalog.label(_typeKey, _isAr);
-    final purposeBit =
-        _purchase ? (_isAr ? 'للشراء' : 'to buy') : (_isAr ? 'للإيجار' : 'to rent');
+    final purposeBit = _purchase
+        ? (_isAr ? 'للشراء' : 'to buy')
+        : (_isAr ? 'للإيجار' : 'to rent');
     final city = _cityForSubmit().trim();
     final districts = _districtsCtrl.text.trim();
     final suggested = PropertyListingDisplay.composeListingHeadline(
@@ -1773,7 +1779,8 @@ class _CreateMarketPropertyRequestPageState
             );
       }
 
-      Future<Map<String, dynamic>> doInsert(Map<String, dynamic> payload) async {
+      Future<Map<String, dynamic>> doInsert(
+          Map<String, dynamic> payload) async {
         try {
           final ins = await _sb
               .from('market_property_requests')
@@ -1810,8 +1817,7 @@ class _CreateMarketPropertyRequestPageState
 
       var row = <String, dynamic>{
         'requester_id': (_sb.auth.currentUser?.id ?? widget.userId).trim(),
-        if (!_isEditing)
-          'status': isInstantNew ? 'draft' : 'published',
+        if (!_isEditing) 'status': isInstantNew ? 'draft' : 'published',
         'request_priority': _requestPriority.wireValue,
         'title': title,
         'description':
@@ -1899,8 +1905,10 @@ class _CreateMarketPropertyRequestPageState
               SnackBar(
                 content: Text(
                   _isAr
-                      ? PlatformFeeCatalog.of(context).instantRequiresPay(isAr: true)
-                      : PlatformFeeCatalog.of(context).instantRequiresPay(isAr: false),
+                      ? PlatformFeeCatalog.of(context)
+                          .instantRequiresPay(isAr: true)
+                      : PlatformFeeCatalog.of(context)
+                          .instantRequiresPay(isAr: false),
                 ),
               ),
             );
@@ -1994,8 +2002,8 @@ class _CreateMarketPropertyRequestPageState
           ),
           AdaptivePostPublishAction(
             id: 'home',
-            label: t?.marketPropertySubmitGoHome ??
-                (_isAr ? 'الرئيسية' : 'Home'),
+            label:
+                t?.marketPropertySubmitGoHome ?? (_isAr ? 'الرئيسية' : 'Home'),
             icon: Icons.home_outlined,
             filled: true,
           ),
@@ -2021,10 +2029,9 @@ class _CreateMarketPropertyRequestPageState
       if (nav.canPop()) {
         nav.pop(
           PostPublishNavResult.liveHome(
-            marketRequestId:
-                '${insertedMarket?['id'] ?? ''}'.trim().isEmpty
-                    ? null
-                    : '${insertedMarket?['id'] ?? ''}'.trim(),
+            marketRequestId: '${insertedMarket?['id'] ?? ''}'.trim().isEmpty
+                ? null
+                : '${insertedMarket?['id'] ?? ''}'.trim(),
           ),
         );
       } else {
@@ -2110,7 +2117,6 @@ class _CreateMarketPropertyRequestPageState
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -2191,10 +2197,13 @@ class _CreateMarketPropertyRequestPageState
                   ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    onPressed: busy ? null : () => unawaited(_cancelUnusedInstantCredit()),
+                    onPressed: busy
+                        ? null
+                        : () => unawaited(_cancelUnusedInstantCredit()),
                     icon: const Icon(Icons.cancel_outlined),
                     label: Text(
-                      PlatformFeeCatalog.of(context).cancelInstantRefund(isAr: _isAr),
+                      PlatformFeeCatalog.of(context)
+                          .cancelInstantRefund(isAr: _isAr),
                     ),
                   ),
                 ],
@@ -2209,7 +2218,8 @@ class _CreateMarketPropertyRequestPageState
         const SizedBox(height: 14),
         Text(
           _isAr ? 'الغرض' : 'Purpose',
-          style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
+          style:
+              const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
         ),
         const SizedBox(height: 8),
         AbsorbPointer(
@@ -2235,29 +2245,31 @@ class _CreateMarketPropertyRequestPageState
             },
           ),
         ),
-        if (!_purchase) RentTermScheduleFields(
-          isAr: _isAr,
-          busy: busy,
-          rentTerm: _rentTerm,
-          rentDays: _rentDays,
-          rentWeeks: _rentWeeks,
-          rentMonths: _rentMonths,
-          rentYears: _rentYears,
-          rentStart: _rentStart,
-          rentEnd: _rentEndComputed,
-          onTerm: _applyRentTerm,
-          onDays: (n) => setState(() => _rentDays = n),
-          onWeeks: (n) => setState(() => _rentWeeks = n),
-          onMonths: _setRentMonths,
-          onYears: (n) => setState(() => _rentYears = n),
-          onPickStart: () => unawaited(_pickRentStart()),
-        ),
+        if (!_purchase)
+          RentTermScheduleFields(
+            isAr: _isAr,
+            busy: busy,
+            rentTerm: _rentTerm,
+            rentDays: _rentDays,
+            rentWeeks: _rentWeeks,
+            rentMonths: _rentMonths,
+            rentYears: _rentYears,
+            rentStart: _rentStart,
+            rentEnd: _rentEndComputed,
+            onTerm: _applyRentTerm,
+            onDays: (n) => setState(() => _rentDays = n),
+            onWeeks: (n) => setState(() => _rentWeeks = n),
+            onMonths: _setRentMonths,
+            onYears: (n) => setState(() => _rentYears = n),
+            onPickStart: () => unawaited(_pickRentStart()),
+          ),
       ],
       if (_step == 1) ...[
         DropdownButtonFormField<String>(
-          initialValue: PropertyTypeCatalog.typeGroups.any((g) => g.id == _typeGroupId)
-              ? _typeGroupId
-              : PropertyTypeCatalog.typeGroups.first.id,
+          initialValue:
+              PropertyTypeCatalog.typeGroups.any((g) => g.id == _typeGroupId)
+                  ? _typeGroupId
+                  : PropertyTypeCatalog.typeGroups.first.id,
           decoration: deco(
             _isAr ? 'فئة العقار' : 'Property category',
           ),
@@ -2314,7 +2326,8 @@ class _CreateMarketPropertyRequestPageState
           const SizedBox(height: 16),
           Text(
             _isAr ? 'تفاصيل سكنية' : 'Residential details',
-            style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
+            style: const TextStyle(
+                fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
           ),
           const SizedBox(height: 8),
           Row(
@@ -2351,7 +2364,8 @@ class _CreateMarketPropertyRequestPageState
           const SizedBox(height: 14),
           Text(
             _isAr ? 'الخدمات المطلوبة' : 'Amenities',
-            style: const TextStyle(fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
+            style: const TextStyle(
+                fontWeight: FontWeight.w900, fontFamily: 'Cairo'),
           ),
           const SizedBox(height: 8),
           AmenityEqualSelectGrid(
@@ -2369,22 +2383,22 @@ class _CreateMarketPropertyRequestPageState
               label: _isAr ? 'مفروش' : 'Furnished',
               selected: _furnishedWanted == true,
               enabled: !busy,
-              onTap: () => setState(() => _furnishedWanted =
-                  _furnishedWanted == true ? null : true),
+              onTap: () => setState(() =>
+                  _furnishedWanted = _furnishedWanted == true ? null : true),
             ),
             EqualSelectTile(
               label: _isAr ? 'غير مفروش' : 'Unfurnished',
               selected: _furnishedWanted == false,
               enabled: !busy,
-              onTap: () => setState(() => _furnishedWanted =
-                  _furnishedWanted == false ? null : false),
+              onTap: () => setState(() =>
+                  _furnishedWanted = _furnishedWanted == false ? null : false),
             ),
             EqualSelectTile(
               label: _isAr ? 'جديدة' : 'New',
               selected: _preferNew == true,
               enabled: !busy,
-              onTap: () => setState(
-                  () => _preferNew = _preferNew == true ? null : true),
+              onTap: () =>
+                  setState(() => _preferNew = _preferNew == true ? null : true),
             ),
             EqualSelectTile(
               label: _isAr ? 'ليست جديدة' : 'Not new',
@@ -2421,7 +2435,9 @@ class _CreateMarketPropertyRequestPageState
               icon: const Icon(Icons.edit_outlined, size: 18),
               label: Text(
                 _manualLocation
-                    ? (_isAr ? 'العودة للقوائم الرسمية' : 'Back to official lists')
+                    ? (_isAr
+                        ? 'العودة للقوائم الرسمية'
+                        : 'Back to official lists')
                     : (_isAr ? 'إدخال يدوي للموقع' : 'Enter location manually'),
               ),
             ),
@@ -2666,7 +2682,9 @@ class _CreateMarketPropertyRequestPageState
       ],
       if (_step == 3) ...[
         Text(
-          _isAr ? 'المبلغ والمساحة ثم مراجعة الطلب.' : 'Amount, area, then review.',
+          _isAr
+              ? 'المبلغ والمساحة ثم مراجعة الطلب.'
+              : 'Amount, area, then review.',
           style: TextStyle(
             color: cs.onSurfaceVariant,
             fontWeight: FontWeight.w600,
@@ -2866,9 +2884,8 @@ class _CreateMarketPropertyRequestPageState
         TermsAcceptanceCheckbox(
           isAr: _isAr,
           value: _termsAccepted,
-          onChanged: busy
-              ? null
-              : (v) => setState(() => _termsAccepted = v == true),
+          onChanged:
+              busy ? null : (v) => setState(() => _termsAccepted = v == true),
           onOpenTerms: () {
             Navigator.of(context).push<void>(
               MaterialPageRoute<void>(
@@ -2880,8 +2897,7 @@ class _CreateMarketPropertyRequestPageState
       ],
     ];
 
-    final confirmPop =
-        !_isEditing && _hasUnsavedWizardInput();
+    final confirmPop = !_isEditing && _hasUnsavedWizardInput();
     // — أثناء النشر يُمنع الرجوع كلياً حتى لا يُنشر الطلب مرتين.
     final isPublishing = _saving || _publishLock;
     return PopScope(
@@ -2906,163 +2922,164 @@ class _CreateMarketPropertyRequestPageState
       child: Scaffold(
         resizeToAvoidBottomInset: false,
         appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leading: AppPageCloseButton(
-                isArabic: _isAr,
-                onPressed: () => unawaited(_onComposerClosePressed()),
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(
+            isArabic: _isAr,
+            onPressed: () => unawaited(_onComposerClosePressed()),
+          ),
+          title: Text(
+            _isEditing
+                ? (_isAr ? 'تعديل الطلب العقاري' : 'Edit property request')
+                : (_isAr ? 'طلب عقاري' : 'Property request'),
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+          actions: [
+            if (!_isEditing)
+              IconButton(
+                tooltip: _isAr ? 'حفظ المسودة' : 'Save draft',
+                onPressed: _saving ? null : () => unawaited(_persistDraft()),
+                icon: const Icon(Icons.save_outlined),
               ),
-        title: Text(
-          _isEditing
-              ? (_isAr ? 'تعديل الطلب العقاري' : 'Edit property request')
-              : (_isAr ? 'طلب عقاري' : 'Property request'),
-          style: const TextStyle(fontWeight: FontWeight.w900),
-        ),
-        actions: [
-          if (!_isEditing)
-            IconButton(
-              tooltip: _isAr ? 'حفظ المسودة' : 'Save draft',
-              onPressed: _saving
-                  ? null
-                  : () => unawaited(_persistDraft()),
-              icon: const Icon(Icons.save_outlined),
-            ),
-        ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(28),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: ComposerStepConstellation(
-              step: _step + 1,
-              total: _stepCount,
-              accent: Theme.of(context).colorScheme.primary,
+          ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(28),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+              child: ComposerStepConstellation(
+                step: _step + 1,
+                total: _stepCount,
+                accent: Theme.of(context).colorScheme.primary,
+              ),
             ),
           ),
-        ),
         ),
         body: AppKeyboardPad(
           extra: 8,
           child: _saving
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const AppLogoLoading(),
-                  const SizedBox(height: 16),
-                  Text(
-                    _isAr
-                        ? 'جاري مراجعة التفاصيل والنشر'
-                        : 'Reviewing details & publishing',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const AppLogoLoading(),
+                      const SizedBox(height: 16),
+                      Text(
+                        _isAr
+                            ? 'جاري مراجعة التفاصيل والنشر'
+                            : 'Reviewing details & publishing',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            )
-          : LayoutBuilder(
-              builder: (context, constraints) {
-                final padH = min(32.0, max(12.0, constraints.maxWidth * 0.04));
-                final maxBody = min(constraints.maxWidth, 980.0);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: ListView(
-                        controller: _stepScrollCtrl,
-                        keyboardDismissBehavior:
-                            ScrollViewKeyboardDismissBehavior.onDrag,
-                        padding: EdgeInsets.fromLTRB(padH, 12, padH, 16),
-                        children: [
-                          Align(
-                            alignment: AlignmentDirectional.centerStart,
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final padH =
+                        min(32.0, max(12.0, constraints.maxWidth * 0.04));
+                    final maxBody = min(constraints.maxWidth, 980.0);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: ListView(
+                            controller: _stepScrollCtrl,
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: EdgeInsets.fromLTRB(padH, 12, padH, 16),
+                            children: [
+                              Align(
+                                alignment: AlignmentDirectional.centerStart,
+                                child: ConstrainedBox(
+                                  constraints:
+                                      BoxConstraints(maxWidth: maxBody),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Text(
+                                        '${_step + 1} / $_stepCount · ${_wizardStepHeading(_step)}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w800,
+                                              color: cs.primary,
+                                            ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      ...stepBody,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_pickingCover)
+                          const LinearProgressIndicator(minHeight: 2),
+                        SafeArea(
+                          minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
                             child: ConstrainedBox(
                               constraints: BoxConstraints(maxWidth: maxBody),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
                                 children: [
-                                  Text(
-                                    '${_step + 1} / $_stepCount · ${_wizardStepHeading(_step)}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w800,
-                                          color: cs.primary,
-                                        ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  ...stepBody,
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_pickingCover)
-                      const LinearProgressIndicator(minHeight: 2),
-                    SafeArea(
-                      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                      child: Align(
-                        alignment: Alignment.bottomCenter,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: maxBody),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              if (_step > 0)
-                                OutlinedButton(
-                                  onPressed: busy ? null : _goPrevStep,
-                                  child: Text(_isAr ? 'السابق' : 'Back'),
-                                ),
-                              const Spacer(),
-                              if (_step < _stepCount - 1)
-                                FilledButton(
-                                  onPressed: busy ? null : _goNextStep,
-                                  child: Text(_isAr ? 'التالي' : 'Next'),
-                                )
-                              else
-                                FilledButton(
-                                  onPressed: busy ? null : _submit,
-                                  child: (_saving || _publishLock)
-                                      ? Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const SizedBox(
-                                              width: 18,
-                                              height: 18,
-                                              child: AppLogoLoading(
-                                                compact: true,
-                                                size: 16,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text(
+                                  if (_step > 0)
+                                    OutlinedButton(
+                                      onPressed: busy ? null : _goPrevStep,
+                                      child: Text(_isAr ? 'السابق' : 'Back'),
+                                    ),
+                                  const Spacer(),
+                                  if (_step < _stepCount - 1)
+                                    FilledButton(
+                                      onPressed: busy ? null : _goNextStep,
+                                      child: Text(_isAr ? 'التالي' : 'Next'),
+                                    )
+                                  else
+                                    FilledButton(
+                                      onPressed: busy ? null : _submit,
+                                      child: (_saving || _publishLock)
+                                          ? Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child: AppLogoLoading(
+                                                    compact: true,
+                                                    size: 16,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  _isAr
+                                                      ? 'جاري مراجعة التفاصيل والنشر…'
+                                                      : 'Reviewing details & publishing…',
+                                                  style: const TextStyle(
+                                                    fontWeight: FontWeight.w900,
+                                                  ),
+                                                ),
+                                              ],
+                                            )
+                                          : Text(
                                               _isAr
-                                                  ? 'جاري مراجعة التفاصيل والنشر…'
-                                                  : 'Reviewing details & publishing…',
+                                                  ? 'نشر الطلب'
+                                                  : 'Publish request',
                                               style: const TextStyle(
                                                 fontWeight: FontWeight.w900,
                                               ),
                                             ),
-                                          ],
-                                        )
-                                      : Text(
-                                          _isAr
-                                              ? 'نشر الطلب'
-                                              : 'Publish request',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                          ),
-                                        ),
-                                ),
-                            ],
+                                    ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
+                      ],
+                    );
+                  },
+                ),
         ),
       ),
     );
