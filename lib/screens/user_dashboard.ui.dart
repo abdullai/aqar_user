@@ -2727,8 +2727,8 @@ class _UserDashboardState extends State<UserDashboard>
       if (!_isGuest) {
         Future<void> loadRest() async {
           if (!mounted) return;
-          await Future.wait([
-            _loadAccountRole(),
+          final roleLoad = _loadAccountRole();
+          final otherLoads = Future.wait([
             _loadNotifications(),
             _refreshAppAudienceOnlineApprox(),
             if (!kIsWeb) _loadMineAndOffers(force: true),
@@ -2736,9 +2736,15 @@ class _UserDashboardState extends State<UserDashboard>
             _loadCart(force: true),
             _loadMyMarketRequestOfferTracking(),
           ]);
+          await roleLoad;
           if (!mounted) return;
-          // سخّن إدارتي مبكراً حتى يفتح فوراً عند النقر.
+          // ابدأ تسخين «صفحتي» و«إدارتي» فور معرفة الدور، دون انتظار الشبكات الأخرى.
           unawaited(_prefetchMyDeskWarm());
+          if (kIsWeb) {
+            unawaited(_ensureMyAdsHubDataLoaded());
+          }
+          await otherLoads;
+          if (!mounted) return;
           _ensureSubTabControllers();
           if (!kIsWeb) {
             await Future.wait([
@@ -2751,8 +2757,6 @@ class _UserDashboardState extends State<UserDashboard>
             ]);
           } else {
             unawaited(_loadFavoritesList(force: false));
-            // ويب: صفحتي تحتاج دلاء المسوّق/المالك — تحميل كسول بمهلة (لا يحجب اللمس).
-            unawaited(_ensureMyAdsHubDataLoaded());
           }
           if (mounted) {
             _ensureWorkflowRealtimeChannel();
@@ -5355,8 +5359,13 @@ class _UserDashboardState extends State<UserDashboard>
           ? Builder(
               builder: (fabCtx) {
                 final isWide = MediaQuery.sizeOf(fabCtx).width >= 720;
+                final isWideWebDesktop = kIsWeb &&
+                    isWide &&
+                    !AqarScrollBehavior.isCompactTouchLike(fabCtx);
                 if (isWide) {
                   return FloatingActionButton.extended(
+                    tooltip:
+                        isWideWebDesktop ? (_isArabic ? 'إضافة' : 'Add') : null,
                     onPressed: () {
                       AppHaptics.medium();
                       _openCenterPlus();
@@ -5365,7 +5374,9 @@ class _UserDashboardState extends State<UserDashboard>
                     foregroundColor: cs.onPrimary,
                     icon: const Icon(Icons.add_rounded, size: 28),
                     label: Text(
-                      _isArabic ? 'إضافة / إتمام صفقة' : 'New action',
+                      isWideWebDesktop
+                          ? (_isArabic ? 'إضافة' : 'Add')
+                          : (_isArabic ? 'إضافة / إتمام صفقة' : 'New action'),
                       style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                   );
