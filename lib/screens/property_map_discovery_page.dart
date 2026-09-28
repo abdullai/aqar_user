@@ -12,8 +12,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/branding/aqar_brand_colors.dart';
 import '../core/config/app_config.dart';
-import '../core/branding/branding_logo_image.dart';
 import '../core/listing/listing_media_urls.dart';
+import '../core/listing/in_app_tour.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/l10n/locale_content.dart';
 import '../core/listing/property_type_catalog.dart';
@@ -27,6 +27,9 @@ import '../services/photographer_service.dart';
 import '../services/saudi_locations_service.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/instant_market_request_badge.dart';
+import '../widgets/listing_media_gallery.dart';
+import '../widgets/in_app_tour_viewer.dart';
+import '../widgets/property_video_sheet.dart';
 import '../widgets/saudi_riyal_symbol_icon.dart';
 
 /// طابع خريطة هادئ يُبرز الدبابيس دون ازدحام POI.
@@ -108,6 +111,7 @@ class PropertyMapDiscoveryPage extends StatefulWidget {
     this.focusRequest,
     this.onOpenProperty,
     this.onOpenRequest,
+    this.onAfterOpenExternal,
     this.requestCoverImageUrl,
     this.listingsOnly = false,
     this.contextTitle,
@@ -125,6 +129,7 @@ class PropertyMapDiscoveryPage extends StatefulWidget {
   final MarketPropertyRequestRow? focusRequest;
   final ValueChanged<Property>? onOpenProperty;
   final ValueChanged<MarketPropertyRequestRow>? onOpenRequest;
+  final VoidCallback? onAfterOpenExternal;
 
   /// غلاف طلب السوق من `property-images` كرابط عام (اختياري).
   final String? Function(MarketPropertyRequestRow row)? requestCoverImageUrl;
@@ -846,7 +851,8 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
       'https://www.google.com/maps/search/?api=1&query='
       '${e.position.latitude},${e.position.longitude}',
     );
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (opened && mounted) widget.onAfterOpenExternal?.call();
   }
 
   String _kindLabel(MapDiscoveryKind kind) {
@@ -866,7 +872,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
     // ارتفاع البطاقة المتوقّع لتعديل موضع زر «موقعي» حتى لا يتقاطعا.
     final selectedCardSpace = _selected == null
         ? 16.0
-        : (_cardCollapsed ? 86.0 : (isCompact ? 196.0 : 178.0));
+        : (_cardCollapsed ? 86.0 : (isCompact ? 260.0 : 252.0));
 
     return Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
@@ -1409,6 +1415,51 @@ class _MapDiscoveryCard extends StatelessWidget {
   final VoidCallback onOpenDetails;
   final bool hasDetailsAction;
 
+  Widget _amountWidget() {
+    final request = entry.request;
+    final min = request?.budgetMin ?? 0;
+    final max = request?.budgetMax ?? 0;
+    final hasRange = min > 0 && max > 0 && (min - max).abs() > 0.009;
+    final textStyle = TextStyle(
+      color: colorScheme.primary,
+      fontWeight: FontWeight.w900,
+      fontSize: 16,
+    );
+
+    if (hasRange) {
+      String format(double value) => AppMoney.formatNumber(
+            value,
+            isAr: isAr,
+            maxFractionDigits: 0,
+          );
+
+      return Wrap(
+        spacing: 6,
+        runSpacing: 2,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          AppMoneyInline(
+            amountText: format(min),
+            isAr: isAr,
+            style: textStyle,
+          ),
+          Text(isAr ? 'إلى' : 'to', style: textStyle),
+          AppMoneyInline(
+            amountText: format(max),
+            isAr: isAr,
+            style: textStyle,
+          ),
+        ],
+      );
+    }
+
+    return AppMoneyInline(
+      amountText: AppMoney.stripSarMarks(entry.amountLabel),
+      isAr: isAr,
+      style: textStyle,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
@@ -1421,6 +1472,77 @@ class _MapDiscoveryCard extends StatelessWidget {
     // السلوك إلا في حالة عدم وجود إجراء تفاصيل (مثلاً لو أُعيد استخدام
     // الويدجت من سياق لا يُمرّر `onOpenProperty`/`onOpenRequest`).
     final openDetailsTap = hasDetailsAction ? onOpenDetails : null;
+    final property = entry.property;
+    final request = entry.request;
+    final imageUrls = property != null
+        ? ListingMediaUrls.publicUrls(
+            Supabase.instance.client,
+            ListingMediaUrls.propertyCardImagePaths(property),
+          )
+        : request != null
+            ? ListingMediaUrls.marketRequestImageUrls(
+                request,
+                Supabase.instance.client,
+              )
+            : <String>[];
+    final videoUrl = property != null &&
+            ListingMediaUrls.looksLikePlayableVideoRef(property.videoUrl)
+        ? ListingMediaUrls.videoPlayableUrl(
+            Supabase.instance.client,
+            property.videoUrl,
+          )
+        : request != null
+            ? ListingMediaUrls.marketRequestVideoPlayableUrl(
+                request,
+                Supabase.instance.client,
+              )
+            : null;
+    final tourUrl = property != null
+        ? (ListingMediaUrls.looksLikePlayableTourUrl(property.virtualTourUrl)
+            ? property.virtualTourUrl
+            : null)
+        : request != null
+            ? ListingMediaUrls.marketRequestTourUrl(request)
+            : null;
+    final requestInAppTour = request == null
+        ? null
+        : ListingMediaUrls.inAppTourFromPayload(request.details);
+    final propertyTours = <InAppTour>[
+      if (property != null) ...[
+        if (InAppTour.fromGuidance(property.listingGuidance) case final tour?
+            when tour.isNotEmpty)
+          tour,
+        ...property.photographerTours,
+      ],
+    ];
+    final hasTour =
+        propertyTours.isNotEmpty || requestInAppTour != null || tourUrl != null;
+    final openTour = propertyTours.isNotEmpty
+        ? () => unawaited(
+              openInAppTourViewer(
+                context: context,
+                tour: propertyTours.first,
+                isAr: isAr,
+                photographerCreditForMedia:
+                    property!.photographerAttributionForMedia,
+              ),
+            )
+        : requestInAppTour != null
+            ? () => unawaited(
+                  openInAppTourViewer(
+                    context: context,
+                    tour: requestInAppTour,
+                    isAr: isAr,
+                  ),
+                )
+            : tourUrl == null
+                ? null
+                : () => unawaited(
+                      launchUrl(
+                        Uri.parse(tourUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                    );
 
     return ConstrainedBox(
       constraints: BoxConstraints(
@@ -1537,28 +1659,42 @@ class _MapDiscoveryCard extends StatelessWidget {
                     children: [
                       // الصورة على «اليمين للمستخدم» في العربية وعلى «اليسار» في
                       // الإنجليزية بحكم Directionality الأبوي.
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: SizedBox(
-                          width: imageSize,
-                          height: imageSize,
-                          child: entry.imageUrl.trim().isNotEmpty
-                              ? Image.network(
-                                  entry.imageUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => const Padding(
-                                    padding: EdgeInsets.all(8),
-                                    child: BrandingLogoImage(
-                                      fit: BoxFit.contain,
+                      SizedBox(
+                        width: imageSize,
+                        height: imageSize + 64,
+                        child: ListingMediaGallery(
+                          key: ValueKey<String>('map-media-${entry.key}'),
+                          imageUrls: imageUrls.isNotEmpty
+                              ? imageUrls
+                              : (entry.imageUrl.trim().isEmpty
+                                  ? const <String>[]
+                                  : [entry.imageUrl]),
+                          videoUrl: videoUrl,
+                          tourUrl: tourUrl,
+                          fillAvailableHeight: true,
+                          preferVideoFirst: property != null
+                              ? ListingMediaUrls.propertyPrefersVideoCover(
+                                  property,
+                                )
+                              : request != null &&
+                                  ListingMediaUrls
+                                      .marketRequestPrefersVideoCover(request),
+                          mediaOwnerKey: entry.key,
+                          isAr: isAr,
+                          aspectRatio: 1,
+                          maxHeight: imageSize,
+                          borderRadius: 14,
+                          onOpenVideo: videoUrl == null
+                              ? null
+                              : () => unawaited(
+                                    PropertyVideoSheet.open(
+                                      context,
+                                      isAr: isAr,
+                                      title: entry.title,
+                                      videoUrl: videoUrl,
                                     ),
                                   ),
-                                )
-                              : const Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: BrandingLogoImage(
-                                    fit: BoxFit.contain,
-                                  ),
-                                ),
+                          onOpenTour: hasTour ? openTour : null,
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -1608,17 +1744,7 @@ class _MapDiscoveryCard extends StatelessWidget {
                               if (RegExp(r'\d').hasMatch(entry.amountLabel))
                                 Align(
                                   alignment: AlignmentDirectional.centerStart,
-                                  child: AppMoneyInline(
-                                    amountText: AppMoney.stripSarMarks(
-                                      entry.amountLabel,
-                                    ),
-                                    isAr: isAr,
-                                    style: TextStyle(
-                                      color: colorScheme.primary,
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 16,
-                                    ),
-                                  ),
+                                  child: _amountWidget(),
                                 )
                               else
                                 Text(

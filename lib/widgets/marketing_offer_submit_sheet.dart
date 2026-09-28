@@ -18,14 +18,18 @@ import '../core/listing/offer_identity_tag.dart';
 import '../core/profile/publisher_identity_prefs.dart';
 import '../core/utils/app_money.dart';
 import '../core/marketing/marketing_offer_fee.dart';
+import '../core/subscription/marketing_subscription_resume_intent.dart';
 import '../core/workflow/listing_workflow_copy.dart';
 import '../core/workflow/listing_workflow_ui_context.dart';
 import '../services/account_completion_service.dart';
 import '../core/network/supabase_interceptor.dart';
 import '../services/marketing_flow_service.dart';
 import '../services/marketing_workflow_automation_service.dart';
+import '../services/photographer_service.dart';
 import '../services/marketing_workflow_hub.dart';
 import '../services/profile_compliance_service.dart';
+import '../services/subscription_service.dart';
+import '../screens/photographer_join_page.dart';
 import '../screens/profile_signature_gate_screen.dart';
 import '../screens/settings_page.dart';
 import '../screens/subscriptions/subscriptions_root_screen.dart';
@@ -71,6 +75,8 @@ class MarketingOfferSubmitPanel extends StatefulWidget {
 
 class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
   final _notes = TextEditingController();
+  final _photographyNotes = TextEditingController();
+  final _photographyAmount = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
   late final MarketingFlowService _svc =
@@ -96,6 +102,9 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
   static const Color _brandTeal = Color(0xFF0F766E);
 
   bool get _hasLiveOffer => _liveOffer != null;
+  bool get _photographyRequired =>
+      _request?['photography_required'] == true &&
+      _request?['photography_fulfillment'] == 'marketer_bundle';
 
   ListingWorkflowUiContext? get _wfCtx => _request == null
       ? null
@@ -121,7 +130,102 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
   @override
   void dispose() {
     _notes.dispose();
+    _photographyNotes.dispose();
+    _photographyAmount.dispose();
     super.dispose();
+  }
+
+  Future<bool> _ensurePhotographerPlan() async {
+    PhotographerProfile? profile;
+    try {
+      profile = await PhotographerService(Supabase.instance.client).myProfile();
+    } catch (_) {}
+    if (profile?.isVerified != true) {
+      if (!mounted) return false;
+      final register = await showAppDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(widget.isAr
+              ? 'اعتماد المصوّر مطلوب'
+              : 'Photographer approval required'),
+          content: Text(widget.isAr
+              ? 'هذا العرض يشمل التصوير. يجب اعتماد حسابك كمصوّر عقاري قبل تقديمه.'
+              : 'This offer includes photography. Your photographer profile must be approved before you can submit it.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(widget.isAr ? 'لاحقًا' : 'Later'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(
+                  widget.isAr ? 'التسجيل كمصوّر' : 'Register as photographer'),
+            ),
+          ],
+        ),
+      );
+      if (register != true || !mounted) return false;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => PhotographerJoinPage(
+            lang: widget.isAr ? 'ar' : 'en',
+          ),
+        ),
+      );
+      if (!mounted) return false;
+      profile = await PhotographerService(Supabase.instance.client).myProfile();
+      if (profile?.isVerified != true) return false;
+    }
+
+    final service = SubscriptionService(Supabase.instance.client);
+    var subscription = await service.getCurrentSubscriptionForPlanUserType(
+      'photographer',
+    );
+    if (SubscriptionService.subscriptionRowInPaidAccess(subscription)) {
+      return true;
+    }
+    if (!mounted) return false;
+    final subscribe = await showAppDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(widget.isAr
+            ? 'اشتراك المصوّر مطلوب'
+            : 'Photographer plan required'),
+        content: Text(widget.isAr
+            ? 'طلب المالك يشترط مصوّرًا عقاريًا. اشترك في باقة المصوّر للعودة إلى هذا العرض وإرساله.'
+            : 'The owner requires a photographer. Choose a photographer plan to return here and submit this offer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(widget.isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.subscriptions_outlined),
+            label: Text(widget.isAr ? 'اشتراك المصوّر' : 'Photographer plans'),
+          ),
+        ],
+      ),
+    );
+    if (subscribe != true || !mounted) return false;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SubscriptionsRootScreen(
+          lang: widget.isAr ? 'ar' : 'en',
+          accountType: 'photographer',
+          embedAppBar: false,
+          resumeAfterPurchase: const MarketingSubscriptionResumeIntent(
+            kind: MarketingSubscriptionResumeKind.postPaidUnlock,
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return false;
+    SubscriptionService.invalidateSubscriptionCache();
+    subscription = await service.getCurrentSubscriptionForPlanUserType(
+      'photographer',
+    );
+    return SubscriptionService.subscriptionRowInPaidAccess(subscription);
   }
 
   double get _effectiveBaseSar => _basePropertySar;
@@ -319,11 +423,12 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
 
     final inclVat = toB(r['price_includes_vat']) ?? true;
     final vRate = toD(r['vat_rate']) ?? 0.05;
-    final kindRaw =
-        (r['marketing_commission_kind'] ?? 'none').toString().trim().toLowerCase();
-    final kind = const {'none', 'percent', 'fixed'}.contains(kindRaw)
-        ? kindRaw
-        : 'none';
+    final kindRaw = (r['marketing_commission_kind'] ?? 'none')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final kind =
+        const {'none', 'percent', 'fixed'}.contains(kindRaw) ? kindRaw : 'none';
     final cRate = toD(r['marketing_commission_rate']) ?? 0.025;
     final cAmount = toD(r['marketing_commission_amount']) ?? 0.0;
 
@@ -364,12 +469,13 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
     if (prop != null && prop['default_cover_used'] != true) {
       final imgs = prop['property_images'];
       if (imgs is List && imgs.isNotEmpty) {
-        final rows = imgs.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-          ..sort((a, b) {
-            final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
-            final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
-            return sa.compareTo(sb);
-          });
+        final rows =
+            imgs.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+              ..sort((a, b) {
+                final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
+                final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
+                return sa.compareTo(sb);
+              });
         final path =
             (rows.first['path'] ?? rows.first['file_name'] ?? '').toString();
         final u = fromPath(path);
@@ -440,6 +546,22 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
     // وإلا نرجع للنموذج القديم (2.5% من المجموع شامل الضريبة) للإعلانات التي
     // لم يَختر فيها المالك نوع العمولة بعد.
     final total = _autoTotalDueSar;
+    final photoAmount = _photographyRequired
+        ? double.tryParse(_photographyAmount.text.trim())
+        : null;
+    final photoDetails = _photographyNotes.text.trim();
+    if (_photographyRequired &&
+        (photoAmount == null || photoAmount < 0 || photoDetails.length < 3)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(widget.isAr
+              ? 'أدخل مبلغ التصوير وتفاصيله قبل إرسال العرض.'
+              : 'Enter the photography amount and details before submitting.'),
+        ),
+      );
+      return;
+    }
+    if (_photographyRequired && !await _ensurePhotographerPlan()) return;
 
     setState(() => _submitting = true);
     try {
@@ -458,6 +580,8 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
           displayName: resolvedName,
           notes: _notes.text.trim(),
         ),
+        photographyAmountSar: photoAmount,
+        photographyDetails: _photographyRequired ? photoDetails : null,
       );
       final iid = (widget.inviteId ?? '').trim();
       if (iid.isNotEmpty) {
@@ -486,7 +610,9 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
       widget.onSuccess?.call();
     } on ListingOfferConflictException catch (_) {
       if (mounted) {
-        SupabaseRequestInterceptor.showIfHandled(context, const ListingOfferConflictException(), isAr: widget.isAr);
+        SupabaseRequestInterceptor.showIfHandled(
+            context, const ListingOfferConflictException(),
+            isAr: widget.isAr);
       }
     } catch (e) {
       final msg = e.toString();
@@ -712,24 +838,22 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
     if (loc.isNotEmpty) {
       entries.add(_SnapshotEntry(
         icon: Icons.map_outlined,
-        label: ListingWorkflowCopy.t(widget.isAr, 'الموقع والعنوان',
-            'Location'),
+        label:
+            ListingWorkflowCopy.t(widget.isAr, 'الموقع والعنوان', 'Location'),
         value: loc,
       ));
     }
     if (ownerName.isNotEmpty) {
       entries.add(_SnapshotEntry(
         icon: Icons.person_outline,
-        label: ListingWorkflowCopy.t(widget.isAr, 'صاحب الإعلان',
-            'Advertiser'),
+        label: ListingWorkflowCopy.t(widget.isAr, 'صاحب الإعلان', 'Advertiser'),
         value: ownerName,
       ));
     }
     if (code.isNotEmpty) {
       entries.add(_SnapshotEntry(
         icon: Icons.qr_code_2_outlined,
-        label: ListingWorkflowCopy.t(widget.isAr, 'رقم الإعلان',
-            'Listing no.'),
+        label: ListingWorkflowCopy.t(widget.isAr, 'رقم الإعلان', 'Listing no.'),
         value: code,
       ));
     }
@@ -823,8 +947,7 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
         final rows = <Widget>[];
         for (var i = 0; i < entries.length; i += 2) {
           final left = entries[i];
-          final right =
-              (i + 1 < entries.length) ? entries[i + 1] : null;
+          final right = (i + 1 < entries.length) ? entries[i + 1] : null;
           rows.add(
             Padding(
               padding: EdgeInsets.only(top: rows.isEmpty ? 0 : gap),
@@ -938,203 +1061,241 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
       final innerContent = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-              if (widget.showDragHandle) ...[
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: cs.onSurfaceVariant.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
+          if (widget.showDragHandle) ...[
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(999),
                 ),
-                Text(
-                  ListingWorkflowCopy.t(
-                    widget.isAr,
-                    'إرسال عرض تسويقي',
-                    'Send marketing offer',
-                  ),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 18,
-                  ),
-                ),
-                const SizedBox(height: 12),
-              ] else ...[
-                const SizedBox(height: 8),
-              ],
-              if (wf != null) ...[
-                Text(
-                  widget.isAr ? wf.statusLabelAr : wf.statusLabelEn,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: _brandTeal,
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              const SizedBox(height: 8),
+              ),
+            ),
+            Text(
+              ListingWorkflowCopy.t(
+                widget.isAr,
+                _photographyRequired
+                    ? 'إرسال عرض تسويق وتصوير'
+                    : 'إرسال عرض تسويقي',
+                _photographyRequired
+                    ? 'Send marketing and photography offer'
+                    : 'Send marketing offer',
+              ),
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ] else ...[
+            const SizedBox(height: 8),
+          ],
+          if (wf != null) ...[
+            Text(
+              widget.isAr ? wf.statusLabelAr : wf.statusLabelEn,
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                color: _brandTeal,
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
+          const SizedBox(height: 8),
 
-              // ---------------------------------------------------------------
-              // مسارات العرض الثلاثة:
-              //
-              // (1) المالك اختار مسوّقاً آخر: لا فائدة من تقديم/تجديد عرض، نُخفي
-              //     ملخّص الأتعاب وحقل العرض والزر تماماً ونعرض إشعاراً واحداً.
-              // (2) لدى المسوّق عرض حيّ: نُخفي حقل العرض وزر «إرسال العرض»،
-              //     ونعرض حالة العرض + زر «إشعار آخر» (مفعَّل بعد 48 ساعة).
-              // (3) لا يوجد عرض حيّ بعد: المسار الأصلي — ملخص الأتعاب + حقل
-              //     ملاحظات + زر إرسال العرض.
-              //
-              // ملاحظة: شاشة المسوّق تعرض هذه المنطقة كما هي بعد أن يُتيح المالك
-              // فرصة ثانية بعد انقضاء 72 ساعة (تُرجع الحالة لـ waiting_marketers
-              // وتُسحب العروض القديمة، فيختفي _liveOffer ويُعاد إظهار الحقل).
-              // ---------------------------------------------------------------
-              if (_ownerSelectedOtherMarketer)
-                _noticeCard(
-                  cs: cs,
-                  icon: Icons.info_outline,
-                  background: cs.surfaceContainerHighest.withValues(alpha: 0.6),
-                  iconColor: cs.onSurfaceVariant,
-                  text: widget.isAr
-                      ? 'تم اختيار مسوّق آخر لهذا الطلب. لا تظهر هنا أي أزرار أو حقول حتى يُعيد المالك الطلب للسوق ويمنحك فرصة جديدة بعد 72 ساعة.'
-                      : 'Another marketer has been selected for this request. Buttons and fields are hidden until the owner re-opens the request to the market after 72 hours.',
-                )
-              else if (_hasLiveOffer) ...[
-                _buildLiveOfferStatusCard(cs, blocked),
-                const SizedBox(height: 10),
-                _buildLastCallSection(cs),
-              ] else ...[
-                if (blocked != null)
-                  _noticeCard(
-                    cs: cs,
-                    icon: Icons.info_outline,
-                    background: cs.errorContainer.withValues(alpha: 0.35),
-                    iconColor: cs.error,
-                    text: blocked,
-                  ),
-                if (blocked != null) const SizedBox(height: 14),
-                if (autoBase <= 0)
-                  _noticeCard(
-                    cs: cs,
-                    icon: Icons.warning_amber_rounded,
-                    background: cs.errorContainer.withValues(alpha: 0.35),
-                    iconColor: cs.error,
-                    text: ListingWorkflowCopy.t(
-                      widget.isAr,
-                      'سعر العقار غير مضبوط في الطلب. يجب على المالك تحديد السعر أولاً، ثم يمكنك إرسال العرض تلقائياً.',
-                      'Property price is missing on this request. The owner must set it first, then you can submit the offer automatically.',
-                    ),
-                  ),
-                const SizedBox(height: 18),
-                Text(
-                  ListingWorkflowCopy.t(
-                    widget.isAr,
-                    'كيف يظهر اسمك للمالك عند تقديم العرض',
-                    'How your name appears to the owner on this offer',
-                  ),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 14,
+          // ---------------------------------------------------------------
+          // مسارات العرض الثلاثة:
+          //
+          // (1) المالك اختار مسوّقاً آخر: لا فائدة من تقديم/تجديد عرض، نُخفي
+          //     ملخّص الأتعاب وحقل العرض والزر تماماً ونعرض إشعاراً واحداً.
+          // (2) لدى المسوّق عرض حيّ: نُخفي حقل العرض وزر «إرسال العرض»،
+          //     ونعرض حالة العرض + زر «إشعار آخر» (مفعَّل بعد 48 ساعة).
+          // (3) لا يوجد عرض حيّ بعد: المسار الأصلي — ملخص الأتعاب + حقل
+          //     ملاحظات + زر إرسال العرض.
+          //
+          // ملاحظة: شاشة المسوّق تعرض هذه المنطقة كما هي بعد أن يُتيح المالك
+          // فرصة ثانية بعد انقضاء 72 ساعة (تُرجع الحالة لـ waiting_marketers
+          // وتُسحب العروض القديمة، فيختفي _liveOffer ويُعاد إظهار الحقل).
+          // ---------------------------------------------------------------
+          if (_ownerSelectedOtherMarketer)
+            _noticeCard(
+              cs: cs,
+              icon: Icons.info_outline,
+              background: cs.surfaceContainerHighest.withValues(alpha: 0.6),
+              iconColor: cs.onSurfaceVariant,
+              text: widget.isAr
+                  ? 'تم اختيار مسوّق آخر لهذا الطلب. لا تظهر هنا أي أزرار أو حقول حتى يُعيد المالك الطلب للسوق ويمنحك فرصة جديدة بعد 72 ساعة.'
+                  : 'Another marketer has been selected for this request. Buttons and fields are hidden until the owner re-opens the request to the market after 72 hours.',
+            )
+          else if (_hasLiveOffer) ...[
+            _buildLiveOfferStatusCard(cs, blocked),
+            const SizedBox(height: 10),
+            _buildLastCallSection(cs),
+          ] else ...[
+            if (blocked != null)
+              _noticeCard(
+                cs: cs,
+                icon: Icons.info_outline,
+                background: cs.errorContainer.withValues(alpha: 0.35),
+                iconColor: cs.error,
+                text: blocked,
+              ),
+            if (blocked != null) const SizedBox(height: 14),
+            if (autoBase <= 0)
+              _noticeCard(
+                cs: cs,
+                icon: Icons.warning_amber_rounded,
+                background: cs.errorContainer.withValues(alpha: 0.35),
+                iconColor: cs.error,
+                text: ListingWorkflowCopy.t(
+                  widget.isAr,
+                  'سعر العقار غير مضبوط في الطلب. يجب على المالك تحديد السعر أولاً، ثم يمكنك إرسال العرض تلقائياً.',
+                  'Property price is missing on this request. The owner must set it first, then you can submit the offer automatically.',
+                ),
+              ),
+            const SizedBox(height: 18),
+            Text(
+              ListingWorkflowCopy.t(
+                widget.isAr,
+                'كيف يظهر اسمك للمالك عند تقديم العرض',
+                'How your name appears to the owner on this offer',
+              ),
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              ListingWorkflowCopy.t(
+                widget.isAr,
+                'الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة، أو الاسم المستعار. رقم الجوال والدردشة لا يظهران إلا بعد موافقة المالك في تبويب التعاقد وتبويب التصريح.',
+                'Official quad / office / institution / company name, or an alias. Phone and chat stay hidden until the owner accepts — then in contracting and permit tabs.',
+              ),
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<PublicNameSource>(
+              segments: [
+                ButtonSegment(
+                  value: PublicNameSource.official,
+                  label: Text(
+                    widget.isAr ? 'المعتمد' : 'Official',
+                    maxLines: 1,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  ListingWorkflowCopy.t(
-                    widget.isAr,
-                    'الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة، أو الاسم المستعار. رقم الجوال والدردشة لا يظهران إلا بعد موافقة المالك في تبويب التعاقد وتبويب التصريح.',
-                    'Official quad / office / institution / company name, or an alias. Phone and chat stay hidden until the owner accepts — then in contracting and permit tabs.',
+                ButtonSegment(
+                  value: PublicNameSource.display,
+                  label: Text(
+                    widget.isAr ? 'المستعار' : 'Alias',
+                    maxLines: 1,
                   ),
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.35,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SegmentedButton<PublicNameSource>(
-                  segments: [
-                    ButtonSegment(
-                      value: PublicNameSource.official,
-                      label: Text(
-                        widget.isAr ? 'المعتمد' : 'Official',
-                        maxLines: 1,
-                      ),
-                    ),
-                    ButtonSegment(
-                      value: PublicNameSource.display,
-                      label: Text(
-                        widget.isAr ? 'المستعار' : 'Alias',
-                        maxLines: 1,
-                      ),
-                    ),
-                  ],
-                  selected: {_offerNameSource},
-                  onSelectionChanged: (s) {
-                    if (s.isEmpty) return;
-                    setState(() => _offerNameSource = s.first);
-                  },
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _offerNameSource == PublicNameSource.official
-                      ? (widget.isAr
-                          ? 'سيظهر: ${_offerOfficialName.trim().isEmpty ? '—' : _offerOfficialName}'
-                          : 'Shows: ${_offerOfficialName.trim().isEmpty ? '—' : _offerOfficialName}')
-                      : (widget.isAr
-                          ? 'سيظهر: ${_offerAliasName.trim().isEmpty ? '—' : _offerAliasName}'
-                          : 'Shows: ${_offerAliasName.trim().isEmpty ? '—' : _offerAliasName}'),
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
-                    color: cs.primary,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                AqarTextField(
-                  controller: _notes,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  minLines: 3,
-                  maxLines: 8,
-                  decoration: InputDecoration(
-                    labelText: ListingWorkflowCopy.offerNotesToOwnerLabel(
-                      widget.isAr,
-                    ),
-                    hintText: ListingWorkflowCopy.offerNotesToOwnerHint(
-                      widget.isAr,
-                    ),
-                    alignLabelWithHint: true,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                FilledButton(
-                  onPressed: (_submitting || _effectiveBaseSar <= 0)
-                      ? null
-                      : _submit,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _brandTeal,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(
-                          ListingWorkflowCopy.btnSendOffer(widget.isAr),
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
                 ),
               ],
+              selected: {_offerNameSource},
+              onSelectionChanged: (s) {
+                if (s.isEmpty) return;
+                setState(() => _offerNameSource = s.first);
+              },
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _offerNameSource == PublicNameSource.official
+                  ? (widget.isAr
+                      ? 'سيظهر: ${_offerOfficialName.trim().isEmpty ? '—' : _offerOfficialName}'
+                      : 'Shows: ${_offerOfficialName.trim().isEmpty ? '—' : _offerOfficialName}')
+                  : (widget.isAr
+                      ? 'سيظهر: ${_offerAliasName.trim().isEmpty ? '—' : _offerAliasName}'
+                      : 'Shows: ${_offerAliasName.trim().isEmpty ? '—' : _offerAliasName}'),
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+                color: cs.primary,
+              ),
+            ),
+            const SizedBox(height: 18),
+            AqarTextField(
+              controller: _notes,
+              keyboardType: TextInputType.multiline,
+              textInputAction: TextInputAction.newline,
+              minLines: 3,
+              maxLines: 8,
+              decoration: InputDecoration(
+                labelText: ListingWorkflowCopy.offerNotesToOwnerLabel(
+                  widget.isAr,
+                ),
+                hintText: ListingWorkflowCopy.offerNotesToOwnerHint(
+                  widget.isAr,
+                ),
+                alignLabelWithHint: true,
+              ),
+            ),
+            if (_photographyRequired) ...[
+              const SizedBox(height: 14),
+              _noticeCard(
+                cs: cs,
+                icon: Icons.photo_camera_outlined,
+                background: cs.tertiaryContainer.withValues(alpha: 0.55),
+                iconColor: cs.onTertiaryContainer,
+                text: widget.isAr
+                    ? 'هذا الطلب يتضمن التصوير. أدخل أتعاب التصوير وتفاصيل تنفيذه بشكل منفصل عن عرض التسويق.'
+                    : 'Photography is required. Enter its fee and delivery details separately from the marketing offer.',
+              ),
+              const SizedBox(height: 10),
+              AqarTextField(
+                controller: _photographyAmount,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: widget.isAr
+                      ? 'أتعاب التصوير بالريال'
+                      : 'Photography fee (SAR)',
+                ),
+              ),
+              const SizedBox(height: 8),
+              AqarTextField(
+                controller: _photographyNotes,
+                minLines: 2,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: widget.isAr
+                      ? 'تفاصيل الصور والفيديو والجولة وموعد التسليم'
+                      : 'Media scope and delivery timing',
+                ),
+              ),
             ],
-          );
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed:
+                  (_submitting || _effectiveBaseSar <= 0) ? null : _submit,
+              style: FilledButton.styleFrom(
+                backgroundColor: _brandTeal,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+              child: _submitting
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(
+                      ListingWorkflowCopy.btnSendOffer(widget.isAr),
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+            ),
+          ],
+        ],
+      );
 
       body = Form(
         key: _formKey,
@@ -1194,8 +1355,8 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
 
   /// بطاقة حالة العرض الحيّ — تُعرض حين يكون للمسوّق عرض نشط في هذه الجولة.
   Widget _buildLiveOfferStatusCard(ColorScheme cs, String? blocked) {
-    final text = blocked ??
-        ListingWorkflowCopy.marketerOfferAlreadyInRound(widget.isAr);
+    final text =
+        blocked ?? ListingWorkflowCopy.marketerOfferAlreadyInRound(widget.isAr);
     return _noticeCard(
       cs: cs,
       icon: Icons.check_circle_outline,
@@ -1255,8 +1416,9 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.icon(
-          onPressed:
-              (!ready || _sendingLastCall) ? null : () => unawaited(_sendLastCall()),
+          onPressed: (!ready || _sendingLastCall)
+              ? null
+              : () => unawaited(_sendLastCall()),
           icon: _sendingLastCall
               ? const SizedBox(
                   width: 18,
@@ -1320,7 +1482,8 @@ Future<void> showMarketingOfferSubmitSheet(
     action: SubscriptionGateAction.marketingPaidWorkflow,
     onGoSubscribe: () async {
       if (!context.mounted) return;
-      final (at, oid) = await MarketingSubscriptionAccess.loadBillingContext(sb);
+      final (at, oid) =
+          await MarketingSubscriptionAccess.loadBillingContext(sb);
       if (!context.mounted) return;
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
@@ -1448,8 +1611,7 @@ Future<void> showMarketingOfferSubmitSheet(
       final kb = AppKeyboardInset.bottomOf(ctx);
       final padding = MediaQuery.paddingOf(ctx);
       // مساحة فعلية مع لوحة المفاتيح (جوال/ويب) حتى لا يُقصّ زر الإرسال.
-      final availableH =
-          (h - kb - padding.vertical).clamp(240.0, 2000.0);
+      final availableH = (h - kb - padding.vertical).clamp(240.0, 2000.0);
       final sidePad = w < 400 ? 10.0 : 20.0;
       final maxW = math.min(560.0, w - sidePad * 2);
       final maxH = math.min(availableH * 0.94, 820.0);

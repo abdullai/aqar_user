@@ -1792,7 +1792,30 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final more = widget.isAr
         ? 'لمزيد من معلومات العقار والصور، قم بزيارة  الرابط:'
         : 'More photos and full details at:';
-    return '${_shareText.trimRight()}\n$more\n${_listingShareUri.toString()}\n\n— $brand';
+    final mediaLinks = <String>[
+      for (final imageUrl in ListingMediaUrls.publicUrls(
+        _sb,
+        ListingMediaUrls.propertyCardImagePaths(_property),
+      ))
+        '${widget.isAr ? 'صورة' : 'Photo'}: $imageUrl',
+      if (_hasVideo)
+        '${widget.isAr ? 'الفيديو' : 'Video'}: '
+            '${_resolveVideoPlayableUrl(_property.videoUrl!)}',
+      if (_property.hasInAppVirtualTour)
+        widget.isAr
+            ? 'جولة تفاعلية داخل التطبيق: افتح رابط الإعلان'
+            : 'Interactive in-app tour: open the listing link',
+    ];
+    final tourUrl = (_property.virtualTourUrl ?? '').trim();
+    if (ListingMediaUrls.looksLikePlayableTourUrl(tourUrl)) {
+      mediaLinks.add('${widget.isAr ? 'الجولة' : 'Tour'}: $tourUrl');
+    }
+    final mediaText = mediaLinks.isEmpty
+        ? ''
+        : '\n${widget.isAr ? 'روابط الوسائط:' : 'Media links:'}\n'
+            '${mediaLinks.join('\n')}';
+    return '${_shareText.trimRight()}\n$more\n'
+        '$_listingShareUri$mediaText\n\n— $brand';
   }
 
   Future<void> _loadDeleteMeta() async {
@@ -4020,10 +4043,83 @@ $licLine
   Widget _buildGallery() {
     final cs = Theme.of(context).colorScheme;
     final imgs = _galleryUrls;
-    final videoLead = _videoAsGalleryLead;
-    final total = (videoLead ? 1 : 0) + imgs.length;
+    final hasVideo = _hasVideo;
+    final videoFirst = _videoAsGalleryLead;
+    final videoIndex = videoFirst ? 0 : imgs.length;
+    final tourIndex = imgs.length + (hasVideo ? 1 : 0);
+    final total = imgs.length + (hasVideo ? 1 : 0) + (_hasVirtualTour ? 1 : 0);
+
+    bool isVideoSlide(int index) => hasVideo && index == videoIndex;
+    bool isTourSlide(int index) => _hasVirtualTour && index == tourIndex;
+
+    int imageIndexForSlide(int index) =>
+        hasVideo && index > videoIndex ? index - 1 : index;
+
+    Widget tourThumbnail() => SizedBox(
+          width: 72,
+          height: 56,
+          child: Tooltip(
+            message: widget.isAr ? 'فتح الجولة' : 'Open tour',
+            child: Material(
+              color: cs.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => _page.animateToPage(
+                  tourIndex,
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOut,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.threed_rotation_outlined,
+                        size: 21, color: cs.primary),
+                    Text(
+                      widget.isAr ? 'جولة' : 'Tour',
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
 
     if (total == 0) {
+      if (_hasVirtualTour) {
+        return Align(
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920, maxHeight: 420),
+            child: AspectRatio(
+              aspectRatio: 16 / 9,
+              child: Material(
+                color: cs.surfaceContainerHighest,
+                child: InkWell(
+                  onTap: () => unawaited(_openVirtualTourOverlay()),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.threed_rotation_outlined,
+                            size: 52, color: cs.primary),
+                        const SizedBox(height: 8),
+                        Text(widget.isAr ? 'فتح الجولة' : 'Open tour'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
       return Align(
         alignment: Alignment.center,
         child: ConstrainedBox(
@@ -4042,36 +4138,48 @@ $licLine
       );
     }
 
-    // صور فقط (بدون فيديو كغلاف): المعرض الموحّد مع أسهم وتكبير.
-    if (!videoLead) {
+    // صورة فقط: استخدم معرض الصور مع الأسهم والتكبير.
+    if (!hasVideo) {
       final idShort = _property.id.trim();
       final wmTrace =
           idShort.length <= 8 ? idShort : idShort.substring(idShort.length - 8);
       return Align(
         alignment: Alignment.center,
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 420),
-          child: ListingMediaGallery(
-            imageUrls: imgs,
-            isAr: widget.isAr,
-            aspectRatio: 16 / 9,
-            maxHeight: 420,
-            borderRadius: 0,
-            initialIndex: 0,
-            watermarkBuilder: (context, index) {
-              final source = index < imgs.length ? imgs[index] : '';
-              final isPhotographerMedia =
-                  _property.isPhotographerMediaPath(source);
-              return ListingWatermarkOverlay(
-                traceId: wmTrace,
+          constraints: const BoxConstraints(maxWidth: 920, maxHeight: 500),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ListingMediaGallery(
+                key: ValueKey<String>('property-gallery-${_property.id}'),
+                imageUrls: imgs,
                 isAr: widget.isAr,
-                headline: isPhotographerMedia
-                    ? (widget.isAr
-                        ? 'حقوق الصورة: ${_property.photographerAttributionForMedia(source)}'
-                        : 'Photo credit: ${_property.photographerAttributionForMedia(source)}')
+                aspectRatio: 16 / 9,
+                maxHeight: 420,
+                borderRadius: 0,
+                initialIndex: 0,
+                mediaOwnerKey: _property.id,
+                tourUrl: _property.virtualTourUrl,
+                onOpenTour: _hasVirtualTour
+                    ? () => unawaited(_openVirtualTourOverlay())
                     : null,
-              );
-            },
+                watermarkBuilder: (context, index) {
+                  final source = index < imgs.length ? imgs[index] : '';
+                  final isPhotographerMedia =
+                      _property.isPhotographerMediaPath(source);
+                  return ListingWatermarkOverlay(
+                    traceId: wmTrace,
+                    isAr: widget.isAr,
+                    headline: isPhotographerMedia
+                        ? (widget.isAr
+                            ? 'حقوق الصورة: ${_property.photographerAttributionForMedia(source)}'
+                            : 'Photo credit: ${_property.photographerAttributionForMedia(source)}')
+                        : null,
+                  );
+                },
+              ),
+            ],
           ),
         ),
       );
@@ -4088,9 +4196,11 @@ $licLine
     final idShort = _property.id.trim();
     final wmTrace =
         idShort.length <= 8 ? idShort : idShort.substring(idShort.length - 8);
-    final activeMediaSource = videoLead && safeIndex == 0
+    final activeMediaSource = isVideoSlide(safeIndex)
         ? (_property.videoUrl ?? '')
-        : imgs[videoLead ? safeIndex - 1 : safeIndex];
+        : isTourSlide(safeIndex)
+            ? ''
+            : imgs[imageIndexForSlide(safeIndex)];
     final activeMediaIsPhotographerOwned =
         _property.isPhotographerMediaPath(activeMediaSource);
 
@@ -4120,7 +4230,26 @@ $licLine
                   itemCount: total,
                   onPageChanged: (i) => setState(() => _imgIndex = i),
                   itemBuilder: (_, i) {
-                    if (videoLead && i == 0) {
+                    if (isTourSlide(i)) {
+                      return Material(
+                        color: cs.surfaceContainerHighest,
+                        child: InkWell(
+                          onTap: () => unawaited(_openVirtualTourOverlay()),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.threed_rotation_outlined,
+                                    size: 52, color: cs.primary),
+                                const SizedBox(height: 8),
+                                Text(widget.isAr ? 'فتح الجولة' : 'Open tour'),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    if (isVideoSlide(i)) {
                       final raw = _property.videoUrl!.trim();
                       final url = _resolveVideoPlayableUrl(raw);
                       return ClipRect(
@@ -4130,7 +4259,7 @@ $licLine
                         ),
                       );
                     }
-                    final imgIndex = videoLead ? i - 1 : i;
+                    final imgIndex = imageIndexForSlide(i);
                     final imageUrl = imgs[imgIndex];
                     return GestureDetector(
                       onTap: () {
@@ -4162,23 +4291,26 @@ $licLine
                     );
                   },
                 ),
-                ListingWatermarkOverlay(
-                  traceId: wmTrace,
-                  isAr: widget.isAr,
-                  headline: activeMediaIsPhotographerOwned
-                      ? (widget.isAr
-                          ? 'حقوق الصورة: ${_property.photographerAttributionForMedia(activeMediaSource)}'
-                          : 'Photo credit: ${_property.photographerAttributionForMedia(activeMediaSource)}')
-                      : null,
-                ),
+                if (!isTourSlide(safeIndex))
+                  ListingWatermarkOverlay(
+                    traceId: wmTrace,
+                    isAr: widget.isAr,
+                    headline: activeMediaIsPhotographerOwned
+                        ? (widget.isAr
+                            ? 'حقوق الصورة: ${_property.photographerAttributionForMedia(activeMediaSource)}'
+                            : 'Photo credit: ${_property.photographerAttributionForMedia(activeMediaSource)}')
+                        : null,
+                  ),
                 PositionedDirectional(
                   top: 10,
                   start: 10,
                   child: _Pill(
                     text: '${safeIndex + 1} / $total',
-                    icon: safeIndex == 0
-                        ? Icons.videocam_outlined
-                        : Icons.photo_library_outlined,
+                    icon: isTourSlide(safeIndex)
+                        ? Icons.threed_rotation_outlined
+                        : isVideoSlide(safeIndex)
+                            ? Icons.videocam_outlined
+                            : Icons.photo_library_outlined,
                   ),
                 ),
                 if (total > 1) ...[
@@ -4239,75 +4371,83 @@ $licLine
             borderRadius: BorderRadius.circular(16),
             child: frame,
           ),
-          if (total > 1) ...[
+          if (total > 1 || _hasVirtualTour) ...[
             const SizedBox(height: 8),
             SizedBox(
               height: 56,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [
-                  GestureDetector(
-                    onTap: () => _page.animateToPage(
-                      0,
-                      duration: const Duration(milliseconds: 250),
-                      curve: Curves.easeOut,
-                    ),
-                    child: Container(
-                      width: 72,
-                      margin: const EdgeInsetsDirectional.only(end: 8),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          width: _imgIndex == 0 ? 2.2 : 1,
-                          color: _imgIndex == 0
-                              ? const Color(0xFF0F766E)
-                              : cs.outlineVariant.withValues(alpha: 0.75),
+                  for (var index = 0; index < total; index++)
+                    if (isVideoSlide(index))
+                      GestureDetector(
+                        onTap: () => _page.animateToPage(
+                          index,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOut,
                         ),
-                        color: Colors.black87,
-                      ),
-                      child: const Icon(Icons.play_arrow_rounded,
-                          color: Colors.white, size: 28),
-                    ),
-                  ),
-                  ...List.generate(imgs.length, (i) {
-                    final pageIndex = i + 1;
-                    final selected = pageIndex == _imgIndex;
-                    return GestureDetector(
-                      onTap: () => _page.animateToPage(
-                        pageIndex,
-                        duration: const Duration(milliseconds: 250),
-                        curve: Curves.easeOut,
-                      ),
-                      child: Container(
-                        width: 72,
-                        margin: const EdgeInsetsDirectional.only(end: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            width: selected ? 2.2 : 1,
-                            color: selected
-                                ? const Color(0xFF0F766E)
-                                : cs.outlineVariant.withValues(alpha: 0.75),
-                          ),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: CachedNetworkImage(
-                          imageUrl: imgs[i],
-                          fit: BoxFit.cover,
-                          memCacheWidth: 220,
-                          memCacheHeight: 160,
-                          errorWidget: (_, __, ___) => ColoredBox(
-                            color: cs.surfaceContainerHighest,
-                            child: Icon(
-                              Icons.image_not_supported_outlined,
-                              size: 16,
-                              color: cs.onSurfaceVariant,
+                        child: Container(
+                          width: 72,
+                          margin: const EdgeInsetsDirectional.only(end: 8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              width: index == _imgIndex ? 2.2 : 1,
+                              color: index == _imgIndex
+                                  ? const Color(0xFF0F766E)
+                                  : cs.outlineVariant.withValues(alpha: 0.75),
                             ),
+                            color: Colors.black87,
                           ),
+                          child: const Icon(Icons.play_arrow_rounded,
+                              color: Colors.white, size: 28),
                         ),
+                      )
+                    else if (isTourSlide(index))
+                      tourThumbnail()
+                    else
+                      Builder(
+                        builder: (_) {
+                          final imageIndex = imageIndexForSlide(index);
+                          final selected = index == _imgIndex;
+                          return GestureDetector(
+                            onTap: () => _page.animateToPage(
+                              index,
+                              duration: const Duration(milliseconds: 250),
+                              curve: Curves.easeOut,
+                            ),
+                            child: Container(
+                              width: 72,
+                              margin: const EdgeInsetsDirectional.only(end: 8),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  width: selected ? 2.2 : 1,
+                                  color: selected
+                                      ? const Color(0xFF0F766E)
+                                      : cs.outlineVariant
+                                          .withValues(alpha: 0.75),
+                                ),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: CachedNetworkImage(
+                                imageUrl: imgs[imageIndex],
+                                fit: BoxFit.cover,
+                                memCacheWidth: 220,
+                                memCacheHeight: 160,
+                                errorWidget: (_, __, ___) => ColoredBox(
+                                  color: cs.surfaceContainerHighest,
+                                  child: Icon(
+                                    Icons.image_not_supported_outlined,
+                                    size: 16,
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  }),
                 ],
               ),
             ),
@@ -5379,69 +5519,17 @@ $licLine
                         marketerBrandUrl: marketerBrandUrl,
                       ),
                       const SizedBox(height: 12),
-                      if (_hasVideo || _hasVirtualTour) ...[
+                      if (_isOwnerManager &&
+                          (_hasVideo || _hasVirtualTour)) ...[
                         _Card(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Text(
-                                widget.isAr ? 'الوسائط' : 'Media',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              const SizedBox(height: 10),
-                              if (_hasVideo)
-                                FilledButton.icon(
-                                  onPressed:
-                                      _openingVideo ? null : _openVideoSheet,
-                                  icon: _openingVideo
-                                      ? const SizedBox(
-                                          width: 22,
-                                          height: 22,
-                                          child: AppLogoLoading(
-                                            compact: true,
-                                            size: 20,
-                                          ),
-                                        )
-                                      : const Icon(Icons.play_circle_outline),
-                                  label: Text(
-                                    widget.isAr
-                                        ? 'عرض فيديو العقار'
-                                        : 'Play property video',
-                                  ),
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFF0F766E),
-                                    foregroundColor: Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              if (_hasVirtualTour) ...[
-                                const SizedBox(height: 10),
-                                FilledButton.tonalIcon(
-                                  onPressed: _openVirtualTourOverlay,
-                                  icon: const Icon(
-                                      Icons.threed_rotation_outlined),
-                                  label: Text(
-                                    AppLocalizations.of(context)!.inAppTourOpen,
-                                  ),
-                                ),
-                              ],
-                              if (_isOwnerManager) ...[
-                                const SizedBox(height: 10),
-                                OutlinedButton.icon(
-                                  onPressed: _rateDeliveredPhotographer,
-                                  icon: const Icon(Icons.star_outline),
-                                  label: Text(
-                                    widget.isAr
-                                        ? 'تقييم المصور'
-                                        : 'Rate photographer',
-                                  ),
-                                ),
-                              ],
-                            ],
+                          child: OutlinedButton.icon(
+                            onPressed: _rateDeliveredPhotographer,
+                            icon: const Icon(Icons.star_outline),
+                            label: Text(
+                              widget.isAr
+                                  ? 'تقييم المصور'
+                                  : 'Rate photographer',
+                            ),
                           ),
                         ),
                         const SizedBox(height: 12),

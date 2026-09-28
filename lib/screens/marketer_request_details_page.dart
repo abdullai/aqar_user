@@ -52,10 +52,12 @@ class MarketerRequestDetailsPage extends StatefulWidget {
   });
 
   @override
-  State<MarketerRequestDetailsPage> createState() => _MarketerRequestDetailsPageState();
+  State<MarketerRequestDetailsPage> createState() =>
+      _MarketerRequestDetailsPageState();
 }
 
-class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage> {
+class _MarketerRequestDetailsPageState
+    extends State<MarketerRequestDetailsPage> {
   late final MarketingFlowService _svc;
 
   /// Controller مخصّص للتمرير — يُستخدم مع `Scrollbar` لتفعيل شريط التمرير
@@ -262,8 +264,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     final wfCtx = _wfCtx;
     final inviteStatus = _inviteStatus();
     final distanceKm = _invite?['distance_km'];
-    final area = (p?['area'] as num?)?.toDouble() ??
-        (r['area'] as num?)?.toDouble();
+    final area =
+        (p?['area'] as num?)?.toDouble() ?? (r['area'] as num?)?.toDouble();
     final listingNo = _listingNumberLabel();
     final headline = _composedHeadline(la);
     final city = _safeText(r['city'] ?? p?['city'], fallback: '');
@@ -409,7 +411,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     }
   }
 
-  String _inviteStatus() => _safeText(_invite?['status'], fallback: 'pending').toLowerCase();
+  String _inviteStatus() =>
+      _safeText(_invite?['status'], fallback: 'pending').toLowerCase();
 
   List<String> _heroUrlsForBanner() {
     final p = _previewProperty;
@@ -421,8 +424,7 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
             .compareTo((b['sort_order'] as num?)?.toInt() ?? 0));
       final out = <String>[];
       for (final im in imgs) {
-        final path =
-            (im['path'] ?? im['file_name'] ?? '').toString().trim();
+        final path = (im['path'] ?? im['file_name'] ?? '').toString().trim();
         if (path.isEmpty) continue;
         out.add(
           Supabase.instance.client.storage
@@ -521,6 +523,25 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
       return false;
     }
     final ctx = _wfCtx;
+    if (ctx != null &&
+        const {
+          ListingWorkflowStage.marketerSelected,
+          ListingWorkflowStage.contractPending,
+          ListingWorkflowStage.contractSent,
+          ListingWorkflowStage.contractReturned,
+          ListingWorkflowStage.contractSigned,
+          ListingWorkflowStage.contractCancelled,
+          ListingWorkflowStage.permitPending,
+          ListingWorkflowStage.permitIssued,
+          ListingWorkflowStage.published,
+          ListingWorkflowStage.reserved,
+          ListingWorkflowStage.inactive72h,
+          ListingWorkflowStage.cancelled,
+          ListingWorkflowStage.terminated,
+          ListingWorkflowStage.archived,
+        }.contains(ctx.stage)) {
+      return false;
+    }
     if (ctx?.stage == ListingWorkflowStage.inactive72h) return false;
     if (ctx?.showMarketerSubmitOffer != true && !_hasLiveOfferThisRound) {
       return false;
@@ -535,10 +556,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
   /// إرسال العقد + توقيع العقد + التصريح + النشر). في هذه الحالات لا يجوز
   /// إظهار حقل «إرسال عرض» للمسوّق المختار — العرض قد قُبل بالفعل.
   bool get _isContractStageOrLater {
-    final wf = (_request?['workflow_stage'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
+    final wf =
+        (_request?['workflow_stage'] ?? '').toString().trim().toLowerCase();
     return wf == 'contract_sent' ||
         wf == 'contract_signed' ||
         wf == 'awaiting_contract' ||
@@ -569,7 +588,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     final uid = (Supabase.instance.client.auth.currentUser?.id ?? '').trim();
     if (uid.isEmpty || _request == null) return false;
     final sel = (_request!['selected_marketer_id'] ?? '').toString().trim();
-    final wf = (_request!['workflow_stage'] ?? '').toString().toLowerCase().trim();
+    final wf =
+        (_request!['workflow_stage'] ?? '').toString().toLowerCase().trim();
     return sel == uid && wf == 'contract_sent';
   }
 
@@ -577,7 +597,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
     final uid = (Supabase.instance.client.auth.currentUser?.id ?? '').trim();
     if (uid.isEmpty || _request == null) return false;
     final sel = (_request!['selected_marketer_id'] ?? '').toString().trim();
-    final wf = (_request!['workflow_stage'] ?? '').toString().toLowerCase().trim();
+    final wf =
+        (_request!['workflow_stage'] ?? '').toString().toLowerCase().trim();
     return sel == uid && wf == 'contract_returned';
   }
 
@@ -665,8 +686,7 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
       final list = rows as List;
       if (list.isNotEmpty) {
         setState(
-          () => _previewProperty =
-              Map<String, dynamic>.from(list.first as Map),
+          () => _previewProperty = Map<String, dynamic>.from(list.first as Map),
         );
       }
     } catch (_) {}
@@ -862,7 +882,8 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
                 leading: AppPageCloseButton(
                   isArabic: _isAr,
                 ),
-                title: Text(_t('تفاصيل طلب التسويق', 'Marketing Request Details')),
+                title:
+                    Text(_t('تفاصيل طلب التسويق', 'Marketing Request Details')),
                 actions: [
                   IconButton(
                     onPressed: _loading ? null : _load,
@@ -910,8 +931,9 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
       fallback: '',
     );
 
-    final bottomPad =
-        24.0 + MediaQuery.paddingOf(context).bottom + AppKeyboardInset.bottomOf(context);
+    final bottomPad = 24.0 +
+        MediaQuery.paddingOf(context).bottom +
+        AppKeyboardInset.bottomOf(context);
 
     final heroUrls = _heroUrlsForBanner();
 
@@ -934,139 +956,139 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          if (widget.embedAppBar)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: IconButton.filledTonal(
-                  onPressed: _loading ? null : _load,
-                  icon: const Icon(Icons.refresh_rounded),
-                  tooltip: _t('تحديث', 'Refresh'),
-                ),
-              ),
-            ),
-          if (heroUrls.isNotEmpty || _heroVideoUrl().isNotEmpty) ...[
-            RepaintBoundary(
-              child: MyPageCoverGallery(
-                imageUrls: heroUrls,
-                videoUrl: _heroVideoUrl(),
-                coverPrefersVideo: _coverPrefersVideo(),
-                isAr: _isAr,
-                borderRadius: 14,
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          _buildRequestSummaryGrid(context),
-          if (notesOwner.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _sectionTitle(_t('ملاحظات المالك', 'Owner notes')),
-            Text(notesOwner),
-          ],
-
-          if (wfCtx != null) ...[
-            const SizedBox(height: 12),
-            ListingWorkflowProgressStrip(
-              stage: wfCtx.stage,
-              compact: false,
-              dense: true,
-              deadline: wfCtx.primaryDeadline,
-              permitSoundContextId: widget.requestId,
-            ),
-          ],
-
-          if (_isSelectedMarketerAwaitingContract) ...[
-            const SizedBox(height: 12),
-            _noticeCard(
-              context: context,
-              text:
-                  '${ListingWorkflowCopy.marketerAwaitingContractTitle(_isAr)}\n\n'
-                  '${ListingWorkflowCopy.marketerAwaitingContractBody(_isAr)}',
-              tone: _NoticeTone.success,
-            ),
-          ],
-
-          if (_isSelectedMarketerContractReturned) ...[
-            const SizedBox(height: 12),
-            _noticeCard(
-              context: context,
-              text: _returnedContractNoticeText(),
-              tone: _NoticeTone.blocked,
-            ),
-          ],
-
-          const SizedBox(height: 20),
-          _buildMarketerDetailsQuickActions(context),
-
-          // قسم العرض: نُبقي اللوحة مرئية كي تستطيع عرض «حالة عرضك» وزر
-          // «إشعار آخر» للمالك بعد 48 ساعة، أو إخفاء الزر والحقل تلقائياً
-          // حين يَختار المالك مسوّقاً آخر.
-          //
-          // — تُخفى تماماً (لا حقل ولا زر) في الحالات التالية:
-          //   * الإعلان منشور (`_isPublishedLike`).
-          //   * المرحلة وصلت لـ«تم الموافقة/التعاقد» وما بعدها
-          //     (`_isContractStageOrLater`) — تطلَب المستخدم عدم ظهور
-          //     الحقل وزر «إرسال العرض» في تبويب التعاقد.
-          if (!_shouldShowOfferPanel &&
-              !_isContractStageOrLater &&
-              _inviteAllowsOffer &&
-              _wfCtx != null &&
-              !_wfCtx!.showMarketerSubmitOffer) ...[
-            const SizedBox(height: 12),
-            _noticeCard(
-              context: context,
-              text: ListingWorkflowCopy.marketerSubmitBlockedExplanation(
-                _isAr,
-                hasLiveOfferThisRound: _hasLiveOfferThisRound,
-                ctx: _wfCtx,
-              ) ??
-                  _t(
-                    'لا يمكن إتمام الصفقة حالياً.',
-                    'Cannot complete a deal right now.',
+              if (widget.embedAppBar)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerEnd,
+                    child: IconButton.filledTonal(
+                      onPressed: _loading ? null : _load,
+                      icon: const Icon(Icons.refresh_rounded),
+                      tooltip: _t('تحديث', 'Refresh'),
+                    ),
                   ),
-              tone: _NoticeTone.blocked,
-            ),
-          ],
+                ),
+              if (heroUrls.isNotEmpty || _heroVideoUrl().isNotEmpty) ...[
+                RepaintBoundary(
+                  child: MyPageCoverGallery(
+                    imageUrls: heroUrls,
+                    videoUrl: _heroVideoUrl(),
+                    coverPrefersVideo: _coverPrefersVideo(),
+                    isAr: _isAr,
+                    borderRadius: 14,
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              _buildRequestSummaryGrid(context),
+              if (notesOwner.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _sectionTitle(_t('ملاحظات المالك', 'Owner notes')),
+                Text(notesOwner),
+              ],
 
-          if (_shouldShowOfferPanel) ...[
-            const SizedBox(height: 20),
-            _sectionTitle(
-              _hasLiveOfferThisRound
-                  ? _t('حالة عرضك', 'Your offer status')
-                  : _t('إرسال عرض تسويقي', 'Send marketing offer'),
-            ),
-            MarketingOfferSubmitPanel(
-              requestId: widget.requestId,
-              inviteId:
-                  _resolvedInviteId.isEmpty ? null : _resolvedInviteId,
-              isAr: _isAr,
-              showDragHandle: false,
-              useInnerScroll: false,
-              propertyBaseSarHint: _propertyBaseSarHint,
-              onSuccess: () => unawaited(_afterOfferSubmittedFromDetails()),
-            ),
-          ] else if (_isPublishedLike) ...[
-            const SizedBox(height: 20),
-            _noticeCard(
-              context: context,
-              text: _t(
-                'تم نشر الإعلان، لا يمكن إتمام صفقة تسويق جديدة.',
-                'The listing is published; new marketing offers are disabled.',
-              ),
-              tone: _NoticeTone.info,
-            ),
-          ] else if (!_inviteAllowsOffer) ...[
-            const SizedBox(height: 20),
-            _noticeCard(
-              context: context,
-              text: ListingWorkflowCopy.inviteBlocksOffer(
-                _isAr,
-                _inviteStatus(),
-              ),
-              tone: _NoticeTone.blocked,
-            ),
-          ],
+              if (wfCtx != null) ...[
+                const SizedBox(height: 12),
+                ListingWorkflowProgressStrip(
+                  stage: wfCtx.stage,
+                  compact: false,
+                  dense: true,
+                  deadline: wfCtx.primaryDeadline,
+                  permitSoundContextId: widget.requestId,
+                ),
+              ],
+
+              if (_isSelectedMarketerAwaitingContract) ...[
+                const SizedBox(height: 12),
+                _noticeCard(
+                  context: context,
+                  text:
+                      '${ListingWorkflowCopy.marketerAwaitingContractTitle(_isAr)}\n\n'
+                      '${ListingWorkflowCopy.marketerAwaitingContractBody(_isAr)}',
+                  tone: _NoticeTone.success,
+                ),
+              ],
+
+              if (_isSelectedMarketerContractReturned) ...[
+                const SizedBox(height: 12),
+                _noticeCard(
+                  context: context,
+                  text: _returnedContractNoticeText(),
+                  tone: _NoticeTone.blocked,
+                ),
+              ],
+
+              const SizedBox(height: 20),
+              _buildMarketerDetailsQuickActions(context),
+
+              // قسم العرض: نُبقي اللوحة مرئية كي تستطيع عرض «حالة عرضك» وزر
+              // «إشعار آخر» للمالك بعد 48 ساعة، أو إخفاء الزر والحقل تلقائياً
+              // حين يَختار المالك مسوّقاً آخر.
+              //
+              // — تُخفى تماماً (لا حقل ولا زر) في الحالات التالية:
+              //   * الإعلان منشور (`_isPublishedLike`).
+              //   * المرحلة وصلت لـ«تم الموافقة/التعاقد» وما بعدها
+              //     (`_isContractStageOrLater`) — تطلَب المستخدم عدم ظهور
+              //     الحقل وزر «إرسال العرض» في تبويب التعاقد.
+              if (!_shouldShowOfferPanel &&
+                  !_isContractStageOrLater &&
+                  _inviteAllowsOffer &&
+                  _wfCtx != null &&
+                  !_wfCtx!.showMarketerSubmitOffer) ...[
+                const SizedBox(height: 12),
+                _noticeCard(
+                  context: context,
+                  text: ListingWorkflowCopy.marketerSubmitBlockedExplanation(
+                        _isAr,
+                        hasLiveOfferThisRound: _hasLiveOfferThisRound,
+                        ctx: _wfCtx,
+                      ) ??
+                      _t(
+                        'لا يمكن إتمام الصفقة حالياً.',
+                        'Cannot complete a deal right now.',
+                      ),
+                  tone: _NoticeTone.blocked,
+                ),
+              ],
+
+              if (_shouldShowOfferPanel) ...[
+                const SizedBox(height: 20),
+                _sectionTitle(
+                  _hasLiveOfferThisRound
+                      ? _t('حالة عرضك', 'Your offer status')
+                      : _t('إرسال عرض تسويقي', 'Send marketing offer'),
+                ),
+                MarketingOfferSubmitPanel(
+                  requestId: widget.requestId,
+                  inviteId:
+                      _resolvedInviteId.isEmpty ? null : _resolvedInviteId,
+                  isAr: _isAr,
+                  showDragHandle: false,
+                  useInnerScroll: false,
+                  propertyBaseSarHint: _propertyBaseSarHint,
+                  onSuccess: () => unawaited(_afterOfferSubmittedFromDetails()),
+                ),
+              ] else if (_isPublishedLike) ...[
+                const SizedBox(height: 20),
+                _noticeCard(
+                  context: context,
+                  text: _t(
+                    'تم نشر الإعلان، لا يمكن إتمام صفقة تسويق جديدة.',
+                    'The listing is published; new marketing offers are disabled.',
+                  ),
+                  tone: _NoticeTone.info,
+                ),
+              ] else if (!_inviteAllowsOffer) ...[
+                const SizedBox(height: 20),
+                _noticeCard(
+                  context: context,
+                  text: ListingWorkflowCopy.inviteBlocksOffer(
+                    _isAr,
+                    _inviteStatus(),
+                  ),
+                  tone: _NoticeTone.blocked,
+                ),
+              ],
               const SizedBox(height: 24),
             ],
           ),
@@ -1084,8 +1106,6 @@ class _MarketerRequestDetailsPageState extends State<MarketerRequestDetailsPage>
       ),
     );
   }
-
-
 
   Widget _noticeCard({
     required BuildContext context,

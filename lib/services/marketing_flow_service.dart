@@ -307,12 +307,25 @@ class MarketingFlowService {
     if (ids.isEmpty) return offers;
 
     final byUser = await _usersProfilesByIds(ids);
+    Map<String, Map<String, dynamic>> photographyByOffer = {};
+    try {
+      final photoRows = await sb
+          .from('listing_offer_photography')
+          .select('offer_id,amount_sar,details')
+          .inFilter('offer_id', offers.map((offer) => offer['id']).toList());
+      photographyByOffer = {
+        for (final row in _asListOfMaps(photoRows))
+          (row['offer_id'] ?? '').toString(): row,
+      };
+    } catch (_) {}
 
     return offers.map((o) {
       final mid = (o['marketer_id'] ?? '').toString();
       final prof = byUser[mid];
       return {
         ...o,
+        '_photography_component':
+            photographyByOffer[(o['id'] ?? '').toString()],
         '_marketer_display_name':
             _marketerDisplayName(prof, preferArabic: preferArabicNames),
         '_marketer_account_type': (prof?['account_type'] ?? '').toString(),
@@ -1377,6 +1390,8 @@ class MarketingFlowService {
     required String requestId,
     required double price,
     required String notes,
+    double? photographyAmountSar,
+    String? photographyDetails,
   }) async {
     await ensureMarketerProfileRow();
     String parseRes(dynamic res) {
@@ -1386,18 +1401,30 @@ class MarketingFlowService {
     }
 
     try {
+      final bundledPhotography = photographyAmountSar != null &&
+          photographyDetails != null &&
+          photographyDetails.trim().isNotEmpty;
       final res = await sb.rpc(
-        'submit_listing_offer',
+        bundledPhotography
+            ? 'submit_listing_offer_with_photography'
+            : 'submit_listing_offer',
         params: {
           'p_request_id': requestId,
           'p_offer_amount': price,
           'p_notes': notes,
+          if (bundledPhotography) ...{
+            'p_photography_amount': photographyAmountSar,
+            'p_photography_details': photographyDetails.trim(),
+          },
         },
       );
       return parseRes(res);
     } on PostgrestException catch (e) {
       if (SupabaseRequestInterceptor.isConflict(e)) {
         throw const ListingOfferConflictException();
+      }
+      if (photographyAmountSar != null || photographyDetails != null) {
+        rethrow;
       }
       try {
         final res = await sb.rpc('marketer_submit_offer', params: {

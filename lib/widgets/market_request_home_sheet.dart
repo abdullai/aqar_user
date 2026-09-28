@@ -15,6 +15,7 @@ import '../core/deals/deal_inventory_policy.dart';
 import '../core/gestures/app_keyboard_inset.dart';
 import '../core/gestures/app_keyboard_popups.dart';
 import '../core/haptics/app_haptics.dart';
+import '../core/listing/listing_media_urls.dart';
 import '../core/utils/chat_display_initials.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/property_listing_display.dart';
@@ -38,7 +39,10 @@ import '../core/utils/users_profiles_safe_select.dart';
 import 'guest_participation_gate.dart';
 import 'deal_completion_flow.dart';
 import 'instant_market_request_badge.dart';
+import 'in_app_tour_viewer.dart';
+import 'listing_media_gallery.dart';
 import 'marketer_policy_notice_card.dart';
+import 'property_video_sheet.dart';
 import 'specified_budget_display.dart';
 
 /// تفاصيل طلب السوق من الرئيسية + عروض + محادثة (بعد تطبيق SQL v20260411).
@@ -936,6 +940,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     final hasAcceptedOffer = acceptedOfferId.isNotEmpty;
     final headline =
         PropertyListingDisplay.displayRequestTitle(row, widget.isAr);
+    final requestImages =
+        ListingMediaUrls.marketRequestImageUrls(row, widget.sb);
+    final requestVideo =
+        ListingMediaUrls.marketRequestVideoPlayableUrl(row, widget.sb);
+    final requestTour = ListingMediaUrls.marketRequestTourUrl(row);
+    final requestInAppTour = ListingMediaUrls.inAppTourFromPayload(row.details);
+    final hasRequestMedia = requestImages.isNotEmpty ||
+        requestVideo != null ||
+        requestTour != null ||
+        requestInAppTour != null;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -962,6 +976,48 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   ),
             ),
             const SizedBox(height: 10),
+            if (hasRequestMedia) ...[
+              ListingMediaGallery(
+                key: ValueKey<String>('market-request-details-${row.id}'),
+                imageUrls: requestImages,
+                videoUrl: requestVideo,
+                tourUrl: requestTour,
+                preferVideoFirst:
+                    ListingMediaUrls.marketRequestPrefersVideoCover(row),
+                mediaOwnerKey: row.id,
+                isAr: widget.isAr,
+                aspectRatio: 16 / 9,
+                maxHeight: 360,
+                borderRadius: 16,
+                onOpenVideo: requestVideo == null
+                    ? null
+                    : () => unawaited(
+                          PropertyVideoSheet.open(
+                            context,
+                            isAr: widget.isAr,
+                            title: headline,
+                            videoUrl: requestVideo,
+                          ),
+                        ),
+                onOpenTour: requestInAppTour != null
+                    ? () => unawaited(
+                          openInAppTourViewer(
+                            context: context,
+                            tour: requestInAppTour,
+                            isAr: widget.isAr,
+                          ),
+                        )
+                    : requestTour == null
+                        ? null
+                        : () => unawaited(
+                              launchUrl(
+                                Uri.parse(requestTour),
+                                mode: LaunchMode.externalApplication,
+                              ),
+                            ),
+              ),
+              const SizedBox(height: 10),
+            ],
             if (isCompleted || deletionRequested) ...[
               Material(
                 color: isCompleted

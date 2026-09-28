@@ -1,4 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../core/branding/branding_logo_image.dart';
@@ -18,6 +19,13 @@ class ListingMediaGallery extends StatefulWidget {
     this.borderRadius = 0,
     this.fit = BoxFit.cover,
     this.initialIndex = 0,
+    this.videoUrl,
+    this.tourUrl,
+    this.fillAvailableHeight = false,
+    this.preferVideoFirst = false,
+    this.mediaOwnerKey,
+    this.onOpenVideo,
+    this.onOpenTour,
     this.watermark,
     this.watermarkBuilder,
     this.emptyChild,
@@ -30,6 +38,13 @@ class ListingMediaGallery extends StatefulWidget {
   final double borderRadius;
   final BoxFit fit;
   final int initialIndex;
+  final String? videoUrl;
+  final String? tourUrl;
+  final bool fillAvailableHeight;
+  final bool preferVideoFirst;
+  final String? mediaOwnerKey;
+  final VoidCallback? onOpenVideo;
+  final VoidCallback? onOpenTour;
   final Widget? watermark;
   final Widget? Function(BuildContext context, int index)? watermarkBuilder;
   final Widget? emptyChild;
@@ -47,10 +62,31 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
       .where((e) => e.isNotEmpty)
       .toList(growable: false);
 
+  bool get _hasVideo => (widget.videoUrl ?? '').trim().isNotEmpty;
+
+  bool get _hasTour =>
+      (widget.tourUrl ?? '').trim().isNotEmpty || widget.onOpenTour != null;
+
+  int get _total => _urls.length + (_hasVideo ? 1 : 0) + (_hasTour ? 1 : 0);
+
+  int get _videoIndex => widget.preferVideoFirst ? 0 : _urls.length;
+
+  int get _tourIndex => _urls.length + (_hasVideo ? 1 : 0);
+
+  int _imageIndexForSlide(int slideIndex) {
+    if (_hasVideo && widget.preferVideoFirst) return slideIndex - 1;
+    if (_hasVideo && slideIndex > _videoIndex) return slideIndex - 1;
+    return slideIndex;
+  }
+
+  bool _isVideoSlide(int index) => _hasVideo && index == _videoIndex;
+
+  bool _isTourSlide(int index) => _hasTour && index == _tourIndex;
+
   @override
   void initState() {
     super.initState();
-    final n = _urls.length;
+    final n = _total;
     _index = n == 0 ? 0 : widget.initialIndex.clamp(0, n - 1);
     _page = PageController(initialPage: _index);
   }
@@ -58,15 +94,17 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
   @override
   void didUpdateWidget(covariant ListingMediaGallery oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrls != widget.imageUrls ||
-        oldWidget.initialIndex != widget.initialIndex) {
-      final n = _urls.length;
+    final mediaChanged = oldWidget.mediaOwnerKey != widget.mediaOwnerKey ||
+        !listEquals(oldWidget.imageUrls, widget.imageUrls) ||
+        oldWidget.videoUrl != widget.videoUrl ||
+        oldWidget.tourUrl != widget.tourUrl ||
+        oldWidget.preferVideoFirst != widget.preferVideoFirst;
+    if (mediaChanged || oldWidget.initialIndex != widget.initialIndex) {
+      final n = _total;
       final next = n == 0 ? 0 : widget.initialIndex.clamp(0, n - 1);
-      if (next != _index) {
-        _index = next;
-        if (_page.hasClients) {
-          _page.jumpToPage(_index);
-        }
+      _index = next;
+      if (_page.hasClients) {
+        _page.jumpToPage(_index);
       }
     }
   }
@@ -78,7 +116,7 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
   }
 
   void _go(int delta) {
-    final n = _urls.length;
+    final n = _total;
     if (n <= 1) return;
     final next = (_index + delta).clamp(0, n - 1);
     _page.animateToPage(
@@ -106,182 +144,250 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final urls = _urls;
+    final total = _total;
 
-    if (urls.isEmpty) {
+    if (total == 0) {
+      final empty = widget.emptyChild ??
+          ColoredBox(
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+            child: const BrandingLogoImage(
+              fillFrame: true,
+              errorIcon: Icons.image_not_supported_outlined,
+            ),
+          );
       return ClipRRect(
         borderRadius: BorderRadius.circular(widget.borderRadius),
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: widget.maxHeight),
-          child: AspectRatio(
-            aspectRatio: widget.aspectRatio,
-            child: widget.emptyChild ??
-                ColoredBox(
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-                  child: const BrandingLogoImage(
-                    fillFrame: true,
-                    errorIcon: Icons.image_not_supported_outlined,
-                  ),
+        child: widget.fillAvailableHeight
+            ? SizedBox.expand(child: empty)
+            : ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: widget.maxHeight),
+                child: AspectRatio(
+                  aspectRatio: widget.aspectRatio,
+                  child: empty,
                 ),
-          ),
-        ),
+              ),
       );
     }
 
-    final frame = ClipRRect(
-      borderRadius: BorderRadius.circular(widget.borderRadius),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: widget.maxHeight),
-        child: AspectRatio(
-          aspectRatio: widget.aspectRatio,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              PageView.builder(
-                controller: _page,
-                itemCount: urls.length,
-                onPageChanged: (i) => setState(() => _index = i),
-                itemBuilder: (_, i) {
-                  return GestureDetector(
-                    onTap: () => _openLightbox(i),
-                    child: CrystalListingMedia(
-                      url: urls[i],
-                      fit: widget.fit,
-                      error: ColoredBox(
-                        color:
-                            cs.surfaceContainerHighest.withValues(alpha: 0.35),
-                        child: const BrandingLogoImage(
-                          fillFrame: true,
-                          errorIcon: Icons.broken_image_outlined,
+    final slideContent = Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: _page,
+          itemCount: total,
+          onPageChanged: (i) => setState(() => _index = i),
+          itemBuilder: (_, i) {
+            if (_isVideoSlide(i) || _isTourSlide(i)) {
+              final isVideo = _isVideoSlide(i);
+              final onTap = isVideo ? widget.onOpenVideo : widget.onOpenTour;
+              return Material(
+                color: cs.surfaceContainerHighest,
+                child: InkWell(
+                  onTap: onTap,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isVideo
+                              ? Icons.play_circle_fill_rounded
+                              : Icons.threed_rotation_outlined,
+                          size: 54,
+                          color: cs.primary,
                         ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              if (widget.watermarkBuilder != null)
-                widget.watermarkBuilder!(context, _index) ??
-                    const SizedBox.shrink()
-              else if (widget.watermark != null)
-                widget.watermark!,
-              if (urls.length > 1) ...[
-                Positioned(
-                  left: 6,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: _NavChip(
-                      icon: Icons.chevron_left_rounded,
-                      onTap: () => _go(-1),
+                        const SizedBox(height: 6),
+                        Text(
+                          isVideo
+                              ? (widget.isAr ? 'تشغيل الفيديو' : 'Play video')
+                              : (widget.isAr ? 'فتح الجولة' : 'Open tour'),
+                          style: TextStyle(
+                            color: cs.onSurface,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                Positioned(
-                  right: 6,
-                  top: 0,
-                  bottom: 0,
-                  child: Center(
-                    child: _NavChip(
-                      icon: Icons.chevron_right_rounded,
-                      onTap: () => _go(1),
-                    ),
-                  ),
-                ),
-              ],
-              PositionedDirectional(
-                top: 10,
-                start: 10,
-                child: Material(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(999),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    child: Text(
-                      '${_index + 1} / ${urls.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 11,
-                      ),
-                    ),
+              );
+            }
+            final imageIndex = _imageIndexForSlide(i);
+            return GestureDetector(
+              onTap: () => _openLightbox(imageIndex),
+              child: CrystalListingMedia(
+                url: urls[imageIndex],
+                fit: widget.fit,
+                error: ColoredBox(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+                  child: const BrandingLogoImage(
+                    fillFrame: true,
+                    errorIcon: Icons.broken_image_outlined,
                   ),
                 ),
               ),
-              PositionedDirectional(
-                top: 8,
-                end: 8,
-                child: Material(
-                  color: Colors.black45,
-                  borderRadius: BorderRadius.circular(999),
-                  child: IconButton(
-                    tooltip: widget.isAr ? 'تكبير الصورة' : 'Enlarge photo',
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 20,
-                    color: Colors.white,
-                    onPressed: () => _openLightbox(_index),
-                    icon: const Icon(Icons.zoom_in_rounded),
-                  ),
+            );
+          },
+        ),
+        if (widget.watermarkBuilder != null &&
+            !_isVideoSlide(_index) &&
+            !_isTourSlide(_index))
+          widget.watermarkBuilder!(
+                context,
+                _imageIndexForSlide(_index),
+              ) ??
+              const SizedBox.shrink()
+        else if (widget.watermark != null)
+          widget.watermark!,
+        if (total > 1) ...[
+          Positioned(
+            left: 6,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _NavChip(
+                icon: Icons.chevron_left_rounded,
+                onTap: () => _go(-1),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 6,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _NavChip(
+                icon: Icons.chevron_right_rounded,
+                onTap: () => _go(1),
+              ),
+            ),
+          ),
+        ],
+        PositionedDirectional(
+          top: 10,
+          start: 10,
+          child: Material(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              child: Text(
+                '${_index + 1} / $total',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
                 ),
               ),
-            ],
+            ),
           ),
         ),
-      ),
+        if (!_isVideoSlide(_index) && !_isTourSlide(_index))
+          PositionedDirectional(
+            top: 8,
+            end: 8,
+            child: Material(
+              color: Colors.black45,
+              borderRadius: BorderRadius.circular(999),
+              child: IconButton(
+                tooltip: widget.isAr ? 'تكبير الصورة' : 'Enlarge photo',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                color: Colors.white,
+                onPressed: () => _openLightbox(_imageIndexForSlide(_index)),
+                icon: const Icon(Icons.zoom_in_rounded),
+              ),
+            ),
+          ),
+      ],
     );
 
-    if (urls.length <= 1) return frame;
+    final frame = ClipRRect(
+      borderRadius: BorderRadius.circular(widget.borderRadius),
+      child: widget.fillAvailableHeight
+          ? SizedBox.expand(child: slideContent)
+          : ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: widget.maxHeight),
+              child: AspectRatio(
+                aspectRatio: widget.aspectRatio,
+                child: slideContent,
+              ),
+            ),
+    );
+
+    if (total <= 1) return frame;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: [
-        frame,
+        if (widget.fillAvailableHeight) Expanded(child: frame) else frame,
         const SizedBox(height: 8),
         SizedBox(
           height: 56,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 2),
-            itemCount: urls.length,
+            itemCount: total,
             separatorBuilder: (_, __) => const SizedBox(width: 8),
             itemBuilder: (_, i) {
               final selected = i == _index;
-              return GestureDetector(
-                onTap: () {
-                  _page.animateToPage(
-                    i,
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOut,
-                  );
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  width: 72,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      width: selected ? 2.2 : 1,
-                      color: selected
-                          ? const Color(0xFF0F766E)
-                          : cs.outlineVariant.withValues(alpha: 0.75),
-                    ),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: CachedNetworkImage(
-                    imageUrl: urls[i],
-                    fit: BoxFit.cover,
-                    memCacheWidth: 220,
-                    memCacheHeight: 160,
-                    errorWidget: (_, __, ___) => ColoredBox(
-                      color: cs.surfaceContainerHighest,
-                      child: Icon(
-                        Icons.image_not_supported_outlined,
-                        size: 16,
-                        color: cs.onSurfaceVariant,
+              final isVideo = _isVideoSlide(i);
+              final isTour = _isTourSlide(i);
+              final tooltip = isVideo
+                  ? (widget.isAr ? 'الفيديو' : 'Video')
+                  : isTour
+                      ? (widget.isAr ? 'الجولة' : 'Tour')
+                      : (widget.isAr
+                          ? 'الصورة ${_imageIndexForSlide(i) + 1}'
+                          : 'Photo ${_imageIndexForSlide(i) + 1}');
+              return Tooltip(
+                message: tooltip,
+                child: GestureDetector(
+                  onTap: () {
+                    _page.animateToPage(
+                      i,
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOut,
+                    );
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    width: 72,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        width: selected ? 2.2 : 1,
+                        color: selected
+                            ? const Color(0xFF0F766E)
+                            : cs.outlineVariant.withValues(alpha: 0.75),
                       ),
                     ),
+                    clipBehavior: Clip.antiAlias,
+                    child: isVideo || isTour
+                        ? ColoredBox(
+                            color: cs.surfaceContainerHighest,
+                            child: Icon(
+                              isVideo
+                                  ? Icons.play_arrow_rounded
+                                  : Icons.threed_rotation_outlined,
+                              size: 28,
+                              color: cs.primary,
+                            ),
+                          )
+                        : CachedNetworkImage(
+                            imageUrl: urls[_imageIndexForSlide(i)],
+                            fit: BoxFit.cover,
+                            memCacheWidth: 220,
+                            memCacheHeight: 160,
+                            errorWidget: (_, __, ___) => ColoredBox(
+                              color: cs.surfaceContainerHighest,
+                              child: Icon(
+                                Icons.image_not_supported_outlined,
+                                size: 16,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
                   ),
                 ),
               );

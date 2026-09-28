@@ -350,11 +350,7 @@ class InAppNotificationRouter {
         typeLower == InAppNotifTypes.photographerVerified ||
         typeLower == InAppNotifTypes.photographerRejected ||
         typeLower == InAppNotifTypes.photographerRated) {
-      await _pushRootNamed<void>(
-        context,
-        AppRoutes.photographerHub,
-        arguments: <String, dynamic>{'lang': lang},
-      );
+      await _goDashboard(context, enriched, lang);
       return;
     }
 

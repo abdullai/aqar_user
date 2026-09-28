@@ -625,6 +625,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     bool resetSubTab = true,
   }) {
     final m = mode.clamp(0, 1);
+    _myPageRoleKind = m;
     _ensureMarketerPublisherRoleTabsCtrl();
     if (_marketerPublisherHubMode != m) {
       _marketerPublisherHubMode = m;
@@ -635,6 +636,17 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         c.animateTo(m);
       } else {
         c.index = m;
+      }
+    }
+    final pageRoleIndex = _myPageRoleKinds.indexOf(m);
+    final pageRoleCtrl = _myPageRoleTabsCtrl;
+    if (pageRoleIndex >= 0 &&
+        pageRoleCtrl != null &&
+        pageRoleCtrl.index != pageRoleIndex) {
+      if (animate) {
+        pageRoleCtrl.animateTo(pageRoleIndex);
+      } else {
+        pageRoleCtrl.index = pageRoleIndex;
       }
     }
     if (!resetSubTab) return;
@@ -652,6 +664,12 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   /// عند فتح صفحتي من الشريط: أول تبويب فرعي (وأول دور كمسوّق إن وُجد المبدّل).
   void _focusMyPageFirstSubTab() {
     _setMarketerPublisherHubMode(0);
+    _myPageRoleKind = _isMarketingAccountType ? 0 : 1;
+    final roleIndex = _myPageRoleKinds.indexOf(_myPageRoleKind);
+    final roleController = _myPageRoleTabsCtrl;
+    if (roleIndex >= 0 && roleController != null) {
+      roleController.index = roleIndex;
+    }
     _lastOwnerSubTabIndex = 0;
     _lastMarketerSubTabIndex = 0;
     try {

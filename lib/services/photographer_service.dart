@@ -107,6 +107,12 @@ class PhotoShootRequest {
     this.maxVideos = 1,
     this.includeTour = false,
     this.propertyOwnerId = '',
+    this.listingTitle = '',
+    this.listingCity = '',
+    this.listingPublicCode = '',
+    this.listingPurpose = '',
+    this.listingPrice,
+    this.offerCount = 0,
     this.ownerMediaConsent = false,
     this.ownerCoverChangeConsent = false,
     this.ownerReplaceMediaConsent = false,
@@ -135,6 +141,12 @@ class PhotoShootRequest {
   final int maxVideos;
   final bool includeTour;
   final String propertyOwnerId;
+  final String listingTitle;
+  final String listingCity;
+  final String listingPublicCode;
+  final String listingPurpose;
+  final double? listingPrice;
+  final int offerCount;
   final bool ownerMediaConsent;
   final bool ownerCoverChangeConsent;
   final bool ownerReplaceMediaConsent;
@@ -158,6 +170,9 @@ class PhotoShootRequest {
   }
 
   factory PhotoShootRequest.fromMap(Map<String, dynamic> m) {
+    final preview = m['listing_preview'] is Map
+        ? Map<String, dynamic>.from(m['listing_preview'] as Map)
+        : const <String, dynamic>{};
     final kinds = <String>[];
     final raw = m['shoot_kinds'];
     if (raw is List) {
@@ -189,6 +204,12 @@ class PhotoShootRequest {
           kinds.contains('tour') ||
           kinds.contains('tour_3d'),
       propertyOwnerId: (m['property_owner_id'] ?? '').toString(),
+      listingTitle: (preview['title'] ?? '').toString(),
+      listingCity: (preview['city'] ?? '').toString(),
+      listingPublicCode: (preview['public_code'] ?? '').toString(),
+      listingPurpose: (preview['purpose'] ?? '').toString(),
+      listingPrice: (preview['price'] as num?)?.toDouble(),
+      offerCount: (m['offer_count'] as num?)?.toInt() ?? 0,
       ownerMediaConsent: m['owner_media_consent'] == true,
       ownerCoverChangeConsent: m['owner_cover_change_consent'] == true,
       ownerReplaceMediaConsent: m['owner_replace_media_consent'] == true,
@@ -331,6 +352,120 @@ class PhotographerService {
     return raw.toString();
   }
 
+  Future<String> createMarketShoot({
+    String? propertyId,
+    String? listingRequestId,
+    String fulfillmentMode = 'independent_market',
+    List<String> kinds = const ['photos'],
+    String? locationText,
+    double? latitude,
+    double? longitude,
+    DateTime? preferredAt,
+    int maxPhotos = 30,
+    int maxVideos = 1,
+    bool includeTour = false,
+    required bool ownerMediaConsent,
+    bool ownerCoverChangeConsent = false,
+    bool ownerReplaceMediaConsent = false,
+  }) async {
+    final normalized = [
+      for (final kind in kinds)
+        if (kind == 'tour_3d' || kind == '3d' || kind == 'virtual_tour')
+          'tour'
+        else
+          kind,
+    ];
+    final raw = await _sb.rpc(
+      'create_photo_shoot_market_request',
+      params: {
+        'p_property_id': propertyId,
+        'p_listing_request_id': listingRequestId,
+        'p_fulfillment_mode': fulfillmentMode,
+        'p_shoot_kinds': normalized,
+        'p_location_text': locationText,
+        'p_latitude': latitude,
+        'p_longitude': longitude,
+        'p_preferred_at': preferredAt?.toUtc().toIso8601String(),
+        'p_max_photos': maxPhotos,
+        'p_max_videos': maxVideos,
+        'p_include_tour': includeTour || normalized.contains('tour'),
+        'p_owner_media_consent': ownerMediaConsent,
+        'p_owner_cover_change_consent': ownerCoverChangeConsent,
+        'p_owner_replace_media_consent': ownerReplaceMediaConsent,
+      },
+    );
+    return raw.toString();
+  }
+
+  Future<List<Map<String, dynamic>>> openPhotoShootOpportunities() async {
+    final raw = await _sb.rpc('list_open_photo_shoot_opportunities');
+    if (raw is! List) return const [];
+    return [
+      for (final row in raw)
+        if (row is Map) Map<String, dynamic>.from(row),
+    ];
+  }
+
+  Future<List<Map<String, dynamic>>> myPhotoShootOffers() async {
+    final raw = await _sb.rpc('list_my_photo_shoot_offers');
+    if (raw is! List) return const [];
+    return [
+      for (final row in raw)
+        if (row is Map) Map<String, dynamic>.from(row),
+    ];
+  }
+
+  Future<List<Map<String, dynamic>>> offersForPhotoShoot(
+    String requestId,
+  ) async {
+    final raw = await _sb.rpc(
+      'list_photo_shoot_request_offers',
+      params: {'p_request_id': requestId},
+    );
+    if (raw is! List) return const [];
+    return [
+      for (final row in raw)
+        if (row is Map) Map<String, dynamic>.from(row),
+    ];
+  }
+
+  Future<List<Map<String, dynamic>>> myIncomingPhotoShootOffers() async {
+    final raw = await _sb.rpc('list_photo_shoot_request_offers');
+    if (raw is! List) return const [];
+    return [
+      for (final row in raw)
+        if (row is Map) Map<String, dynamic>.from(row),
+    ];
+  }
+
+  Future<String> submitPhotoShootOffer({
+    required String requestId,
+    required double amountSar,
+    required String details,
+    DateTime? proposedAt,
+  }) async {
+    final raw = await _sb.rpc(
+      'submit_photo_shoot_offer',
+      params: {
+        'p_request_id': requestId,
+        'p_amount_sar': amountSar,
+        'p_details': details,
+        'p_proposed_at': proposedAt?.toUtc().toIso8601String(),
+      },
+    );
+    return raw.toString();
+  }
+
+  Future<void> respondToPhotoShootOffer({
+    required String offerId,
+    required bool accept,
+  }) async {
+    await _sb.rpc(
+      'respond_photo_shoot_offer',
+      params: {'p_offer_id': offerId, 'p_accept': accept},
+    );
+  }
+
   Future<int> expireStaleShoots() async {
     try {
       final raw = await _sb.rpc('expire_stale_photo_shoot_requests');
@@ -360,10 +495,24 @@ class PhotographerService {
     await expireStaleShoots();
     final uid = _sb.auth.currentUser?.id ?? '';
     if (uid.isEmpty) return const [];
+    try {
+      final raw = await _sb.rpc('list_my_photo_shoot_requests');
+      if (raw is List) {
+        return [
+          for (final item in raw)
+            if (item is Map && item['shoot'] is Map)
+              PhotoShootRequest.fromMap({
+                ...Map<String, dynamic>.from(item['shoot'] as Map),
+                'listing_preview': item['listing_preview'],
+                'offer_count': item['offer_count'],
+              }),
+        ];
+      }
+    } catch (_) {}
     final rows = await _sb
         .from('photo_shoot_requests')
         .select()
-        .eq('requester_id', uid)
+        .or('requester_id.eq.$uid,property_owner_id.eq.$uid')
         .order('created_at', ascending: false);
     return [
       for (final r in (rows as List))

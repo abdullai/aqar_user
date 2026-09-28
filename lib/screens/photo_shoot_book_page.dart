@@ -21,6 +21,8 @@ class PhotoShootBookPage extends StatefulWidget {
     this.latitude,
     this.longitude,
     this.onQueued,
+    this.marketplaceMode = false,
+    this.allowMarketerBundle = false,
   });
 
   final String lang;
@@ -32,6 +34,8 @@ class PhotoShootBookPage extends StatefulWidget {
 
   /// إن لم يُحفظ الإعلان بعد: يُرجع مسودة الطلب للتخزين المحلي ثم الإرسال بعد النشر.
   final void Function(Map<String, dynamic> draft)? onQueued;
+  final bool marketplaceMode;
+  final bool allowMarketerBundle;
 
   @override
   State<PhotoShootBookPage> createState() => _PhotoShootBookPageState();
@@ -43,6 +47,10 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
   var _loading = true;
   final _kinds = <String>{'photos'};
   DateTime? _when;
+  bool _allowMedia = false;
+  bool _allowCoverChange = false;
+  bool _allowReplaceExisting = false;
+  String _fulfillmentMode = 'independent_market';
 
   bool get _isAr => widget.lang != 'en';
 
@@ -53,6 +61,10 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
   }
 
   Future<void> _load() async {
+    if (widget.marketplaceMode) {
+      setState(() => _loading = false);
+      return;
+    }
     try {
       final rows = await _svc.verifiedDirectory();
       final city = (widget.locationText ?? '').split('·').first.trim();
@@ -244,6 +256,73 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
     }
   }
 
+  Future<void> _requestMarketOffers() async {
+    final l10n = AppLocalizations.of(context)!;
+    if (!_allowMedia) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.photographerPolicyRequired)),
+      );
+      return;
+    }
+    final kinds = [
+      for (final kind in _kinds)
+        if (kind == 'tour_3d') 'tour' else kind,
+    ];
+    final draft = <String, dynamic>{
+      'marketplace': true,
+      'fulfillment_mode': _fulfillmentMode,
+      'shoot_kinds': kinds.isEmpty ? const ['photos'] : kinds,
+      'location_text': widget.locationText,
+      'latitude': widget.latitude,
+      'longitude': widget.longitude,
+      'preferred_at': _when?.toUtc().toIso8601String(),
+      'max_photos': 30,
+      'max_videos': kinds.contains('video') ? 1 : 0,
+      'include_tour': kinds.contains('tour'),
+      'owner_media_consent': _allowMedia,
+      'owner_cover_change_consent': _allowCoverChange,
+      'owner_replace_media_consent': _allowReplaceExisting,
+    };
+    final propertyId = (widget.propertyId ?? '').trim();
+    if (propertyId.isEmpty && widget.onQueued != null) {
+      widget.onQueued!(draft);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.photographerQueuedUntilPublish)),
+      );
+      Navigator.pop(context, draft);
+      return;
+    }
+    try {
+      await _svc.createMarketShoot(
+        propertyId: propertyId.isEmpty ? null : propertyId,
+        listingRequestId: widget.listingRequestId,
+        fulfillmentMode: _fulfillmentMode,
+        kinds: kinds,
+        locationText: widget.locationText,
+        latitude: widget.latitude,
+        longitude: widget.longitude,
+        preferredAt: _when,
+        maxPhotos: 30,
+        maxVideos: kinds.contains('video') ? 1 : 0,
+        includeTour: kinds.contains('tour'),
+        ownerMediaConsent: _allowMedia,
+        ownerCoverChangeConsent: _allowCoverChange,
+        ownerReplaceMediaConsent: _allowReplaceExisting,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.photographerRequestSent)),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(RpcUserMessage.of(e, isAr: _isAr))),
+      );
+    }
+  }
+
   String _rateLine(PhotographerProfile p, AppLocalizations l10n) {
     final bits = <String>[];
     if (p.photoRateSar != null) {
@@ -310,93 +389,205 @@ class _PhotoShootBookPageState extends State<PhotoShootBookPage> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    l10n.photographerBookFlowHint,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      height: 1.35,
+                  if (widget.marketplaceMode) ...[
+                    Text(
+                      _isAr
+                          ? 'سيصل طلبك إلى المصورين المعتمدين ذوي الاشتراك الفعّال. اختر العرض المناسب قبل بدء التصوير.'
+                          : 'Your request will reach verified photographers with active plans. Choose an offer before work begins.',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        height: 1.35,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () async {
-                      final d = await showDatePicker(
-                        context: context,
-                        initialDate:
-                            DateTime.now().add(const Duration(days: 1)),
-                        firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 180)),
-                      );
-                      if (d == null || !mounted) return;
-                      final t = await showTimePicker(
-                        context: context,
-                        initialTime: const TimeOfDay(hour: 10, minute: 0),
-                      );
-                      if (t == null || !mounted) return;
-                      setState(() {
-                        _when =
-                            DateTime(d.year, d.month, d.day, t.hour, t.minute);
-                      });
-                    },
-                    icon: const Icon(Icons.event_outlined),
-                    label: Text(
-                      _when == null
+                    if (widget.allowMarketerBundle) ...[
+                      const SizedBox(height: 8),
+                      SegmentedButton<String>(
+                        segments: [
+                          ButtonSegment(
+                            value: 'independent_market',
+                            label: Text(_isAr ? 'مصوّر مستقل' : 'Independent'),
+                          ),
+                          ButtonSegment(
+                            value: 'marketer_bundle',
+                            label: Text(
+                                _isAr ? 'ضمن عرض المسوّق' : 'With marketer'),
+                          ),
+                        ],
+                        selected: {_fulfillmentMode},
+                        onSelectionChanged: (value) => setState(
+                          () => _fulfillmentMode = value.first,
+                        ),
+                      ),
+                    ],
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _allowMedia,
+                      title: Text(_isAr
+                          ? 'أوافق على مراجعة الوسائط قبل إضافتها إلى الإعلان.'
+                          : 'I will review the media before it is added to the listing.'),
+                      onChanged: (value) => setState(() {
+                        _allowMedia = value ?? false;
+                        if (!_allowMedia) {
+                          _allowCoverChange = false;
+                          _allowReplaceExisting = false;
+                        }
+                      }),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _allowCoverChange,
+                      title: Text(_isAr
+                          ? 'أسمح باستخدام الوسائط المعتمدة كغلاف.'
+                          : 'Allow approved media to become the cover.'),
+                      onChanged: !_allowMedia
+                          ? null
+                          : (value) => setState(
+                                () => _allowCoverChange = value ?? false,
+                              ),
+                    ),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: _allowReplaceExisting,
+                      title: Text(_isAr
+                          ? 'أسمح باستبدال الوسائط الحالية بعد اعتمادي.'
+                          : 'Allow existing media to be replaced after approval.'),
+                      onChanged: !_allowMedia
+                          ? null
+                          : (value) => setState(
+                                () => _allowReplaceExisting = value ?? false,
+                              ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate:
+                              DateTime.now().add(const Duration(days: 1)),
+                          firstDate: DateTime.now(),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 180)),
+                        );
+                        if (d == null || !mounted) return;
+                        final t = await showTimePicker(
+                          context: context,
+                          initialTime: const TimeOfDay(hour: 10, minute: 0),
+                        );
+                        if (t == null || !mounted) return;
+                        setState(() => _when = DateTime(
+                              d.year,
+                              d.month,
+                              d.day,
+                              t.hour,
+                              t.minute,
+                            ));
+                      },
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(_when == null
                           ? l10n.photographerPickSlot
                           : DateHelper.fmtCivilDateTime(
                               _when!.toLocal(),
                               isAr: _isAr,
-                            ),
+                            )),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_list.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 40),
-                      child: Text(
-                        l10n.photographerDirectoryEmpty,
-                        textAlign: TextAlign.center,
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      onPressed: _allowMedia ? _requestMarketOffers : null,
+                      icon: const Icon(Icons.campaign_outlined),
+                      label: Text(
+                          _isAr ? 'طلب عروض تصوير' : 'Request photo offers'),
+                    ),
+                  ] else ...[
+                    Text(
+                      l10n.photographerBookFlowHint,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        height: 1.35,
                       ),
                     ),
-                  for (final p in _list)
-                    Card(
-                      child: ListTile(
-                        title: CertifiedPhotographerName(
-                          name: p.displayName,
-                          verified: p.isVerified,
-                        ),
-                        subtitle: Text(
-                          [
-                            if (p.city.trim().isNotEmpty) p.city,
-                            if (PhotographerService.distanceKm(
-                                  p: p,
-                                  fromLat: widget.latitude,
-                                  fromLng: widget.longitude,
-                                ) !=
-                                null)
-                              l10n.photographerDistanceKm(
-                                PhotographerService.distanceKm(
-                                  p: p,
-                                  fromLat: widget.latitude,
-                                  fromLng: widget.longitude,
-                                )!
-                                    .toStringAsFixed(1),
-                              ),
-                            if (p.ratingCount > 0)
-                              l10n.photographerRatingLine(
-                                p.ratingAvg.toStringAsFixed(1),
-                                p.ratingCount,
-                              ),
-                            _rateLine(p, l10n),
-                          ].where((s) => s.trim().isNotEmpty).join('\n'),
-                        ),
-                        isThreeLine: true,
-                        trailing: FilledButton(
-                          onPressed: () => _book(p),
-                          child: Text(l10n.photographerSendRequest),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate:
+                              DateTime.now().add(const Duration(days: 1)),
+                          firstDate: DateTime.now(),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 180)),
+                        );
+                        if (d == null || !mounted) return;
+                        final t = await showTimePicker(
+                          context: context,
+                          initialTime: const TimeOfDay(hour: 10, minute: 0),
+                        );
+                        if (t == null || !mounted) return;
+                        setState(() => _when = DateTime(
+                              d.year,
+                              d.month,
+                              d.day,
+                              t.hour,
+                              t.minute,
+                            ));
+                      },
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(_when == null
+                          ? l10n.photographerPickSlot
+                          : DateHelper.fmtCivilDateTime(
+                              _when!.toLocal(),
+                              isAr: _isAr,
+                            )),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_list.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 40),
+                        child: Text(
+                          l10n.photographerDirectoryEmpty,
+                          textAlign: TextAlign.center,
                         ),
                       ),
-                    ),
+                    for (final p in _list)
+                      Card(
+                        child: ListTile(
+                          title: CertifiedPhotographerName(
+                            name: p.displayName,
+                            verified: p.isVerified,
+                          ),
+                          subtitle: Text(
+                            [
+                              if (p.city.trim().isNotEmpty) p.city,
+                              if (PhotographerService.distanceKm(
+                                    p: p,
+                                    fromLat: widget.latitude,
+                                    fromLng: widget.longitude,
+                                  ) !=
+                                  null)
+                                l10n.photographerDistanceKm(
+                                  PhotographerService.distanceKm(
+                                    p: p,
+                                    fromLat: widget.latitude,
+                                    fromLng: widget.longitude,
+                                  )!
+                                      .toStringAsFixed(1),
+                                ),
+                              if (p.ratingCount > 0)
+                                l10n.photographerRatingLine(
+                                  p.ratingAvg.toStringAsFixed(1),
+                                  p.ratingCount,
+                                ),
+                              _rateLine(p, l10n),
+                            ].where((s) => s.trim().isNotEmpty).join('\n'),
+                          ),
+                          isThreeLine: true,
+                          trailing: FilledButton(
+                            onPressed: () => _book(p),
+                            child: Text(l10n.photographerSendRequest),
+                          ),
+                        ),
+                      ),
+                  ],
                 ],
               ),
       ),

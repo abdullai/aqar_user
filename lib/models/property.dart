@@ -1,3 +1,4 @@
+import '../core/branding/app_branding.dart';
 import '../core/workflow/listing_workflow_stage.dart';
 import '../core/listing/in_app_tour.dart';
 import '../core/listing/property_type_catalog.dart';
@@ -884,85 +885,81 @@ class Property {
     dynamic listingGuidance,
   }) {
     final out = <String>[];
+    final seen = <String>{};
+
+    bool looksVideo(String raw) {
+      final v = raw.toLowerCase().split('?').first.split('#').first;
+      return v.endsWith('.mp4') ||
+          v.endsWith('.mov') ||
+          v.endsWith('.webm') ||
+          v.endsWith('.m4v') ||
+          v.endsWith('.avi') ||
+          v.endsWith('.mkv');
+    }
+
+    void addPath(dynamic raw) {
+      final path = (raw ?? '').toString().trim();
+      if (path.isEmpty ||
+          path == AppBranding.smartDefaultCoverStorageSentinel ||
+          looksVideo(path) ||
+          !seen.add(path)) {
+        return;
+      }
+      out.add(path);
+    }
 
     void pushFromImageMap(Map<String, dynamic> row) {
       final mt = (row['media_type'] ?? '').toString().trim().toLowerCase();
       if (mt.contains('video')) return;
-      final path = row['path']?.toString().trim();
-      final fileName = row['file_name']?.toString().trim();
-      final url = row['url']?.toString().trim();
-      bool looksVideo(String? s) {
-        final v = (s ?? '').toLowerCase();
-        return v.endsWith('.mp4') ||
-            v.endsWith('.mov') ||
-            v.endsWith('.webm') ||
-            v.endsWith('.m4v') ||
-            v.endsWith('.avi') ||
-            v.endsWith('.mkv');
-      }
-
-      if (path != null && path.isNotEmpty) {
-        if (!looksVideo(path)) out.add(path);
-      } else if (fileName != null && fileName.isNotEmpty) {
-        if (!looksVideo(fileName)) out.add(fileName);
-      } else if (url != null && url.isNotEmpty) {
-        if (!looksVideo(url)) out.add(url);
-      }
+      final path = [row['path'], row['file_name'], row['url']]
+          .map((value) => (value ?? '').toString().trim())
+          .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+      addPath(path);
     }
 
-    if (propertyImages is Map) {
-      pushFromImageMap(Map<String, dynamic>.from(propertyImages));
-    } else if (propertyImages is List) {
-      final rows = List<Map<String, dynamic>>.from(
-        propertyImages.map((e) => Map<String, dynamic>.from(e as Map)),
-      );
-
-      rows.sort((a, b) {
-        final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
-        final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
-        return sa.compareTo(sb);
-      });
-
-      for (final row in rows) {
-        pushFromImageMap(row);
-      }
-    }
-
-    if (out.isEmpty && images is List) {
-      out.addAll(
-        images.map((e) => e.toString().trim()).where((e) => e.isNotEmpty),
-      );
-    }
-
-    if (out.isEmpty && imageUrls is List) {
-      out.addAll(
-        imageUrls.map((e) => e.toString().trim()).where((e) => e.isNotEmpty),
-      );
-    }
-
-    if (out.isEmpty) {
-      final u = (legacyImageUrl ?? '').toString().trim();
-      if (u.isNotEmpty) out.add(u);
-    }
-
-    if (out.isEmpty) {
-      final g = _objectMap(listingGuidance);
-      if (g != null) {
-        for (final k in const [
-          'image_paths',
-          'request_image_paths',
-          'images',
-          'image_urls',
-        ]) {
-          final raw = g[k];
-          if (raw is List) {
-            for (final e in raw) {
-              final s = e.toString().trim();
-              if (s.isNotEmpty) out.add(s);
-            }
-            if (out.isNotEmpty) break;
-          }
+    void pushMany(dynamic raw) {
+      if (raw is! List) return;
+      for (final value in raw) {
+        if (value is Map) {
+          pushFromImageMap(Map<String, dynamic>.from(value));
+        } else {
+          addPath(value);
         }
+      }
+    }
+
+    final embeddedRows = <Map<String, dynamic>>[];
+    if (propertyImages is Map) {
+      embeddedRows.add(Map<String, dynamic>.from(propertyImages));
+    } else if (propertyImages is List) {
+      embeddedRows.addAll(
+        propertyImages.whereType<Map>().map(
+              (row) => Map<String, dynamic>.from(row),
+            ),
+      );
+    }
+    embeddedRows.sort((a, b) {
+      final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
+      final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
+      return sa.compareTo(sb);
+    });
+    for (final row in embeddedRows) {
+      pushFromImageMap(row);
+    }
+
+    pushMany(images);
+    pushMany(imageUrls);
+    addPath(legacyImageUrl);
+
+    final guidance = _objectMap(listingGuidance);
+    if (guidance != null) {
+      for (final key in const [
+        'image_paths',
+        'request_image_paths',
+        'images',
+        'image_urls',
+      ]) {
+        pushMany(guidance[key]);
       }
     }
 

@@ -1,14 +1,19 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/marketing/marketer_owner_chat_intro_ar.dart';
+import '../../core/listing/in_app_tour.dart';
 import '../../core/utils/app_money.dart';
 import '../../core/utils/display_ids.dart';
 import '../../core/haptics/app_haptics.dart';
 import '../../core/workflow/listing_workflow_copy.dart';
 import '../../widgets/app_page_close_button.dart';
+import '../../widgets/in_app_tour_viewer.dart';
 import '../../widgets/listing_media_gallery.dart';
+import '../../widgets/property_video_sheet.dart';
 
 /// شاشة كاملة من «السوق العقاري»: معاينة + مقاييس + (اختياري) مراسلة واتساب + تقديم عرض.
 class MarketerMarketOfferHubPage extends StatelessWidget {
@@ -16,6 +21,11 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
     super.key,
     required this.isAr,
     required this.heroImageUrls,
+    this.heroVideoUrl,
+    this.heroTourUrl,
+    this.heroInAppTour,
+    this.mediaOwnerKey,
+    this.preferVideoFirst = false,
     required this.title,
     required this.locationLine,
     required this.ownerDisplayName,
@@ -23,6 +33,8 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
     required this.listingNoTenDigit,
     required this.priceSar,
     required this.areaM2,
+    this.photographyRequired = false,
+    this.photographyFulfillment = 'independent_market',
     this.onSubmitOffer,
     this.onMessageOwner,
     this.hideOwnerContactActions = false,
@@ -34,6 +46,11 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
 
   final bool isAr;
   final List<String> heroImageUrls;
+  final String? heroVideoUrl;
+  final String? heroTourUrl;
+  final InAppTour? heroInAppTour;
+  final String? mediaOwnerKey;
+  final bool preferVideoFirst;
   final String title;
   final String locationLine;
   final String ownerDisplayName;
@@ -41,6 +58,8 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
   final String listingNoTenDigit;
   final double priceSar;
   final double areaM2;
+  final bool photographyRequired;
+  final String photographyFulfillment;
   final Future<void> Function()? onMessageOwner;
   final Future<void> Function()? onSubmitOffer;
 
@@ -94,7 +113,8 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
         context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(isAr ? 'تعذّر فتح واتساب.' : 'Could not open WhatsApp.'),
+          content:
+              Text(isAr ? 'تعذّر فتح واتساب.' : 'Could not open WhatsApp.'),
         ),
       );
     }
@@ -145,11 +165,41 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                     child: ListingMediaGallery(
                       imageUrls: heroImageUrls,
+                      videoUrl: heroVideoUrl,
+                      tourUrl: heroTourUrl,
+                      mediaOwnerKey: mediaOwnerKey,
+                      preferVideoFirst: preferVideoFirst,
                       isAr: isAr,
                       aspectRatio: 16 / 10,
                       maxHeight: 210,
                       borderRadius: 16,
                       initialIndex: 0,
+                      onOpenVideo: heroVideoUrl == null
+                          ? null
+                          : () => unawaited(
+                                PropertyVideoSheet.open(
+                                  context,
+                                  isAr: isAr,
+                                  title: title,
+                                  videoUrl: heroVideoUrl!,
+                                ),
+                              ),
+                      onOpenTour: heroInAppTour != null
+                          ? () => unawaited(
+                                openInAppTourViewer(
+                                  context: context,
+                                  tour: heroInAppTour!,
+                                  isAr: isAr,
+                                ),
+                              )
+                          : heroTourUrl == null
+                              ? null
+                              : () => unawaited(
+                                    launchUrl(
+                                      Uri.parse(heroTourUrl!),
+                                      mode: LaunchMode.externalApplication,
+                                    ),
+                                  ),
                     ),
                   ),
                   if (stageLabel.isNotEmpty)
@@ -216,6 +266,19 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
                           isAr ? 'الموقع' : 'Location',
                           locationLine.isEmpty ? '—' : locationLine,
                         ),
+                        if (photographyRequired)
+                          _metricChip(
+                            context,
+                            Icons.photo_camera_outlined,
+                            isAr ? 'التصوير' : 'Photography',
+                            photographyFulfillment == 'marketer_bundle'
+                                ? (isAr
+                                    ? 'ضمن عرض المسوّق'
+                                    : 'Included in marketer offer')
+                                : (isAr
+                                    ? 'من سوق المصوّرين'
+                                    : 'Photographer market'),
+                          ),
                         _metricChip(
                           context,
                           Icons.confirmation_number_outlined,
@@ -241,7 +304,8 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
                             context,
                             Icons.replay_rounded,
                             isAr ? 'جولة التسويق' : 'Marketing round',
-                            ListingWorkflowCopy.marketingRoundLabel(isAr, round),
+                            ListingWorkflowCopy.marketingRoundLabel(
+                                isAr, round),
                           ),
                       ],
                     ),
@@ -282,7 +346,8 @@ class MarketerMarketOfferHubPage extends StatelessWidget {
                             icon: const Icon(Icons.forum_outlined),
                             label: Text(
                               isAr ? 'مراسلة المالك' : 'Message owner',
-                              style: const TextStyle(fontWeight: FontWeight.w800),
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w800),
                             ),
                           ),
                         ),

@@ -16,6 +16,7 @@
   },
   "chat.tools.terminal.autoApprove": {
     "Tee-Object": true,
-    ".\\scripts\\deploy-web.ps1": true
+    ".\\scripts\\deploy-web.ps1": true,
+    "Get-FileHash": true
   }
 }

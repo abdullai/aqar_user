@@ -15,12 +15,14 @@ class SupportHubTabs extends StatefulWidget {
     required this.userId,
     required this.isAr,
     required this.bankColor,
+    this.refreshToken = 0,
     this.helpScrollController,
   });
 
   final String userId;
   final bool isAr;
   final Color bankColor;
+  final int refreshToken;
   final ScrollController? helpScrollController;
 
   @override
@@ -35,7 +37,22 @@ class _SupportHubTabsState extends State<SupportHubTabs>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 3, vsync: this);
+    _tabCtrl = TabController(
+      length: 3,
+      vsync: this,
+      initialIndex: widget.refreshToken > 0 ? 2 : 0,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant SupportHubTabs oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshToken == widget.refreshToken) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _tabCtrl.animateTo(2);
+      _ticketsKey.currentState?.reload();
+    });
   }
 
   @override
@@ -79,7 +96,8 @@ class _SupportHubTabsState extends State<SupportHubTabs>
               ),
               ListView(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
                 children: [
                   ComplaintSubmitForm(
                     isAr: widget.isAr,
@@ -110,6 +128,7 @@ class SupportHubBody extends StatelessWidget {
     required this.userId,
     required this.isAr,
     required this.accentColor,
+    this.refreshToken = 0,
     this.onLogin,
     this.helpScrollController,
     this.showChatInbox = false,
@@ -118,6 +137,7 @@ class SupportHubBody extends StatelessWidget {
   final String userId;
   final bool isAr;
   final Color accentColor;
+  final int refreshToken;
   final VoidCallback? onLogin;
   final ScrollController? helpScrollController;
   final bool showChatInbox;
@@ -175,6 +195,7 @@ class SupportHubBody extends StatelessWidget {
       userId: userId,
       isAr: isAr,
       bankColor: accentColor,
+      refreshToken: refreshToken,
       helpScrollController: helpScrollController,
     );
   }

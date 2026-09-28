@@ -362,6 +362,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           contextTitle: contextTitle,
           properties: properties,
           requests: const <MarketPropertyRequestRow>[],
+          onAfterOpenExternal: _returnFromExactMapLocation,
           onOpenProperty: (p) {
             _dashboardBodyNavKey.currentState?.pop();
             unawaited(_openDetails(p));
@@ -506,6 +507,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           photographerRequests: photographerRequests,
           requestCoverImageUrl: (r) =>
               ListingMediaUrls.marketRequestCoverNetworkUrl(r, _sb),
+          onAfterOpenExternal: _returnFromExactMapLocation,
           onOpenProperty: (p) {
             _dashboardBodyNavKey.currentState?.pop();
             unawaited(_openDetails(p));
@@ -820,8 +822,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
                       foreground: cs.onTertiaryContainer,
                       title: t.photographerJoinCta,
                       subtitle: widget.isAr
-                          ? 'طلبات تصوير مفتوحة: $photographerRequestCount · استقبل الطلبات وسلّم الوسائط'
-                          : '$photographerRequestCount open property shoots · receive requests and deliver media',
+                          ? 'إجراءات تصوير معلّقة: $photographerRequestCount · طلباتك وعروضك وأعمالك'
+                          : '$photographerRequestCount photography actions · requests, offers, and work',
                       value: 'photographer',
                     ),
                     choiceTile(
@@ -843,85 +845,21 @@ extension _UserDashboardStateActions on _UserDashboardState {
   }
 
   Future<void> _openPlusPhotographer() async {
-    PhotographerProfile? profile;
-    try {
-      profile = await PhotographerService(_sb).myProfile();
-    } catch (_) {}
-    if (!mounted) return;
-    if (profile == null || !profile.isVerified) {
-      await _pushPlusForm<void>(
-        (_) => PhotographerJoinPage(lang: widget.lang, embedAppBar: true),
-      );
-      return;
-    }
-
-    final subscriptionService = SubscriptionService(_sb);
-    var subscription =
-        await subscriptionService.getCurrentSubscriptionForPlanUserType(
-      'photographer',
-    );
-    if (!SubscriptionService.subscriptionRowInPaidAccess(
-      subscription,
-    )) {
+    if (_isGuest || !mounted) return;
+    _myPageRoleKind = 2;
+    _ss(() {
+      _tabIndex = 1;
+      _bottomNavTransientIndex = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final hasExpired = subscription != null;
-      final goToPlans = await showAppDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          icon: const Icon(Icons.photo_camera_outlined),
-          title: Text(widget.isAr
-              ? 'اشتراك المصور العقاري'
-              : 'Photographer subscription'),
-          content: Text(
-            widget.isAr
-                ? (hasExpired
-                    ? 'انتهى اشتراك المصور العقاري. جدّده لمتابعة استقبال الطلبات وتسليم الوسائط.'
-                    : 'تحتاج إلى اشتراك مصور عقاري فعّال لاستقبال الطلبات وتسليم الوسائط.')
-                : (hasExpired
-                    ? 'Your photographer subscription has expired. Renew it to receive requests and deliver media.'
-                    : 'An active photographer subscription is required to receive requests and deliver media.'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(widget.isAr ? 'لاحقاً' : 'Later'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, true),
-              icon: const Icon(Icons.subscriptions_outlined),
-              label: Text(
-                  widget.isAr ? 'عرض باقات المصور' : 'View photographer plans'),
-            ),
-          ],
-        ),
-      );
-      if (!mounted || goToPlans != true) return;
-
-      await _pushBody<MarketingSubscriptionResumeIntent?>(
-        MaterialPageRoute<MarketingSubscriptionResumeIntent?>(
-          settings: const RouteSettings(name: '/dashboard/photographer-plans'),
-          builder: (_) => SubscriptionsRootScreen(
-            lang: widget.lang,
-            accountType: 'photographer',
-            embedAppBar: false,
-            resumeAfterPurchase: const MarketingSubscriptionResumeIntent(
-              kind: MarketingSubscriptionResumeKind.postPaidUnlock,
-            ),
-          ),
-        ),
-      );
-      if (!mounted) return;
-      SubscriptionService.invalidateSubscriptionCache();
-      subscription = await subscriptionService
-          .getCurrentSubscriptionForPlanUserType('photographer');
-      if (!SubscriptionService.subscriptionRowInPaidAccess(subscription)) {
-        return;
+      _ensureMyPageRoleTabsCtrl();
+      final roleIndex = _myPageRoleKinds.indexOf(2);
+      final controller = _myPageRoleTabsCtrl;
+      if (roleIndex >= 0 && controller != null) {
+        controller.animateTo(roleIndex);
       }
-    }
-
-    await _pushPlusForm<void>(
-      (_) => PhotographerHubPage(lang: widget.lang, embedAppBar: true),
-    );
+    });
   }
 
   Future<void> _guestOpenCenterPlusFlow() async {
@@ -1009,20 +947,33 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
     var photographerRequestCount = 0;
     try {
+      final photographerService = PhotographerService(_sb);
+      final requesterShots = await photographerService.myShootsAsRequester();
+      final incomingOffers =
+          await photographerService.myIncomingPhotoShootOffers();
+      photographerRequestCount += incomingOffers
+          .where((offer) => offer['offer_status'] == 'submitted')
+          .length;
+      photographerRequestCount += requesterShots
+          .where((shoot) => shoot.deliveryReviewStatus == 'pending_review')
+          .length;
       final photographerSubscription = await SubscriptionService(_sb)
           .getCurrentSubscriptionForPlanUserType('photographer');
-      if (SubscriptionService.subscriptionRowGrantsMarketingAccess(
+      if (SubscriptionService.subscriptionRowInPaidAccess(
         photographerSubscription,
       )) {
-        final shoots = await PhotographerService(_sb).myShootsAsPhotographer();
-        photographerRequestCount = shoots
+        final shoots = await photographerService.myShootsAsPhotographer();
+        final opportunities =
+            await photographerService.openPhotoShootOpportunities();
+        photographerRequestCount += opportunities.length;
+        photographerRequestCount += shoots
             .where(
               (shoot) =>
-                  shoot.propertyId.trim().isNotEmpty &&
-                  (const {'pending', 'accepted', 'in_progress'}
-                          .contains(shoot.status) ||
-                      const {'pending_review', 'revision_requested'}
-                          .contains(shoot.deliveryReviewStatus)),
+                  shoot.status == 'pending' ||
+                  shoot.deliveryReviewStatus == 'revision_requested' ||
+                  ((shoot.status == 'accepted' ||
+                          shoot.status == 'in_progress') &&
+                      shoot.propertyId.trim().isNotEmpty),
             )
             .length;
       }
@@ -1604,8 +1555,30 @@ extension _UserDashboardStateActions on _UserDashboardState {
           ? p.title.trim()
           : (widget.isAr ? 'إعلان عقار' : 'Property listing');
       final img = PropertyListingDisplay.propertySharePreviewUrl(p, _sb);
+      final imageUrls = ListingMediaUrls.publicUrls(
+        _sb,
+        ListingMediaUrls.propertyCardImagePaths(p),
+      );
+      final videoUrl = ListingMediaUrls.looksLikePlayableVideoRef(p.videoUrl)
+          ? ListingMediaUrls.videoPlayableUrl(_sb, p.videoUrl)
+          : null;
+      final tourUrl =
+          ListingMediaUrls.looksLikePlayableTourUrl(p.virtualTourUrl)
+              ? p.virtualTourUrl!.trim()
+              : null;
+      final hasInAppTour = p.hasInAppVirtualTour;
+      final mediaLines = <String>[
+        for (final imageUrl in imageUrls)
+          '${widget.isAr ? 'صورة' : 'Photo'}: $imageUrl',
+        if (videoUrl != null) '${widget.isAr ? 'الفيديو' : 'Video'}: $videoUrl',
+        if (tourUrl != null) '${widget.isAr ? 'الجولة' : 'Tour'}: $tourUrl',
+        if (hasInAppTour)
+          widget.isAr
+              ? 'جولة تفاعلية داخل التطبيق: افتح رابط الإعلان'
+              : 'Interactive in-app tour: open the listing link',
+      ];
       await shareListingRich(
-        text: '$title\n${uri.toString()}',
+        text: [title, uri.toString(), ...mediaLines].join('\n'),
         imageHttpUrl: img,
         subject: widget.isAr ? 'إعلان — $title' : 'Listing — $title',
       );
@@ -1664,8 +1637,23 @@ extension _UserDashboardStateActions on _UserDashboardState {
           ? r.title.trim()
           : (widget.isAr ? 'طلب عقاري' : 'Property request');
       final img = PropertyListingDisplay.marketRequestSharePreviewUrl(r, _sb);
+      final imageUrls = ListingMediaUrls.marketRequestImageUrls(r, _sb);
+      final videoUrl = ListingMediaUrls.marketRequestVideoPlayableUrl(r, _sb);
+      final tourUrl = ListingMediaUrls.marketRequestTourUrl(r);
+      final hasInAppTour =
+          ListingMediaUrls.inAppTourFromPayload(r.details) != null;
+      final mediaLines = <String>[
+        for (final imageUrl in imageUrls)
+          '${widget.isAr ? 'صورة' : 'Photo'}: $imageUrl',
+        if (videoUrl != null) '${widget.isAr ? 'الفيديو' : 'Video'}: $videoUrl',
+        if (tourUrl != null) '${widget.isAr ? 'الجولة' : 'Tour'}: $tourUrl',
+        if (hasInAppTour)
+          widget.isAr
+              ? 'جولة تفاعلية داخل التطبيق: افتح رابط الطلب'
+              : 'Interactive in-app tour: open the request link',
+      ];
       await shareListingRich(
-        text: '$title\n${uri.toString()}',
+        text: [title, uri.toString(), ...mediaLines].join('\n'),
         imageHttpUrl: img,
         subject: widget.isAr ? 'طلب — $title' : 'Request — $title',
       );

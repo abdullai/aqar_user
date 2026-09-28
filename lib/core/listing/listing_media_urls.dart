@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../branding/app_branding.dart';
+import 'in_app_tour.dart';
 import '../../models/market_property_request_row.dart';
 import '../../models/property.dart';
 
@@ -240,21 +243,44 @@ abstract final class ListingMediaUrls {
     MarketPropertyRequestRow r,
     SupabaseClient sb,
   ) {
-    final path = (r.coverImageStoragePath ?? '').trim();
-    if (path.isNotEmpty && !isSmartDefaultCoverPath(path)) {
-      return storagePublicUrl(sb, path);
-    }
-    final fromDetails = imagePathsFromPayload(r.details);
-    for (final raw in fromDetails) {
-      final s = raw.trim();
-      if (s.isEmpty || isSmartDefaultCoverPath(s) || looksLikeVideoPath(s)) {
-        continue;
-      }
-      if (s.startsWith('http://') || s.startsWith('https://')) return s;
-      return storagePublicUrl(sb, s);
-    }
-    return null;
+    final urls = marketRequestImageUrls(r, sb);
+    return urls.isEmpty ? null : urls.first;
   }
+
+  static List<String> marketRequestImagePaths(MarketPropertyRequestRow r) {
+    final cover = (r.coverImageStoragePath ?? '').trim();
+    return mergePathLists([
+      if (cover.isNotEmpty) [cover],
+      imagePathsFromPayload(r.details),
+    ]);
+  }
+
+  static List<String> marketRequestImageUrls(
+    MarketPropertyRequestRow r,
+    SupabaseClient sb,
+  ) =>
+      publicUrls(sb, marketRequestImagePaths(r));
+
+  static String? marketRequestVideoPlayableUrl(
+    MarketPropertyRequestRow r,
+    SupabaseClient sb,
+  ) {
+    final cover = (r.coverImageStoragePath ?? '').trim();
+    final raw = videoPathFromPayload(r.details) ??
+        (looksLikeVideoPath(cover) ? cover : null);
+    if (!looksLikePlayableVideoRef(raw)) return null;
+    return videoPlayableUrl(sb, raw);
+  }
+
+  static String? marketRequestTourUrl(MarketPropertyRequestRow r) {
+    final raw = virtualTourFromPayload(r.details);
+    if (!looksLikePlayableTourUrl(raw)) return null;
+    return raw;
+  }
+
+  static bool marketRequestPrefersVideoCover(MarketPropertyRequestRow r) =>
+      payloadPrefersVideoCover(r.details) ||
+      looksLikeVideoPath(r.coverImageStoragePath);
 
   static String propertySharePreviewHttpUrl(Property p, SupabaseClient sb) =>
       propertyImageNetworkUrl(p, sb) ?? fallbackSharePreviewImageUrl();
@@ -319,14 +345,12 @@ abstract final class ListingMediaUrls {
 
   static List<String> imagePathsFromPayload(Map<String, dynamic>? payload) {
     if (payload == null || payload.isEmpty) return const [];
-    final flat = Map<String, dynamic>.from(payload);
-    final lg = payload['listing_guidance'];
-    if (lg is Map) {
-      for (final e in Map<String, dynamic>.from(lg).entries) {
-        flat.putIfAbsent(e.key, () => e.value);
-      }
+    final sources = <Map<String, dynamic>>[Map<String, dynamic>.from(payload)];
+    final guidance = payload['listing_guidance'];
+    if (guidance is Map) {
+      sources.add(Map<String, dynamic>.from(guidance));
     }
-    for (final k in const [
+    const imageKeys = [
       'request_image_paths',
       'image_paths',
       'image_urls',
@@ -334,12 +358,16 @@ abstract final class ListingMediaUrls {
       'photos',
       'gallery',
       'property_images',
+      'preview_images',
       'preview_image_urls',
-    ]) {
-      final fromKey = _pathsFromDynamic(flat[k]);
-      if (fromKey.isNotEmpty) return fromKey;
+    ];
+    final out = <String>[];
+    for (final source in sources) {
+      for (final key in imageKeys) {
+        out.addAll(_pathsFromDynamic(source[key]));
+      }
     }
-    for (final k in const [
+    const singleImageKeys = [
       'cover_image',
       'main_image',
       'image',
@@ -350,62 +378,91 @@ abstract final class ListingMediaUrls {
       'hero_image',
       'primary_image',
       'primaryImage',
-    ]) {
-      final s = (flat[k] ?? '').toString().trim();
-      if (s.isEmpty || isSmartDefaultCoverPath(s) || looksLikeVideoPath(s)) {
-        continue;
+    ];
+    for (final source in sources) {
+      for (final key in singleImageKeys) {
+        final s = (source[key] ?? '').toString().trim();
+        if (s.isEmpty || isSmartDefaultCoverPath(s) || looksLikeVideoPath(s)) {
+          continue;
+        }
+        out.add(s);
       }
-      return [s];
     }
-    return const [];
+    return mergePathLists([out]);
   }
 
   static String? videoPathFromPayload(Map<String, dynamic>? payload) {
     if (payload == null) return null;
-    final flat = Map<String, dynamic>.from(payload);
-    final lg = payload['listing_guidance'];
-    if (lg is Map) {
-      for (final e in Map<String, dynamic>.from(lg).entries) {
-        flat.putIfAbsent(e.key, () => e.value);
-      }
+    final sources = <Map<String, dynamic>>[Map<String, dynamic>.from(payload)];
+    final guidance = payload['listing_guidance'];
+    if (guidance is Map) {
+      sources.add(Map<String, dynamic>.from(guidance));
     }
-    for (final k in const [
-      'request_video_path',
-      'video_url',
-      'video_path',
-      'video',
-    ]) {
-      final s = (flat[k] ?? '').toString().trim();
-      if (s.isNotEmpty) return s;
+    for (final source in sources) {
+      for (final key in const [
+        'preview_video_url',
+        'hero_video_url',
+        'request_video_path',
+        'video_url',
+        'video_path',
+        'video',
+      ]) {
+        final s = (source[key] ?? '').toString().trim();
+        if (s.isEmpty || s == 'true' || s == 'false' || s == 'video') {
+          continue;
+        }
+        return s;
+      }
     }
     return null;
   }
 
   static String? virtualTourFromPayload(Map<String, dynamic>? payload) {
     if (payload == null) return null;
-    final flat = Map<String, dynamic>.from(payload);
-    final lg = payload['listing_guidance'];
-    if (lg is Map) {
-      for (final e in Map<String, dynamic>.from(lg).entries) {
-        flat.putIfAbsent(e.key, () => e.value);
+    final sources = <Map<String, dynamic>>[Map<String, dynamic>.from(payload)];
+    final guidance = payload['listing_guidance'];
+    if (guidance is Map) {
+      sources.add(Map<String, dynamic>.from(guidance));
+    }
+    for (final source in sources) {
+      for (final key in const [
+        'preview_tour_url',
+        'virtual_tour_url',
+        'tour_url',
+        'virtualTourUrl',
+      ]) {
+        final s = (source[key] ?? '').toString().trim();
+        if (s.isNotEmpty) return s;
       }
     }
-    for (final k in const ['virtual_tour_url', 'tour_url', 'virtualTourUrl']) {
-      final s = (flat[k] ?? '').toString().trim();
-      if (s.isNotEmpty) return s;
-    }
     return null;
+  }
+
+  static InAppTour? inAppTourFromPayload(Map<String, dynamic>? payload) {
+    if (payload == null || payload.isEmpty) return null;
+    Map<String, dynamic>? guidance;
+    final rawGuidance = payload['listing_guidance'];
+    if (rawGuidance is Map) {
+      guidance = Map<String, dynamic>.from(rawGuidance);
+    } else if (rawGuidance is String && rawGuidance.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawGuidance);
+        if (decoded is Map) guidance = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    final rawTour = payload['in_app_tour'] ?? guidance?['in_app_tour'];
+    final tour = InAppTour.fromRaw(rawTour);
+    return tour?.isNotEmpty == true ? tour : null;
   }
 
   static bool payloadPrefersVideoCover(Map<String, dynamic>? payload) {
     if (payload == null) return false;
     final raw = payload['listing_guidance'];
-    if (raw is Map) {
-      final g = Map<String, dynamic>.from(raw);
-      return (g['cover_primary'] ?? '').toString().trim().toLowerCase() ==
-          'video';
-    }
-    return (payload['cover_primary'] ?? '').toString().trim().toLowerCase() ==
+    final guidance = raw is Map ? Map<String, dynamic>.from(raw) : null;
+    return (guidance?['cover_primary'] ?? payload['cover_primary'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase() ==
         'video';
   }
 
@@ -426,7 +483,14 @@ abstract final class ListingMediaUrls {
         if (e is Map) {
           final m = Map<String, dynamic>.from(e);
           if (rowLooksLikeVideo(m)) continue;
-          add((m['path'] ?? m['url'] ?? m['image'] ?? m['image_url'] ?? '')
+          add((m['path'] ??
+                  m['url'] ??
+                  m['image'] ??
+                  m['image_url'] ??
+                  m['file_name'] ??
+                  m['file_path'] ??
+                  m['storage_path'] ??
+                  '')
               .toString());
         } else {
           add(e.toString());
@@ -435,7 +499,15 @@ abstract final class ListingMediaUrls {
     } else if (raw is Map) {
       final m = Map<String, dynamic>.from(raw);
       if (!rowLooksLikeVideo(m)) {
-        add((m['path'] ?? m['url'] ?? m['image'] ?? '').toString());
+        add((m['path'] ??
+                m['url'] ??
+                m['image'] ??
+                m['image_url'] ??
+                m['file_name'] ??
+                m['file_path'] ??
+                m['storage_path'] ??
+                '')
+            .toString());
       }
     } else if (raw is String) {
       add(raw);

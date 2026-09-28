@@ -5,6 +5,69 @@ part of 'user_dashboard.dart';
 /// واجهة تبويبات «صفحتي» (مسوّق/معلن): راجع `docs/MARKETING_FULL_FLOW_USER_SPEC_AR.md` لربط المراحل.
 
 extension _UserDashboardStateMyAdsHub on _UserDashboardState {
+  List<int> get _myPageRoleOptions {
+    if (_isMarketingAccountType) {
+      return _hasOwnerRequestsData || _mine.isNotEmpty
+          ? const [0, 1, 2]
+          : const [0, 2];
+    }
+    return const [1, 2];
+  }
+
+  void _ensureMyPageRoleTabsCtrl() {
+    final options = _myPageRoleOptions;
+    final oldOptions = _myPageRoleKinds;
+    final sameOptions = oldOptions.length == options.length &&
+        List<int>.generate(options.length, (i) => oldOptions[i])
+            .asMap()
+            .entries
+            .every((entry) => entry.value == options[entry.key]);
+    final selectedIndex = options.indexOf(_myPageRoleKind);
+    final current = _myPageRoleTabsCtrl;
+    if (current != null && sameOptions) {
+      if (selectedIndex >= 0 &&
+          current.index != selectedIndex &&
+          !current.indexIsChanging) {
+        current.index = selectedIndex;
+      }
+      return;
+    }
+
+    final initialIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    final next = TabController(
+      length: options.length,
+      vsync: this,
+      initialIndex: initialIndex,
+    );
+    _myPageRoleKinds = options;
+    next.addListener(() {
+      final controller = _myPageRoleTabsCtrl;
+      if (controller == null || controller.indexIsChanging) return;
+      final index = controller.index.clamp(0, _myPageRoleKinds.length - 1);
+      final kind = _myPageRoleKinds[index];
+      if (_myPageRoleKind == kind) return;
+      _ss(() {
+        _myPageRoleKind = kind;
+        if (_isMarketingAccountType) {
+          _marketerPublisherHubMode = kind == 1 ? 1 : 0;
+        }
+      });
+      if (kind == 1 && _isMarketingAccountType) {
+        unawaited(_loadOwnerRequestsBuckets(force: false, silent: true));
+      }
+      try {
+        if (kind == 0 && _marketerTabsCtrl?.index != 0) {
+          _marketerTabsCtrl?.index = 0;
+        } else if (kind == 1 && _ownerTabsCtrl?.index != 0) {
+          _ownerTabsCtrl?.index = 0;
+        }
+      } catch (_) {}
+    });
+    _myPageRoleTabsCtrl = next;
+    final old = current;
+    if (old != null) _disposeTabControllerLater(old);
+  }
+
   /// تنبيه بصري: طلبات كمعلن تحتاج مراجعة عروض (يشمل المسوّق الذي يطرح طلبات).
   int get _ownerOffersAttentionCount {
     if (_isGuest) return 0;
@@ -87,10 +150,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           onRetry: _ensureSubTabControllers,
         );
       }
-      // إن كان لديه طلبات كمعلن: مبدّل ذكي بين دور المسوّق ودور المالك.
-      if (_hasOwnerRequestsData) {
-        return _buildMarketerDualRoleMyAds(cs, ctrl);
-      }
       return _buildMarketerMyAds(cs, ctrl);
     }
 
@@ -122,7 +181,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   Widget _buildOwnerDirectMineCards(ColorScheme cs, List<Property> myItems) {
     final scroll = _scrollControllerForOnboardingTab(1);
     final ar = widget.isAr;
-    final items = List<Property>.from(myItems)
+    final items = myItems.where(_matchesMyPagePropertyFilters).toList()
       ..sort((a, b) => b.displayDate.compareTo(a.displayDate));
 
     if (_loadingMine && items.isEmpty) {
@@ -133,8 +192,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     }
 
+    if (_errorMine != null && _mine.isEmpty && items.isEmpty) {
+      return _simpleErrorBox(
+        title: ar ? 'تعذّر تحميل إعلاناتك' : 'Could not load your listings',
+        err: _errorMine!,
+        onRetry: () => _loadMineAndOffers(force: true),
+      );
+    }
+
     if (items.isEmpty) {
-      final l10n = AppLocalizations.of(context)!;
       return ListView(
         controller: scroll,
         physics: _myAdsHubScrollPhysics,
@@ -148,7 +214,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ),
           const SizedBox(height: 16),
           Text(
-            ar ? 'لا توجد إعلانات بعد' : 'No listings yet',
+            myItems.isNotEmpty && _hasActiveTopFilters
+                ? (ar
+                    ? 'لا توجد إعلانات مطابقة لخيارات البحث.'
+                    : 'No listings match these filters.')
+                : (ar ? 'لا توجد إعلانات بعد' : 'No listings yet'),
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.w900,
@@ -156,26 +226,18 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ),
           const SizedBox(height: 10),
           Text(
-            ar
-                ? 'أضف إعلاناً من زر + وسيظهر هنا فوراً.'
-                : 'Add a listing from + and it will show here instantly.',
+            myItems.isNotEmpty && _hasActiveTopFilters
+                ? (ar
+                    ? 'غيّر البحث أو امسح الفلاتر لعرض إعلاناتك.'
+                    : 'Change the search or clear filters to see your listings.')
+                : (ar
+                    ? 'لا توجد إعلانات مرتبطة بهذا الحساب حالياً.'
+                    : 'No listings are linked to this account yet.'),
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: cs.onSurfaceVariant,
                 ),
-          ),
-          const SizedBox(height: 20),
-          Center(
-            child: ElevatedButton.icon(
-              onPressed: () => unawaited(_openCenterPlus()),
-              icon: const Icon(Icons.add_rounded),
-              label: Text(l10n.navAdd),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _brandPrimary,
-                foregroundColor: Colors.white,
-              ),
-            ),
           ),
         ],
       );
@@ -328,6 +390,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return items.where((p) {
       if (p.deletedByUser) return false;
       if (p.deleteApproved) return false;
+      if (!_matchesMyPagePropertyFilters(p)) return false;
       if (tabIndex == 8) {
         final st = p.normalizedStatus;
         final soldLike = st == 'sold' || st == 'completed';
@@ -356,6 +419,157 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         stage,
       );
     }).toList();
+  }
+
+  bool _matchesMyPagePropertyFilters(Property property) {
+    final filters = _myPageAdvancedFilters;
+    if (!_matchesSearch(property, filters.query)) return false;
+    if (!_matchesCityFilter(property, filters.city)) return false;
+
+    final region = _norm(filters.region);
+    final governorate = _norm(filters.governorate);
+    final district = _norm(filters.district);
+    if (region.isNotEmpty || governorate.isNotEmpty || district.isNotEmpty) {
+      String dynamicLocation(String key) {
+        try {
+          return _norm((property as dynamic).toJson()[key]?.toString());
+        } catch (_) {
+          return '';
+        }
+      }
+
+      final haystack = <String>[
+        _norm(property.city),
+        _norm(property.location),
+        _norm(property.addressLine),
+        _norm(property.locationText),
+        dynamicLocation('region'),
+        dynamicLocation('governorate'),
+      ].where((part) => part.isNotEmpty).join(' | ');
+      bool containsLocation(String value) {
+        if (value.isEmpty) return true;
+        return haystack.contains(value) ||
+            value
+                .split(' ')
+                .where((part) => part.length >= 3)
+                .any(haystack.contains);
+      }
+
+      if (!containsLocation(region) ||
+          !containsLocation(governorate) ||
+          !containsLocation(district)) {
+        return false;
+      }
+    }
+
+    if (filters.type != null && property.type != filters.type) return false;
+    if (filters.purpose != null &&
+        !PropertyListingDisplay.matchesPurposeFilter(
+          property,
+          filters.purpose,
+        )) {
+      return false;
+    }
+    if (filters.furnished == true && property.furnished != true) return false;
+    if (filters.furnished == false && property.furnished == true) return false;
+    if (!_matchesNumberRange(
+      property.price,
+      _parseFilterNumber(filters.priceMin),
+      _parseFilterNumber(filters.priceMax),
+    )) {
+      return false;
+    }
+    if (!_matchesNumberRange(
+      property.area,
+      _parseFilterNumber(filters.areaMin),
+      _parseFilterNumber(filters.areaMax),
+    )) {
+      return false;
+    }
+    return true;
+  }
+
+  bool _matchesMyPageRequestFilters(Map<String, dynamic> row) {
+    final filters = _myPageAdvancedFilters;
+    if (!_matchesHubRowSearch(row)) return false;
+    if (!_matchesHubRowRanges(row)) return false;
+    final hierarchy = _norm(
+      '${row['region'] ?? row['request_region'] ?? ''} '
+      '${row['governorate'] ?? row['request_governorate'] ?? ''} '
+      '${row['district'] ?? ''} ${row['districts'] ?? ''} '
+      '${row['location'] ?? ''} ${row['address_line'] ?? ''} '
+      '${row['request_city'] ?? ''} ${row['preview_city'] ?? ''} ${row['city'] ?? ''}',
+    );
+    for (final needle in [
+      filters.region,
+      filters.governorate,
+      filters.district,
+    ].map(_norm).where((value) => value.isNotEmpty)) {
+      if (!hierarchy.contains(needle) &&
+          !needle
+              .split(' ')
+              .where((part) => part.length >= 3)
+              .any(hierarchy.contains)) {
+        return false;
+      }
+    }
+    final city = _norm(filters.city);
+    if (city.isNotEmpty && city != 'all') {
+      final haystack = _norm(
+        '${row['request_city'] ?? ''} ${row['preview_city'] ?? ''} '
+        '${row['city'] ?? ''} ${row['location'] ?? ''} '
+        '${row['district'] ?? ''} ${row['districts'] ?? ''}',
+      );
+      final cityLabel = _norm(_cityLabel(filters.city));
+      if (!haystack.contains(city) &&
+          (cityLabel.isEmpty || !haystack.contains(cityLabel))) {
+        return false;
+      }
+    }
+    final type = filters.type;
+    if (type != null) {
+      final typeCode = switch (type) {
+        PropertyType.villa => 'villa',
+        PropertyType.apartment => 'apartment',
+        PropertyType.land => 'land',
+      };
+      final rowType = _norm(
+        '${row['property_type'] ?? row['preview_type'] ?? row['type'] ?? ''}',
+      );
+      if (rowType.isNotEmpty && rowType != _norm(typeCode)) {
+        return false;
+      }
+    }
+    final purpose = filters.purpose;
+    if (purpose != null) {
+      final raw = _norm(
+        '${row['purpose'] ?? row['preview_purpose'] ?? row['request_purpose'] ?? ''}',
+      );
+      const rentPurposes = {
+        'rent',
+        'daily_rent',
+        'monthly_rent',
+        'yearly_rent',
+      };
+      if (raw.isNotEmpty) {
+        final matches = switch (purpose) {
+          'rent' => rentPurposes.contains(raw),
+          'sale' => const {'purchase', 'sale', 'buy'}.contains(raw),
+          'auction' => raw == 'auction',
+          'investment' => raw == 'investment',
+          _ => true,
+        };
+        if (!matches) return false;
+      }
+    }
+    final furnished = filters.furnished;
+    final furnishedValue =
+        row['furnished'] ?? row['preview_furnished'] ?? row['is_furnished'];
+    if (furnished != null && furnishedValue != null) {
+      final isFurnished = furnishedValue == true;
+      if (furnished != isFurnished) return false;
+    }
+    return true;
   }
 
   List<double> _hubRowNumbers(Map<String, dynamic> r, List<String> keys) {
@@ -392,7 +606,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   bool _matchesHubRowSearch(Map<String, dynamic> r) {
-    final q = _searchQuery.trim();
+    final q = _activeInlineSearchQuery.trim();
     final nq = _norm(q);
     if (nq.isEmpty) return true;
     final tokens = _tokens(nq);
@@ -403,6 +617,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   bool _matchesHubRowRanges(Map<String, dynamic> r) {
+    final filters = _myPageFilterScope
+        ? _myPageAdvancedFilters
+        : _DashboardAdvDraftHolder.fromState(this);
     final priceOk = _matchesHubRowAnyRange(
         r,
         const [
@@ -414,8 +631,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           'offer_price',
           'marketing_fee',
         ],
-        _priceMinFilter,
-        _priceMaxFilter);
+        _parseFilterNumber(filters.priceMin),
+        _parseFilterNumber(filters.priceMax));
     final areaOk = _matchesHubRowAnyRange(
         r,
         const [
@@ -425,8 +642,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           'preview_area',
           'land_area',
         ],
-        _areaMinFilter,
-        _areaMaxFilter);
+        _parseFilterNumber(filters.areaMin),
+        _parseFilterNumber(filters.areaMax));
     return priceOk && areaOk;
   }
 
@@ -434,8 +651,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   List<Map<String, dynamic>> _ownerRequestRowsForTab(int tabIndex) {
     if (tabIndex >= 4) return const <Map<String, dynamic>>[];
     return _ownerListingRequests.where((r) {
-      if (!_matchesHubRowSearch(r)) return false;
-      if (!_matchesHubRowRanges(r)) return false;
+      if (!_matchesMyPageRequestFilters(r)) return false;
       final decision = ListingPostPublishUiHelper.decideFromRequestRow(
           Map<String, dynamic>.from(r));
       if (decision.kind == ListingUiEntityKind.publishedProperty) return false;
@@ -478,6 +694,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       Map<String, dynamic>.from(r),
     );
     if (decision.kind == ListingUiEntityKind.publishedProperty) return false;
+    if (ListingStageUiHelper.ownerTabMatches(1, decision.stage)) return false;
+    final selectedOfferId = (r['selected_offer_id'] ?? '').toString().trim();
+    final selectedMarketerId =
+        (r['selected_marketer_id'] ?? '').toString().trim();
+    if (selectedOfferId.isNotEmpty || selectedMarketerId.isNotEmpty) {
+      return false;
+    }
     if (const {
       ListingWorkflowStage.published,
       ListingWorkflowStage.reserved,
@@ -527,7 +750,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   /// تبويب «بانتظار المسوقين» — بدون عروض مقدَّمة بعد.
   List<Map<String, dynamic>> _ownerRequestRowsWaitingNoOffers() {
     return _ownerListingRequests.where((r) {
-      if (!_matchesHubRowSearch(r) || !_matchesHubRowRanges(r)) return false;
+      if (!_matchesMyPageRequestFilters(r)) return false;
       if (!_ownerRequestRowInWaitingMarketersBucket(r)) return false;
       if (_ownerRequestRowShowsInSubmittedOffersTab(r)) return false;
       if (_ownerRequestRowShowsInInactive72hTab(r)) return false;
@@ -538,7 +761,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   /// تبويب «العروض المقدمة» — وصلت عروض ولم يُعاد توجيه الطلب لتعاقد بعد.
   List<Map<String, dynamic>> _ownerRequestRowsSubmittedOffersOnly() {
     return _ownerListingRequests.where((r) {
-      if (!_matchesHubRowSearch(r) || !_matchesHubRowRanges(r)) return false;
+      if (!_matchesMyPageRequestFilters(r)) return false;
       return _ownerRequestRowShowsInSubmittedOffersTab(r);
     }).toList();
   }
@@ -2056,9 +2279,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final imageColumn = _buildMarketingPreviewImage(
       urls,
       type: 'invite',
+      mediaOwnerKey: id.isNotEmpty ? id : (merged['id'] ?? '').toString(),
       views: previewViews,
-      videoStoragePath:
-          (vidRaw.isNotEmpty && (urls.isEmpty || coverVid)) ? vidRaw : null,
+      videoStoragePath: vidRaw.isNotEmpty ? vidRaw : null,
+      tourPathOrUrl: ListingMediaUrls.virtualTourFromPayload(merged),
+      inAppTour: ListingMediaUrls.inAppTourFromPayload(merged),
       coverPrefersVideo: coverVid,
       showTrackingMark: ownerTrackTap != null,
       onImageTrackingTap: ownerTrackTap,
@@ -3829,6 +4054,31 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
   }
 
+  bool _marketerCanSubmitOfferFromDetails(
+    Map<String, dynamic> row, {
+    required String type,
+  }) {
+    if (_marketerCardActionMatrix(row, type: type).canSubmitOffer) return true;
+    if (!_marketerOfferRetryAllowedForRow(row) ||
+        _marketerRowHasContract(row) ||
+        _marketerRowInactive72h(row)) {
+      return false;
+    }
+    final workflowRaw =
+        (row['request_workflow_stage'] ?? row['workflow_stage'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    final requestStatusRaw =
+        (row['listing_request_status'] ?? row['request_status'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    return _marketingRequestIdFromRow(row).isNotEmpty &&
+        !_marketerRowPublishedByOther(row) &&
+        _requestActivelyCollectingOffers(workflowRaw, requestStatusRaw);
+  }
+
   bool _requestActivelyCollectingOffers(
     String workflowRaw,
     String requestStatusRaw,
@@ -4130,6 +4380,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final ar = widget.isAr;
 
     bool allowSame = false;
+    bool legalAcknowledged = false;
     final confirmed = await showAppDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -4142,10 +4393,28 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               children: [
                 Text(
                   ar
-                      ? 'سيُعاد الطلب إلى السوق ليَتقدّم عليه المسوّقون من جديد.'
-                      : 'Your request will be re-listed for marketers to bid on.',
+                      ? 'سيُعاد الطلب إلى السوق ليقدّم المسوّقون عروضًا جديدة. هذه الخطوة لا تلغي أي تصريح صادر من الهيئة.'
+                      : 'The request will reopen for new marketer offers. This action does not revoke any permit already issued by REGA.',
                 ),
                 const SizedBox(height: 12),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: legalAcknowledged,
+                  onChanged: (value) =>
+                      setSt(() => legalAcknowledged = value ?? false),
+                  title: Text(
+                    ar
+                        ? 'أقر بصحة حالة الترخيص وأتحمل المسؤولية النظامية عن إعادة الطلب للسوق. إذا صدر تصريح، فسأتبع إجراء الإلغاء الرسمي لدى الجهة المختصة.'
+                        : 'I confirm the permit status is accurate and accept legal responsibility for reopening this request. If a permit was issued, I will follow the regulator’s formal cancellation process.',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      height: 1.35,
+                    ),
+                  ),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+                const SizedBox(height: 8),
                 SwitchListTile.adaptive(
                   contentPadding: EdgeInsets.zero,
                   title: Text(
@@ -4171,7 +4440,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                 child: Text(ar ? 'إلغاء' : 'Cancel'),
               ),
               FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
+                onPressed: legalAcknowledged
+                    ? () => Navigator.of(ctx).pop(true)
+                    : null,
                 child: Text(ar ? 'إعادة للسوق' : 'Return'),
               ),
             ],
@@ -4185,6 +4456,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final res = await svc.returnRequestToMarket(
       requestId: reqId,
       allowSameMarketer: allowSame,
+      legalAcknowledged: legalAcknowledged,
     );
     Future<void> succeed({bool hasOffers = false}) async {
       if (!mounted) return;
@@ -4212,28 +4484,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       return;
     }
 
-    final err = res['error']?.toString() ?? '';
-    try {
-      await MarketingFlowService(_sb).relistListingRequestForMarketing(
-        requestId: reqId,
-        allowPreviousMarketersRetry: allowSame,
-      );
-      await succeed();
-      return;
-    } catch (e) {
-      if (_errorLooksLikeAlreadyOnMarket(e) ||
-          _errorLooksLikeAlreadyOnMarket(err) ||
-          await _listingRequestIsOnMarketerMarket(reqId)) {
-        await succeed();
-        return;
-      }
-      if (!mounted) return;
-      _showNotification(
-        ar ? 'خطأ' : 'Error',
-        ListingWorkflowCopy.rpcFailedFriendly(ar, e),
-        isError: true,
-      );
-    }
+    if (!mounted) return;
+    _showNotification(
+      ar ? 'خطأ' : 'Error',
+      ListingWorkflowCopy.rpcFailedFriendly(
+          ar, res['error'] ?? 'return_failed'),
+      isError: true,
+    );
   }
 
   static const Duration _inactiveToCancelledAfter = Duration(days: 14);
@@ -4367,44 +4624,62 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
     final next = used + 1;
     final ordinal = OpportunityGrantStore.ordinalLabel(next, isAr: ar);
+    var legalAcknowledged = false;
     final confirmed = await showAppDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(ar ? 'إتاحة فرصة' : 'Grant another chance'),
-        content: Text(
-          ar
-              ? 'هذه الفرصة $ordinal من أصل ${OpportunityGrantStore.maxGrants}.\n'
-                  'سيُعاد الطلب إلى تبويب «العروض المقدمة» ليتابع المسوّقون.\n'
-                  'بعد الفرصة الرابعة يختفي من «بدون إجراء 72 ساعة».'
-              : 'This is the $ordinal of ${OpportunityGrantStore.maxGrants} chances.\n'
-                  'The request returns to Submitted offers.\n'
-                  'After the 4th chance it leaves the 72h inactive tab.',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: Text(ar ? 'إتاحة فرصة' : 'Grant another chance'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                ar
+                    ? 'هذه الفرصة $ordinal من أصل ${OpportunityGrantStore.maxGrants}. سيُعاد الطلب إلى «العروض المقدمة». تأكد من صحة حالة الترخيص؛ إعادة الطلب لا تلغي تصريحًا صادرًا من الهيئة.'
+                    : 'This is chance $ordinal of ${OpportunityGrantStore.maxGrants}. The request returns to Submitted offers. Confirm the permit status; relisting does not revoke an issued regulator permit.',
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: legalAcknowledged,
+                onChanged: (value) => setLocal(
+                  () => legalAcknowledged = value ?? false,
+                ),
+                title: Text(
+                  ar
+                      ? 'أقر بصحة حالة الطلب والترخيص وأتحمل المسؤولية النظامية عن إتاحة الفرصة.'
+                      : 'I confirm the request and permit status and accept responsibility for reopening this opportunity.',
+                  style: const TextStyle(fontSize: 12, height: 1.3),
+                ),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(ar ? 'إلغاء' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed:
+                  legalAcknowledged ? () => Navigator.of(ctx).pop(true) : null,
+              child: Text(ar ? 'تأكيد' : 'Confirm'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(ar ? 'إلغاء' : 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(ar ? 'تأكيد' : 'Confirm'),
-          ),
-        ],
       ),
     );
     if (confirmed != true || !mounted) return;
-    final granted = await OpportunityGrantStore.increment(
-      userId: uid,
-      requestId: reqId,
-    );
-    if (granted == null) return;
 
     final svc = MarketingWorkflowAutomationService(Supabase.instance.client);
     final res = await svc.returnRequestToMarket(
       requestId: reqId,
       allowSameMarketer: true,
+      legalAcknowledged: legalAcknowledged,
     );
     if (!mounted) return;
+    var granted = 0;
 
     Future<void> grantSucceed() async {
       if (!mounted) return;
@@ -4437,30 +4712,22 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     if (_rpcMapOk(res)) {
+      final incremented = await OpportunityGrantStore.increment(
+        userId: uid,
+        requestId: reqId,
+      );
+      if (incremented == null) return;
+      granted = incremented;
       await grantSucceed();
       return;
     }
-
-    try {
-      await MarketingFlowService(_sb).relistListingRequestForMarketing(
-        requestId: reqId,
-        allowPreviousMarketersRetry: true,
-      );
-      await grantSucceed();
-    } catch (e) {
-      if (_errorLooksLikeAlreadyOnMarket(e) ||
-          _errorLooksLikeAlreadyOnMarket(res['error']) ||
-          await _listingRequestIsOnMarketerMarket(reqId)) {
-        await grantSucceed();
-        return;
-      }
-      if (!mounted) return;
-      _showNotification(
-        ar ? 'خطأ' : 'Error',
-        ListingWorkflowCopy.rpcFailedFriendly(ar, e),
-        isError: true,
-      );
-    }
+    if (!mounted) return;
+    _showNotification(
+      ar ? 'خطأ' : 'Error',
+      ListingWorkflowCopy.rpcFailedFriendly(
+          ar, res['error'] ?? 'return_failed'),
+      isError: true,
+    );
   }
 
   Future<void> _grantOpportunityFromInactive72h(Map<String, dynamic> r) async {
@@ -4749,9 +5016,20 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     return sourceRows().where((r) {
-      if (!_matchesHubRowSearch(r)) return false;
-      if (!_matchesHubRowRanges(r)) return false;
+      if (!_matchesMyPageRequestFilters(r)) return false;
       if (_marketerRowPublishedByOther(r)) return false;
+      if (tabIndex == 0 && _marketerPhotographyMarketFilter != 'all') {
+        final requiredPhotography = r['photography_required'] == true ||
+            '${r['photography_required']}'.trim().toLowerCase() == 'true';
+        if (_marketerPhotographyMarketFilter == 'required' &&
+            !requiredPhotography) {
+          return false;
+        }
+        if (_marketerPhotographyMarketFilter == 'not_required' &&
+            requiredPhotography) {
+          return false;
+        }
+      }
       if (tabIndex == 0 && _marketerRowHasContract(r)) return false;
       if (tabIndex == 2 &&
           (r['_hubKind'] ?? r['_ui_type'] ?? '').toString() == 'offer') {
@@ -4855,6 +5133,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         involvedInContract: involved(r),
         hasInviteOrOffer: true,
       );
+    }).map((row) {
+      return <String, dynamic>{...row, '_sourceHubTab': tabIndex};
     }).toList();
   }
 
@@ -5478,13 +5758,49 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
     }
 
-    return _buildSimpleRowsList(
+    final rowsList = _buildSimpleRowsList(
       rows: rows,
       emptyText: emptyText,
       type: type,
       marketerInvitesTabLayout: marketerInvitesTabLayout,
       marketerMyOffersTabLayout: marketerMyOffersTabLayout,
       marketerHubUnifiedMarketCard: true,
+    );
+    if (!marketerInvitesTabLayout) return rowsList;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+          child: SegmentedButton<String>(
+            segments: [
+              ButtonSegment(
+                value: 'all',
+                label: Text(widget.isAr ? 'الكل' : 'All'),
+              ),
+              ButtonSegment(
+                value: 'required',
+                label: Text(widget.isAr ? 'بحاجة تصوير' : 'Needs photos'),
+              ),
+              ButtonSegment(
+                value: 'not_required',
+                label: Text(widget.isAr ? 'بلا تصوير' : 'No photos'),
+              ),
+            ],
+            selected: {_marketerPhotographyMarketFilter},
+            onSelectionChanged: (selection) {
+              if (selection.isEmpty) return;
+              _ss(
+                () => _marketerPhotographyMarketFilter = selection.first,
+              );
+            },
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ),
+        Expanded(child: rowsList),
+      ],
     );
   }
 
@@ -5877,11 +6193,20 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         .toString()
         .trim();
     final status = _trMarketingStatus(r['status']?.toString());
+    final photography = r['photography_required'] == true
+        ? ((r['photography_fulfillment'] ?? '') == 'marketer_bundle'
+            ? (widget.isAr ? 'التصوير ضمن العرض' : 'Photography bundled')
+            : (widget.isAr ? 'التصوير مستقل' : 'Independent photography'))
+        : (widget.isAr ? 'لا يحتاج تصويرًا' : 'No photography needed');
 
     if (widget.isAr) {
-      return city.isNotEmpty ? '$city • الحالة: $status' : 'الحالة: $status';
+      return city.isNotEmpty
+          ? '$city • الحالة: $status • $photography'
+          : 'الحالة: $status • $photography';
     }
-    return city.isNotEmpty ? '$city • Status: $status' : 'Status: $status';
+    return city.isNotEmpty
+        ? '$city • Status: $status • $photography'
+        : 'Status: $status • $photography';
   }
 
   String _mkTypeLabel(String type) {
@@ -7172,9 +7497,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   Future<void> _openMarketerInviteDetails(Map<String, dynamic> r) async {
-    final hub =
+    final rowHub =
         (r['_hubKind'] ?? r['_ui_type'] ?? '').toString().trim().toLowerCase();
-    final inviteId = hub == 'invite'
+    final sourceTab = int.tryParse('${r['_sourceHubTab'] ?? ''}');
+    final detailsHub = sourceTab == 5
+        ? 'inactive72h'
+        : sourceTab == 6
+            ? 'cancelled'
+            : rowHub;
+    final inviteId = rowHub == 'invite'
         ? (r['id'] ?? '').toString().trim()
         : (r['invite_id'] ?? r['inviteId'] ?? '').toString().trim();
     final requestId = _marketingRequestIdFromRow(r);
@@ -7190,6 +7521,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           inviteId: inviteId,
           requestId: requestId,
           embedAppBar: false,
+          hubKind: detailsHub,
         ),
       ),
     );
@@ -8289,7 +8621,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (p != null) {
       _applyUpdatedPropertyToCollections(p);
       final allowOffer = requestId.isNotEmpty &&
-          (type == 'invite' || _marketerOfferRetryAllowedForRow(row));
+          _marketerCanSubmitOfferFromDetails(row, type: type);
       await _openDetails(
         p,
         marketingRequestId: requestId.isEmpty ? null : requestId,
@@ -8402,6 +8734,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   Future<void> _openMarketerMarketOfferHub(Map<String, dynamic> row) async {
     final urls = _effectiveImageUrlsForOwnerRequestRow(row);
+    final videoPath = ListingMediaUrls.videoPathFromPayload(row);
+    final videoUrl = videoPath == null
+        ? null
+        : ListingMediaUrls.videoPlayableUrl(_sb, videoPath);
+    final tourPath = ListingMediaUrls.virtualTourFromPayload(row);
+    final tourUrl =
+        ListingMediaUrls.looksLikePlayableTourUrl(tourPath) ? tourPath : null;
     final title = _mkRowTitle(row);
     final loc = _marketingLocationText(row);
     final owner = _marketingOwnerName(row);
@@ -8437,6 +8776,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           );
     final round = (row['marketing_round'] as num?)?.toInt() ?? 1;
     final requestId = _marketingRequestIdFromRow(row);
+    final mediaOwnerKey = (row['preview_property_id'] ??
+            row['property_id'] ??
+            row['listing_id'] ??
+            requestId)
+        .toString()
+        .trim();
 
     if (!mounted) return;
     await Navigator.of(context).push<void>(
@@ -8445,6 +8790,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         builder: (ctx) => MarketerMarketOfferHubPage(
           isAr: widget.isAr,
           heroImageUrls: urls,
+          heroVideoUrl: videoUrl,
+          heroTourUrl: tourUrl,
+          heroInAppTour: ListingMediaUrls.inAppTourFromPayload(row),
+          mediaOwnerKey: mediaOwnerKey,
+          preferVideoFirst: ListingMediaUrls.payloadPrefersVideoCover(row) ||
+              (urls.isEmpty && videoUrl != null),
           title: title,
           locationLine: loc,
           ownerDisplayName: owner,
@@ -8452,6 +8803,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           listingNoTenDigit: code,
           priceSar: base,
           areaM2: area,
+          photographyRequired: row['photography_required'] == true,
+          photographyFulfillment:
+              (row['photography_fulfillment'] ?? 'independent_market')
+                  .toString(),
           hideOwnerContactActions: !_marketerMaySeeOwnerPhone(row),
           workflowStageLabel: stageLabel,
           requestSubmittedAt: submittedAt,
@@ -8596,8 +8951,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
       final p = Property.fromJson(Map<String, dynamic>.from(data));
       final hk = (row['_hubKind'] ?? row['_ui_type'] ?? '').toString().trim();
-      final allowOffer =
-          hk == 'invite' || _marketerOfferRetryAllowedForRow(row);
+      final allowOffer = _marketerCanSubmitOfferFromDetails(row, type: hk);
       await _openDetails(
         p,
         marketingRequestId: requestId,
@@ -8615,8 +8969,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   Widget _buildMarketingPreviewImage(
     List<String> imageUrls, {
     required String type,
+    String? mediaOwnerKey,
     int? views,
     String? videoStoragePath,
+    String? tourPathOrUrl,
+    InAppTour? inAppTour,
     bool coverPrefersVideo = false,
 
     /// أيقونة تتبّع أعلى الصورة (بداية الاتجاه) — يُفضّل تمرير [onImageTrackingTap].
@@ -8634,17 +8991,32 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final vid = (videoStoragePath ?? '').trim();
     final showVideoLead =
         vid.isNotEmpty && (imageUrls.isEmpty || coverPrefersVideo);
-    if (imageUrls.isNotEmpty || showVideoLead) {
+    if (imageUrls.isNotEmpty ||
+        showVideoLead ||
+        (tourPathOrUrl ?? '').trim().isNotEmpty ||
+        inAppTour != null) {
       final showViewsChip = views != null && views >= 0 && !showInviteSeenEye;
       return Stack(
         fit: StackFit.expand,
         children: [
           _PropertyImage(
+            key: ValueKey<String>('marketing-media-${mediaOwnerKey ?? ''}'),
             urls: imageUrls,
             fit: BoxFit.cover,
-            videoPathOrUrl: showVideoLead ? vid : null,
+            videoPathOrUrl: vid.isNotEmpty ? vid : null,
+            tourPathOrUrl: tourPathOrUrl,
+            onOpenTour: inAppTour == null
+                ? null
+                : () => unawaited(
+                      openInAppTourViewer(
+                        context: context,
+                        tour: inAppTour,
+                        isAr: widget.isAr,
+                      ),
+                    ),
             isAr: widget.isAr,
-            allowInlineVideo: !kIsWeb,
+            listingIdForWatermark: mediaOwnerKey,
+            preferVideoCover: showVideoLead,
           ),
           DecoratedBox(
             decoration: BoxDecoration(
@@ -10017,11 +10389,12 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final imageColumn = _buildMarketingPreviewImage(
       previewImageUrls,
       type: type,
+      mediaOwnerKey:
+          previewPropertyId.isNotEmpty ? previewPropertyId : requestId,
       views: previewViews,
-      videoStoragePath: (previewVideoUrl.isNotEmpty &&
-              (previewImageUrls.isEmpty || coverPrefersVideo))
-          ? previewVideoUrl
-          : null,
+      videoStoragePath: previewVideoUrl.isNotEmpty ? previewVideoUrl : null,
+      tourPathOrUrl: ListingMediaUrls.virtualTourFromPayload(r),
+      inAppTour: ListingMediaUrls.inAppTourFromPayload(r),
       coverPrefersVideo: coverPrefersVideo,
       showTrackingMark: trackingTap != null,
       onImageTrackingTap: trackingTap,
@@ -10487,12 +10860,17 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                               child: _buildMarketingPreviewImage(
                                 previewImageUrls,
                                 type: type,
+                                mediaOwnerKey: previewPropertyId.isNotEmpty
+                                    ? previewPropertyId
+                                    : requestId,
                                 views: previewViews,
-                                videoStoragePath: (previewVideoUrl.isNotEmpty &&
-                                        (previewImageUrls.isEmpty ||
-                                            coverPrefersVideo))
+                                videoStoragePath: previewVideoUrl.isNotEmpty
                                     ? previewVideoUrl
                                     : null,
+                                tourPathOrUrl:
+                                    ListingMediaUrls.virtualTourFromPayload(r),
+                                inAppTour:
+                                    ListingMediaUrls.inAppTourFromPayload(r),
                                 coverPrefersVideo: coverPrefersVideo,
                               ),
                             ),
@@ -10578,13 +10956,18 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                                 child: _buildMarketingPreviewImage(
                                   previewImageUrls,
                                   type: type,
+                                  mediaOwnerKey: previewPropertyId.isNotEmpty
+                                      ? previewPropertyId
+                                      : requestId,
                                   views: previewViews,
-                                  videoStoragePath:
-                                      (previewVideoUrl.isNotEmpty &&
-                                              (previewImageUrls.isEmpty ||
-                                                  coverPrefersVideo))
-                                          ? previewVideoUrl
-                                          : null,
+                                  videoStoragePath: previewVideoUrl.isNotEmpty
+                                      ? previewVideoUrl
+                                      : null,
+                                  tourPathOrUrl:
+                                      ListingMediaUrls.virtualTourFromPayload(
+                                          r),
+                                  inAppTour:
+                                      ListingMediaUrls.inAppTourFromPayload(r),
                                   coverPrefersVideo: coverPrefersVideo,
                                 ),
                               ),

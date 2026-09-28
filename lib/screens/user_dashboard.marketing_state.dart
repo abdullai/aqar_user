@@ -7,6 +7,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
   bool get _isGuest;
   int get _tabIndex;
   int get _overlayNavDepth;
+  _DashboardAdvDraftHolder get _myPageAdvancedFilters;
 
   /// اسم التحية من الكاش — يظهر فوراً قبل اكتمال جلب الملف الشخصي.
   /// يُعرَّف هنا لأن [MarketingStateMixin] يمسحه عند تسجيل الخروج.
@@ -90,6 +91,9 @@ mixin MarketingStateMixin on State<UserDashboard> {
   // =========================================================
   TabController? _ownerTabsCtrl;
   TabController? _marketerTabsCtrl;
+  TabController? _myPageRoleTabsCtrl;
+  List<int> _myPageRoleKinds = <int>[];
+  int _myPageRoleKind = 1;
 
   /// تبديل «كمسوّق / كمعن» — طول ثابت 2؛ لا يُعاد إنشاؤه مع دلاء المسوّق/المالك.
   TabController? _marketerPublisherRoleTabsCtrl;
@@ -145,6 +149,7 @@ mixin MarketingStateMixin on State<UserDashboard> {
 
   /// 0 = صفحتي كمسوّق، 1 = صفحتي كمعلن (طلبات طرحها للسوق).
   int _marketerPublisherHubMode = 0;
+  String _marketerPhotographyMarketFilter = 'all';
 
   bool get _hasMarketingData =>
       _mkInvites.isNotEmpty ||
@@ -228,11 +233,18 @@ mixin MarketingStateMixin on State<UserDashboard> {
     } catch (_) {}
 
     try {
+      _myPageRoleTabsCtrl?.dispose();
+    } catch (_) {}
+
+    try {
       _marketerPublisherRoleTabsCtrl?.dispose();
     } catch (_) {}
 
     _ownerTabsCtrl = null;
     _marketerTabsCtrl = null;
+    _myPageRoleTabsCtrl = null;
+    _myPageRoleKinds = <int>[];
+    _myPageRoleKind = 1;
     _marketerPublisherRoleTabsCtrl = null;
   }
 
@@ -240,6 +252,8 @@ mixin MarketingStateMixin on State<UserDashboard> {
     unawaited(AccountRoleCache.clear());
     unawaited(DashboardGreetingCache.clear());
     _greetingNameCache = '';
+    _myPageAdvancedFilters.resetAll();
+    _myPageRoleKind = 1;
     _accountType = 'user';
     _verified = false;
     _accountRoleLoaded = false;

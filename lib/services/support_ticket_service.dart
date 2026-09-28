@@ -93,8 +93,8 @@ class SupportTicketRow {
   String get receivedByName =>
       '${details['received_by_name'] ?? details['assigned_name'] ?? ''}'.trim();
 
-  DateTime? get receivedAt =>
-      DateTime.tryParse('${details['received_at'] ?? details['assigned_at'] ?? ''}');
+  DateTime? get receivedAt => DateTime.tryParse(
+      '${details['received_at'] ?? details['assigned_at'] ?? ''}');
 
   String get shortRef {
     final raw = id.replaceAll('-', '');
@@ -107,7 +107,8 @@ class SupportTicketRow {
     if (raw is! List) return const [];
     return raw
         .whereType<Map>()
-        .map((e) => SupportRemoteAttachment.fromMap(Map<String, dynamic>.from(e)))
+        .map((e) =>
+            SupportRemoteAttachment.fromMap(Map<String, dynamic>.from(e)))
         .where((e) => e.path.isNotEmpty || e.url.isNotEmpty)
         .toList();
   }
@@ -166,6 +167,8 @@ class SupportTicketRow {
 class SupportTicketService {
   SupportTicketService(this._sb);
 
+  static const int maxPropertyEditRequests = 3;
+
   final SupabaseClient _sb;
 
   static String _localKey(String userId) => 'local_support_tickets_$userId';
@@ -196,6 +199,8 @@ class SupportTicketService {
     String submitterName = '',
     String submitterPhone = '',
     List<SupportLocalAttachment> attachments = const [],
+    Map<String, dynamic> extraDetails = const {},
+    bool allowFallback = true,
   }) async {
     final uid = _sb.auth.currentUser?.id;
     if (uid == null) return null;
@@ -221,6 +226,7 @@ class SupportTicketService {
       'submitter_phone': PhoneDisplay.localTenDigits(submitterPhone),
       'requester_phone': PhoneDisplay.localTenDigits(submitterPhone),
       'attachments': uploaded.map((e) => e.toMap()).toList(),
+      ...extraDetails,
       'auto_ack': contactChannel == 'in_app'
           ? SupportTicketAssist.draftAck(
               isAr: true,
@@ -261,6 +267,7 @@ class SupportTicketService {
       return row;
     } catch (e) {
       if (kDebugMode) debugPrint('[SupportTicketService] rpc submit: $e');
+      if (!allowFallback) return null;
       try {
         final ins = await _sb
             .from('regc_user_complaints')
@@ -278,7 +285,9 @@ class SupportTicketService {
         await _appendLocal(uid, row);
         return row;
       } catch (e2) {
-        if (kDebugMode) debugPrint('[SupportTicketService] insert fallback: $e2');
+        if (kDebugMode) {
+          debugPrint('[SupportTicketService] insert fallback: $e2');
+        }
         final local = SupportTicketRow(
           id: 'local-${DateTime.now().millisecondsSinceEpoch}',
           kind: kind,
@@ -293,6 +302,17 @@ class SupportTicketService {
         return local;
       }
     }
+  }
+
+  Future<int> propertyEditRequestCount({
+    required String userId,
+    required String propertyId,
+  }) async {
+    final rows = await listMine(userId);
+    return rows.where((row) {
+      return row.details['ticket_category'] == 'property_edit_request' &&
+          row.details['property_id']?.toString() == propertyId;
+    }).length;
   }
 
   Future<void> userFeedback({

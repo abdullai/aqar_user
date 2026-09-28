@@ -654,7 +654,13 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                     label: widget.isAr ? 'مشاركة' : 'Share',
                                     pad: layout.actionPad,
                                     iconSize: layout.actionIcon,
-                                    onTap: () => widget.onShare?.call(item),
+                                    onTap: () {
+                                      if (widget.isGuest) {
+                                        widget.onRequireLogin?.call();
+                                        return;
+                                      }
+                                      widget.onShare?.call(item);
+                                    },
                                   ),
                                   if (!widget.mineIds.contains(item.id)) ...[
                                     SizedBox(height: layout.gap),
@@ -663,10 +669,16 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                                       label: widget.isAr ? 'صفقة' : 'Deal',
                                       pad: layout.actionPad,
                                       iconSize: layout.actionIcon,
-                                      onTap: () => unawaited(
-                                        widget.onCompleteDeal?.call(item) ??
-                                            Future<void>.value(),
-                                      ),
+                                      onTap: () {
+                                        if (widget.isGuest) {
+                                          widget.onRequireLogin?.call();
+                                          return;
+                                        }
+                                        unawaited(
+                                          widget.onCompleteDeal?.call(item) ??
+                                              Future<void>.value(),
+                                        );
+                                      },
                                     ),
                                   ],
                                   if (showVideo) ...[

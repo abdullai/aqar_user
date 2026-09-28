@@ -1035,6 +1035,9 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
 
   Widget _buildOfferCard(Map<String, dynamic> o, ColorScheme cs) {
     final id = (o['id'] ?? '').toString();
+    final photography = o['_photography_component'] is Map
+        ? Map<String, dynamic>.from(o['_photography_component'] as Map)
+        : null;
     final notesRaw = (o['notes'] ?? '').toString();
     final identity = OfferIdentityTag.parse(notesRaw);
     final notes = identity.notes.trim();
@@ -1235,6 +1238,16 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                   value: _amountLine(o),
                   emphasize: true,
                 ),
+                if (photography != null)
+                  RequestSummaryRow(
+                    label: _isAr ? 'أتعاب التصوير' : 'Photography fee',
+                    value: AppMoney.sarPhrase(
+                      ((photography['amount_sar'] as num?) ?? 0)
+                          .toStringAsFixed(0),
+                      isAr: _isAr,
+                    ),
+                    emphasize: true,
+                  ),
                 RequestSummaryRow(
                   label: _isAr ? 'تاريخ التقديم' : 'Submitted date',
                   value: _fmtDateOnly(o['created_at']) ?? '—',
@@ -1269,6 +1282,25 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                   color: cs.onSurfaceVariant,
                   height: 1.35,
                 ),
+              ),
+            ],
+            if ((photography?['details'] ?? '')
+                .toString()
+                .trim()
+                .isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                _isAr ? 'تفاصيل التصوير' : 'Photography details',
+                style: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                photography!['details'].toString(),
+                style: TextStyle(color: cs.onSurfaceVariant, height: 1.35),
               ),
             ],
             if (declineReason.isNotEmpty) ...[
@@ -1355,7 +1387,12 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
                                     size: 22),
                                 const SizedBox(width: 8),
                                 Text(
-                                  ListingWorkflowCopy.btnAcceptOffer(_isAr),
+                                  photography != null
+                                      ? (_isAr
+                                          ? 'قبول عرض التسويق والتصوير'
+                                          : 'Accept marketing and photography')
+                                      : ListingWorkflowCopy.btnAcceptOffer(
+                                          _isAr),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w900,
                                     fontSize: 15,

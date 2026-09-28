@@ -26,7 +26,12 @@ class MarketingWorkflowAutomationService {
       );
       if (res is Map) return Map<String, dynamic>.from(res);
     } catch (e) {
-      return {'ok': false, 'allow': false, 'reason': 'rpc_error', 'error': '$e'};
+      return {
+        'ok': false,
+        'allow': false,
+        'reason': 'rpc_error',
+        'error': '$e'
+      };
     }
     return const {'ok': false, 'allow': false};
   }
@@ -56,66 +61,22 @@ class MarketingWorkflowAutomationService {
   Future<Map<String, dynamic>> returnRequestToMarket({
     required String requestId,
     bool allowSameMarketer = false,
+    required bool legalAcknowledged,
   }) async {
-    bool parseOk(dynamic v) {
-      if (v == true) return true;
-      if (v == false || v == null) return false;
-      final s = v.toString().trim().toLowerCase();
-      return s == 'true' || s == '1' || s == 't';
-    }
-
-    bool alreadyDone(String msg) {
-      final s = msg.toLowerCase();
-      return s.contains('invalid_stage_for_relist') ||
-          s.contains('no_owner_action_pending');
-    }
-
     try {
       final res = await _sb.rpc(
-        'owner_return_request_to_market',
+        'owner_return_request_to_market_with_ack',
         params: {
           'p_request_id': requestId,
           'p_allow_same_marketer': allowSameMarketer,
+          'p_legal_acknowledged': legalAcknowledged,
         },
       );
       if (res is Map) {
-        final m = Map<String, dynamic>.from(res);
-        if (parseOk(m['ok'])) return m;
-        return m;
+        return Map<String, dynamic>.from(res);
       }
       return {'ok': true, 'request_id': requestId};
     } catch (e) {
-      final msg = e.toString();
-      final low = msg.toLowerCase();
-      final schemaGap = low.contains('round_no') ||
-          low.contains('undefined_column') ||
-          low.contains('42703') ||
-          (low.contains('does not exist') && low.contains('column'));
-      if (schemaGap || alreadyDone(msg)) {
-        try {
-          await _sb.rpc(
-            'relist_property_for_marketing',
-            params: {
-              'p_request_id': requestId,
-              'p_allow_previous_marketers_retry': allowSameMarketer,
-            },
-          );
-          return {
-            'ok': true,
-            'request_id': requestId,
-            'fallback': 'relist_property_for_marketing',
-          };
-        } catch (e2) {
-          if (alreadyDone('$e2') || alreadyDone(msg)) {
-            return {
-              'ok': true,
-              'request_id': requestId,
-              'idempotent': true,
-            };
-          }
-          return {'ok': false, 'error': '$e2'};
-        }
-      }
       return {'ok': false, 'error': '$e'};
     }
   }

@@ -213,6 +213,22 @@ class _UserDashboardState extends State<UserDashboard>
   double? _priceMaxFilter;
   double? _areaMinFilter;
   double? _areaMaxFilter;
+  @override
+  final _DashboardAdvDraftHolder _myPageAdvancedFilters =
+      _DashboardAdvDraftHolder(
+    query: '',
+    city: 'all',
+    type: null,
+    purpose: null,
+    furnished: null,
+    priceMin: '',
+    priceMax: '',
+    areaMin: '',
+    areaMax: '',
+    sort: 'latest',
+    homeKind: HomeFeedKind.all,
+    hidden: false,
+  );
   HomeFeedKind _homeFeedKind = HomeFeedKind.all;
   String _sortBy = 'latest';
   Timer? _debounce;
@@ -249,6 +265,10 @@ class _UserDashboardState extends State<UserDashboard>
   List<MarketPropertyRequestRow> _nestedDashboardHomeRequests = const [];
   int? _nestedDashboardMixedHomeCount;
   int _nestedDashboardMySubmissionsCount = 0;
+  Future<List<SupportTicketRow>>? _mySupportTicketsFuture;
+  String _supportTicketCacheUserId = '';
+  int _supportHubRefreshToken = 0;
+  final Map<String, Future<int>> _propertyEditTicketCountFutures = {};
   List<HomeMixedFeedEntry> _nestedDashboardMixedEntries = const [];
   ({int server, int filtered, int shown}) _nestedDashboardPipelineL =
       (server: 0, filtered: 0, shown: 0);
@@ -286,6 +306,11 @@ class _UserDashboardState extends State<UserDashboard>
 
   bool get _isNearestMode => _sortBy == 'nearest';
 
+  bool get _myPageFilterScope => _tabIndex == 1;
+
+  String get _activeInlineSearchQuery =>
+      _myPageFilterScope ? _myPageAdvancedFilters.query : _searchQuery;
+
   double? _parseFilterNumber(String raw) {
     final normalized = raw
         .replaceAll('٠', '0')
@@ -318,6 +343,21 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   bool get _hasActiveTopFilters {
+    if (_myPageFilterScope) {
+      final filters = _myPageAdvancedFilters;
+      return filters.query.trim().isNotEmpty ||
+          (filters.city.trim().isNotEmpty && filters.city != 'all') ||
+          filters.type != null ||
+          filters.purpose != null ||
+          filters.furnished != null ||
+          _parseFilterNumber(filters.priceMin) != null ||
+          _parseFilterNumber(filters.priceMax) != null ||
+          _parseFilterNumber(filters.areaMin) != null ||
+          _parseFilterNumber(filters.areaMax) != null ||
+          filters.region.trim().isNotEmpty ||
+          filters.governorate.trim().isNotEmpty ||
+          filters.district.trim().isNotEmpty;
+    }
     return _searchQuery.trim().isNotEmpty ||
         (_cityFilter.trim().isNotEmpty && _cityFilter != 'all') ||
         _typeFilter != null ||
@@ -1213,6 +1253,58 @@ class _UserDashboardState extends State<UserDashboard>
     ]).toLowerCase();
     final requestId = from([WorkflowNotificationKeys.requestId, 'request_id']);
 
+    final notificationType = (notif['type'] ?? '').toString().toLowerCase();
+    if (deepRoute == InAppDeepRoutes.photographerHub ||
+        const {
+          InAppNotifTypes.photoShootRequested,
+          InAppNotifTypes.photoShootAccepted,
+          InAppNotifTypes.photoShootRejected,
+          InAppNotifTypes.photoShootDelivered,
+          InAppNotifTypes.photoShootApproved,
+          InAppNotifTypes.photoShootRevisionRequested,
+          InAppNotifTypes.photoShootMediaAuthorized,
+          InAppNotifTypes.photoShootExpired,
+          InAppNotifTypes.photoShootOfferReceived,
+          InAppNotifTypes.photoShootOfferAccepted,
+          InAppNotifTypes.photoShootOfferDeclined,
+          InAppNotifTypes.photographerVerified,
+          InAppNotifTypes.photographerRejected,
+          InAppNotifTypes.photographerRated,
+        }.contains(notificationType)) {
+      final inferredRole = const {
+        InAppNotifTypes.photoShootAccepted,
+        InAppNotifTypes.photoShootRejected,
+      }.contains(notificationType)
+          ? 'requester'
+          : 'photographer';
+      final photographerMode =
+          (data['photographer_mode'] ?? (role.isNotEmpty ? role : inferredRole))
+              .toString()
+              .trim()
+              .toLowerCase();
+      await _markInAppNotifReadAndRefresh(notif);
+      if (!mounted) return;
+      _myPageRoleKind = 2;
+      _inlineSearchCtrl.text = _myPageAdvancedFilters.query;
+      _ss(() {
+        _tabIndex = 1;
+        _bottomNavTransientIndex = null;
+      });
+      _ensureMyPageRoleTabsCtrl();
+      final roleIndex = _myPageRoleKinds.indexOf(2);
+      final roleController = _myPageRoleTabsCtrl;
+      if (roleIndex >= 0 && roleController != null) {
+        roleController.animateTo(roleIndex);
+      }
+      PhotographerHubPage.openDeepLink({
+        ...data,
+        'photographer_mode': photographerMode,
+        'shoot_request_id':
+            requestId.isNotEmpty ? requestId : data['shoot_request_id'],
+      });
+      return;
+    }
+
     if (deepRoute == 'market_request' && requestId.isNotEmpty) {
       setState(() => _tabIndex = mainTab == WorkflowMainSections.cart ? 3 : 2);
       await _markInAppNotifReadAndRefresh(notif);
@@ -1273,6 +1365,7 @@ class _UserDashboardState extends State<UserDashboard>
     }
 
     setState(() => _tabIndex = 1);
+    _inlineSearchCtrl.text = _myPageAdvancedFilters.query;
     _ensureSubTabControllers();
 
     final explicitMyAdsTab = int.tryParse(
@@ -1524,6 +1617,11 @@ class _UserDashboardState extends State<UserDashboard>
   // =========================
   void _setSearchQuery(String v) {
     final next = v.trim();
+    if (_myPageFilterScope) {
+      if (_myPageAdvancedFilters.query == next || !mounted) return;
+      setState(() => _myPageAdvancedFilters.query = next);
+      return;
+    }
     if (_searchQuery == next) return;
     if (!mounted) return;
     _markDashboardFeedDirty();
@@ -1535,7 +1633,7 @@ class _UserDashboardState extends State<UserDashboard>
   void _scheduleInlineSearchApply() {
     _debounce?.cancel();
     final draft = _inlineSearchCtrl.text.trim();
-    if (draft == _searchQuery) {
+    if (draft == _activeInlineSearchQuery) {
       if (_feedFilterBusy && mounted) {
         setState(() => _feedFilterBusy = false);
       }
@@ -1545,7 +1643,7 @@ class _UserDashboardState extends State<UserDashboard>
     _debounce = Timer(const Duration(milliseconds: 420), () {
       if (!mounted) return;
       final next = _inlineSearchCtrl.text.trim();
-      if (next == _searchQuery) {
+      if (next == _activeInlineSearchQuery) {
         setState(() => _feedFilterBusy = false);
         return;
       }
@@ -1626,6 +1724,11 @@ class _UserDashboardState extends State<UserDashboard>
   void _clearAllTopFilters() {
     _debounce?.cancel();
     _advancedSearchDraftTimer?.cancel();
+    if (_myPageFilterScope) {
+      _resetMyPageAdvancedFilters();
+      FocusScope.of(context).unfocus();
+      return;
+    }
     _inlineSearchCtrl.clear();
     if (!mounted) return;
     _markDashboardFeedDirty();
@@ -1743,6 +1846,13 @@ class _UserDashboardState extends State<UserDashboard>
     FocusScope.of(context).unfocus();
   }
 
+  void _resetMyPageAdvancedFilters() {
+    _debounce?.cancel();
+    _myPageAdvancedFilters.resetAll();
+    _inlineSearchCtrl.clear();
+    if (mounted) setState(() => _feedFilterBusy = false);
+  }
+
   Future<void> _openSearchFiltersSheet() async {
     final cs = Theme.of(context).colorScheme;
 
@@ -1750,8 +1860,11 @@ class _UserDashboardState extends State<UserDashboard>
     await Future<void>.delayed(Duration.zero); // let tap complete
     if (!mounted) return;
 
-    final sheet = _DashboardAdvDraftHolder.fromState(this);
-    await sheet.mergePersistedIfAny();
+    final myPageScope = _myPageFilterScope;
+    final sheet = myPageScope
+        ? (_myPageAdvancedFilters.copy()..persistDraft = false)
+        : _DashboardAdvDraftHolder.fromState(this);
+    if (!myPageScope) await sheet.mergePersistedIfAny();
     if (!mounted) return;
 
     if (kIsWeb) {
@@ -1904,7 +2017,11 @@ class _UserDashboardState extends State<UserDashboard>
                                   TextButton(
                                     onPressed: () async {
                                       Navigator.pop(context);
-                                      await _exitAdvancedSearchModeFull();
+                                      if (myPageScope) {
+                                        _resetMyPageAdvancedFilters();
+                                      } else {
+                                        await _exitAdvancedSearchModeFull();
+                                      }
                                     },
                                     child: Text(
                                       _isArabic ? 'إعادة ضبط' : 'Reset',
@@ -1917,89 +2034,86 @@ class _UserDashboardState extends State<UserDashboard>
                                 ],
                               ),
                               const SizedBox(height: 14),
-                              Text(
-                                _isArabic ? 'محتوى الرئيسية' : 'Home feed',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w900,
-                                      fontFamily: 'Cairo',
-                                    ),
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  actionChip(
-                                    selected:
-                                        sheet.homeKind == HomeFeedKind.all,
-                                    label: _isArabic ? 'الكل' : 'All',
-                                    icon: Icons.grid_view_rounded,
-                                    onTap: () {
-                                      setModalState(
-                                        () => sheet.homeKind = HomeFeedKind.all,
-                                      );
-                                      _scheduleAdvSearchDraftSave(sheet);
-                                    },
-                                  ),
-                                  actionChip(
-                                    selected:
-                                        sheet.homeKind == HomeFeedKind.listings,
-                                    label: _isArabic ? 'إعلانات' : 'Listings',
-                                    icon: Icons.home_work_outlined,
-                                    onTap: () {
-                                      setModalState(
-                                        () => sheet.homeKind =
-                                            HomeFeedKind.listings,
-                                      );
-                                      _scheduleAdvSearchDraftSave(sheet);
-                                    },
-                                  ),
-                                  actionChip(
-                                    selected:
-                                        sheet.homeKind == HomeFeedKind.requests,
-                                    label:
-                                        _isArabic ? 'طلبات السوق' : 'Requests',
-                                    icon: Icons.request_quote_outlined,
-                                    onTap: () {
-                                      setModalState(
-                                        () => sheet.homeKind =
-                                            HomeFeedKind.requests,
-                                      );
-                                      _scheduleAdvSearchDraftSave(sheet);
-                                    },
-                                  ),
-                                  actionChip(
-                                    selected: _paidPriorityOnlyFilter,
-                                    label: _isArabic
-                                        ? 'مدفوع / أولوية'
-                                        : 'Paid / Priority',
-                                    icon: Icons.workspace_premium_rounded,
-                                    onTap: () {
-                                      setModalState(() {
-                                        _paidPriorityOnlyFilter =
-                                            !_paidPriorityOnlyFilter;
-                                      });
-                                      _scheduleAdvSearchDraftSave(sheet);
-                                    },
-                                  ),
-                                  if (!_isGuest)
+                              if (!myPageScope) ...[
+                                Text(
+                                  _isArabic ? 'محتوى الرئيسية' : 'Home feed',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w900,
+                                        fontFamily: 'Cairo',
+                                      ),
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
                                     actionChip(
-                                      selected: sheet.hidden,
-                                      label: _isArabic ? 'المخفية' : 'Hidden',
-                                      icon: Icons.visibility_off_outlined,
+                                      selected:
+                                          sheet.homeKind == HomeFeedKind.all,
+                                      label: _isArabic ? 'الكل' : 'All',
+                                      icon: Icons.grid_view_rounded,
                                       onTap: () {
-                                        setModalState(
-                                          () => sheet.hidden = !sheet.hidden,
-                                        );
+                                        setModalState(() =>
+                                            sheet.homeKind = HomeFeedKind.all);
                                         _scheduleAdvSearchDraftSave(sheet);
                                       },
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 14),
+                                    actionChip(
+                                      selected: sheet.homeKind ==
+                                          HomeFeedKind.listings,
+                                      label: _isArabic ? 'إعلانات' : 'Listings',
+                                      icon: Icons.home_work_outlined,
+                                      onTap: () {
+                                        setModalState(() => sheet.homeKind =
+                                            HomeFeedKind.listings);
+                                        _scheduleAdvSearchDraftSave(sheet);
+                                      },
+                                    ),
+                                    actionChip(
+                                      selected: sheet.homeKind ==
+                                          HomeFeedKind.requests,
+                                      label: _isArabic
+                                          ? 'طلبات السوق'
+                                          : 'Requests',
+                                      icon: Icons.request_quote_outlined,
+                                      onTap: () {
+                                        setModalState(() => sheet.homeKind =
+                                            HomeFeedKind.requests);
+                                        _scheduleAdvSearchDraftSave(sheet);
+                                      },
+                                    ),
+                                    actionChip(
+                                      selected: _paidPriorityOnlyFilter,
+                                      label: _isArabic
+                                          ? 'مدفوع / أولوية'
+                                          : 'Paid / Priority',
+                                      icon: Icons.workspace_premium_rounded,
+                                      onTap: () {
+                                        setModalState(() {
+                                          _paidPriorityOnlyFilter =
+                                              !_paidPriorityOnlyFilter;
+                                        });
+                                        _scheduleAdvSearchDraftSave(sheet);
+                                      },
+                                    ),
+                                    if (!_isGuest)
+                                      actionChip(
+                                        selected: sheet.hidden,
+                                        label: _isArabic ? 'المخفية' : 'Hidden',
+                                        icon: Icons.visibility_off_outlined,
+                                        onTap: () {
+                                          setModalState(() =>
+                                              sheet.hidden = !sheet.hidden);
+                                          _scheduleAdvSearchDraftSave(sheet);
+                                        },
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 14),
+                              ],
                               AqarTextFormField(
                                 initialValue: sheet.query,
                                 onChanged: (v) {
@@ -2295,23 +2409,29 @@ class _UserDashboardState extends State<UserDashboard>
                                       fontWeight: FontWeight.w900,
                                     ),
                               ),
-                              const SizedBox(height: 8),
-                              _SortMenu(
-                                isAr: _isArabic,
-                                value: sheet.sort,
-                                onChanged: (v) {
-                                  setModalState(() => sheet.sort = v);
-                                  _scheduleAdvSearchDraftSave(sheet);
-                                },
-                              ),
-                              const SizedBox(height: 14),
+                              if (!myPageScope) ...[
+                                const SizedBox(height: 14),
+                                _SortMenu(
+                                  isAr: _isArabic,
+                                  value: sheet.sort,
+                                  onChanged: (v) {
+                                    setModalState(() => sheet.sort = v);
+                                    _scheduleAdvSearchDraftSave(sheet);
+                                  },
+                                ),
+                                const SizedBox(height: 14),
+                              ],
                               Align(
                                 alignment: AlignmentDirectional.centerStart,
                                 child: TextButton.icon(
                                   onPressed: () async {
                                     FocusScope.of(context).unfocus();
                                     Navigator.pop(context);
-                                    await _exitAdvancedSearchModeFull();
+                                    if (myPageScope) {
+                                      _resetMyPageAdvancedFilters();
+                                    } else {
+                                      await _exitAdvancedSearchModeFull();
+                                    }
                                   },
                                   icon:
                                       const Icon(Icons.filter_alt_off_outlined),
@@ -2355,34 +2475,59 @@ class _UserDashboardState extends State<UserDashboard>
                               onPressed: () async {
                                 if (!mounted) return;
                                 _debounce?.cancel();
-                                setState(() {
-                                  _feedFilterBusy = false;
-                                  _searchQuery = sheet.query.trim();
-                                  _cityFilter = sheet.city.trim().isEmpty
-                                      ? 'all'
-                                      : sheet.city;
-                                  _typeFilter = sheet.type;
-                                  _purposeFilter = sheet.purpose;
-                                  _furnishedFilter = sheet.furnished;
-                                  _priceMinFilter = _parseFilterNumber(
-                                    sheet.priceMin,
-                                  );
-                                  _priceMaxFilter = _parseFilterNumber(
-                                    sheet.priceMax,
-                                  );
-                                  _areaMinFilter = _parseFilterNumber(
-                                    sheet.areaMin,
-                                  );
-                                  _areaMaxFilter = _parseFilterNumber(
-                                    sheet.areaMax,
-                                  );
-                                  _sortBy = sheet.sort;
-                                  _homeFeedKind = sheet.homeKind;
-                                  _homeShowHiddenOnly = sheet.hidden;
-                                  _inlineSearchCtrl.text = _searchQuery;
-                                });
+                                if (myPageScope) {
+                                  setState(() {
+                                    _feedFilterBusy = false;
+                                    _myPageAdvancedFilters
+                                      ..query = sheet.query.trim()
+                                      ..city = sheet.city.trim().isEmpty
+                                          ? 'all'
+                                          : sheet.city
+                                      ..type = sheet.type
+                                      ..purpose = sheet.purpose
+                                      ..furnished = sheet.furnished
+                                      ..priceMin = sheet.priceMin
+                                      ..priceMax = sheet.priceMax
+                                      ..areaMin = sheet.areaMin
+                                      ..areaMax = sheet.areaMax
+                                      ..sort = sheet.sort
+                                      ..region = sheet.region
+                                      ..governorate = sheet.governorate
+                                      ..district = sheet.district;
+                                    _inlineSearchCtrl.text =
+                                        _myPageAdvancedFilters.query;
+                                  });
+                                } else {
+                                  setState(() {
+                                    _feedFilterBusy = false;
+                                    _searchQuery = sheet.query.trim();
+                                    _cityFilter = sheet.city.trim().isEmpty
+                                        ? 'all'
+                                        : sheet.city;
+                                    _typeFilter = sheet.type;
+                                    _purposeFilter = sheet.purpose;
+                                    _furnishedFilter = sheet.furnished;
+                                    _priceMinFilter = _parseFilterNumber(
+                                      sheet.priceMin,
+                                    );
+                                    _priceMaxFilter = _parseFilterNumber(
+                                      sheet.priceMax,
+                                    );
+                                    _areaMinFilter = _parseFilterNumber(
+                                      sheet.areaMin,
+                                    );
+                                    _areaMaxFilter = _parseFilterNumber(
+                                      sheet.areaMax,
+                                    );
+                                    _sortBy = sheet.sort;
+                                    _homeFeedKind = sheet.homeKind;
+                                    _homeShowHiddenOnly = sheet.hidden;
+                                    _inlineSearchCtrl.text = _searchQuery;
+                                  });
+                                }
 
-                                if (_sortBy == 'nearest' &&
+                                if (!myPageScope &&
+                                    _sortBy == 'nearest' &&
                                     (_myLat == null || _myLng == null)) {
                                   _showNotification(
                                     _isArabic
@@ -2396,7 +2541,9 @@ class _UserDashboardState extends State<UserDashboard>
 
                                 final nav = Navigator.of(context);
                                 nav.pop();
-                                await _clearAdvSearchDraftPrefs();
+                                if (!myPageScope) {
+                                  await _clearAdvSearchDraftPrefs();
+                                }
                                 FocusManager.instance.primaryFocus?.unfocus();
                               },
                               icon: const Icon(Icons.check_circle_outline),
@@ -2633,6 +2780,8 @@ class _UserDashboardState extends State<UserDashboard>
       }
       if (_tabIndex == idx) return;
       _tabIndex = idx;
+      _inlineSearchCtrl.text =
+          idx == 1 ? _myPageAdvancedFilters.query : _searchQuery;
       WebBootstrapDiag.log('dashboard.tab', 'opened from url tab=$idx');
     } catch (_) {}
   }
@@ -2937,6 +3086,24 @@ class _UserDashboardState extends State<UserDashboard>
       WebBootstrapDiag.warn('my_ads.lazy', '$e');
       _myAdsHubDataLoadStarted = false;
     }
+  }
+
+  Future<void> _refreshCurrentMyPageRole() async {
+    if (_isGuest || !mounted) return;
+    final role = _myPageRoleKind;
+    if (role == 2) {
+      PhotographerHubPage.refreshCurrentPage();
+      return;
+    }
+    if (role == 0 && _isMarketingAccountType) {
+      await _loadMarketerBuckets(force: true);
+    } else {
+      await Future.wait([
+        _loadMineAndOffers(force: true),
+        _loadOwnerRequestsBuckets(force: true),
+      ]);
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadMyAdsHubDataInBackground({required bool force}) async {
@@ -3413,13 +3580,53 @@ class _UserDashboardState extends State<UserDashboard>
         _favoritesLoaded = true;
         _favoriteIds.clear();
         _favoritesList = <Property>[];
+        _all = <Property>[];
+        _mine = <Property>[];
+        _myPropertyById = <String, Property>{};
+        _propertyCache.clear();
+        _profileCache.clear();
+        _nestedDashboardHomeItems = const <Property>[];
+        _nestedDashboardHomeRequests = const <MarketPropertyRequestRow>[];
+        _nestedDashboardMixedEntries = const <HomeMixedFeedEntry>[];
+        _nestedDashboardMixedHomeCount = null;
+        _nestedDashboardMySubmissionsCount = 0;
+        _nestedDashboardFeedCacheBuiltKey = -1;
+        _webTabChildren = null;
+        _webVisitedTabs
+          ..clear()
+          ..add(0);
+        _webMaterializedTabs.clear();
+        _webTabChildrenFeedSig = -1;
+        _webTabChildrenHubSig = -1;
+        _webTabChildrenCartSig = -1;
+        _webBuiltActiveTab = -1;
+        _homeFeedDataEpoch++;
+        _marketHomeRequests = <MarketPropertyRequestRow>[];
+        _myMarketSubmissions = <MarketPropertyRequestRow>[];
+        _incomingMarketOffersOnMine = <Map<String, dynamic>>[];
+        _homeRequestApplicantCounts = <String, int>{};
+        _marketRequestIdsWithMyPendingOffer = <String>{};
+        _marketRequestIdsHiddenAfterTwoWithdrawals = <String>{};
+        _hiddenCartMarketOfferIds = <String>{};
+        _myPendingMarketOffersForCart = <Map<String, dynamic>>[];
+        _myArchivedMarketOffersForCart = <Map<String, dynamic>>[];
+        _lastMineFetch = null;
+        _lastHomeFetch = null;
+        _lastCartFetch = null;
+        _myAdsHubDataLoadStarted = false;
         _cart = <Map<String, dynamic>>[];
         _cartPropertyById = {};
+        _completedCart = <Map<String, dynamic>>[];
+        _completedCartPropertyById = {};
+        _excludedUserReservationsForCart = <Map<String, dynamic>>[];
         _cartCount = 0;
         _offers = <Map<String, dynamic>>[];
         _offersCount = 0;
         _marketRequestIdsWithMyPendingOffer = <String>{};
         _myPendingMarketOffersForCart = const [];
+        _homeRevealOwnPropertyId = null;
+        _homeRevealOwnMarketRequestId = null;
+        _homeRevealOwnUntil = null;
         _notifications.clear();
         _clearMarketingStateOnLogout();
         _myAdsHubDataLoadStarted = false;
@@ -4215,7 +4422,15 @@ class _UserDashboardState extends State<UserDashboard>
   bool _popDashboardBodyRoute() {
     final snap = _captureOverlayNavMemory();
     final bodyNav = _dashboardBodyNavKey.currentState;
-    if (bodyNav == null || !bodyNav.canPop()) return false;
+    if (bodyNav == null || !bodyNav.canPop()) {
+      if (_tabIndex != 1) return false;
+      _inlineSearchCtrl.text = _searchQuery;
+      _ss(() {
+        _tabIndex = 0;
+        _bottomNavTransientIndex = null;
+      });
+      return true;
+    }
     bodyNav.pop();
     if (mounted) {
       if (!_bottomNavSlideVisible) {
@@ -4535,6 +4750,7 @@ class _UserDashboardState extends State<UserDashboard>
     _dashboardOnboardingBackdropScroll.dispose();
     _ownerTabsCtrl?.dispose();
     _marketerTabsCtrl?.dispose();
+    _myPageRoleTabsCtrl?.dispose();
     // ويب: بعد الخروج/تبديل الضيف يُسمح لـ UserDashboard التالي بالـ bootstrap.
     if (kIsWeb) {
       AppWebSoftRefresh.unregister();
@@ -4566,7 +4782,11 @@ class _UserDashboardState extends State<UserDashboard>
                   // صفحتي وطلباتي/إعلاناتي: بحث + تحديث + متقدم (بدون تبويبات الرئيسية).
                   compactForMyPage: _tabIndex == 1 || _tabIndex == 2,
                   onRefresh: () async {
-                    await _reloadAll();
+                    if (_tabIndex == 1) {
+                      await _refreshCurrentMyPageRole();
+                    } else {
+                      await _reloadAll();
+                    }
                   },
                   showResultCount: _tabIndex == 0,
                   resultCount: _tabIndex == 0
@@ -5233,6 +5453,7 @@ class _UserDashboardState extends State<UserDashboard>
     final navIndex = _bottomNavSelectedIndex(bottomSlots);
     final useSideNav = AppLayout.useDashboardSideNavigation(context);
     final bodyNavCanPop = _dashboardCanGoBack();
+    final myPageFullscreen = _tabIndex == 1 && !bodyNavCanPop;
 
     Widget buildBottomNavBar(BoxConstraints constraints) {
       final w = constraints.maxWidth;
@@ -5293,7 +5514,7 @@ class _UserDashboardState extends State<UserDashboard>
       backgroundColor: cs.surface,
       // صفحة فوق التبويب: شريط الترحيب يُخفى حتى لا يتكرر X بجانب الاسم.
       // الصفحة الداخلية تعرض إغلاقاً واحداً بجانب عنوانها.
-      appBar: bodyNavCanPop
+      appBar: bodyNavCanPop || myPageFullscreen
           ? null
           : AppBar(
               elevation: 0,
@@ -5355,10 +5576,24 @@ class _UserDashboardState extends State<UserDashboard>
           ),
         ),
       ),
-      floatingActionButton: _showBottomNavAddSlot
+      floatingActionButton: _showBottomNavAddSlot && !myPageFullscreen
           ? Builder(
               builder: (fabCtx) {
                 final isWide = MediaQuery.sizeOf(fabCtx).width >= 720;
+                final unreadPhotoAlerts = _notifications.where((row) {
+                  final type = (row['type'] ?? '').toString().toLowerCase();
+                  return (type.contains('photo') ||
+                          type.contains('photographer')) &&
+                      MarketingFlowService.countsForInboxUnreadBadge(row);
+                }).length;
+                final addIcon = Badge(
+                  isLabelVisible: unreadPhotoAlerts > 0,
+                  backgroundColor: cs.error,
+                  textColor: cs.onError,
+                  label: Text(
+                      unreadPhotoAlerts > 99 ? '99+' : '$unreadPhotoAlerts'),
+                  child: const Icon(Icons.add_rounded, size: 28),
+                );
                 final isWideWebDesktop = kIsWeb &&
                     isWide &&
                     !AqarScrollBehavior.isCompactTouchLike(fabCtx);
@@ -5372,7 +5607,7 @@ class _UserDashboardState extends State<UserDashboard>
                     },
                     backgroundColor: cs.primary,
                     foregroundColor: cs.onPrimary,
-                    icon: const Icon(Icons.add_rounded, size: 28),
+                    icon: addIcon,
                     label: Text(
                       isWideWebDesktop
                           ? (_isArabic ? 'إضافة' : 'Add')
@@ -5390,19 +5625,19 @@ class _UserDashboardState extends State<UserDashboard>
                   },
                   backgroundColor: cs.primary,
                   foregroundColor: cs.onPrimary,
-                  child: const Icon(Icons.add_rounded, size: 30),
+                  child: addIcon,
                 );
               },
             )
           : null,
-      bottomNavigationBar: useSideNav || bodyNavCanPop
+      bottomNavigationBar: useSideNav || bodyNavCanPop || myPageFullscreen
           ? null
           : LayoutBuilder(
               builder: (context, constraints) => buildBottomNavBar(constraints),
             ),
     );
 
-    final mainChrome = useSideNav && !bodyNavCanPop
+    final mainChrome = useSideNav && !bodyNavCanPop && !myPageFullscreen
         ? Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -5637,6 +5872,11 @@ class _UserDashboardState extends State<UserDashboard>
       DashboardBottomSlot.myDesk => 5,
       _ => null,
     };
+    if (instantTab == 1) {
+      _inlineSearchCtrl.text = _myPageAdvancedFilters.query;
+    } else if (instantTab == 0 || instantTab == 2) {
+      _inlineSearchCtrl.text = _searchQuery;
+    }
     final guestBlocked = _isGuest &&
         slot != DashboardBottomSlot.home &&
         slot != DashboardBottomSlot.support &&
@@ -7710,7 +7950,7 @@ class _UserDashboardState extends State<UserDashboard>
                       isReserved: _isReservedByAnyone(p.id),
                       reservedUntil: _reservedUntil(p.id),
                       reservedByName: _reservedByName(p.id),
-                      onAddToCart: _cartReservationFeaturesEnabled
+                      onAddToCart: (_isGuest || _cartReservationFeaturesEnabled)
                           ? () => _addToCart(p)
                           : null,
                       currentUserId: _uid.isEmpty ? 'guest' : _uid,
@@ -7838,52 +8078,346 @@ class _UserDashboardState extends State<UserDashboard>
     if (_isGuest) return publisherPage;
 
     final cs = Theme.of(context).colorScheme;
-    final compact = MediaQuery.sizeOf(context).width < 420;
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          Material(
-            color: cs.surface,
-            child: TabBar(
-              isScrollable: false,
-              labelColor: cs.primary,
-              unselectedLabelColor: cs.onSurfaceVariant,
-              tabs: [
-                Tab(
-                  icon: const Icon(Icons.list_alt_outlined),
-                  text: compact
-                      ? (_isArabic ? 'صفحتي' : 'My page')
-                      : (_isArabic ? 'كمعلن / مسوّق' : 'Publisher / marketer'),
-                ),
-                Tab(
-                  icon: const Icon(Icons.photo_camera_outlined),
-                  text: compact
-                      ? (_isArabic ? 'كمصور' : 'Photographer')
-                      : AppLocalizations.of(context)!.photographerHubTitle,
-                ),
-              ],
+    final options = _myPageRoleOptions;
+    _ensureMyPageRoleTabsCtrl();
+    final roleCtrl = _myPageRoleTabsCtrl;
+    if (roleCtrl == null) return publisherPage;
+    final narrow = MediaQuery.sizeOf(context).width < 380;
+    final myItems = sortedMineForHub();
+
+    Widget ownerPage() {
+      if (!_isMarketingAccountType) return publisherPage;
+      if (kIsWeb && !_hasOwnerRequestsData) {
+        return _buildOwnerDirectMineCards(cs, myItems);
+      }
+      final ownerCtrl = _ownerTabsCtrl;
+      if (ownerCtrl == null) return publisherPage;
+      return _buildOwnerMyAds(cs, myItems, ownerCtrl);
+    }
+
+    Widget pageForRole(int kind) => switch (kind) {
+          0 => publisherPage,
+          1 => ownerPage(),
+          _ => PhotographerHubPage(
+              lang: widget.lang,
+              embedAppBar: true,
+              matchesMyPageFilters: _matchesMyPageRequestFilters,
+            ),
+        };
+
+    return Column(
+      children: [
+        Material(
+          color: cs.surface,
+          child: SizedBox(
+            height: 44,
+            child: Padding(
+              padding: const EdgeInsetsDirectional.only(start: 16, end: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      AppLocalizations.of(context)!.navMyAds,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: _isArabic
+                        ? 'إغلاق والعودة للرئيسية'
+                        : 'Close and return home',
+                    onPressed: () {
+                      _inlineSearchCtrl.text = _searchQuery;
+                      _ss(() {
+                        _tabIndex = 0;
+                        _bottomNavTransientIndex = null;
+                      });
+                    },
+                    icon: const Icon(Icons.close_rounded),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
             ),
           ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                KeyedSubtree(
-                  key: const ValueKey<String>('my-page-publisher-role'),
-                  child: publisherPage,
-                ),
-                KeyedSubtree(
-                  key: const ValueKey<String>('my-page-photographer-role'),
-                  child: PhotographerHubPage(
-                    lang: widget.lang,
-                    embedAppBar: true,
+        ),
+        Material(
+          color: cs.surface,
+          child: TabBar(
+            controller: roleCtrl,
+            isScrollable: false,
+            labelPadding: EdgeInsets.zero,
+            labelColor: cs.primary,
+            unselectedLabelColor: cs.onSurfaceVariant,
+            indicatorColor: cs.primary,
+            tabs: [
+              for (final kind in options)
+                Tab(
+                  height: 48,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        switch (kind) {
+                          0 => Icons.business_center_outlined,
+                          1 => Icons.home_work_outlined,
+                          _ => Icons.photo_camera_outlined,
+                        },
+                        size: narrow ? 15 : 17,
+                      ),
+                      SizedBox(width: narrow ? 3 : 6),
+                      Flexible(
+                        child: Text(
+                          switch (kind) {
+                            0 => _isArabic ? 'كمسوّق' : 'Marketer',
+                            1 => _isArabic ? 'كمعلن' : 'Publisher',
+                            _ => _isArabic ? 'كمصور' : 'Photographer',
+                          },
+                          maxLines: 1,
+                          softWrap: false,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: narrow ? 11 : 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            ),
+            ],
           ),
-        ],
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: roleCtrl,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              for (final kind in options)
+                KeyedSubtree(
+                  key: ValueKey<String>('my-page-role-$kind'),
+                  child: pageForRole(kind),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<List<SupportTicketRow>> _loadMySupportTickets() {
+    if (_supportTicketCacheUserId != _uid) {
+      _supportTicketCacheUserId = _uid;
+      _mySupportTicketsFuture = null;
+      _propertyEditTicketCountFutures.clear();
+    }
+    return _mySupportTicketsFuture ??= SupportTicketService(_sb).listMine(_uid);
+  }
+
+  Future<int> _propertyEditTicketCount(String propertyId) {
+    return _propertyEditTicketCountFutures.putIfAbsent(propertyId, () async {
+      final tickets = await _loadMySupportTickets();
+      return tickets.where((ticket) {
+        return ticket.details['ticket_category'] == 'property_edit_request' &&
+            ticket.details['property_id']?.toString() == propertyId;
+      }).length;
+    });
+  }
+
+  Future<void> _requestPropertyEditBySupport(Property property) async {
+    if (_isGuest || _uid.isEmpty) {
+      _showLoginDialog();
+      return;
+    }
+
+    final tickets = await _loadMySupportTickets();
+    final count = tickets.where((ticket) {
+      return ticket.details['ticket_category'] == 'property_edit_request' &&
+          ticket.details['property_id']?.toString() == property.id;
+    }).length;
+    if (count >= SupportTicketService.maxPropertyEditRequests) {
+      _propertyEditTicketCountFutures[property.id] = Future<int>.value(count);
+      if (mounted) setState(() {});
+      _toast(
+        _isArabic
+            ? 'استخدمت جميع طلبات التعديل المتاحة لهذا الإعلان.'
+            : 'All edit requests for this listing have been used.',
+        isError: true,
+      );
+      return;
+    }
+
+    final requestNotesController = TextEditingController();
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final notesReady = requestNotesController.text.trim().length >= 5;
+          return AlertDialog(
+            title: Text(
+              _isArabic ? 'طلب تعديل الإعلان' : 'Request listing changes',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _isArabic
+                        ? 'لا يمكن تعديل الإعلان مباشرة من هذا المسار. اشرح التغيير المطلوب وسيراجعه فريق الإدارة، ويمكنك متابعة التذكرة من تبويب الدعم الفني.'
+                        : 'Direct editing is unavailable here. Describe the requested change for review by the support team; track the ticket in Technical Support.',
+                    style: const TextStyle(height: 1.4),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    _isArabic
+                        ? 'المتبقي: ${SupportTicketService.maxPropertyEditRequests - count} من ${SupportTicketService.maxPropertyEditRequests} طلبات'
+                        : 'Remaining: ${SupportTicketService.maxPropertyEditRequests - count} of ${SupportTicketService.maxPropertyEditRequests} requests',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: requestNotesController,
+                    minLines: 3,
+                    maxLines: 5,
+                    maxLength: 1000,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: InputDecoration(
+                      labelText: _isArabic
+                          ? 'ما التعديل المطلوب؟'
+                          : 'What change do you need?',
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(_isArabic ? 'إلغاء' : 'Cancel'),
+              ),
+              FilledButton.icon(
+                onPressed: notesReady
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                icon: const Icon(Icons.support_agent_outlined),
+                label: Text(_isArabic ? 'رفع الطلب' : 'Submit request'),
+              ),
+            ],
+          );
+        },
       ),
+    );
+    final requestNotes = requestNotesController.text.trim();
+    requestNotesController.dispose();
+    if (accepted != true || !mounted) return;
+
+    final submitted = await SupportTicketService(_sb).submit(
+      kind: 'complaint',
+      subject:
+          _isArabic ? 'طلب تعديل إعلان عقاري' : 'Property listing edit request',
+      body: '${property.title.trim()}\n$requestNotes',
+      contactChannel: 'in_app',
+      extraDetails: {
+        'ticket_category': 'property_edit_request',
+        'property_id': property.id,
+        'property_title': property.title.trim(),
+        'edit_request_number': count + 1,
+      },
+      allowFallback: false,
+    );
+    if (!mounted) return;
+    if (submitted == null) {
+      _toast(
+        _isArabic
+            ? 'تعذّر رفع الطلب. تحقّق من الاتصال ثم أعد المحاولة.'
+            : 'Could not submit the request. Check your connection and try again.',
+        isError: true,
+      );
+      return;
+    }
+
+    _mySupportTicketsFuture = Future<List<SupportTicketRow>>.value([
+      ...tickets,
+      submitted,
+    ]);
+    _propertyEditTicketCountFutures[property.id] = Future<int>.value(count + 1);
+    _supportHubRefreshToken++;
+    setState(() {});
+    _toast(
+      _isArabic
+          ? 'تم رفع طلب التعديل. يمكنك متابعة حالته في الدعم الفني.'
+          : 'Edit request submitted. Track its status in Technical Support.',
+    );
+    await _openSupportHubOverlay();
+  }
+
+  Widget _mySubmissionPropertyActions(Property property) {
+    final detailsButton = OutlinedButton.icon(
+      onPressed: () => _openDetails(property),
+      icon: const Icon(Icons.open_in_new_rounded, size: 18),
+      label: Text(
+        _isArabic ? 'تفاصيل العقار' : 'Property details',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(0, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      ),
+    );
+    if (property.ownerId != _uid || _uid.isEmpty) {
+      return SizedBox(width: double.infinity, child: detailsButton);
+    }
+
+    return FutureBuilder<int>(
+      future: _propertyEditTicketCount(property.id),
+      builder: (context, snapshot) {
+        final count = snapshot.data;
+        if (count != null &&
+            count >= SupportTicketService.maxPropertyEditRequests) {
+          return SizedBox(width: double.infinity, child: detailsButton);
+        }
+        final editButton = OutlinedButton.icon(
+          onPressed: count == null
+              ? null
+              : () => unawaited(_requestPropertyEditBySupport(property)),
+          icon: count == null
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.edit_outlined, size: 18),
+          label: Text(
+            count == null
+                ? (_isArabic ? 'جارٍ التحقق' : 'Checking')
+                : (_isArabic ? 'تعديل الإعلان' : 'Request edit'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(0, 48),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          ),
+        );
+        return Row(
+          children: [
+            Expanded(child: detailsButton),
+            const SizedBox(width: 8),
+            Expanded(child: editButton),
+          ],
+        );
+      },
     );
   }
 
@@ -8186,11 +8720,12 @@ class _UserDashboardState extends State<UserDashboard>
                 _cartReservationFeaturesEnabled ? () => _addToCart(p) : null,
             currentUserId: _uid.isEmpty ? 'guest' : _uid,
             showEditDelete: isOwner,
-            onEditProperty: isOwner ? () => _editProperty(p) : null,
+            onEditProperty: null,
             onDeleteProperty: isOwner ? () => _requestDeleteProperty(p) : null,
             timeAgo: _timeAgo,
             canShowCartButton: _cartReservationFeaturesEnabled,
-            showListingQuickActions: true,
+            showListingQuickActions: !isOwner,
+            cardBelowMainRow: isOwner ? _mySubmissionPropertyActions(p) : null,
             onCopyListingWebLink: _copyListingPublicLink,
             suppressPublicOwnerIdentity: true,
             showRegulatoryIdentityOnCard: false,
@@ -8581,6 +9116,16 @@ class _UserDashboardState extends State<UserDashboard>
     );
   }
 
+  void _returnFromExactMapLocation() {
+    _dashboardBodyNavKey.currentState?.pop();
+    if (!mounted) return;
+    _ss(() {
+      _tabIndex = 0;
+      _bottomNavTransientIndex = null;
+      if (kIsWeb) _webVisitedTabs.add(0);
+    });
+  }
+
   Future<void> _openSupportHubOverlay() async {
     AppHaptics.light();
     if (!mounted) return;
@@ -8601,6 +9146,7 @@ class _UserDashboardState extends State<UserDashboard>
         userId: _isGuest ? '' : _uid,
         isAr: _isArabic,
         accentColor: _brandPrimary,
+        refreshToken: _supportHubRefreshToken,
         onLogin: _navigateToLogin,
         helpScrollController: onboardingScroll,
       ),

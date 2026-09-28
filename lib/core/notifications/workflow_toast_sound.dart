@@ -8,6 +8,19 @@ void playWorkflowToastSound(String notificationType) {
   final t = notificationType.toLowerCase().trim();
   bool eq(String constant) => t == constant.toLowerCase();
 
+  if (eq(InAppNotifTypes.photoShootOfferReceived)) {
+    playHubWorkflowSound(HubWorkflowSoundKind.newOffer);
+    return;
+  }
+  if (eq(InAppNotifTypes.photoShootOfferAccepted)) {
+    playHubWorkflowSound(HubWorkflowSoundKind.contractSuccess);
+    return;
+  }
+  if (eq(InAppNotifTypes.photoShootOfferDeclined)) {
+    playInAppNotificationChime();
+    return;
+  }
+
   if (t.contains('apology') || eq(InAppNotifTypes.offerApologyFromOwner)) {
     playHubWorkflowSound(HubWorkflowSoundKind.permitWarning);
     return;

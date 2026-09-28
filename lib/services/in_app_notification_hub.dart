@@ -77,9 +77,11 @@ class InAppNotificationPayload {
     }
 
     final titleAr =
-        (dataMap['title_ar'] ?? dataMap['title'] ?? row['title'] ?? '').toString();
+        (dataMap['title_ar'] ?? dataMap['title'] ?? row['title'] ?? '')
+            .toString();
     final titleEn =
-        (dataMap['title_en'] ?? dataMap['title'] ?? row['title'] ?? '').toString();
+        (dataMap['title_en'] ?? dataMap['title'] ?? row['title'] ?? '')
+            .toString();
     final bodyAr = (dataMap['body_ar'] ??
             dataMap['body'] ??
             row['message'] ??
@@ -117,11 +119,17 @@ class InAppNotificationHub {
 
   static final ValueNotifier<InAppNotificationPayload?> toast =
       ValueNotifier<InAppNotificationPayload?>(null);
+  static final ValueNotifier<int> inboxRevision = ValueNotifier<int>(0);
 
   static final List<InAppNotificationPayload> _queue = [];
 
   /// يُسجَّل من لوحة المستخدم لتحديث عدّاد الجرس فور وصول إشعار Realtime.
   static VoidCallback? onInboxInvalidate;
+
+  static void _invalidateInbox() {
+    inboxRevision.value++;
+    onInboxInvalidate?.call();
+  }
 
   /// مطابقة صفوف Realtime: `username` (سياسات RLS الحالية) و/أو `user_id` إن وُجد في الصف.
   static String? _sessionUsername;
@@ -158,12 +166,12 @@ class InAppNotificationHub {
   /// تحديث/حذف صف (قراءة، حذف من الويب/جهاز آخر) — يحدّث عدّاد الجرس دون Toast.
   static void onRecordUpdated(Map<String, dynamic>? record) {
     if (!recordMatchesSession(record)) return;
-    onInboxInvalidate?.call();
+    _invalidateInbox();
   }
 
   static void onRecordDeleted(Map<String, dynamic>? record) {
     if (!recordMatchesSession(record)) return;
-    onInboxInvalidate?.call();
+    _invalidateInbox();
   }
 
   static void dismiss() {
@@ -227,12 +235,20 @@ class InAppNotificationHub {
       // v8: إشعارات «last_call»/«expired_72h» تُشغّل نغمة تنبيه أقوى.
       _playSoundForPayload(payload);
     }
-    onInboxInvalidate?.call();
+    _invalidateInbox();
   }
 
   static void _playSoundForPayload(InAppNotificationPayload payload) {
     try {
       final t = payload.type.toLowerCase();
+      if (t == InAppNotifTypes.photoShootOfferReceived) {
+        playHubWorkflowSound(HubWorkflowSoundKind.newOffer);
+        return;
+      }
+      if (t == InAppNotifTypes.photoShootOfferAccepted) {
+        playHubWorkflowSound(HubWorkflowSoundKind.contractSuccess);
+        return;
+      }
       final dataRaw = payload.rawRow['data'];
       Map<String, dynamic>? data;
       if (dataRaw is Map) {

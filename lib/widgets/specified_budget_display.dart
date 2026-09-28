@@ -11,6 +11,7 @@ class SpecifiedBudgetLine extends StatelessWidget {
     required this.max,
     required this.isAr,
     this.showCaption = true,
+    this.inlineCaption = false,
     this.color,
     this.fontSize = 18,
     this.alignEnd = false,
@@ -20,6 +21,7 @@ class SpecifiedBudgetLine extends StatelessWidget {
   final double? max;
   final bool isAr;
   final bool showCaption;
+  final bool inlineCaption;
   final Color? color;
   final double fontSize;
   final bool alignEnd;
@@ -80,24 +82,39 @@ class SpecifiedBudgetLine extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final caption = Text(
+      isAr ? 'المبلغ المحدد' : 'Specified amount',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        fontWeight: FontWeight.w800,
+        fontFamily: 'Cairo',
+        fontSize: 11,
+        height: 1.1,
+        color: AqarBrandColors.primary,
+      ),
+    );
+    if (inlineCaption) {
+      return SizedBox(
+        width: double.infinity,
+        child: Wrap(
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 7,
+          runSpacing: 2,
+          children: [
+            if (showCaption) caption,
+            if (amounts != null) amounts,
+          ],
+        ),
+      );
+    }
+
     final block = Column(
       crossAxisAlignment:
           alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (showCaption)
-          Text(
-            isAr ? 'المبلغ المحدد' : 'Specified amount',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontFamily: 'Cairo',
-              fontSize: 11,
-              height: 1.1,
-              color: AqarBrandColors.primary,
-            ),
-          ),
+        if (showCaption) caption,
         if (showCaption && amounts != null) const SizedBox(height: 2),
         if (amounts != null) amounts,
       ],

@@ -1254,16 +1254,7 @@ List<Widget> _smartDashboardCardRows({
 /// ارتفاع صورة رأس البطاقة — ثابت عبر الصف حتى لا يختل عند تمدد بطاقتين.
 double _homeListingHeroImageHeight(BuildContext context,
     {bool isRequest = false}) {
-  if (ViewportScrollPolicy.isCompactTouchLike(context)) {
-    return 154;
-  }
-  final cols = _homeListingGridCrossAxisCount(
-    MediaQuery.sizeOf(context).width,
-    context,
-  );
-  if (cols >= 3) return 148;
-  if (cols == 2) return 154;
-  return 160;
+  return 228;
 }
 
 /// نسبة صورة البطاقة: أقصر على الشاشات الضيقة لتوفير مساحة للبيانات.
@@ -1826,10 +1817,14 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         (currentUserId == 'guest' || currentUserId != r.requesterId);
     final isRequester =
         currentUserId != 'guest' && currentUserId == r.requesterId;
-    final coverUrl = ListingMediaUrls.marketRequestCoverNetworkUrl(
+    final requestImageUrls =
+        ListingMediaUrls.marketRequestImageUrls(r, Supabase.instance.client);
+    final requestVideoUrl = ListingMediaUrls.marketRequestVideoPlayableUrl(
       r,
       Supabase.instance.client,
     );
+    final requestTourUrl = ListingMediaUrls.marketRequestTourUrl(r);
+    final requestInAppTour = ListingMediaUrls.inAppTourFromPayload(r.details);
 
     final headline = PropertyListingDisplay.displayRequestTitle(r, isAr);
     final requestTen = _requestPublicTenDigit(r);
@@ -1902,6 +1897,8 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         max: r.budgetMax,
         isAr: isAr,
         color: purposeAccent,
+        inlineCaption: true,
+        fontSize: 15,
         alignEnd: false,
       ),
       publishedAt: r.sortTime,
@@ -1999,7 +1996,9 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
                   ),
                 ),
               );
-        final editAction = isRequester && onEditMarketRequest != null
+        final editAction = isRequester &&
+                request.editCount < request.maxEdits &&
+                onEditMarketRequest != null
             ? OutlinedButton.icon(
                 onPressed: () => unawaited(onEditMarketRequest!(r)),
                 icon: const Icon(Icons.edit_outlined, size: 18),
@@ -2020,12 +2019,6 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         if (editAction == null) {
           return SizedBox(width: double.infinity, child: mainAction);
         }
-        if (c.maxWidth < 420) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [mainAction, const SizedBox(height: 8), editAction],
-          );
-        }
         return Row(
           children: [
             Expanded(child: mainAction),
@@ -2039,17 +2032,45 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
     final imageStack = Stack(
       fit: StackFit.expand,
       children: [
-        if ((coverUrl ?? '').trim().isNotEmpty)
-          _PropertyImage(
-            urls: [coverUrl!.trim()],
-            fit: BoxFit.cover,
-            isAr: isAr,
-            allowInlineVideo: false,
-            showListingWatermark: false,
-            preferStaticPrimaryImage: true,
-          )
-        else
-          ColoredBox(
+        ListingMediaGallery(
+          key: ValueKey<String>('market-request-media-${r.id}'),
+          imageUrls: requestImageUrls,
+          videoUrl: requestVideoUrl,
+          tourUrl: requestTourUrl,
+          fillAvailableHeight: true,
+          preferVideoFirst: ListingMediaUrls.marketRequestPrefersVideoCover(r),
+          mediaOwnerKey: r.id,
+          isAr: isAr,
+          aspectRatio: 2.2,
+          maxHeight: 164,
+          borderRadius: 0,
+          onOpenVideo: requestVideoUrl == null
+              ? null
+              : () => unawaited(
+                    PropertyVideoSheet.open(
+                      context,
+                      isAr: isAr,
+                      title: headline,
+                      videoUrl: requestVideoUrl,
+                    ),
+                  ),
+          onOpenTour: requestInAppTour != null
+              ? () => unawaited(
+                    openInAppTourViewer(
+                      context: context,
+                      tour: requestInAppTour,
+                      isAr: isAr,
+                    ),
+                  )
+              : requestTourUrl == null
+                  ? null
+                  : () => unawaited(
+                        launchUrl(
+                          Uri.parse(requestTourUrl),
+                          mode: LaunchMode.externalApplication,
+                        ),
+                      ),
+          emptyChild: ColoredBox(
             color: theme.brightness == Brightness.dark
                 ? const Color(0xFF3B2114)
                 : const Color(0xFFFFF4EC),
@@ -2071,6 +2092,7 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
               ),
             ),
           ),
+        ),
         if (showMenu)
           PositionedDirectional(
             top: 8,
@@ -2886,18 +2908,49 @@ class _RealEstateCard extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         _PropertyImage(
+          key: ValueKey<String>('property-media-${property.id}'),
           urls: PropertyListingDisplay.propertyCardImagePaths(property),
           fit: BoxFit.cover,
           videoPathOrUrl: property.videoUrl,
           preferVideoCover:
               ListingMediaUrls.propertyPrefersVideoCover(property),
           isAr: isAr,
-          allowInlineVideo: !kIsWeb,
           listingIdForWatermark: property.id,
           showListingWatermark: property.photographerMediaPaths.isNotEmpty,
           photographerMediaAttributions: property.photographerMediaAttributions,
           photographerMediaPaths: property.photographerMediaPaths,
-          preferStaticPrimaryImage: preferStaticPrimaryImage,
+          tourPathOrUrl: property.virtualTourUrl,
+          onOpenTour: property.showsVirtualTourBadge
+              ? () {
+                  final tours = <InAppTour>[
+                    if (InAppTour.fromGuidance(property.listingGuidance)
+                        case final tour? when tour.isNotEmpty)
+                      tour,
+                    ...property.photographerTours,
+                  ];
+                  if (tours.isNotEmpty) {
+                    unawaited(
+                      openInAppTourViewer(
+                        context: context,
+                        tour: tours.first,
+                        isAr: isAr,
+                        photographerCreditForMedia:
+                            property.photographerAttributionForMedia,
+                      ),
+                    );
+                    return;
+                  }
+                  final tourUrl = (property.virtualTourUrl ?? '').trim();
+                  if (ListingMediaUrls.looksLikePlayableTourUrl(tourUrl)) {
+                    unawaited(
+                      launchUrl(
+                        Uri.parse(tourUrl),
+                        mode: LaunchMode.externalApplication,
+                      ),
+                    );
+                  }
+                }
+              : null,
         ),
         ListingMediaStoryOrbit(
           hasImage: ListingMediaUrls.propertyHasRealMedia(property) &&
@@ -3599,6 +3652,41 @@ class _RealEstateCard extends StatelessWidget {
               );
             }
             final code = DisplayIds.tenDigit(raw);
+            if (layoutWidth >= 460) {
+              return Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            isAr ? 'رقم الإعلان: $code' : 'Listing no.: $code',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: cs.primary,
+                              fontFamily: 'Cairo',
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        _copyInlineIcon(ctx, code),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 3,
+                    child: Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: amountWidget,
+                    ),
+                  ),
+                ],
+              );
+            }
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -4030,34 +4118,30 @@ class _PropertyImage extends StatelessWidget {
   final List<String> urls;
   final BoxFit fit;
   final String? videoPathOrUrl;
+  final String? tourPathOrUrl;
+  final VoidCallback? onOpenTour;
   final bool isAr;
-
-  /// على الويب، مشغّل الفيديو المضمّن يستهلك أحداث المؤشر فيغطّي الضغط على البطاقة/الأزرار.
-  /// في بطاقات القوائم مرّر false لعرض غلاف ثابت بدل المشغّل.
-  final bool allowInlineVideo;
 
   final String? listingIdForWatermark;
   final bool showListingWatermark;
   final Map<String, String> photographerMediaAttributions;
   final List<String> photographerMediaPaths;
 
-  /// عند true مع عدة صور: نعرض الأولى فقط (بدون PageView/نقاط).
-  final bool preferStaticPrimaryImage;
-
-  /// عند true مع فيديو: الغلاف فيديو حتى لو وُجدت صور.
+  /// عند true مع فيديو: يبدأ المعرض بشريحة الفيديو.
   final bool preferVideoCover;
 
   const _PropertyImage({
+    super.key,
     required this.urls,
     this.fit = BoxFit.cover,
     this.videoPathOrUrl,
+    this.tourPathOrUrl,
+    this.onOpenTour,
     this.isAr = true,
-    this.allowInlineVideo = true,
     this.listingIdForWatermark,
     this.showListingWatermark = false,
     this.photographerMediaAttributions = const {},
     this.photographerMediaPaths = const [],
-    this.preferStaticPrimaryImage = false,
     this.preferVideoCover = false,
   });
 
@@ -4136,88 +4220,53 @@ class _PropertyImage extends StatelessWidget {
     final vid = (videoPathOrUrl ?? '').trim();
     final cleanUrls =
         urls.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-    final wantVideoCover =
-        vid.isNotEmpty && (cleanUrls.isEmpty || preferVideoCover);
-
-    if (wantVideoCover && !allowInlineVideo) {
-      final playable = _normalizeVideoPlayableUrl(vid);
-      if (playable.isEmpty) return placeholder();
-      return _withWatermark(
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () {
-            unawaited(
-              PropertyVideoSheet.open(
-                context,
-                isAr: isAr,
-                title: isAr ? 'فيديو العقار' : 'Property video',
-                videoUrl: playable,
-              ),
-            );
-          },
-          child: ColoredBox(
-            color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-            child: Center(
-              child: Icon(
-                Icons.play_circle_fill_rounded,
-                size: 56,
-                color: cs.primary.withValues(alpha: 0.88),
-              ),
-            ),
-          ),
-        ),
-        source: vid,
-      );
-    }
-
-    if (wantVideoCover && allowInlineVideo) {
-      final playable = _normalizeVideoPlayableUrl(vid);
-      if (playable.isEmpty) return placeholder();
-      return _withWatermark(
-        FittedBox(
-          fit: BoxFit.cover,
-          clipBehavior: Clip.hardEdge,
-          child: SizedBox(
-            width: 800,
-            height: 450,
-            child: InlinePropertyVideoPlayer(
-              videoUrl: playable,
-              isAr: isAr,
-            ),
-          ),
-        ),
-        source: vid,
-      );
-    }
-
-    if (urls.isEmpty || cleanUrls.isEmpty) return placeholder();
-
     final normalized = cleanUrls
         .map(_normalizeImagePublicUrl)
         .where((s) => s.isNotEmpty)
         .toList();
-    if (normalized.isEmpty) return placeholder();
+    final videoUrl = vid.isEmpty ? null : _normalizeVideoPlayableUrl(vid);
+    final rawTour = (tourPathOrUrl ?? '').trim();
+    final tourUrl =
+        ListingMediaUrls.looksLikePlayableTourUrl(rawTour) ? rawTour : null;
 
-    Widget oneImage(String imageUrl) => CrystalListingMedia(
-          url: imageUrl,
-          fit: fit,
-          enhanceClarity: true,
-        );
-
-    if (normalized.length == 1 || preferStaticPrimaryImage) {
-      return _withWatermark(
-        oneImage(normalized.first),
-        source: cleanUrls.first,
-      );
-    }
-
-    return _ListingImagePager(
-      urls: normalized,
-      buildOne: oneImage,
-      watermarkForUrl: (url) {
-        final index = normalized.indexOf(url);
-        return index < 0 ? null : _photographerWatermark(cleanUrls[index]);
-      },
+    return ListingMediaGallery(
+      key: ValueKey<String>(
+        'listing-media-gallery-${listingIdForWatermark ?? ''}',
+      ),
+      imageUrls: normalized,
+      videoUrl: videoUrl,
+      tourUrl: tourUrl,
+      fillAvailableHeight: true,
+      preferVideoFirst: preferVideoCover || normalized.isEmpty,
+      mediaOwnerKey: listingIdForWatermark,
+      isAr: isAr,
+      aspectRatio: 2.2,
+      maxHeight: 164,
+      borderRadius: 0,
+      fit: fit,
+      emptyChild: placeholder(),
+      onOpenVideo: videoUrl == null
+          ? null
+          : () => unawaited(
+                PropertyVideoSheet.open(
+                  context,
+                  isAr: isAr,
+                  title: isAr ? 'فيديو العقار' : 'Property video',
+                  videoUrl: videoUrl,
+                ),
+              ),
+      onOpenTour: onOpenTour ??
+          (tourUrl == null
+              ? null
+              : () => unawaited(
+                    launchUrl(
+                      Uri.parse(tourUrl),
+                      mode: LaunchMode.externalApplication,
+                    ),
+                  )),
+      watermarkBuilder: (context, index) => index < cleanUrls.length
+          ? _photographerWatermark(cleanUrls[index])
+          : null,
     );
   }
 }
@@ -4249,6 +4298,27 @@ class _ListingImagePagerState extends State<_ListingImagePager> {
   }
 
   @override
+  void didUpdateWidget(covariant _ListingImagePager oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    var changed = oldWidget.urls.length != widget.urls.length;
+    for (var i = 0; !changed && i < widget.urls.length; i++) {
+      changed = oldWidget.urls[i] != widget.urls[i];
+    }
+    if (!changed) return;
+    _page = 0;
+    if (_pc.hasClients) _pc.jumpToPage(0);
+  }
+
+  void _go(int delta) {
+    final next = (_page + delta).clamp(0, widget.urls.length - 1);
+    _pc.animateToPage(
+      next,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
   void dispose() {
     _pc.dispose();
     super.dispose();
@@ -4266,6 +4336,42 @@ class _ListingImagePagerState extends State<_ListingImagePager> {
           onPageChanged: (i) => setState(() => _page = i),
           itemBuilder: (context, i) => widget.buildOne(widget.urls[i]),
         ),
+        if (n > 1) ...[
+          Positioned(
+            left: 4,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                onPressed: () => _go(-1),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                  shape: const CircleBorder(),
+                  padding: const EdgeInsets.all(4),
+                ),
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 4,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                onPressed: () => _go(1),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                  shape: const CircleBorder(),
+                  padding: const EdgeInsets.all(4),
+                ),
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ),
+          ),
+        ],
         if (widget.watermarkForUrl != null)
           widget.watermarkForUrl!(widget.urls[_page]) ??
               const SizedBox.shrink(),

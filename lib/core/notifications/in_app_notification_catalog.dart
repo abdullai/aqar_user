@@ -61,6 +61,9 @@ abstract final class InAppNotifTypes {
   static const String opsPush = 'ops_push';
   static const String opsTeam = 'ops_team';
   static const String photoShootRequested = 'photo_shoot_requested';
+  static const String photoShootOfferReceived = 'photo_shoot_offer_received';
+  static const String photoShootOfferAccepted = 'photo_shoot_offer_accepted';
+  static const String photoShootOfferDeclined = 'photo_shoot_offer_declined';
   static const String photoShootAccepted = 'photo_shoot_accepted';
   static const String photoShootRejected = 'photo_shoot_rejected';
   static const String photoShootDelivered = 'photo_shoot_delivered';
@@ -332,6 +335,9 @@ abstract final class InAppNotificationCatalog {
       case InAppNotifTypes.permitPackageSubmitted:
         return Icons.fact_check_rounded;
       case InAppNotifTypes.photoShootRequested:
+      case InAppNotifTypes.photoShootOfferReceived:
+      case InAppNotifTypes.photoShootOfferAccepted:
+      case InAppNotifTypes.photoShootOfferDeclined:
       case InAppNotifTypes.photoShootAccepted:
       case InAppNotifTypes.photoShootRejected:
       case InAppNotifTypes.photoShootDelivered:

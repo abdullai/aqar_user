@@ -12,8 +12,8 @@ abstract final class CatalogReadableInk {
 
   static Color body(ColorScheme cs) => cs.onSurface;
 
-  static Color muted(ColorScheme cs) =>
-      cs.onSurface.withValues(alpha: cs.brightness == Brightness.dark ? 0.78 : 0.72);
+  static Color muted(ColorScheme cs) => cs.onSurface
+      .withValues(alpha: cs.brightness == Brightness.dark ? 0.78 : 0.72);
 }
 
 /// جسم بيانات بطاقة الإعلان/الطلب — ترتيب منصّات عقارية (صفوف مضغوطة بلا صناديق مبلغ).
@@ -179,34 +179,21 @@ class CatalogEstateCardBody extends StatelessWidget {
         ],
         if ((publicId ?? '').trim().isNotEmpty) ...[
           const SizedBox(height: 3),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '${publicIdLabel ?? (isAr ? 'رقم الإعلان' : 'Listing no.')}: ${publicId!.trim()}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: cs.primary,
-                        fontFamily: 'Cairo',
-                        fontSize: 12,
-                        height: 1.15,
-                      ),
-                    ),
-                    if (amount != null) ...[
-                      const SizedBox(height: 3),
-                      amount!,
-                    ],
-                  ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final idText = Text(
+                '${publicIdLabel ?? (isAr ? 'رقم الإعلان' : 'Listing no.')}: ${publicId!.trim()}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: cs.primary,
+                  fontFamily: 'Cairo',
+                  fontSize: 12,
+                  height: 1.15,
                 ),
-              ),
-              IconButton(
+              );
+              final copyButton = IconButton(
                 tooltip: isAr ? 'نسخ' : 'Copy',
                 visualDensity: VisualDensity.compact,
                 constraints:
@@ -216,8 +203,8 @@ class CatalogEstateCardBody extends StatelessWidget {
                 icon: Icon(Icons.copy_rounded, color: cs.primary),
                 onPressed: onCopyPublicId ??
                     () async {
-                      final v = publicId!.trim();
-                      await Clipboard.setData(ClipboardData(text: v));
+                      final value = publicId!.trim();
+                      await Clipboard.setData(ClipboardData(text: value));
                       if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -226,8 +213,50 @@ class CatalogEstateCardBody extends StatelessWidget {
                         ),
                       );
                     },
-              ),
-            ],
+              );
+              if (amount != null && constraints.maxWidth >= 440) {
+                return Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Row(
+                        children: [
+                          Expanded(child: idText),
+                          copyButton,
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 3,
+                      child: Align(
+                        alignment: AlignmentDirectional.centerEnd,
+                        child: amount!,
+                      ),
+                    ),
+                  ],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        idText,
+                        if (amount != null) ...[
+                          const SizedBox(height: 3),
+                          amount!,
+                        ],
+                      ],
+                    ),
+                  ),
+                  copyButton,
+                ],
+              );
+            },
           ),
         ] else if (amount != null) ...[
           const SizedBox(height: 3),

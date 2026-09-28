@@ -18,23 +18,26 @@ abstract final class ListingMediaHydration {
     return null;
   }
 
-  static bool _embedEmpty(dynamic raw) {
-    if (raw == null) return true;
-    if (raw is List) return raw.isEmpty;
-    if (raw is Map) return raw.isEmpty;
-    return true;
-  }
-
   /// ينسخ مسارات الصور/الفيديو/الجولة من `listing_guidance` و`image_url` إلى شكل الصف.
   static void stampRow(Map row) {
     final g = guidanceMap(row['listing_guidance']);
     final payloadMap = guidanceMap(row['payload_json']);
+    final fromEmbedded = ListingMediaUrls.imagePathsFromPropertyImages(
+      row['property_images'],
+    );
+    final fromImages = ListingMediaUrls.imagePathsFromPayload({
+      'images': row['images'],
+    });
+    final embeddedVideo = ListingMediaUrls.videoPathFromPropertyImages(
+      row['property_images'],
+    );
     final fromGuidance = ListingMediaUrls.imagePathsFromPayload(g);
     final fromPayload = ListingMediaUrls.imagePathsFromPayload(payloadMap);
-    final cover = (row['image_url'] ?? row['primary_image'] ?? '')
-        .toString()
-        .trim();
+    final cover =
+        (row['image_url'] ?? row['primary_image'] ?? '').toString().trim();
     final merged = ListingMediaUrls.mergePathLists([
+      fromEmbedded,
+      fromImages,
       fromGuidance,
       fromPayload,
       if (cover.isNotEmpty &&
@@ -43,7 +46,7 @@ abstract final class ListingMediaHydration {
         [cover],
     ]);
 
-    if (merged.isNotEmpty && _embedEmpty(row['property_images'])) {
+    if (merged.isNotEmpty) {
       row['images'] = merged;
       row['property_images'] = [
         for (var i = 0; i < merged.length; i++)
@@ -55,10 +58,11 @@ abstract final class ListingMediaHydration {
       ];
     }
 
-    final vidG = ListingMediaUrls.videoPathFromPayload(g) ??
+    final currentVideo = (row['video_url'] ?? '').toString().trim();
+    final vidG = embeddedVideo ??
+        ListingMediaUrls.videoPathFromPayload(g) ??
         ListingMediaUrls.videoPathFromPayload(payloadMap);
-    if ((row['video_url'] ?? '').toString().trim().isEmpty &&
-        (vidG ?? '').trim().isNotEmpty) {
+    if (currentVideo.isEmpty && (vidG ?? '').trim().isNotEmpty) {
       row['video_url'] = vidG!.trim();
     }
 
@@ -77,42 +81,39 @@ abstract final class ListingMediaHydration {
     List<Map> rows,
   ) async {
     if (rows.isEmpty) return;
-    for (final r in rows) {
-      stampRow(r);
-    }
 
     final need = <String>[];
     for (final r in rows) {
       final id = (r['id'] ?? '').toString().trim();
       if (id.isEmpty) continue;
-      if (!_embedEmpty(r['property_images'])) continue;
       final paths = ListingMediaUrls.imagePathsFromPropertyImages(
         r['property_images'],
       );
       if (paths.isEmpty) need.add(id);
     }
-    if (need.isEmpty) return;
 
-    try {
-      final data = await sb
-          .from('property_images')
-          .select('property_id,path,file_name,url,sort_order,media_type')
-          .inFilter('property_id', need);
-      final byPid = <String, List<Map<String, dynamic>>>{};
-      for (final e in (data as List)) {
-        if (e is! Map) continue;
-        final m = Map<String, dynamic>.from(e);
-        final pid = (m['property_id'] ?? '').toString().trim();
-        if (pid.isEmpty) continue;
-        byPid.putIfAbsent(pid, () => []).add(m);
-      }
-      for (final r in rows) {
-        final id = (r['id'] ?? '').toString().trim();
-        final imgs = byPid[id];
-        if (imgs == null || imgs.isEmpty) continue;
-        r['property_images'] = imgs;
-      }
-    } catch (_) {}
+    if (need.isNotEmpty) {
+      try {
+        final data = await sb
+            .from('property_images')
+            .select('property_id,path,file_name,url,sort_order,media_type')
+            .inFilter('property_id', need);
+        final byPid = <String, List<Map<String, dynamic>>>{};
+        for (final e in (data as List)) {
+          if (e is! Map) continue;
+          final m = Map<String, dynamic>.from(e);
+          final pid = (m['property_id'] ?? '').toString().trim();
+          if (pid.isEmpty) continue;
+          byPid.putIfAbsent(pid, () => []).add(m);
+        }
+        for (final r in rows) {
+          final id = (r['id'] ?? '').toString().trim();
+          final imgs = byPid[id];
+          if (imgs == null || imgs.isEmpty) continue;
+          r['property_images'] = imgs;
+        }
+      } catch (_) {}
+    }
 
     for (final r in rows) {
       stampRow(r);

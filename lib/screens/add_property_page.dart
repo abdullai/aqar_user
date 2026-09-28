@@ -284,6 +284,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   final _virtualTourUrl = TextEditingController();
   InAppTour? _inAppTour;
   Map<String, dynamic>? _pendingPhotoShoot;
+  bool _needsPhotographer = false;
   DateTime? _availabilityDate;
   DateTime? _deedDate;
   bool _uploadingVideo = false;
@@ -763,6 +764,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'virtual_tour_url': _virtualTourUrl.text,
       'in_app_tour': _inAppTour?.toJson(),
       'pending_photo_shoot': _pendingPhotoShoot,
+      'needs_photographer': _needsPhotographer,
       'lat': _latCtrl.text,
       'lng': _lngCtrl.text,
       'plan_number': _planNumber.text,
@@ -851,6 +853,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _inAppTour = InAppTour.fromRaw(d['in_app_tour']);
     final shoot = d['pending_photo_shoot'];
     _pendingPhotoShoot = shoot is Map ? Map<String, dynamic>.from(shoot) : null;
+    _needsPhotographer =
+        d['needs_photographer'] == true || _pendingPhotoShoot != null;
     _latCtrl.text = '${d['lat'] ?? ''}';
     _lngCtrl.text = '${d['lng'] ?? ''}';
     _planNumber.text = '${d['plan_number'] ?? ''}';
@@ -4418,8 +4422,69 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _usedDefaultCover = true;
   }
 
+  Future<void> _persistPendingPhotoShoot({
+    String? propertyId,
+    String? listingRequestId,
+  }) async {
+    final pending = _pendingPhotoShoot;
+    if (pending == null) return;
+    final kinds = pending['shoot_kinds'] is List
+        ? [
+            for (final value in pending['shoot_kinds'] as List)
+              value.toString(),
+          ]
+        : const <String>['photos'];
+    final service = PhotographerService(_sb);
+    if (pending['marketplace'] == true) {
+      await service.createMarketShoot(
+        propertyId: propertyId,
+        listingRequestId: listingRequestId,
+        fulfillmentMode:
+            (pending['fulfillment_mode'] ?? 'independent_market').toString(),
+        kinds: kinds,
+        locationText: (pending['location_text'] ?? '').toString(),
+        latitude: (pending['latitude'] as num?)?.toDouble(),
+        longitude: (pending['longitude'] as num?)?.toDouble(),
+        preferredAt: DateTime.tryParse('${pending['preferred_at'] ?? ''}'),
+        maxPhotos: (pending['max_photos'] as num?)?.toInt() ?? 30,
+        maxVideos: (pending['max_videos'] as num?)?.toInt() ?? 1,
+        includeTour: pending['include_tour'] == true,
+        ownerMediaConsent: pending['owner_media_consent'] == true,
+        ownerCoverChangeConsent: pending['owner_cover_change_consent'] == true,
+        ownerReplaceMediaConsent:
+            pending['owner_replace_media_consent'] == true,
+      );
+      return;
+    }
+
+    await service.createShoot(
+      photographerId: (pending['photographer_id'] ?? '').toString(),
+      propertyId: propertyId,
+      listingRequestId: listingRequestId,
+      kinds: kinds,
+      locationText: (pending['location_text'] ?? '').toString(),
+      latitude: (pending['latitude'] as num?)?.toDouble(),
+      longitude: (pending['longitude'] as num?)?.toDouble(),
+      preferredAt: DateTime.tryParse('${pending['preferred_at'] ?? ''}'),
+      quotedAmountSar: (pending['quoted_amount_sar'] as num?)?.toDouble(),
+      maxPhotos: (pending['max_photos'] as num?)?.toInt() ?? 30,
+      maxVideos: (pending['max_videos'] as num?)?.toInt() ?? 1,
+      includeTour: pending['include_tour'] == true,
+      ownerMediaConsent: pending['owner_media_consent'] == true,
+      ownerCoverChangeConsent: pending['owner_cover_change_consent'] == true,
+      ownerReplaceMediaConsent: pending['owner_replace_media_consent'] == true,
+    );
+  }
+
   Future<void> _submit() async {
     setState(() => _error = null);
+    if (_needsPhotographer && _pendingPhotoShoot == null) {
+      setState(() => _error = _isAr
+          ? 'أكمل تفاصيل طلب التصوير أو ألغِ خيار الحاجة إلى مصوّر.'
+          : 'Complete the photography request details or turn off the photographer option.');
+      _scrollToKey(_listingMediaKey);
+      return;
+    }
     if (!_termsAccepted) {
       setState(() => _error = _isAr
           ? 'يجب الموافقة على الشروط والأحكام قبل النشر.'
@@ -4680,6 +4745,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               'default_cover_used': false,
           });
         } catch (_) {}
+        Object? photoRequestError;
+        if (_pendingPhotoShoot != null) {
+          try {
+            await _persistPendingPhotoShoot(listingRequestId: requestId);
+          } catch (e) {
+            photoRequestError = e;
+          }
+        }
         if (!mounted) return;
         // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
         final fp = _currentPublishFingerprint();
@@ -4689,6 +4762,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           requestId: requestId,
           listingRequestPublicCode: reqPub.isEmpty ? null : reqPub,
         );
+        if (photoRequestError != null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_isAr
+                  ? 'حُفظ طلب التسويق، لكن تعذّر إنشاء طلب التصوير. افتح الإعلان من صفحتي وأعد المحاولة.'
+                  : 'The marketing request was saved, but the photo request could not be created. Reopen it from My Page and retry.'),
+            ),
+          );
+        }
         return;
       }
       if (widget.marketingFlow?.publishToHomeFeed == true &&
@@ -4827,33 +4909,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         await _rollbackCreatedListing(propertyId: propertyId);
         rethrow;
       }
-      final pending = _pendingPhotoShoot;
-      if (pending != null) {
+      Object? photoRequestError;
+      if (_pendingPhotoShoot != null) {
         try {
-          await PhotographerService(_sb).createShoot(
-            photographerId: (pending['photographer_id'] ?? '').toString(),
-            propertyId: propertyId,
-            kinds: (pending['shoot_kinds'] is List)
-                ? [
-                    for (final e in pending['shoot_kinds'] as List)
-                      e.toString(),
-                  ]
-                : const ['photos'],
-            locationText: (pending['location_text'] ?? '').toString(),
-            latitude: (pending['latitude'] as num?)?.toDouble(),
-            longitude: (pending['longitude'] as num?)?.toDouble(),
-            preferredAt: DateTime.tryParse('${pending['preferred_at'] ?? ''}'),
-            quotedAmountSar: (pending['quoted_amount_sar'] as num?)?.toDouble(),
-            maxPhotos: (pending['max_photos'] as num?)?.toInt() ?? 30,
-            maxVideos: (pending['max_videos'] as num?)?.toInt() ?? 1,
-            includeTour: pending['include_tour'] == true,
-            ownerMediaConsent: pending['owner_media_consent'] == true,
-            ownerCoverChangeConsent:
-                pending['owner_cover_change_consent'] == true,
-            ownerReplaceMediaConsent:
-                pending['owner_replace_media_consent'] == true,
-          );
-        } catch (_) {}
+          await _persistPendingPhotoShoot(propertyId: propertyId);
+        } catch (e) {
+          photoRequestError = e;
+        }
       }
       if (!mounted) return;
       // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
@@ -4865,6 +4927,15 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         listingPublicCode: pub.isEmpty ? null : pub,
         propertyId: propertyId,
       );
+      if (photoRequestError != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isAr
+                ? 'نُشر الإعلان، لكن تعذّر إنشاء طلب التصوير. افتح الإعلان من صفحتي وأعد المحاولة.'
+                : 'The listing was published, but the photo request could not be created. Reopen it from My Page and retry.'),
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -5660,8 +5731,30 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                   ),
                                                 ),
                                                 const SizedBox(height: 8),
+                                                CheckboxListTile(
+                                                  contentPadding:
+                                                      EdgeInsets.zero,
+                                                  value: _needsPhotographer,
+                                                  title: Text(_isAr
+                                                      ? 'بحاجة إلى مصوّر عقاري'
+                                                      : 'I need a property photographer'),
+                                                  subtitle: Text(_isAr
+                                                      ? 'اطلب عروض تصوير مرتبطة بهذا الإعلان واختر العرض المناسب.'
+                                                      : 'Request photo offers linked to this listing and choose the best one.'),
+                                                  onChanged: _saving
+                                                      ? null
+                                                      : (value) => setState(() {
+                                                            _needsPhotographer =
+                                                                value ?? false;
+                                                            if (!_needsPhotographer) {
+                                                              _pendingPhotoShoot =
+                                                                  null;
+                                                            }
+                                                          }),
+                                                ),
                                                 FilledButton.tonalIcon(
-                                                  onPressed: _saving
+                                                  onPressed: _saving ||
+                                                          !_needsPhotographer
                                                       ? null
                                                       : () async {
                                                           final loc = [
@@ -5681,6 +5774,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                                   PhotoShootBookPage(
                                                                 lang:
                                                                     widget.lang,
+                                                                marketplaceMode:
+                                                                    true,
+                                                                allowMarketerBundle:
+                                                                    _forceListingRequestPath,
                                                                 locationText:
                                                                     loc,
                                                                 latitude: double
@@ -5695,10 +5792,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                                             .trim()),
                                                                 onQueued: (d) =>
                                                                     setState(
-                                                                  () =>
-                                                                      _pendingPhotoShoot =
-                                                                          d,
-                                                                ),
+                                                                        () {
+                                                                  _pendingPhotoShoot =
+                                                                      d;
+                                                                  _needsPhotographer =
+                                                                      true;
+                                                                }),
                                                               ),
                                                             ),
                                                           );

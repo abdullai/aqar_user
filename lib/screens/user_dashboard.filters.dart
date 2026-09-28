@@ -1417,6 +1417,7 @@ class _DashboardAdvDraftHolder {
     required this.sort,
     required this.homeKind,
     required this.hidden,
+    this.persistDraft = true,
     this.region = '',
     this.governorate = '',
     this.district = '',
@@ -1442,6 +1443,25 @@ class _DashboardAdvDraftHolder {
     );
   }
 
+  _DashboardAdvDraftHolder copy() => _DashboardAdvDraftHolder(
+        query: query,
+        city: city,
+        type: type,
+        purpose: purpose,
+        furnished: furnished,
+        priceMin: priceMin,
+        priceMax: priceMax,
+        areaMin: areaMin,
+        areaMax: areaMax,
+        sort: sort,
+        homeKind: homeKind,
+        hidden: hidden,
+        persistDraft: persistDraft,
+        region: region,
+        governorate: governorate,
+        district: district,
+      );
+
   String query;
   String city;
   PropertyType? type;
@@ -1454,6 +1474,7 @@ class _DashboardAdvDraftHolder {
   String sort;
   HomeFeedKind homeKind;
   bool hidden;
+  bool persistDraft;
 
   /// تدرّج الموقع — حقول نصّية بسيطة. عند اختيار «المدينة» يُسحب القيمة إلى
   /// [city] أيضاً ليعمل فلتر المدينة الحالي. عند ترك «الحيّ» سيُلحَق نصُّه
@@ -1588,6 +1609,7 @@ class _DashboardAdvDraftHolder {
 extension _UserDashboardAdvSearchDraft on _UserDashboardState {
   void _scheduleAdvSearchDraftSave(_DashboardAdvDraftHolder sheet) {
     _advancedSearchDraftTimer?.cancel();
+    if (!sheet.persistDraft) return;
     _advancedSearchDraftTimer = Timer(const Duration(milliseconds: 420), () {
       unawaited(_persistAdvSearchDraft(sheet));
     });
