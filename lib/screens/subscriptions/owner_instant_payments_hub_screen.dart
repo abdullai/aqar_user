@@ -202,12 +202,12 @@ class _OwnerInstantPaymentsHubScreenState
             const SizedBox(height: 10),
             Text(
               _isAr
-                  ? '• إعلان عقاري وطلب عقاري وإتمام صفقة على طلبات الآخرين — مجاني.\n'
-                    '• الطلب «فوري» فقط: ${PlatformFeeCatalog.of(context, listen: true).instantPhrase(isAr: true)} — أسبوع أولوية في منطقتك و72 ساعة في باقي المناطق.\n'
-                    '• الرصيد غير المستخدم يُسترد؛ المُلغى قبل النشر يعود للمحفظة.'
-                  : '• Property listing, home request, and completing deals on others\' requests — free.\n'
-                    '• Instant priority only: ${PlatformFeeCatalog.of(context, listen: true).instantPhrase(isAr: false)} — 1 week in your region, 72h elsewhere.\n'
-                    '• Unused credits can be refunded before publish.',
+                  ? '• إضافة إعلان وطلب عقاري عادي مجانيان. إتمام الصفقات على طلبات السوق يُحسب من حصة باقة الصفقات، وتظهر الإضافات عند نفاد الحصة.\n'
+                      '• الطلب «فوري» فقط: ${PlatformFeeCatalog.of(context, listen: true).instantPhrase(isAr: true)} — أسبوع أولوية في منطقتك و72 ساعة في باقي المناطق.\n'
+                      '• الرصيد غير المستخدم يُسترد؛ المُلغى قبل النشر يعود للمحفظة.'
+                  : '• Adding a listing and a standard home request are free. Completing market deals uses your plan quota; deal top-ups are available when it runs out.\n'
+                      '• Instant priority only: ${PlatformFeeCatalog.of(context, listen: true).instantPhrase(isAr: false)} — 1 week in your region, 72h elsewhere.\n'
+                      '• Unused credits can be refunded before publish.',
               style: TextStyle(
                 height: 1.45,
                 color: cs.onSurfaceVariant,
@@ -269,8 +269,8 @@ class _OwnerInstantPaymentsHubScreenState
                         ? 'رصيد فوري جاهز — استخدمه عند النشر أو استردّه أدناه'
                         : 'Instant credit ready — use it at publish or refund below')
                     : (_isAr
-                    ? 'شراء طلب فوري — ${AppMoney.formatWithCurrencyCode(_catalogPrice, isAr: true)}'
-                    : 'Buy instant request — ${AppMoney.formatWithCurrencyCode(_catalogPrice, isAr: false)}'),
+                        ? 'شراء طلب فوري — ${AppMoney.formatWithCurrencyCode(_catalogPrice, isAr: true)}'
+                        : 'Buy instant request — ${AppMoney.formatWithCurrencyCode(_catalogPrice, isAr: false)}'),
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
@@ -338,7 +338,9 @@ class _OwnerInstantPaymentsHubScreenState
           if (availableRows.isNotEmpty) ...[
             const SizedBox(height: 20),
             Text(
-              _isAr ? 'أرصدة قابلة للاستخدام أو الاسترداد' : 'Credits you can use or refund',
+              _isAr
+                  ? 'أرصدة قابلة للاستخدام أو الاسترداد'
+                  : 'Credits you can use or refund',
               style: const TextStyle(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 8),
@@ -346,7 +348,8 @@ class _OwnerInstantPaymentsHubScreenState
               final id = '${r['id']}';
               return Card(
                 child: ListTile(
-                  leading: const Icon(Icons.bolt_rounded, color: Color(0xFFDC2626)),
+                  leading:
+                      const Icon(Icons.bolt_rounded, color: Color(0xFFDC2626)),
                   title: Text(
                     AppMoney.formatWithCurrencyCode(
                       (r['amount_sar'] as num?)?.toDouble() ?? _catalogPrice,

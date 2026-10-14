@@ -42,7 +42,7 @@ class AppRoleHelper {
     return normalizeType(accountType) == 'photographer';
   }
 
-  /// مالك فرد / مستخدم عام: لا باقات اشتراك — الطلب الفوري من كتالوج الرسوم.
+  /// مالك فرد / مستخدم عام: نشر الإعلان والطلب الأساسي مجاني؛ حصة إتمام الصفقة مدفوعة.
   static bool isOwnerFreeTierAccount(String? accountType) {
     if (isPhotographerAccount(accountType)) return false;
     final k = fromAccountType(accountType);
@@ -77,7 +77,8 @@ class AppRoleHelper {
   }
 
   /// Strict marketer buckets (requires verified in dashboard mixin).
-  static bool isVerifiedMarketerRole(String? accountType, {required bool verified}) {
+  static bool isVerifiedMarketerRole(String? accountType,
+      {required bool verified}) {
     if (!verified) return false;
     final k = fromAccountType(accountType);
     return k == AppRoleKind.marketer ||

@@ -69,6 +69,26 @@ class PaymentService {
     return kDebugMode;
   }
 
+  /// Local-only validation bypass for fake PAN entry; never active with Moyasar
+  /// keys or release builds. Keep this unset outside development testing.
+  static bool get allowInvalidMockCardInput {
+    if (!allowMockGateway || !kDebugMode || useMoyasarLiveFlow) return false;
+    final v = (dotenv.env['ALLOW_INVALID_MOCK_CARD_INPUT'] ?? '')
+        .trim()
+        .toLowerCase();
+    return v == '1' || v == 'true' || v == 'yes';
+  }
+
+  /// Send malformed-but-length-valid PANs to Moyasar sandbox only to exercise
+  /// decline/error handling. Never enabled for live keys or release builds.
+  static bool get allowInvalidMoyasarTestCardInput {
+    if (!kDebugMode || kIsProd || !isMoyasarTestMode) return false;
+    final v = (dotenv.env['ALLOW_INVALID_MOYASAR_TEST_CARD_INPUT'] ?? '')
+        .trim()
+        .toLowerCase();
+    return v == '1' || v == 'true' || v == 'yes';
+  }
+
   static Map<String, dynamic> get _mockGatewayBlocked =>
       const {'ok': false, 'error': 'payment_gateway_not_configured'};
 
@@ -694,6 +714,7 @@ class PaymentService {
       expiryYear: expiryYear,
       cvv: cvv,
       holderName: holderName,
+      allowInvalidCardNumber: allowInvalidMockCardInput,
     );
     if (err != null) {
       return {'ok': false, 'error': err};

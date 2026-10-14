@@ -14,6 +14,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
   Future<void> _loadFavoritesForUid() async {
     final uid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
 
     if (uid.isEmpty) {
       _favoriteIds.clear();
@@ -25,6 +26,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (!_isCurrentDashboardAccount(uid, accountEpoch)) return;
       final raw = prefs.getString(_favKey(uid));
 
       _favoriteIds.clear();
@@ -45,6 +47,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _ss(() {});
       }
     } catch (_) {
+      if (!_isCurrentDashboardAccount(uid, accountEpoch)) return;
       _favoriteIds.clear();
       _favoritesLoaded = true;
       _favoritesList = <Property>[];
@@ -55,12 +58,15 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   Future<void> _saveFavoritesForUid() async {
     final uid = _uid;
     if (uid.isEmpty) return;
+    final accountEpoch = _dashboardAccountEpoch;
+    final ids = _favoriteIds.toList(growable: false);
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (!_isCurrentDashboardAccount(uid, accountEpoch)) return;
       await prefs.setString(
         _favKey(uid),
-        jsonEncode(_favoriteIds.toList()),
+        jsonEncode(ids),
       );
     } catch (_) {}
   }
@@ -157,8 +163,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // Notifications
   // =========================================================
   Future<void> _loadNotifications() async {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
     final l10n = AppLocalizations.of(context)!;
-    if (_isGuest) {
+    if (_isGuest || requestUid.isEmpty) {
       _notifications.clear();
       _unreadNotificationsCount = 0;
       _chatUnreadTotal = 0;
@@ -171,7 +179,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     _ss(() => _loadingNotifications = true);
 
     try {
-      await _fetchProfilesByUserIds([_uid]);
+      await _fetchProfilesByUserIds([requestUid]);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _syncInAppHubFromProfileCache();
 
       // الاعتماد دائماً على user_id حتى لا يختلط عداد/قائمة الإشعارات مع مستخدم آخر
@@ -182,10 +191,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .select(
               'id,username,type,title,body,data,created_at,is_read',
             )
-            .eq('user_id', _uid)
+            .eq('user_id', requestUid)
             .order('created_at', ascending: false)
             .limit(80);
       }, tag: 'IN_APP_NOTIF_UID');
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       if (data != null) {
         final rows = (data as List).map((e) {
@@ -243,6 +253,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         try {
           final n =
               await MarketingFlowService(_sb).unreadInAppNotificationCount();
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           _unreadNotificationsCount = n;
         } catch (_) {}
 
@@ -252,15 +263,19 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
     } catch (_) {
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() => _loadingNotifications = false);
       }
     }
-    await _refreshChatUnreadTotal();
+    if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
+      await _refreshChatUnreadTotal();
+    }
   }
 
   Future<void> _refreshChatUnreadTotal() async {
-    if (_isGuest) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) {
       _ss(() => _chatUnreadTotal = 0);
       return;
     }
@@ -273,6 +288,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         tag: 'CHAT_UNREAD',
         showDialog: false,
       );
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (res == null) return;
       final list = (res is List) ? res : <dynamic>[];
       var sum = 0;
@@ -997,16 +1013,16 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
   /// تحليل صفوف الرئيسية على دفعات — يمنع تجمّد واجهة الويب عند `select(*)` ثقيل.
   Future<List<Property>> _parseHomeRowsYielding(
-    List<Map> rows,
-    Map<String, Map<String, dynamic>> ownerProfiles,
-  ) async {
+      List<Map> rows, Map<String, Map<String, dynamic>> ownerProfiles,
+      {required bool Function() isCurrent}) async {
     const batch = kIsWeb ? 3 : 6;
     final list = <Property>[];
     for (var i = 0; i < rows.length; i++) {
-      if (!mounted) break;
+      if (!isCurrent()) break;
       list.add(_propertyFromRowWithProfiles(rows[i], ownerProfiles));
       if (kIsWeb && (i + 1) % batch == 0 && i + 1 < rows.length) {
         await Future<void>.delayed(const Duration(milliseconds: 16));
+        if (!isCurrent()) break;
       }
     }
     return list;
@@ -1014,17 +1030,21 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
   /// بعد أول إطار على الويب: حجوزات فقط — بدون إعادة بناء القائمة (يمنع وميض البطاقة).
   Future<void> _enrichHomeFeedAfterFirstPaint(
-    List<String> propIds,
-    List<Map> rows,
-  ) async {
-    if (!kIsWeb || !mounted) return;
-    if (_isGuest) return;
+      List<String> propIds, List<Map> rows,
+      {required String requestUid, required int accountEpoch}) async {
+    if (!kIsWeb || !_isCurrentDashboardAccount(requestUid, accountEpoch)) {
+      return;
+    }
+    if (requestUid.isEmpty) return;
     try {
       await Future<void>.delayed(const Duration(milliseconds: 350));
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final activeRes = await _fetchActiveReservationsByPropertyIds(propIds)
           .timeout(const Duration(seconds: 12));
-      if (!mounted || activeRes.isEmpty) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch) ||
+          activeRes.isEmpty) {
+        return;
+      }
       for (final e in activeRes.entries) {
         _activeReservationByPropertyId[e.key] = e.value;
       }
@@ -1129,6 +1149,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     bool userInitiated = false,
     bool silent = false,
   }) async {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
     if (!userInitiated && PropertiesHomeFeedService.isCircuitOpen) {
       WebBootstrapDiag.warn('home.fetch', 'skipped — circuit open');
       _ssHomeFeed(() {
@@ -1243,6 +1265,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
 
       final rows = (data as List).cast<Map>();
       await ListingMediaHydration.hydratePropertyRows(_sb, rows);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       if (kDebugMode) {
         print('[DBG][HOME] rows=${rows.length}');
@@ -1268,6 +1291,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               kIsWeb && !_isGuest
                   ? await _ownerProfilesForRows(rows)
                   : const <String, Map<String, dynamic>>{},
+              isCurrent: () =>
+                  _isCurrentDashboardAccount(requestUid, accountEpoch),
             )
           : rows
               .map(
@@ -1277,7 +1302,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
                 ),
               )
               .toList();
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       list = await _hydratePublisherCardLabels(list);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       var activeRes = <String, Map<String, dynamic>>{};
 
@@ -1290,20 +1317,26 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _nestedDashboardFeedCacheBuiltKey = -1;
         _markDashboardFeedDirty();
         WebBootstrapDiag.log('home.apply', 'sync rows=${_all.length}');
-        if (mounted) {
+        if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
           _ssHomeFeed(() {
             _loadingHome = false;
             _homeLoadingSince = null;
           });
         }
-        unawaited(_enrichHomeFeedAfterFirstPaint(propIds, rows));
+        unawaited(_enrichHomeFeedAfterFirstPaint(
+          propIds,
+          rows,
+          requestUid: requestUid,
+          accountEpoch: accountEpoch,
+        ));
         unawaited(() async {
           var enriched = await _enrichPublishedPropertiesFromRequests(
             list,
             rows.cast<Map<dynamic, dynamic>>(),
           );
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           enriched = await _hydratePublisherCardLabels(enriched);
-          if (!mounted) return;
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           var changed = !identical(enriched, list);
           if (!changed && enriched.length == list.length) {
             for (var i = 0; i < list.length; i++) {
@@ -1326,6 +1359,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           }
           // لا تستبدل القائمة إن لم يتغيّر شيء — يمنع وميض البطاقة.
           if (!changed) return;
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           _ssHomeFeed(() {
             _all = enriched;
             _rebuildFavoritesFromCache();
@@ -1347,7 +1381,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           list,
           rows.cast<Map<dynamic, dynamic>>(),
         );
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         list = await _hydratePublisherCardLabels(list);
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       }
 
       if (kDebugMode && list.isNotEmpty) {
@@ -1372,15 +1408,18 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         await UserListingPreferencesService.pruneHiddenAgainstKnownPropertyIds(
           propIds,
         );
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
         // إن كانت قائمة «إخفاء من الرئيسية» تغطي كل ما جلبه الخادم، تصبح الشبكة
         // فارغة دون فلاتر علوية — نمسح إخفاء الرئيسية تلقائياً (مرة لكل جلب ناجح).
         final hiddenAfterPrune =
             await UserListingPreferencesService.hiddenPropertyIds();
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         final loadedIdSet = propIds.toSet();
         if (loadedIdSet.isNotEmpty &&
             loadedIdSet.every(hiddenAfterPrune.contains)) {
           await UserListingPreferencesService.clearHomeFeedHideSets();
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           if (kDebugMode) {
             print(
               '[DBG][HOME] cleared home-feed hide set (all loaded rows were hidden)',
@@ -1390,6 +1429,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         }
       }
 
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (!kIsWeb) {
         _ssHomeFeed(() {
           _retainRevealedHomeProperty(list);
@@ -1403,6 +1443,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         unawaited(_reloadHiddenFeedPreferences());
       }
     } catch (e) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (_errorLooksLikeUnauthorized(e) ||
           SupabasePublicReadGuard.isAuthError(e)) {
         if (kDebugMode) {
@@ -1438,7 +1479,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _errorHome = e.toString();
       });
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() {
           _loadingHome = false;
           _homeLoadingSince = null;
@@ -1455,7 +1496,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     bool force = false,
     bool silent = false,
   }) async {
-    if (_isGuest || _uid.isEmpty) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) {
       _ss(() {
         _myMarketSubmissions = const [];
         _loadingMyMarketSubmissions = false;
@@ -1477,10 +1520,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         return _sb
             .from('market_property_requests')
             .select(selectCols)
-            .eq('requester_id', _uid)
+            .eq('requester_id', requestUid)
             .order('created_at', ascending: false)
             .limit(60);
       }, tag: 'MY_MARKET_SUBMISSIONS', showDialog: false);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (rows == null) {
         _ss(() => _myMarketSubmissions = const []);
         return;
@@ -1495,12 +1539,13 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       _ss(() => _myMarketSubmissions = list);
       unawaited(_loadIncomingMarketOffersOnMine());
     } catch (e) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (kDebugMode) {
         print('[DBG][MY_MARKET_SUBMISSIONS] skip: $e');
       }
       _ss(() => _myMarketSubmissions = const []);
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() => _loadingMyMarketSubmissions = false);
       }
     }
@@ -1513,6 +1558,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     bool force = false,
     bool silent = false,
   }) async {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
     if (_loadingMarketRequests && !force) return;
     final keepExistingCards = silent;
     if (!keepExistingCards) {
@@ -1612,7 +1659,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
 
       if (rowMaps.isEmpty) {
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         _ssHomeFeed(() => _marketHomeRequests = const []);
+        await _refreshHomeRequestApplicantCounts(const <String>[]);
         return;
       }
 
@@ -1632,6 +1681,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
                 .select('user_id,avatar_url')
                 .inFilter('user_id', uids);
           }, tag: 'MARKET_REQ_AVATARS', showDialog: false);
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           if (prof != null) {
             for (final p in (prof as List).cast<Map>()) {
               final uid = (p['user_id'] ?? '').toString().trim();
@@ -1659,18 +1709,25 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       await UserListingPreferencesService.pruneHiddenAgainstKnownRequestIds(
         list.map((r) => r.id),
       );
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       _ssHomeFeed(() {
         _retainRevealedMarketRequest(list);
         _marketHomeRequests = list;
       });
-      unawaited(_refreshHomeRequestApplicantCounts(list.map((e) => e.id)));
+      await _refreshHomeRequestApplicantCounts(list.map((e) => e.id));
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (mounted) {
         unawaited(_reloadHiddenFeedPreferences());
       }
     } catch (e) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (kDebugMode) {
         print('[DBG][MARKET_REQ_HOME] skip: $e');
+      }
+      if (_marketHomeRequests.isEmpty) {
+        _homeRequestApplicantCountsLoaded = true;
+        _tryReleaseHomeFeedIdentity(accountEpoch);
       }
       _ssHomeFeed(() {
         _errorMarketRequests = e.toString();
@@ -1679,7 +1736,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         }
       });
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() {
           _loadingMarketRequests = false;
           _marketRequestsLoadingSince = null;
@@ -1692,7 +1749,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // Favorites list
   // =========================================================
   Future<void> _loadFavoritesList({bool force = false}) async {
-    if (_isGuest || _favoriteIds.isEmpty) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty || _favoriteIds.isEmpty) {
       _ss(() {
         _favoritesList = <Property>[];
         _loadingFavorites = false;
@@ -1726,11 +1785,13 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .order('updated_at', ascending: false)
             .order('created_at', ascending: false);
       }, tag: 'FAV_LIST');
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       if (data == null) return;
 
       final rows = (data as List).cast<Map>();
       await ListingMediaHydration.hydratePropertyRows(_sb, rows);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       if (kDebugMode) {
         print('[DBG][FAV] rows=${rows.length} ids=${_favoriteIds.length}');
@@ -1745,6 +1806,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _fetchActiveReservationsByPropertyIds(propIds),
         _ownerProfilesForRows(rows),
       ]);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final activeRes = favEnrich[0];
       final ownerProfiles = favEnrich[1];
 
@@ -1761,9 +1825,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _lastFavoritesFetch = DateTime.now();
       });
     } catch (e) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() => _errorFavorites = e.toString());
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() {
           _loadingFavorites = false;
           _favLoadingSince = null;
@@ -1777,6 +1842,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // =========================================================
   Future<void> _loadMineAndOffers(
       {bool force = false, bool silent = false}) async {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
     if (!force && !_shouldFetchMine() && _mine.isNotEmpty) return;
 
     if (!silent) {
@@ -1792,7 +1859,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     }
 
     try {
-      if (_uid.isEmpty) {
+      if (requestUid.isEmpty) {
         _ss(() {
           _mine = <Property>[];
           _offers = <Map<String, dynamic>>[];
@@ -1819,7 +1886,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             return _sb
                 .from('properties')
                 .select(mineSelect)
-                .eq(eqColumn, _uid)
+                .eq(eqColumn, requestUid)
                 .order('updated_at', ascending: false)
                 .order('created_at', ascending: false)
                 .limit(mineLimit);
@@ -1839,7 +1906,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             return _sb
                 .from('properties')
                 .select(mineSelectPlain)
-                .eq(eqColumn, _uid)
+                .eq(eqColumn, requestUid)
                 .order('updated_at', ascending: false)
                 .order('created_at', ascending: false)
                 .limit(mineLimit);
@@ -1854,6 +1921,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           tag: 'MINE_PUBLISHED_BY',
         ),
       ]);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final mineData = minePair[0];
       final publishedByMeData = minePair[1];
 
@@ -1881,9 +1949,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
       final mineRows = byId.values.toList();
       await ListingMediaHydration.hydratePropertyRows(_sb, mineRows);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       if (kDebugMode) {
-        print('[DBG][MINE] rows=${mineRows.length} uid=$_uid');
+        print('[DBG][MINE] rows=${mineRows.length} uid=$requestUid');
       }
 
       final myIdsEarly = mineRows
@@ -1924,11 +1993,12 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
 
       final mineParallelOut = await Future.wait(mineParallel);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final mineProfiles =
           mineParallelOut[0] as Map<String, Map<String, dynamic>>;
       final offersDataPrefetched =
           myIdsEarly.isNotEmpty ? mineParallelOut[1] : null;
-      final myProfile = mineProfiles[_uid];
+      final myProfile = mineProfiles[requestUid];
       final myName = _displayNameFromProfile(myProfile);
       final myPhone = _phoneFromProfile(myProfile);
 
@@ -1973,9 +2043,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         mineList.add(property);
         if (kIsWeb && (i + 1) % 5 == 0 && i + 1 < mineRows.length) {
           await Future<void>.delayed(Duration.zero);
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         }
       }
 
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() {
         _mine = mineList;
         _myPropertyById = {
@@ -2029,6 +2101,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _fetchProfilesByUserIds(userIds),
         _fetchActiveReservationsByPropertyIds(myIds),
       ]);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final profMap = offersEnrich[0];
       final myActiveRes = offersEnrich[1];
 
@@ -2055,6 +2128,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _activeReservationByPropertyId[e.key] = e.value;
       }
 
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() {
         _offers = offersRows;
         _offersCount = cnt;
@@ -2066,6 +2140,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         );
       }
     } catch (e) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() {
         // لا تُظهر «تعذر تحميل إعلاناتي» على كل تبويب فارغ إذا كانت القائمة وصلت.
         if (_mine.isEmpty) {
@@ -2076,7 +2151,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         }
       });
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() {
           if (!silent) {
             _loadingMine = false;
@@ -2093,7 +2168,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // Cart
   // =========================================================
   Future<void> _loadCart({bool force = false, bool silent = false}) async {
-    if (!force && !_shouldFetchCart() && _cart.isNotEmpty) return;
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (!force && !_shouldFetchCart()) return;
 
     if (!silent) {
       _ss(() {
@@ -2104,7 +2181,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     }
 
     try {
-      if (_uid.isEmpty) {
+      if (requestUid.isEmpty) {
         _ss(() {
           _cart = <Map<String, dynamic>>[];
           _cartPropertyById = {};
@@ -2113,6 +2190,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           _cartCount = 0;
           _lastCartFetch = DateTime.now();
         });
+        _homeCartVisibilityLoaded = true;
+        _tryReleaseHomeFeedIdentity(accountEpoch);
         return;
       }
 
@@ -2133,7 +2212,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               total_amount,
               total_amount
             ''')
-              .eq('user_id', _uid)
+              .eq('user_id', requestUid)
               .inFilter('status', ['pending', 'paid', 'accepted'])
               .order('created_at', ascending: false);
         }, tag: 'CART'),
@@ -2154,7 +2233,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               deal_completed_at,
               deal_completion_note
             ''')
-              .eq('user_id', _uid)
+              .eq('user_id', requestUid)
               .inFilter('status', ['completed', 'sold'])
               .order('created_at', ascending: false);
         }, tag: 'CART_COMPLETED'),
@@ -2178,7 +2257,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
               owner_rejected_at,
               owner_rejected_by
             ''')
-                .eq('user_id', _uid)
+                .eq('user_id', requestUid)
                 .inFilter('status', ['cancelled', 'rejected'])
                 .not('owner_rejection_reason', 'is', null)
                 .order('created_at', ascending: false)
@@ -2189,12 +2268,16 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           }
         }, tag: 'CART_EXCLUDED'),
       ]);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       final cartData = cartParallel[0];
       final completedData = cartParallel[1];
       final excludedData = cartParallel[2];
 
-      if (cartData == null) return;
+      if (cartData == null) {
+        _failHomeFeedIdentity(accountEpoch);
+        return;
+      }
 
       final cartRowsRaw = (cartData as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
@@ -2221,6 +2304,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       // لا تمسح صفاً محلياً فورياً إن تأخر ظهور الحجز من الخادم بعد «إتمام الصفقة».
       if (cartRows.isEmpty &&
           _cart.any((r) => (r['id'] ?? '').toString().startsWith('local-'))) {
+        _homeCartVisibilityLoaded = true;
         _ssHomeFeed(() {
           _completedCart = completedRows;
           _completedCartPropertyById = {
@@ -2230,6 +2314,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           _lastCartFetch = DateTime.now();
         });
         _flushHomeFeedMutationsSync();
+        _tryReleaseHomeFeedIdentity(accountEpoch);
         return;
       }
 
@@ -2262,6 +2347,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           if (propsData != null) {
             final rows = (propsData as List).cast<Map>();
             await ListingMediaHydration.hydratePropertyRows(_sb, rows);
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
             if (kDebugMode) {
               print(
@@ -2270,6 +2356,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             }
 
             final ownerProfiles = await _ownerProfilesForRows(rows);
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
             for (final row in rows) {
               _propertyFromRowWithProfiles(row, ownerProfiles);
@@ -2285,6 +2372,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         }
       }
 
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      _homeCartVisibilityLoaded = true;
       // _ssHomeFeed: يبلّغ تبويب الرئيسية بإعادة التصفية الفورية حتى يختفي
       // أي إعلان أصبح في السلة دون الحاجة للضغط على «تحديث».
       _ssHomeFeed(() {
@@ -2297,7 +2386,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _lastCartFetch = DateTime.now();
       });
       _flushHomeFeedMutationsSync();
+      _tryReleaseHomeFeedIdentity(accountEpoch);
     } catch (e) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      _failHomeFeedIdentity(accountEpoch);
       if (!silent ||
           (_cart.isEmpty &&
               _completedCart.isEmpty &&
@@ -2305,7 +2397,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _ss(() => _errorCart = e.toString());
       }
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() {
           if (!silent) _loadingCart = false;
           _cartLoadingSince = null;
@@ -2318,7 +2410,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // عروضي على طلبات السوق (إخفاء من الرئيسية + قسم السلة)
   // =========================================================
   Future<void> _loadMyMarketRequestOfferTracking() async {
-    if (_isGuest) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) {
+      _homeRequestTrackingLoaded = true;
       _ssHomeFeed(() {
         _marketRequestIdsWithMyPendingOffer = <String>{};
         _marketRequestIdsHiddenAfterTwoWithdrawals = <String>{};
@@ -2326,11 +2421,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _myArchivedMarketOffersForCart = const [];
       });
       _ss(() => _incomingMarketOffersOnMine = const []);
+      _tryReleaseHomeFeedIdentity(accountEpoch);
       return;
     }
     try {
       final svc = MarketingFlowService(_sb);
-      final uid = _uid;
       final results = await Future.wait([
         svc.myActiveMarketRequestOffers(),
         svc.myArchivedMarketRequestOffers(),
@@ -2338,10 +2433,11 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           return _sb
               .from('market_request_offer_user_withdrawals')
               .select('market_request_id,withdrawn_count')
-              .eq('user_id', uid)
+              .eq('user_id', requestUid)
               .gte('withdrawn_count', 2);
         }, tag: 'MR_OFFER_WITHDRAWALS', showDialog: false),
       ]);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final list = (results[0] as List?)?.cast<Map<String, dynamic>>() ??
           const <Map<String, dynamic>>[];
       final requesterIds = list
@@ -2352,6 +2448,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       if (requesterIds.isNotEmpty) {
         try {
           final profs = await _fetchProfilesByUserIds(requesterIds);
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           for (final m in list) {
             final rid = (m['_requester_id'] ?? '').toString().trim();
             final prof = profs[rid];
@@ -2381,13 +2478,17 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           _myPendingMarketOffersForCart.any(
             (m) => (m['id'] ?? '').toString().startsWith('local-'),
           )) {
+        _homeRequestTrackingLoaded = true;
         _ssHomeFeed(() {
           _marketRequestIdsHiddenAfterTwoWithdrawals = hiddenAfterTwo;
           _myArchivedMarketOffersForCart = archived;
         });
         _flushHomeFeedMutationsSync();
+        _tryReleaseHomeFeedIdentity(accountEpoch);
         return;
       }
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      _homeRequestTrackingLoaded = true;
       // _ssHomeFeed: يضمن إخفاء أي طلب قُدِّم عليه عرض من الرئيسية فوراً.
       _ssHomeFeed(() {
         _marketRequestIdsWithMyPendingOffer = ids;
@@ -2396,33 +2497,32 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _myArchivedMarketOffersForCart = archived;
       });
       _flushHomeFeedMutationsSync();
+      _tryReleaseHomeFeedIdentity(accountEpoch);
     } catch (_) {
-      if (_myPendingMarketOffersForCart.any(
-        (m) => (m['id'] ?? '').toString().startsWith('local-'),
-      )) {
-        return;
-      }
-      _ssHomeFeed(() {
-        _marketRequestIdsWithMyPendingOffer = <String>{};
-        _marketRequestIdsHiddenAfterTwoWithdrawals = <String>{};
-        _myPendingMarketOffersForCart = const [];
-        _myArchivedMarketOffersForCart = const [];
-      });
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      // Keep previous successful tracking; first-load failures keep the feed closed.
+      _failHomeFeedIdentity(accountEpoch);
     } finally {
-      unawaited(_loadIncomingMarketOffersOnMine());
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
+        unawaited(_loadIncomingMarketOffersOnMine());
+      }
     }
   }
 
   Future<void> _refreshHomeRequestApplicantCounts(
     Iterable<String> requestIds,
   ) async {
+    final accountEpoch = _dashboardAccountEpoch;
     final ids = requestIds
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toSet()
         .toList();
     if (ids.isEmpty) {
+      if (accountEpoch != _dashboardAccountEpoch) return;
+      _homeRequestApplicantCountsLoaded = true;
       _ssHomeFeed(() => _homeRequestApplicantCounts = const {});
+      _tryReleaseHomeFeedIdentity(accountEpoch);
       return;
     }
     try {
@@ -2432,6 +2532,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             .select('market_request_id,status')
             .inFilter('market_request_id', ids);
       }, tag: 'MR_APPLICANT_COUNTS', showDialog: false);
+      if (accountEpoch != _dashboardAccountEpoch || !mounted) return;
       final counts = <String, int>{};
       const live = {
         'submitted',
@@ -2449,12 +2550,18 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         if (rid.isEmpty) continue;
         counts[rid] = (counts[rid] ?? 0) + 1;
       }
+      _homeRequestApplicantCountsLoaded = true;
       _ssHomeFeed(() => _homeRequestApplicantCounts = counts);
-    } catch (_) {}
+      _tryReleaseHomeFeedIdentity(accountEpoch);
+    } catch (_) {
+      _failHomeFeedIdentity(accountEpoch);
+    }
   }
 
   Future<void> _loadIncomingMarketOffersOnMine() async {
-    if (_isGuest || _uid.isEmpty) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) {
       _ss(() => _incomingMarketOffersOnMine = const []);
       return;
     }
@@ -2469,15 +2576,17 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     try {
       var rows =
           await MarketRequestOffersService(_sb).listAllOffersOnRequests(ids);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       try {
         rows = await MarketRequestOffersService(_sb).enrichOfferRows(
           rows,
           preferArabicNames: _isArabic,
         );
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       } catch (_) {}
       final byReq = {for (final r in _myMarketSubmissions) r.id: r};
       final decorated = rows
-          .where((o) => (o['offerer_id'] ?? '').toString() != _uid)
+          .where((o) => (o['offerer_id'] ?? '').toString() != requestUid)
           .map((o) {
         final rid = (o['market_request_id'] ?? '').toString().trim();
         final req = byReq[rid];
@@ -2489,8 +2598,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
             '_selected_offer_id': req!.selectedOfferId,
         };
       }).toList(growable: false);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() => _incomingMarketOffersOnMine = decorated);
     } catch (_) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() => _incomingMarketOffersOnMine = const []);
     }
   }
@@ -2498,7 +2609,10 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
   // =========================================================
   // Full reload
   // =========================================================
-  Future<void> _reloadAll({bool silent = false}) async {
+  Future<void> _reloadAll({
+    bool silent = false,
+    bool deferTabs = true,
+  }) async {
     PropertiesHomeFeedService.resetCircuit();
 
     if (_isGuest) {
@@ -2534,7 +2648,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         if (!_isGuest) _loadMyMarketRequestOfferTracking(),
         if (!_isGuest) _loadMyMarketSubmissions(force: true, silent: true),
       ]);
-      unawaited(_reloadAllLoggedInDeferred());
+      if (deferTabs) unawaited(_reloadAllLoggedInDeferred());
       return;
     }
 
@@ -2547,7 +2661,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         if (!_isGuest) _loadMineAndOffers(force: true, silent: true),
         if (!_isGuest) _loadMyMarketSubmissions(force: true, silent: true),
       ]);
-      unawaited(_reloadAllLoggedInDeferred());
+      if (deferTabs) unawaited(_reloadAllLoggedInDeferred());
       return;
     }
 

@@ -126,7 +126,6 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
   bool get _isTrialEligibleAccount {
     if (_isPhotographerPlan) return true;
-    if (AppRoleHelper.isOwnerFreeTierAccount(widget.accountType)) return false;
     if (_isMarketingRole) return true;
     final k = AppRoleHelper.fromAccountType(widget.accountType);
     return k == AppRoleKind.ownerIndividual || k == AppRoleKind.publicUser;

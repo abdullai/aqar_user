@@ -38,20 +38,14 @@ abstract final class UserListingPreferencesService {
     return '${base}__$uid';
   }
 
+  static String? _readScoped(SharedPreferences prefs, String base) {
+    return prefs.getString(_scoped(base));
+  }
+
   static Future<Set<String>> hiddenPropertyIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_scoped(_kHiddenProperties)) ??
-          // ترحيل لمرة واحدة من المفتاح القديم غير المقيّد.
-          (p.getString(_kHiddenProperties));
-      final set = _decodeIdSet(raw);
-      if (raw != null &&
-          p.getString(_scoped(_kHiddenProperties)) == null &&
-          (_uid ?? '').isNotEmpty) {
-        await _saveSet(_scoped(_kHiddenProperties), set);
-        await p.remove(_kHiddenProperties);
-      }
-      return set;
+      return _decodeIdSet(_readScoped(p, _kHiddenProperties));
     } catch (_) {
       return {};
     }
@@ -60,16 +54,7 @@ abstract final class UserListingPreferencesService {
   static Future<Set<String>> hiddenMarketRequestIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_scoped(_kHiddenRequests)) ??
-          p.getString(_kHiddenRequests);
-      final set = _decodeIdSet(raw);
-      if (raw != null &&
-          p.getString(_scoped(_kHiddenRequests)) == null &&
-          (_uid ?? '').isNotEmpty) {
-        await _saveSet(_scoped(_kHiddenRequests), set);
-        await p.remove(_kHiddenRequests);
-      }
-      return set;
+      return _decodeIdSet(_readScoped(p, _kHiddenRequests));
     } catch (_) {
       return {};
     }
@@ -136,8 +121,7 @@ abstract final class UserListingPreferencesService {
   static Future<Set<String>> hiddenCompletedDealPropertyIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_scoped(_kHiddenCompletedDeals)) ??
-          p.getString(_kHiddenCompletedDeals);
+      final raw = _readScoped(p, _kHiddenCompletedDeals);
       return _decodeIdSet(raw);
     } catch (_) {
       return {};
@@ -168,8 +152,7 @@ abstract final class UserListingPreferencesService {
   static Future<Set<String>> hiddenCartMarketOfferIds() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_scoped(_kHiddenCartMarketOffers)) ??
-          p.getString(_kHiddenCartMarketOffers);
+      final raw = _readScoped(p, _kHiddenCartMarketOffers);
       return _decodeIdSet(raw);
     } catch (_) {
       return {};
@@ -191,8 +174,7 @@ abstract final class UserListingPreferencesService {
   static Future<List<ReportActivityEvent>> _loadReportEvents() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_scoped(_kReportEvents)) ??
-          p.getString(_kReportEvents);
+      final raw = _readScoped(p, _kReportEvents);
       if (raw == null || raw.trim().isEmpty) return [];
       final d = jsonDecode(raw);
       if (d is! List) return [];
@@ -246,7 +228,8 @@ abstract final class UserListingPreferencesService {
     await _saveReportEvents(list);
   }
 
-  static Future<void> recordMarketRequestReportSubmitted(String requestId) async {
+  static Future<void> recordMarketRequestReportSubmitted(
+      String requestId) async {
     final id = requestId.trim();
     if (id.isEmpty) return;
     final list = await _loadReportEvents();
@@ -267,7 +250,8 @@ abstract final class UserListingPreferencesService {
     final events = await _loadReportEvents();
     bool countsTowardLimit(ReportActivityEvent e) =>
         e.kind == 'property' || e.kind == 'request';
-    final day = events.where((e) => countsTowardLimit(e) && e.ts >= dayAgo).length;
+    final day =
+        events.where((e) => countsTowardLimit(e) && e.ts >= dayAgo).length;
     final hour =
         events.where((e) => countsTowardLimit(e) && e.ts >= hourAgo).length;
 
@@ -323,8 +307,7 @@ abstract final class UserListingPreferencesService {
   static Future<Map<String, String>> _pendingReportsMap() async {
     try {
       final p = await SharedPreferences.getInstance();
-      final raw = p.getString(_scoped(_kPendingPropertyReports)) ??
-          p.getString(_kPendingPropertyReports);
+      final raw = _readScoped(p, _kPendingPropertyReports);
       if (raw == null || raw.trim().isEmpty) return {};
       final d = jsonDecode(raw);
       if (d is! Map) return {};
@@ -395,7 +378,8 @@ abstract final class UserListingPreferencesService {
   static Future<void> pruneHiddenAgainstKnownPropertyIds(
     Iterable<String> knownIds,
   ) async {
-    final set = knownIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    final set =
+        knownIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
     final hidden = await hiddenPropertyIds();
     if (hidden.isEmpty) return;
     final next = hidden.where((id) => set.contains(id)).toSet();
@@ -414,7 +398,8 @@ abstract final class UserListingPreferencesService {
   static Future<void> pruneHiddenAgainstKnownRequestIds(
     Iterable<String> knownIds,
   ) async {
-    final set = knownIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    final set =
+        knownIds.map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
     final hidden = await hiddenMarketRequestIds();
     if (hidden.isEmpty) return;
     final next = hidden.where((id) => set.contains(id)).toSet();

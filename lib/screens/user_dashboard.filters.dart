@@ -587,6 +587,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
             : _cityFilter.trim(),
         viewerLat: _myLat,
         viewerLng: _myLng,
+        pinLocalPaid: !forMySubmissions,
       );
     }
 
@@ -602,7 +603,6 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     String? viewerRegion,
     bool pinPaidRequests = true,
   }) {
-    final effectiveLimit = limit ?? (kIsWeb ? 40 : 120);
     final region = (viewerRegion ?? _regionFilter).trim();
     final viewer = region.isNotEmpty ? region : _cityFilter.trim();
     final out = <HomeMixedFeedEntry>[
@@ -613,63 +613,37 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     ];
     // المستعجل/الفوري المدفوع أولاً في الرئيسية فقط (pinPaidRequests).
     out.sort((a, b) {
-      double? distanceFor(HomeMixedFeedEntry entry) {
-        final request = entry.request;
-        if (request != null) {
-          return InstantMarketRequestFeed.distanceKmTo(
-            request,
+      final aRequest = a.request;
+      final bRequest = b.request;
+      final aPaid = pinPaidRequests &&
+          aRequest != null &&
+          InstantMarketRequestFeed.isLocalPaidPriorityPin(
+            aRequest,
+            viewerRegion: viewer,
             viewerLat: _myLat,
             viewerLng: _myLng,
           );
-        }
-        final listing = entry.listing;
-        final lat = listing?.latitude;
-        final lng = listing?.longitude;
-        if (_myLat == null || _myLng == null || lat == null || lng == null) {
-          return null;
-        }
-        return GeoHelper.distanceKm(
-          lat1: _myLat!,
-          lon1: _myLng!,
-          lat2: lat,
-          lon2: lng,
-        );
-      }
-
-      final aPriority = a.request?.requestPriority.feedRank ?? -1;
-      final bPriority = b.request?.requestPriority.feedRank ?? -1;
-      if (aPriority != bPriority) return bPriority.compareTo(aPriority);
-      if (pinPaidRequests) {
-        final aPaid = a.request != null &&
-            InstantMarketRequestFeed.isPaidPriorityPin(a.request!);
-        final bPaid = b.request != null &&
-            InstantMarketRequestFeed.isPaidPriorityPin(b.request!);
-        if (aPaid != bPaid) return aPaid ? -1 : 1;
-        if (aPaid && bPaid) {
-          return InstantMarketRequestFeed.compare(
-            a.request!,
-            b.request!,
+      final bPaid = pinPaidRequests &&
+          bRequest != null &&
+          InstantMarketRequestFeed.isLocalPaidPriorityPin(
+            bRequest,
             viewerRegion: viewer,
+            viewerLat: _myLat,
+            viewerLng: _myLng,
           );
-        }
-      }
-      final da = distanceFor(a);
-      final db = distanceFor(b);
-      if (da != null && db != null) {
-        final byDistance = da.compareTo(db);
-        if (byDistance != 0) return byDistance;
-      } else if (da != null) {
-        return -1;
-      } else if (db != null) {
-        return 1;
+      if (aPaid != bPaid) return aPaid ? -1 : 1;
+      if (aPaid && bPaid) {
+        return InstantMarketRequestFeed.compare(
+          aRequest,
+          bRequest,
+          viewerRegion: viewer,
+          viewerLat: _myLat,
+          viewerLng: _myLng,
+        );
       }
       return b.sortAt.compareTo(a.sortAt);
     });
-    final pinned = _pinRevealedMixedFirst(out);
-    if (pinned.length > effectiveLimit) {
-      return pinned.sublist(0, effectiveLimit);
-    }
-    return pinned;
+    return _pinRevealedMixedFirst(out);
   }
 
   // =========================
@@ -1049,12 +1023,10 @@ extension _UserDashboardStateFilters on _UserDashboardState {
       shown: _nestedDashboardHomeRequests.length,
     );
 
-    final mixedTimeline = _sortBy == 'latest'
-        ? buildMixedHomeTimeline(
-            _nestedDashboardHomeItems,
-            _nestedDashboardHomeRequests,
-          )
-        : const <HomeMixedFeedEntry>[];
+    final mixedTimeline = buildMixedHomeTimeline(
+      _nestedDashboardHomeItems,
+      _nestedDashboardHomeRequests,
+    );
     _nestedDashboardMixedEntries = mixedTimeline;
     _nestedDashboardMixedHomeCount =
         mixedTimeline.isEmpty ? null : mixedTimeline.length;
@@ -1183,12 +1155,10 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     if (!mounted || _nestedDashboardFeedCacheKey() != key) return;
 
     // ابنِ التسليمة المختلطة دائماً عند latest — اختيار HomeFeedKind عرض فقط.
-    final mixedTimeline = _sortBy == 'latest'
-        ? buildMixedHomeTimeline(
-            _nestedDashboardHomeItems,
-            _nestedDashboardHomeRequests,
-          )
-        : const <HomeMixedFeedEntry>[];
+    final mixedTimeline = buildMixedHomeTimeline(
+      _nestedDashboardHomeItems,
+      _nestedDashboardHomeRequests,
+    );
     _nestedDashboardMixedEntries = mixedTimeline;
     _nestedDashboardMixedHomeCount =
         mixedTimeline.isEmpty ? null : mixedTimeline.length;
@@ -1284,113 +1254,7 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     List<Property> list, {
     String queryRaw = '',
   }) {
-    final sort = _sortBy.toString();
-    final hasQuery = _norm(queryRaw).isNotEmpty;
-
-    int compareLatest(Property a, Property b) {
-      return b.createdAt.compareTo(a.createdAt);
-    }
-
-    int compareNearest(Property a, Property b) {
-      final da = _distanceFor(a);
-      final db = _distanceFor(b);
-
-      final aInf = !da.isFinite;
-      final bInf = !db.isFinite;
-
-      if (aInf && bInf) return compareLatest(a, b);
-      if (aInf) return 1;
-      if (bInf) return -1;
-
-      final cmp = da.compareTo(db);
-      if (cmp != 0) return cmp;
-
-      return compareLatest(a, b);
-    }
-
-    int compareSearchThenLatest(Property a, Property b) {
-      final sa = _searchScore(a, queryRaw);
-      final sb = _searchScore(b, queryRaw);
-
-      final cmpScore = sb.compareTo(sa);
-      if (cmpScore != 0) return cmpScore;
-
-      return compareLatest(a, b);
-    }
-
-    if (sort == 'price_low') {
-      list.sort((a, b) {
-        final cmp = a.price.compareTo(b.price);
-        if (cmp != 0) return cmp;
-
-        if (hasQuery) {
-          final sCmp = compareSearchThenLatest(a, b);
-          if (sCmp != 0) return sCmp;
-        }
-
-        return compareLatest(a, b);
-      });
-      return;
-    }
-
-    if (sort == 'price_high') {
-      list.sort((a, b) {
-        final cmp = b.price.compareTo(a.price);
-        if (cmp != 0) return cmp;
-
-        if (hasQuery) {
-          final sCmp = compareSearchThenLatest(a, b);
-          if (sCmp != 0) return sCmp;
-        }
-
-        return compareLatest(a, b);
-      });
-      return;
-    }
-
-    if (sort == 'area_high') {
-      list.sort((a, b) {
-        final cmp = b.area.compareTo(a.area);
-        if (cmp != 0) return cmp;
-
-        if (hasQuery) {
-          final sCmp = compareSearchThenLatest(a, b);
-          if (sCmp != 0) return sCmp;
-        }
-
-        return compareLatest(a, b);
-      });
-      return;
-    }
-
-    if (sort == 'nearest') {
-      list.sort((a, b) {
-        if (hasQuery) {
-          final sa = _searchScore(a, queryRaw);
-          final sb = _searchScore(b, queryRaw);
-          final cmpScore = sb.compareTo(sa);
-          if (cmpScore != 0) return cmpScore;
-        }
-        return compareNearest(a, b);
-      });
-      return;
-    }
-
-    if (sort == 'most_viewed') {
-      list.sort((a, b) {
-        final cv = b.views.compareTo(a.views);
-        if (cv != 0) return cv;
-        return compareLatest(a, b);
-      });
-      return;
-    }
-
-    if (hasQuery) {
-      list.sort(compareSearchThenLatest);
-      return;
-    }
-
-    list.sort(compareLatest);
+    list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
   }
 
   String _cityLabel(String v) {

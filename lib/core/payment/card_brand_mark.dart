@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../subscription/card_scheme.dart';
+
 /// شعار الشبكة من حزمة Moyasar (Visa / Mastercard / mada).
 class CardBrandMark extends StatelessWidget {
   const CardBrandMark({
@@ -21,7 +23,27 @@ class CardBrandMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final asset = _assets[scheme];
-    if (asset == null) return const SizedBox.shrink();
+    if (asset == null) {
+      final label = cardSchemeDisplayLabel(
+        scheme,
+        isAr: Localizations.localeOf(context).languageCode == 'ar',
+      );
+      if (label.isEmpty) return const SizedBox.shrink();
+      return SizedBox(
+        height: height,
+        child: Center(
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      );
+    }
     return Image.asset(
       asset,
       package: 'moyasar',

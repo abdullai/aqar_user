@@ -1198,24 +1198,105 @@ Widget _listingFeedCardsRow({
   }
   final remaining = (total - start).clamp(0, cross);
   if (remaining <= 0) return const SizedBox.shrink();
-  return Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      for (var j = 0; j < remaining; j++) ...[
-        if (j > 0) SizedBox(width: spacing),
-        Expanded(
-          child: _wrapEqualGridCardHeight(
-            height: equalH,
-            child: cardAt(start + j),
-          ),
-        ),
-      ],
-      for (var j = remaining; j < cross; j++) ...[
-        SizedBox(width: spacing),
-        const Expanded(child: SizedBox.shrink()),
-      ],
-    ],
+  return _EqualHeightFeedRow(
+    cross: cross,
+    start: start,
+    total: total,
+    spacing: spacing,
+    equalHeight: equalH,
+    cardAt: cardAt,
   );
+}
+
+class _EqualHeightFeedRow extends StatefulWidget {
+  const _EqualHeightFeedRow({
+    required this.cross,
+    required this.start,
+    required this.total,
+    required this.spacing,
+    required this.equalHeight,
+    required this.cardAt,
+  });
+
+  final int cross;
+  final int start;
+  final int total;
+  final double spacing;
+  final double? equalHeight;
+  final Widget Function(int index) cardAt;
+
+  @override
+  State<_EqualHeightFeedRow> createState() => _EqualHeightFeedRowState();
+}
+
+class _EqualHeightFeedRowState extends State<_EqualHeightFeedRow> {
+  late List<GlobalKey> _cardKeys;
+  double? _rowHeight;
+
+  int get _visibleCount => (widget.total - widget.start).clamp(0, widget.cross);
+
+  @override
+  void initState() {
+    super.initState();
+    _cardKeys = List<GlobalKey>.generate(_visibleCount, (_) => GlobalKey());
+    _rowHeight = widget.equalHeight;
+  }
+
+  @override
+  void didUpdateWidget(covariant _EqualHeightFeedRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.cross != widget.cross ||
+        oldWidget.start != widget.start ||
+        oldWidget.total != widget.total) {
+      _cardKeys = List<GlobalKey>.generate(_visibleCount, (_) => GlobalKey());
+      _rowHeight = widget.equalHeight;
+    }
+  }
+
+  void _measureRowAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      var tallest = 0.0;
+      for (final key in _cardKeys) {
+        final renderObject = key.currentContext?.findRenderObject();
+        if (renderObject is RenderBox && renderObject.hasSize) {
+          tallest = tallest < renderObject.size.height
+              ? renderObject.size.height
+              : tallest;
+        }
+      }
+      if (tallest <= 0 || (_rowHeight != null && tallest <= _rowHeight! + 1)) {
+        return;
+      }
+      setState(() => _rowHeight = tallest);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _measureRowAfterLayout();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var index = 0; index < _visibleCount; index++) ...[
+          if (index > 0) SizedBox(width: widget.spacing),
+          Expanded(
+            child: SizedBox(
+              height: _rowHeight,
+              child: KeyedSubtree(
+                key: _cardKeys[index],
+                child: widget.cardAt(widget.start + index),
+              ),
+            ),
+          ),
+        ],
+        for (var index = _visibleCount; index < widget.cross; index++) ...[
+          SizedBox(width: widget.spacing),
+          const Expanded(child: SizedBox.shrink()),
+        ],
+      ],
+    );
+  }
 }
 
 List<Widget> _smartDashboardCardRows({
@@ -1909,37 +1990,44 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         if (InstantMarketRequestBadge.showsFor(r.requestPriority)) ...[
           InstantMarketRequestFeatureStrip(isAr: isAr),
         ],
-        if (deletionRequested || requestCompleted) ...[
-          const SizedBox(height: 2),
-          FittedBox(
-            fit: BoxFit.scaleDown,
+        SizedBox(
+          height: 28,
+          child: Align(
             alignment: AlignmentDirectional.centerStart,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: requestCompleted
-                    ? Colors.green.withValues(alpha: 0.12)
-                    : cs.errorContainer.withValues(alpha: 0.72),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                child: Text(
-                  requestCompleted
-                      ? (isAr ? 'تمت الصفقة' : 'Deal completed')
-                      : (isAr ? 'مرفوع طلب حذف' : 'Deletion requested'),
-                  maxLines: 1,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: requestCompleted
-                        ? Colors.green.shade800
-                        : cs.onErrorContainer,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
+            child: (deletionRequested || requestCompleted)
+                ? FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: AlignmentDirectional.centerStart,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: requestCompleted
+                            ? Colors.green.withValues(alpha: 0.12)
+                            : cs.errorContainer.withValues(alpha: 0.72),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          requestCompleted
+                              ? (isAr ? 'تمت الصفقة' : 'Deal completed')
+                              : (isAr ? 'مرفوع طلب حذف' : 'Deletion requested'),
+                          maxLines: 1,
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: requestCompleted
+                                ? Colors.green.shade800
+                                : cs.onErrorContainer,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
-        ],
+        ),
       ],
     );
 
@@ -2171,7 +2259,10 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
       ),
       dataColumn: dataColumn,
       imageColumn: imageStack,
-      underImage: presenceUnderImage,
+      belowCard: SizedBox(
+        height: 28,
+        child: presenceUnderImage ?? const SizedBox.shrink(),
+      ),
       belowMainRow: null,
       footer: requestFooter,
     );
@@ -3402,19 +3493,24 @@ class _RealEstateCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (property.isAuction) ...[
-          SizedBox(height: gapSm),
-          Text(
-            isAr ? 'مزايدة علنية' : 'Open auction',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 12,
-              color: Colors.orange.shade800,
-            ),
+        SizedBox(
+          height: 22,
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: property.isAuction
+                ? Text(
+                    isAr ? 'مزايدة علنية' : 'Open auction',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                      color: Colors.orange.shade800,
+                    ),
+                  )
+                : const SizedBox.shrink(),
           ),
-        ],
+        ),
         const SizedBox(height: 2),
         SizedBox(
           width: double.infinity,
@@ -3887,7 +3983,10 @@ class _RealEstateCard extends StatelessWidget {
         canAddToCart: canAddToCart,
         canBidFromCard: canBidFromCard,
       ),
-      underImage: listingPresenceUnderImage(),
+      belowCard: SizedBox(
+        height: 28,
+        child: listingPresenceUnderImage(),
+      ),
       belowMainRow: dateBelow,
       footer: footer,
     );

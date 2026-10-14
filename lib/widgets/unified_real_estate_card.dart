@@ -22,6 +22,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
   final VoidCallback? onCardDoubleTap;
   final Widget? footer;
   final Widget? belowMainRow;
+  final Widget? belowCard;
 
   /// متصل الآن / آخر ظهور تحت الصورة مباشرة (ليس فوقها).
   final Widget? underImage;
@@ -49,6 +50,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
     this.onCardDoubleTap,
     this.footer,
     this.belowMainRow,
+    this.belowCard,
     this.underImage,
     this.topChrome,
     this.webHoverShell = true,
@@ -156,10 +158,8 @@ class UnifiedRealEstateCard extends StatelessWidget {
       builder: (context, constraints) {
         final h = constraints.maxHeight;
         // ارتفاع 0/ضئيل شائع مع IntrinsicHeight على ويب ويندوز — لا تملأ به البطاقة.
-        final fillHeight = constraints.hasBoundedHeight &&
-            h.isFinite &&
-            h > 48 &&
-            h < 8000;
+        final fillHeight =
+            constraints.hasBoundedHeight && h.isFinite && h > 48 && h < 8000;
         Widget core = face(
           fillHeight: fillHeight,
           maxHeight: fillHeight ? h : null,
@@ -171,7 +171,17 @@ class UnifiedRealEstateCard extends StatelessWidget {
         if (hoverShell) {
           core = _WebHoverScaleShell(child: core);
         }
-        return RepaintBoundary(child: core);
+        final card = RepaintBoundary(child: core);
+        if (belowCard == null) return card;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            card,
+            const SizedBox(height: 4),
+            belowCard!,
+          ],
+        );
       },
     );
   }
@@ -332,6 +342,7 @@ class UnifiedCardSpecRow extends StatelessWidget {
   final String districtText;
   final String regionText;
   final String cityText;
+
   /// مسار قديم: قائمة مسطّحة إن لم تُمرَّر حقول المنطقة/المدينة/الحي.
   final List<String> locationParts;
   final List<String> extraChips;

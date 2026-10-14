@@ -44,6 +44,16 @@ class _AqarMoyasarCreditCardState extends State<AqarMoyasarCreditCard> {
 
   bool get _isAr => widget.locale.languageCode == 'ar';
 
+  String? _validateCardNumber(String number, Localization loc) {
+    final digits = CardUtils.getCleanedNumber(number);
+    if (PaymentService.allowInvalidMoyasarTestCardInput &&
+        digits.length >= 13 &&
+        digits.length <= 19) {
+      return null;
+    }
+    return CardUtils.validateCardNum(number, loc);
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -67,9 +77,9 @@ class _AqarMoyasarCreditCardState extends State<AqarMoyasarCreditCard> {
 
   void _validateAll(Localization loc) {
     _nameError = CardUtils.validateName(_cardData.name, loc);
-    _cardNumberError = CardUtils.validateCardNum(_cardData.number, loc);
-    final expiryShown = '${_cardData.month}/${_cardData.year}'
-        .replaceAll('\u200E', '');
+    _cardNumberError = _validateCardNumber(_cardData.number, loc);
+    final expiryShown =
+        '${_cardData.month}/${_cardData.year}'.replaceAll('\u200E', '');
     _expiryError = CardUtils.validateDate(expiryShown, loc);
     if (_expiryError == null &&
         isCardExpiryInPast(_cardData.month, _cardData.year)) {
@@ -88,8 +98,7 @@ class _AqarMoyasarCreditCardState extends State<AqarMoyasarCreditCard> {
     final parts = CardUtils.getExpiryDate(expiry);
     _cardData.month =
         parts.isNotEmpty ? parts.first.replaceAll('\u200E', '') : '';
-    _cardData.year =
-        parts.length > 1 ? parts[1].replaceAll('\u200E', '') : '';
+    _cardData.year = parts.length > 1 ? parts[1].replaceAll('\u200E', '') : '';
     _cardData.cvc = _cvcCtrl.text;
   }
 
@@ -249,14 +258,11 @@ class _AqarMoyasarCreditCardState extends State<AqarMoyasarCreditCard> {
               _cardData.number = CardUtils.getCleanedNumber(
                 normalizeWesternDigits(v),
               );
-              _cardNumberError = CardUtils.validateCardNum(
-                _cardData.number,
-                loc,
-              );
+              _cardNumberError = _validateCardNumber(_cardData.number, loc);
               setState(() {});
             },
-            inputFormatters: const [
-              CardPanFormatter(maxDigits: 19),
+            inputFormatters: [
+              CardPanFormatter(maxDigits: cardSchemeMaxPanDigits(scheme)),
             ],
           ),
           const SizedBox(height: 12),
@@ -296,9 +302,8 @@ class _AqarMoyasarCreditCardState extends State<AqarMoyasarCreditCard> {
                           _cardData.month,
                           _cardData.year,
                         )) {
-                      _expiryError = _isAr
-                          ? 'تاريخ الانتهاء منتهٍ'
-                          : 'Card has expired';
+                      _expiryError =
+                          _isAr ? 'تاريخ الانتهاء منتهٍ' : 'Card has expired';
                     }
                     setState(() {});
                   },

@@ -47,106 +47,142 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
     final body = AppKeyboardPad(
       extra: 16,
       child: AqarPrimaryScrollScope(
-      child: SafeArea(
-        child: SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Card(
-                color: cs.primaryContainer.withValues(alpha: 0.45),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        isAr ? 'ملخص الدفع' : 'Payment summary',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      if (planName != null && planName!.trim().isNotEmpty)
+        child: SafeArea(
+          child: SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Card(
+                  color: cs.primaryContainer.withValues(alpha: 0.45),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
                         Text(
-                          planName!,
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          isAr ? 'ملخص الدفع' : 'Payment summary',
+                          style:
+                              Theme.of(context).textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (planName != null && planName!.trim().isNotEmpty)
+                          Text(
+                            planName!,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        if (periodLabel != null &&
+                            periodLabel!.trim().isNotEmpty)
+                          Text(
+                            periodLabel!,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              isAr ? 'المبلغ المستحق' : 'Amount due',
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                            AppMoneyLine(
+                              amount: displayAmount,
+                              currencyCode: 'SAR',
+                              isAr: isAr,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w900,
+                                    color: cs.primary,
+                                  ),
+                              maxFractionDigits:
+                                  displayAmount == displayAmount.roundToDouble()
+                                      ? 0
+                                      : 2,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                if (PaymentService.isMoyasarTestMode)
+                  Card(
+                    color: cs.secondaryContainer.withValues(alpha: 0.65),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.science_outlined,
+                            color: cs.onSecondaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              isAr
+                                  ? 'وضع اختبار ميسّر: استخدم بيانات البطاقة التجريبية المعتمدة. لن يتم خصم مبلغ حقيقي.'
+                                  : 'Moyasar test mode: use an accepted sandbox card. No real charge will be made.',
+                              style: TextStyle(
+                                color: cs.onSecondaryContainer,
                                 fontWeight: FontWeight.w700,
                               ),
-                        ),
-                      if (periodLabel != null && periodLabel!.trim().isNotEmpty)
-                        Text(
-                          periodLabel!,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            isAr ? 'المبلغ المستحق' : 'Amount due',
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          AppMoneyLine(
-                            amount: displayAmount,
-                            currencyCode: 'SAR',
-                            isAr: isAr,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w900,
-                                  color: cs.primary,
-                                ),
-                            maxFractionDigits:
-                                displayAmount == displayAmount.roundToDouble()
-                                    ? 0
-                                    : 2,
+                            ),
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              if (configError != null)
-                Card(
-                  color: cs.errorContainer,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Text(
-                      configError,
-                      style: TextStyle(color: cs.onErrorContainer),
                     ),
                   ),
-                )
-              else if (useApplePay)
-                ApplePay(
-                  config: config,
-                  onPaymentResult: (dynamic r) {
-                    if (context.mounted) Navigator.of(context).pop(r);
-                  },
-                )
-              else if (useSamsungPay)
-                SamsungPay(
-                  config: config,
-                  onPaymentResult: (dynamic r) {
-                    if (context.mounted) Navigator.of(context).pop(r);
-                  },
-                )
-              else
-                AqarMoyasarCreditCard(
-                  config: config,
-                  locale: loc,
-                  onPaymentResult: (dynamic r) {
-                    if (context.mounted) Navigator.of(context).pop(r);
-                  },
-                ),
-            ],
+                if (configError != null)
+                  Card(
+                    color: cs.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        configError,
+                        style: TextStyle(color: cs.onErrorContainer),
+                      ),
+                    ),
+                  )
+                else if (useApplePay)
+                  ApplePay(
+                    config: config,
+                    onPaymentResult: (dynamic r) {
+                      if (context.mounted) Navigator.of(context).pop(r);
+                    },
+                  )
+                else if (useSamsungPay)
+                  SamsungPay(
+                    config: config,
+                    onPaymentResult: (dynamic r) {
+                      if (context.mounted) Navigator.of(context).pop(r);
+                    },
+                  )
+                else
+                  AqarMoyasarCreditCard(
+                    config: config,
+                    locale: loc,
+                    onPaymentResult: (dynamic r) {
+                      if (context.mounted) Navigator.of(context).pop(r);
+                    },
+                  ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
     );
 
     final title = useApplePay
@@ -158,17 +194,17 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
 
     return PaymentPopGuard(
       child: Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leading: AppPageCloseButton(
-          isArabic: isAr,
-          onPressed: () => SafeOverlayPop.pop(context),
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(
+            isArabic: isAr,
+            onPressed: () => SafeOverlayPop.pop(context),
+          ),
+          title: Text(title),
         ),
-        title: Text(title),
+        body: body,
       ),
-      body: body,
-    ),
     );
   }
 

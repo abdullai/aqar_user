@@ -31,13 +31,14 @@ class PaymentGatewayMock {
     required int expiryYear,
     required String cvv,
     required String holderName,
+    bool allowInvalidCardNumber = false,
     DateTime? now,
   }) {
     final n = cardNumberDigits.replaceAll(RegExp(r'\D'), '');
     if (n.length < 12 || n.length > 19) {
       return 'invalid_length';
     }
-    if (!_passesLuhn(n)) {
+    if (!allowInvalidCardNumber && !_passesLuhn(n)) {
       return 'luhn';
     }
     final cn = holderName.trim();

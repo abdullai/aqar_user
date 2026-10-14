@@ -103,6 +103,22 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       bodies.add(body);
     }
 
+    add(
+      Tab(
+        icon: const Icon(Icons.inventory_2_outlined),
+        text: t.subscriptionsTabPlans,
+      ),
+      SubscriptionPlansScreen(
+        lang: widget.lang,
+        accountType: widget.accountType,
+        organizationId: widget.organizationId,
+        resumeAfterPurchase: widget.resumeAfterPurchase,
+        billingContext: _billingCtx,
+        billingContextLoading: _billingCtxLoading,
+        marketOfferPlansOnly: widget.marketOfferPlansOnly,
+      ),
+    );
+
     if (ownerDesk) {
       add(
         Tab(
@@ -110,22 +126,6 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
           text: widget.lang.toLowerCase() != 'en' ? 'الطلب الفوري' : 'Instant',
         ),
         OwnerInstantPaymentsHubScreen(lang: widget.lang),
-      );
-    } else {
-      add(
-        Tab(
-          icon: const Icon(Icons.inventory_2_outlined),
-          text: t.subscriptionsTabPlans,
-        ),
-        SubscriptionPlansScreen(
-          lang: widget.lang,
-          accountType: widget.accountType,
-          organizationId: widget.organizationId,
-          resumeAfterPurchase: widget.resumeAfterPurchase,
-          billingContext: _billingCtx,
-          billingContextLoading: _billingCtxLoading,
-          marketOfferPlansOnly: widget.marketOfferPlansOnly,
-        ),
       );
     }
     add(
@@ -319,25 +319,25 @@ class _RenewFalTab extends StatelessWidget {
     final t = AppLocalizations.of(context)!;
     return AqarPrimaryScrollScope(
       child: ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text(t.subscriptionsRenewFalBody),
-        const SizedBox(height: 20),
-        OrgFalAndSeatsPanel(
-          accountType: accountType,
-          organizationId: organizationId,
-          lang: lang,
-          onOpenPlans: onOpenPlans,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          _isAr
-              ? 'تأكد أن اشتراك المنشأة نشط قبل تجديد رمز العرض.'
-              : 'Keep the organization subscription active before renewing the public FAL code.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    ),
+        padding: const EdgeInsets.all(24),
+        children: [
+          Text(t.subscriptionsRenewFalBody),
+          const SizedBox(height: 20),
+          OrgFalAndSeatsPanel(
+            accountType: accountType,
+            organizationId: organizationId,
+            lang: lang,
+            onOpenPlans: onOpenPlans,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _isAr
+                ? 'تأكد أن اشتراك المنشأة نشط قبل تجديد رمز العرض.'
+                : 'Keep the organization subscription active before renewing the public FAL code.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
     );
   }
 }

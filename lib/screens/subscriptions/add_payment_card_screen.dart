@@ -138,9 +138,9 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
       );
       return;
     }
-    final charge =
-        PlatformFeeCatalog.of(context).amountOf(PlatformFeeCatalog.saveCardVerify) ??
-            0;
+    final charge = PlatformFeeCatalog.of(context)
+            .amountOf(PlatformFeeCatalog.saveCardVerify) ??
+        0;
     if (charge <= 0) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -221,8 +221,8 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
               setDefault: _default,
             );
             if (saved['ok'] == true) {
-              final cardId = '${saved['card_id'] ?? saved['row']?['id'] ?? ''}'
-                  .trim();
+              final cardId =
+                  '${saved['card_id'] ?? saved['row']?['id'] ?? ''}'.trim();
               final label = _label.text.trim();
               if (cardId.isNotEmpty && label.isNotEmpty) {
                 await _pay.updateCardLabel(cardId: cardId, label: label);
@@ -315,6 +315,77 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
       return PaymentPopGuard(
         busy: _saving,
         child: Scaffold(
+          resizeToAvoidBottomInset: false,
+          appBar: _closeAppBar(t),
+          body: AppKeyboardPad(
+            extra: 16,
+            child: AqarPrimaryScrollScope(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: AppKeyboardInset.scrollViewPadding(
+                  context,
+                  base: const EdgeInsets.all(24),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Icon(
+                      Icons.credit_card,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      t.subscriptionsAddCardTitle,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (verifyAmount.isNotEmpty)
+                      Text(
+                        _isAr
+                            ? 'يُخصم $verifyAmount للتحقق من البطاقة وحفظها للخصم المباشر لاحقاً.'
+                            : 'A $verifyAmount verification charge saves your card for one-tap payments.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    const SizedBox(height: 20),
+                    CheckboxListTile(
+                      value: _default,
+                      onChanged: (v) => setState(() => _default = v ?? false),
+                      title: Text(t.subscriptionsDefaultCard),
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed:
+                          _saving ? null : () => unawaited(_saveViaMoyasar()),
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.lock_outline),
+                      label: Text(
+                        _isAr ? 'إدخال البطاقة والتحقق' : 'Enter card & verify',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    final scheme = detectCardSchemeFromPan(_num.text);
+    final brand = cardSchemeDisplayLabel(scheme, isAr: _isAr);
+    return PaymentPopGuard(
+      busy: _saving,
+      child: Scaffold(
         resizeToAvoidBottomInset: false,
         appBar: _closeAppBar(t),
         body: AppKeyboardPad(
@@ -324,53 +395,172 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: AppKeyboardInset.scrollViewPadding(
                 context,
-                base: const EdgeInsets.all(24),
+                base: const EdgeInsets.all(16),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(
-                    Icons.credit_card,
-                    size: 48,
-                    color: Theme.of(context).colorScheme.primary,
+                  CreditCardWidget(
+                    cardNumber:
+                        _num.text.isEmpty ? '0000 0000 0000 0000' : _num.text,
+                    expiryDate: _exp.text.isEmpty ? '00/00' : _exp.text,
+                    cardHolderName: _holder.text.isEmpty
+                        ? 'NAME'
+                        : _holder.text.toUpperCase(),
+                    cvvCode: _cvv.text,
+                    showBackView: _cvvBack,
+                    isHolderNameVisible: true,
+                    obscureCardCvv: true,
+                    onCreditCardWidgetChange: (_) {},
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    t.subscriptionsAddCardTitle,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
+                  if (brand.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      brand,
+                      textAlign: TextAlign.center,
+                      textDirection: TextDirection.ltr,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  if (kIsWeb && _capsLockOn)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color:
+                              Theme.of(context).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(8),
                         ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.keyboard_capslock,
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSecondaryContainer,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  t.subscriptionsCapsLockOn,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSecondaryContainer,
+                                      ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  AqarTextField(
+                    controller: _num,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    textDirection: TextDirection.ltr,
+                    inputFormatters: [
+                      CardPanFormatter(
+                          maxDigits: cardSchemeMaxPanDigits(scheme)),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: t.subscriptionsCardNumber,
+                      prefixIcon: const Icon(Icons.credit_card),
+                      suffixIcon: scheme == 'unknown'
+                          ? null
+                          : Padding(
+                              padding: const EdgeInsetsDirectional.only(end: 8),
+                              child: CardBrandMark(scheme: scheme),
+                            ),
+                      suffixIconConstraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 28,
+                      ),
+                    ),
+                    onChanged: (_) => setState(() {}),
                   ),
                   const SizedBox(height: 12),
-                  if (verifyAmount.isNotEmpty)
-                    Text(
-                      _isAr
-                          ? 'يُخصم $verifyAmount للتحقق من البطاقة وحفظها للخصم المباشر لاحقاً.'
-                          : 'A $verifyAmount verification charge saves your card for one-tap payments.',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodyMedium,
+                  AqarTextField(
+                    controller: _holder,
+                    textInputAction: TextInputAction.next,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: InputDecoration(
+                      labelText: t.subscriptionsCardHolder,
+                      prefixIcon: const Icon(Icons.person_outline),
                     ),
-                  const SizedBox(height: 20),
+                    inputFormatters: const [
+                      CardHolderLatinUppercaseFormatter(),
+                    ],
+                    onChanged: _onHolderTextChanged,
+                  ),
+                  const SizedBox(height: 12),
+                  AqarTextField(
+                    controller: _exp,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.next,
+                    textDirection: TextDirection.ltr,
+                    inputFormatters: [
+                      const WesternDigitNormalizer(),
+                      const CardExpirySlashFormatter(),
+                      LengthLimitingTextInputFormatter(7),
+                    ],
+                    decoration: InputDecoration(
+                      labelText: t.subscriptionsExpiry,
+                      hintText: '12/28',
+                      prefixIcon: const Icon(Icons.date_range_outlined),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  Focus(
+                    onFocusChange: (f) => setState(() => _cvvBack = f),
+                    child: AqarTextField(
+                      controller: _cvv,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.next,
+                      textDirection: TextDirection.ltr,
+                      obscureText: true,
+                      inputFormatters: const [
+                        WesternDigitNormalizer(),
+                        DigitsOnlyFormatter(4),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: t.subscriptionsCvv,
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        counterText: '',
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  AqarTextField(
+                    controller: _label,
+                    textInputAction: TextInputAction.done,
+                    decoration: InputDecoration(
+                      labelText: t.subscriptionsCardLabel,
+                      prefixIcon: const Icon(Icons.label_outline),
+                    ),
+                  ),
                   CheckboxListTile(
                     value: _default,
                     onChanged: (v) => setState(() => _default = v ?? false),
                     title: Text(t.subscriptionsDefaultCard),
                   ),
-                  const SizedBox(height: 16),
-                  FilledButton.icon(
-                    onPressed:
-                        _saving ? null : () => unawaited(_saveViaMoyasar()),
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.lock_outline),
-                    label: Text(
-                      _isAr ? 'إدخال البطاقة والتحقق' : 'Enter card & verify',
-                    ),
+                  FilledButton(
+                    onPressed: _saving ? null : () => unawaited(_save()),
+                    child: Text(t.subscriptionsSaveCard),
                   ),
                 ],
               ),
@@ -378,193 +568,6 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
           ),
         ),
       ),
-      );
-    }
-    final scheme = detectCardSchemeFromPan(_num.text);
-    final brand = cardSchemeDisplayLabel(scheme, isAr: _isAr);
-    return PaymentPopGuard(
-      busy: _saving,
-      child: Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: _closeAppBar(t),
-      body: AppKeyboardPad(
-        extra: 16,
-        child: AqarPrimaryScrollScope(
-          child: SingleChildScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: AppKeyboardInset.scrollViewPadding(
-              context,
-              base: const EdgeInsets.all(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                CreditCardWidget(
-                  cardNumber:
-                      _num.text.isEmpty ? '0000 0000 0000 0000' : _num.text,
-                  expiryDate: _exp.text.isEmpty ? '00/00' : _exp.text,
-                  cardHolderName: _holder.text.isEmpty
-                      ? 'NAME'
-                      : _holder.text.toUpperCase(),
-                  cvvCode: _cvv.text,
-                  showBackView: _cvvBack,
-                  isHolderNameVisible: true,
-                  obscureCardCvv: true,
-                  onCreditCardWidgetChange: (_) {},
-                ),
-                if (brand.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    brand,
-                    textAlign: TextAlign.center,
-                    textDirection: TextDirection.ltr,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                ],
-                const SizedBox(height: 20),
-                if (kIsWeb && _capsLockOn)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.keyboard_capslock,
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSecondaryContainer,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                t.subscriptionsCapsLockOn,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .onSecondaryContainer,
-                                    ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                AqarTextField(
-                  controller: _num,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.next,
-                  textDirection: TextDirection.ltr,
-                  inputFormatters: const [
-                    CardPanFormatter(maxDigits: 19),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: t.subscriptionsCardNumber,
-                    prefixIcon: const Icon(Icons.credit_card),
-                    suffixIcon: scheme == 'unknown'
-                        ? null
-                        : Padding(
-                            padding: const EdgeInsetsDirectional.only(end: 8),
-                            child: CardBrandMark(scheme: scheme),
-                          ),
-                    suffixIconConstraints: const BoxConstraints(
-                      minWidth: 40,
-                      minHeight: 28,
-                    ),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                AqarTextField(
-                  controller: _holder,
-                  textInputAction: TextInputAction.next,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    labelText: t.subscriptionsCardHolder,
-                    prefixIcon: const Icon(Icons.person_outline),
-                  ),
-                  inputFormatters: const [
-                    CardHolderLatinUppercaseFormatter(),
-                  ],
-                  onChanged: _onHolderTextChanged,
-                ),
-                const SizedBox(height: 12),
-                AqarTextField(
-                  controller: _exp,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.next,
-                  textDirection: TextDirection.ltr,
-                  inputFormatters: [
-                    const WesternDigitNormalizer(),
-                    const CardExpirySlashFormatter(),
-                    LengthLimitingTextInputFormatter(7),
-                  ],
-                  decoration: InputDecoration(
-                    labelText: t.subscriptionsExpiry,
-                    hintText: '12/28',
-                    prefixIcon: const Icon(Icons.date_range_outlined),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                Focus(
-                  onFocusChange: (f) => setState(() => _cvvBack = f),
-                  child: AqarTextField(
-                    controller: _cvv,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                    textDirection: TextDirection.ltr,
-                    obscureText: true,
-                    inputFormatters: const [
-                      WesternDigitNormalizer(),
-                      DigitsOnlyFormatter(4),
-                    ],
-                    decoration: InputDecoration(
-                      labelText: t.subscriptionsCvv,
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      counterText: '',
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                AqarTextField(
-                  controller: _label,
-                  textInputAction: TextInputAction.done,
-                  decoration: InputDecoration(
-                    labelText: t.subscriptionsCardLabel,
-                    prefixIcon: const Icon(Icons.label_outline),
-                  ),
-                ),
-                CheckboxListTile(
-                  value: _default,
-                  onChanged: (v) => setState(() => _default = v ?? false),
-                  title: Text(t.subscriptionsDefaultCard),
-                ),
-                FilledButton(
-                  onPressed: _saving ? null : () => unawaited(_save()),
-                  child: Text(t.subscriptionsSaveCard),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    ),
     );
   }
 }

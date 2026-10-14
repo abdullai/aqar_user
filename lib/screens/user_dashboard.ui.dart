@@ -109,6 +109,13 @@ class _UserDashboardState extends State<UserDashboard>
   bool _shortsRouteOpen = false;
   bool _resumeQuickBrowseHandled = false;
   bool _reloading = false;
+  int _dashboardAccountEpoch = 0;
+  bool _homeFeedIdentityReady = false;
+  bool _homeCartVisibilityLoaded = false;
+  bool _homeRequestTrackingLoaded = false;
+  bool _homeRequestApplicantCountsLoaded = false;
+  bool _homeHiddenPreferencesLoaded = false;
+  String? _homeFeedIdentityError;
   String? _lastAuthUserId;
 
   // =========================
@@ -291,6 +298,64 @@ class _UserDashboardState extends State<UserDashboard>
   bool get _isArabic => widget.isAr;
   String get _lang => widget.lang;
   String get _uid => _sb.auth.currentUser?.id ?? '';
+
+  bool _isCurrentDashboardAccount(String uid, int epoch) {
+    return mounted && _uid == uid && _dashboardAccountEpoch == epoch;
+  }
+
+  void _tryReleaseHomeFeedIdentity(int accountEpoch) {
+    if (!mounted || accountEpoch != _dashboardAccountEpoch) return;
+    if (_isGuest) {
+      _homeFeedIdentityReady = true;
+      _homeFeedIdentityError = null;
+      _ssHomeFeed(() {});
+      return;
+    }
+    final ready = _accountRoleLoaded &&
+        _homeCartVisibilityLoaded &&
+        _homeRequestTrackingLoaded &&
+        _homeRequestApplicantCountsLoaded &&
+        _homeHiddenPreferencesLoaded;
+    _homeFeedIdentityReady = ready;
+    if (ready) _homeFeedIdentityError = null;
+    _ssHomeFeed(() {});
+  }
+
+  void _failHomeFeedIdentity(int accountEpoch) {
+    if (!mounted ||
+        accountEpoch != _dashboardAccountEpoch ||
+        _homeFeedIdentityReady) {
+      return;
+    }
+    _homeFeedIdentityError = _isArabic
+        ? 'تعذّر التحقق من صفقات وفلاتر هذا الحساب.'
+        : 'Could not verify this account’s deal and feed filters.';
+    _ssHomeFeed(() {});
+  }
+
+  Future<void> _retryHomeFeedIdentity() async {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) return;
+    _homeFeedIdentityError = null;
+    _homeFeedIdentityReady = false;
+    _homeCartVisibilityLoaded = false;
+    _homeRequestTrackingLoaded = false;
+    _homeRequestApplicantCountsLoaded = false;
+    _homeHiddenPreferencesLoaded = false;
+    _ss(() {});
+    await Future.wait([
+      _loadAccountRole(),
+      _loadCart(force: true, silent: true),
+      _loadMyMarketRequestOfferTracking(),
+      _loadMarketHomeRequests(force: true, silent: true),
+      _reloadHiddenFeedPreferences(),
+      _maybeApplyPreferredExploreCity(),
+    ]);
+    if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+    _tryReleaseHomeFeedIdentity(accountEpoch);
+  }
+
   @override
   bool get _isGuest {
     // مصدر الحقيقة: جلسة Supabase. prefs الضيف المتأخرة كانت تُصنّف المستخدم ضيفاً
@@ -1669,23 +1734,9 @@ class _UserDashboardState extends State<UserDashboard>
 
   void _setSortBy(String v) {
     if (!mounted) return;
-
+    if (_sortBy == 'latest') return;
     _markDashboardFeedDirty();
-    setState(() {
-      _sortBy = v;
-      if (v != 'nearest') {
-        _cityFilter = 'all';
-      }
-    });
-
-    if (v == 'nearest' && (_myLat == null || _myLng == null)) {
-      _showNotification(
-        _isArabic ? 'تم تفعيل الأقرب' : 'Nearest enabled',
-        _isArabic
-            ? 'سيتم ترتيب النتائج بالأقرب عند توفر موقعك، ويمكنك أيضًا التحديد من قائمة المدن.'
-            : 'Results will be sorted by nearest when your location is available. You can also narrow it down with the city list.',
-      );
-    }
+    setState(() => _sortBy = 'latest');
   }
 
   void _setTypeFilter(PropertyType? value) {
@@ -2410,14 +2461,25 @@ class _UserDashboardState extends State<UserDashboard>
                                     ),
                               ),
                               if (!myPageScope) ...[
-                                const SizedBox(height: 14),
-                                _SortMenu(
-                                  isAr: _isArabic,
-                                  value: sheet.sort,
-                                  onChanged: (v) {
-                                    setModalState(() => sheet.sort = v);
-                                    _scheduleAdvSearchDraftSave(sheet);
-                                  },
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.schedule_rounded,
+                                      size: 18,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _isArabic
+                                          ? 'الأحدث أولاً'
+                                          : 'Newest first',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                                 const SizedBox(height: 14),
                               ],
@@ -2490,7 +2552,7 @@ class _UserDashboardState extends State<UserDashboard>
                                       ..priceMax = sheet.priceMax
                                       ..areaMin = sheet.areaMin
                                       ..areaMax = sheet.areaMax
-                                      ..sort = sheet.sort
+                                      ..sort = 'latest'
                                       ..region = sheet.region
                                       ..governorate = sheet.governorate
                                       ..district = sheet.district;
@@ -2519,7 +2581,7 @@ class _UserDashboardState extends State<UserDashboard>
                                     _areaMaxFilter = _parseFilterNumber(
                                       sheet.areaMax,
                                     );
-                                    _sortBy = sheet.sort;
+                                    _sortBy = 'latest';
                                     _homeFeedKind = sheet.homeKind;
                                     _homeShowHiddenOnly = sheet.hidden;
                                     _inlineSearchCtrl.text = _searchQuery;
@@ -2747,8 +2809,8 @@ class _UserDashboardState extends State<UserDashboard>
         if (hasCity) {
           _cityFilter = v;
         }
-        // نقطة الخريطة/المدينة من الإعدادات — تُستعمل لترتيب «الأقرب» فقط مع المدينة المختارة.
-        if (hasCity && hasAnchor) {
+        // استخدم نقطة الموقع حتى عند عدم اختيار مدينة نصياً لترتيب الأولوية المحلية.
+        if (hasAnchor) {
           _myLat = lat;
           _myLng = lng;
         }
@@ -2794,11 +2856,19 @@ class _UserDashboardState extends State<UserDashboard>
     if (_didInitialLoad) return;
 
     _didInitialLoad = true;
+    final initialAccountEpoch = _dashboardAccountEpoch;
     _lastAuthUserId = _sb.auth.currentUser?.id;
     _inlineSearchCtrl.text = _searchQuery;
 
     _ss(() {
+      _homeFeedIdentityReady = _isGuest;
+      _homeCartVisibilityLoaded = _isGuest;
+      _homeRequestTrackingLoaded = _isGuest;
+      _homeRequestApplicantCountsLoaded = _isGuest;
+      _homeHiddenPreferencesLoaded = _isGuest;
+      _homeFeedIdentityError = null;
       _errorHome = null;
+      _errorMarketRequests = null;
       _errorMine = null;
       _errorFavorites = null;
       _errorCart = null;
@@ -2858,7 +2928,17 @@ class _UserDashboardState extends State<UserDashboard>
         phase1.add(_loadMineAndOffers(force: true));
         phase1.add(_loadMyMarketSubmissions(force: false));
       }
+      if (!_isGuest) {
+        phase1.addAll([
+          _loadAccountRole(),
+          _loadCart(force: true, silent: true),
+          _loadMyMarketRequestOfferTracking(),
+          _reloadHiddenFeedPreferences(),
+          _maybeApplyPreferredExploreCity(),
+        ]);
+      }
       await Future.wait(phase1);
+      _tryReleaseHomeFeedIdentity(initialAccountEpoch);
       _flushHomeFeedMutationsSync();
       WebBootstrapDiag.log(
         'initial_load',
@@ -2876,14 +2956,13 @@ class _UserDashboardState extends State<UserDashboard>
       if (!_isGuest) {
         Future<void> loadRest() async {
           if (!mounted) return;
-          final roleLoad = _loadAccountRole();
+          final roleLoad =
+              _accountRoleLoaded ? Future<void>.value() : _loadAccountRole();
           final otherLoads = Future.wait([
             _loadNotifications(),
             _refreshAppAudienceOnlineApprox(),
             if (!kIsWeb) _loadMineAndOffers(force: true),
             _loadFavoritesForUid(),
-            _loadCart(force: true),
-            _loadMyMarketRequestOfferTracking(),
           ]);
           await roleLoad;
           if (!mounted) return;
@@ -2948,10 +3027,6 @@ class _UserDashboardState extends State<UserDashboard>
       }
     } catch (e) {
       debugPrint('Initial load error: $e');
-    } finally {
-      if (mounted) {
-        unawaited(_reloadHiddenFeedPreferences());
-      }
     }
   }
 
@@ -3515,11 +3590,6 @@ class _UserDashboardState extends State<UserDashboard>
       WebBootstrapDiag.warn('auth.reload', 'skipped — public session reset');
       return;
     }
-    // ضيف: signedOut بعد مسح JWT لا يجب أن يعيد تحميل اللوحة بالكامل (كان يجمّد).
-    if (_isGuest) {
-      WebBootstrapDiag.warn('auth.reload', 'skipped — guest mode');
-      return;
-    }
     if (event == AuthChangeEvent.tokenRefreshed ||
         event == AuthChangeEvent.userUpdated) {
       return;
@@ -3541,18 +3611,15 @@ class _UserDashboardState extends State<UserDashboard>
     );
     final previousUid = _lastAuthUserId;
     _lastAuthUserId = uid;
+    final reloadEpoch = ++_dashboardAccountEpoch;
 
     if (!mounted) return;
     if (!_didInitialLoad) return;
-    if (_reloading) return;
     _reloading = true;
 
-    // تبديل حساب A→B أو خروج صريح: امسح فوراً حتى لا يومض بيانات الحساب السابق.
-    final switchedAccounts = previousUid != null &&
-        previousUid.isNotEmpty &&
-        uid != null &&
-        uid.isNotEmpty &&
-        previousUid != uid;
+    // يشمل الانتقال من ضيف إلى حساب، وليس فقط A→B.
+    final switchedAccounts =
+        previousUid != uid && uid != null && uid.isNotEmpty;
     final signedOut =
         event == AuthChangeEvent.signedOut || uid == null || uid.isEmpty;
     if (switchedAccounts || signedOut) {
@@ -3564,7 +3631,14 @@ class _UserDashboardState extends State<UserDashboard>
     }
 
     _ss(() {
+      _homeFeedIdentityReady = signedOut;
+      _homeCartVisibilityLoaded = signedOut;
+      _homeRequestTrackingLoaded = signedOut;
+      _homeRequestApplicantCountsLoaded = signedOut;
+      _homeHiddenPreferencesLoaded = signedOut;
+      _homeFeedIdentityError = null;
       _errorHome = null;
+      _errorMarketRequests = null;
       _errorMine = null;
       _errorFavorites = null;
       _errorCart = null;
@@ -3577,6 +3651,45 @@ class _UserDashboardState extends State<UserDashboard>
       _offersLoadingSince = DateTime.now();
 
       if (signedOut || switchedAccounts) {
+        _loadingHome = false;
+        _loadingMarketRequests = false;
+        _loadingMine = false;
+        _loadingOffers = false;
+        _loadingCart = false;
+        _loadingFavorites = false;
+        _loadingNotifications = false;
+        _homeFeedPendingMutations.clear();
+        _homeFeedPaintPending = false;
+        _hiddenPropertyIds = <String>{};
+        _hiddenMarketRequestIds = <String>{};
+        _hiddenCompletedDealPropertyIds = <String>{};
+        _hiddenCartMarketOfferIds = <String>{};
+        _searchQuery = '';
+        _typeFilter = null;
+        _purposeFilter = null;
+        _furnishedFilter = null;
+        _priceMinFilter = null;
+        _priceMaxFilter = null;
+        _areaMinFilter = null;
+        _areaMaxFilter = null;
+        _cityFilter = 'all';
+        _regionFilter = '';
+        _governorateFilter = '';
+        _districtFilter = '';
+        _homeFeedKind = HomeFeedKind.all;
+        _sortBy = 'latest';
+        _paidPriorityOnlyFilter = false;
+        _homeShowHiddenOnly = false;
+        _activeReservationByPropertyId.clear();
+        _tabIndex = 0;
+        _bottomNavTransientIndex = null;
+        _inlineSearchCtrl.clear();
+        _accountType = 'user';
+        _verified = false;
+        _accountRoleLoaded = false;
+        _orgNavResolved = false;
+        _orgNavIsOwner = false;
+        _orgMembershipPermissions = null;
         _favoritesLoaded = true;
         _favoriteIds.clear();
         _favoritesList = <Property>[];
@@ -3602,6 +3715,7 @@ class _UserDashboardState extends State<UserDashboard>
         _webBuiltActiveTab = -1;
         _homeFeedDataEpoch++;
         _marketHomeRequests = <MarketPropertyRequestRow>[];
+        _loadingMyMarketSubmissions = false;
         _myMarketSubmissions = <MarketPropertyRequestRow>[];
         _incomingMarketOffersOnMine = <Map<String, dynamic>>[];
         _homeRequestApplicantCounts = <String, int>{};
@@ -3635,60 +3749,41 @@ class _UserDashboardState extends State<UserDashboard>
 
     // خروج بلا uid: لا تُعد تحميل لوحة مستخدم — اترك الحارس يوجّه للدخول.
     if (signedOut && (uid == null || uid.isEmpty)) {
-      _reloading = false;
+      if (_dashboardAccountEpoch == reloadEpoch) _reloading = false;
       return;
     }
 
     () async {
       try {
-        if (kIsWeb) {
-          await _reloadAll();
-          if (mounted && uid != null && uid.isNotEmpty) {
-            _ensureWorkflowRealtimeChannel();
-          }
-          if (mounted) {
-            _ensureHomeFeedRealtimeChannel();
-          }
-        } else {
-          await _loadCities(includeExtra: false);
-          if (mounted) {
-            setState(() {});
-          }
-
-          await Future.wait([
-            _loadHome(force: true),
-            _loadMarketHomeRequests(force: true),
-          ]);
-
-          if (uid != null && uid.isNotEmpty) {
-            await Future.wait([
-              _loadAccountRole(),
-              _loadNotifications(),
-              _loadFavoritesForUid(),
-              _loadCart(force: true),
-              _loadMineAndOffers(force: true),
-            ]);
-            _ensureSubTabControllers();
-
-            await Future.wait([
-              _loadFavoritesList(force: true),
-              if (_isMarketerRole)
-                _loadMarketerBuckets(force: true)
-              else
-                _loadOwnerRequestsBuckets(force: true),
-            ]);
-          }
-          if (mounted && uid != null && uid.isNotEmpty) {
-            _ensureWorkflowRealtimeChannel();
-          }
-          if (mounted) {
-            _ensureHomeFeedRealtimeChannel();
-          }
+        await Future.wait([
+          _reloadAll(silent: true, deferTabs: false),
+          _loadAccountRole(),
+          _loadMineAndOffers(force: true, silent: true),
+          _reloadHiddenFeedPreferences(),
+          _maybeApplyPreferredExploreCity(),
+          _loadNotifications(),
+          _loadFavoritesForUid(),
+        ]);
+        if (!mounted || _dashboardAccountEpoch != reloadEpoch || uid != _uid) {
+          return;
         }
+        _ensureSubTabControllers();
+        _tryReleaseHomeFeedIdentity(reloadEpoch);
+        await Future.wait([
+          _loadOwnerRequestsBuckets(force: true, silent: true),
+          if (_usesMarketerMyPageHub)
+            _loadMarketerBuckets(force: true, silent: true),
+          if (_favoriteIds.isNotEmpty) _loadFavoritesList(force: true),
+        ]);
+        if (!mounted || _dashboardAccountEpoch != reloadEpoch || uid != _uid) {
+          return;
+        }
+        _ensureWorkflowRealtimeChannel();
+        _ensureHomeFeedRealtimeChannel();
       } catch (e) {
         debugPrint('Auth reload error: $e');
       } finally {
-        _reloading = false;
+        if (_dashboardAccountEpoch == reloadEpoch) _reloading = false;
       }
     }();
   }
@@ -4776,6 +4871,48 @@ class _UserDashboardState extends State<UserDashboard>
           bottom: false,
           child: Column(
             children: [
+              if (_tabIndex == 1)
+                Material(
+                  color: Theme.of(context).colorScheme.surface,
+                  child: SizedBox(
+                    height: 44,
+                    child: Padding(
+                      padding: const EdgeInsetsDirectional.only(
+                        start: 16,
+                        end: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              l10n.navMyAds,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: _isArabic
+                                ? 'إغلاق والعودة للرئيسية'
+                                : 'Close and return home',
+                            onPressed: () {
+                              _inlineSearchCtrl.text = _searchQuery;
+                              _ss(() {
+                                _tabIndex = 0;
+                                _bottomNavTransientIndex = null;
+                              });
+                            },
+                            icon: const Icon(Icons.close_rounded),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               if (_tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2)
                 _buildTopFilters(
                   // الرئيسية فقط: الكل / الطلبات / الإعلانات.
@@ -4889,15 +5026,11 @@ class _UserDashboardState extends State<UserDashboard>
     _nestedDashboardHomeItems = homeItems;
     _nestedDashboardHomeRequests = homeRequestsFiltered;
     _nestedDashboardHomePropertyPoolSize = homePropertyPool.length;
-    final mixedTimeline = _sortBy == 'latest'
-        ? _pinRevealedMixedFirst(
-            buildMixedHomeTimeline(homeItems, homeRequestsFiltered),
-          )
-        : const <HomeMixedFeedEntry>[];
+    final mixedTimeline = _pinRevealedMixedFirst(
+      buildMixedHomeTimeline(homeItems, homeRequestsFiltered),
+    );
     _nestedDashboardMixedEntries = mixedTimeline;
-    final mixedHomeCount = _tabIndex == 0 &&
-            _homeFeedKind == HomeFeedKind.all &&
-            _sortBy == 'latest'
+    final mixedHomeCount = _tabIndex == 0 && _homeFeedKind == HomeFeedKind.all
         ? mixedTimeline.length
         : null;
     final mySubmissionsCount = buildMixedHomeTimeline(
@@ -7159,6 +7292,19 @@ class _UserDashboardState extends State<UserDashboard>
     if (l10n == null) {
       return const SizedBox.shrink();
     }
+    if (!_isGuest && !_homeFeedIdentityReady) {
+      final identityError = _homeFeedIdentityError;
+      if (identityError != null) {
+        return _simpleErrorBox(
+          title: _isArabic
+              ? 'تعذّر تجهيز الرئيسية لهذا الحساب'
+              : 'Could not prepare this account’s home feed',
+          err: identityError,
+          onRetry: () => unawaited(_retryHomeFeedIdentity()),
+        );
+      }
+      return const PropertyCardSkeletonList(count: 6, topPadding: 16);
+    }
     final onboardingScroll =
         _scrollControllerForOnboardingTab(0) ?? _homeFeedScrollCtrl;
     final dealSubBlocked = context.select<AppSubscriptionGate, bool>(
@@ -7290,7 +7436,6 @@ class _UserDashboardState extends State<UserDashboard>
     final listingsEmpty = !showListings || homeItems.isEmpty;
     final requestsEmpty = !showRequests || homeRequestsFiltered.isEmpty;
     final mixedReady = _homeFeedKind == HomeFeedKind.all &&
-        _sortBy == 'latest' &&
         _nestedDashboardMixedEntries.isNotEmpty;
 
     // لا تُظهر «لا توجد بطاقات» إن وُجدت تسليمة مختلطة جاهزة (كان يسبق رسم البطاقات).
@@ -7478,13 +7623,9 @@ class _UserDashboardState extends State<UserDashboard>
       );
     }
 
-    // ويب: لا تستخدم التسليمة المختلطة — كانت تُظهر «النتائج: N» بلا بطاقات.
-    // اعرض شبكة الإعلانات + قسم الطلبات مباشرة (أوثق وأسرع للرسم).
-    final useMergedTimeline = !kIsWeb &&
-        _homeFeedKind == HomeFeedKind.all &&
-        _sortBy == 'latest' &&
-        showListings &&
-        showRequests;
+    // في «الكل»، وحّد الإعلانات والطلبات زمنياً على كل المنصات.
+    final useMergedTimeline =
+        _homeFeedKind == HomeFeedKind.all && showListings && showRequests;
 
     // ابنِ التسليمة دائماً من القوائم الممرَّرة — لا تعتمد على كاش قد يفرغ الإطار.
     var mixedEntries = useMergedTimeline
@@ -7504,9 +7645,35 @@ class _UserDashboardState extends State<UserDashboard>
 
     final showRequestsBelowListings = _homeFeedKind == HomeFeedKind.listings &&
         homeRequestsFiltered.isNotEmpty;
+    final localPaidRequestsAtTop =
+        _homeFeedKind == HomeFeedKind.all && !useMergedTimeline
+            ? homeRequestsFiltered
+                .where(
+                  (request) => InstantMarketRequestFeed.isLocalPaidPriorityPin(
+                    request,
+                    viewerRegion: _regionFilter.trim().isNotEmpty
+                        ? _regionFilter.trim()
+                        : _cityFilter.trim(),
+                    viewerLat: _myLat,
+                    viewerLng: _myLng,
+                  ),
+                )
+                .toList(growable: false)
+            : const <MarketPropertyRequestRow>[];
+    final localPaidRequestIdsAtTop =
+        localPaidRequestsAtTop.map((request) => request.id).toSet();
+    final remainingHomeRequests = localPaidRequestIdsAtTop.isEmpty
+        ? homeRequestsFiltered
+        : homeRequestsFiltered
+            .where((request) => !localPaidRequestIdsAtTop.contains(request.id))
+            .toList(growable: false);
+    final localPaidRequestBlock = localPaidRequestsAtTop.isEmpty
+        ? const SizedBox.shrink()
+        : _buildMarketRequestsHomeSection(localPaidRequestsAtTop);
     final webHomeHasRequestsBlock = !useMergedTimeline &&
         ((showRequests || showRequestsBelowListings) &&
-            homeRequestsFiltered.isNotEmpty);
+            (localPaidRequestsAtTop.isNotEmpty ||
+                remainingHomeRequests.isNotEmpty));
     final gridStandaloneScrollOnWeb = kIsWeb &&
         !useMergedTimeline &&
         showListings &&
@@ -7535,7 +7702,7 @@ class _UserDashboardState extends State<UserDashboard>
               onEditProperty: _editProperty,
               onDeleteProperty: (p) => _requestDeleteProperty(p),
               timeAgo: _timeAgo,
-              canShowCartButton: _cartReservationFeaturesEnabled,
+              canShowCartButton: _isGuest || _cartReservationFeaturesEnabled,
               onPropertyViewsInteraction: (ctx, p, isOwner) {
                 final pubId = (p.publishedByMarketerId ?? '').trim();
                 final isPm = !_isGuest && _uid.isNotEmpty && pubId == _uid;
@@ -7611,7 +7778,8 @@ class _UserDashboardState extends State<UserDashboard>
                   onEditProperty: _editProperty,
                   onDeleteProperty: (p) => _requestDeleteProperty(p),
                   timeAgo: _timeAgo,
-                  canShowCartButton: _cartReservationFeaturesEnabled,
+                  canShowCartButton:
+                      _isGuest || _cartReservationFeaturesEnabled,
                   showListingQuickActions: false,
                   onCopyListingWebLink: _copyListingPublicLink,
                   suppressPublicOwnerIdentityOnCards: true,
@@ -7646,10 +7814,10 @@ class _UserDashboardState extends State<UserDashboard>
     final requestBlock = useMergedTimeline
         ? const SizedBox.shrink()
         : (((!showRequests && !showRequestsBelowListings) ||
-                homeRequestsFiltered.isEmpty)
+                remainingHomeRequests.isEmpty)
             ? const SizedBox.shrink()
             : _buildMarketRequestsHomeSection(
-                homeRequestsFiltered,
+                remainingHomeRequests,
                 alwaysShowSectionTitle: showRequestsBelowListings,
               ));
 
@@ -7804,6 +7972,7 @@ class _UserDashboardState extends State<UserDashboard>
           const SizedBox(height: 8),
         ],
         mixedBlock,
+        localPaidRequestBlock,
         grid,
         requestBlock,
       ],
@@ -7958,7 +8127,8 @@ class _UserDashboardState extends State<UserDashboard>
                       onEditProperty: null,
                       onDeleteProperty: null,
                       timeAgo: _timeAgo,
-                      canShowCartButton: _cartReservationFeaturesEnabled,
+                      canShowCartButton:
+                          _isGuest || _cartReservationFeaturesEnabled,
                       showListingQuickActions: false,
                       suppressPublicOwnerIdentity: true,
                       // الضيف: لا بيانات مسوّق على بطاقة الرئيسية.
@@ -8107,43 +8277,6 @@ class _UserDashboardState extends State<UserDashboard>
 
     return Column(
       children: [
-        Material(
-          color: cs.surface,
-          child: SizedBox(
-            height: 44,
-            child: Padding(
-              padding: const EdgeInsetsDirectional.only(start: 16, end: 6),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      AppLocalizations.of(context)!.navMyAds,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: _isArabic
-                        ? 'إغلاق والعودة للرئيسية'
-                        : 'Close and return home',
-                    onPressed: () {
-                      _inlineSearchCtrl.text = _searchQuery;
-                      _ss(() {
-                        _tabIndex = 0;
-                        _bottomNavTransientIndex = null;
-                      });
-                    },
-                    icon: const Icon(Icons.close_rounded),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
         Material(
           color: cs.surface,
           child: TabBar(

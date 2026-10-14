@@ -58,7 +58,7 @@ class AppSubscriptionGate extends ChangeNotifier {
 
   /// هل نُظهر زر «اشترك» بدل «إتمام الصفقة» على بطاقة طلب في الرئيسية؟
   bool get shouldShowSubscribeInsteadOfDeal {
-    if (isGuest || !isMarketingAccount) return false;
+    if (isGuest) return false;
     if (!loaded) return false;
     return !canCompleteMarketDeal;
   }

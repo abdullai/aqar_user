@@ -4,8 +4,8 @@ import '../utils/geo_helper.dart';
 
 /// ترتيب ظهور الطلبات المدفوعة/المستعجلة في الخلاصات.
 ///
-/// - الطلبات **المدفوعة** (فوري / مستعجل / أولوية) تبقى دائماً فوق غير المدفوعة
-///   والإعلانات في الخليط، حتى لو تاريخ إنشائها أحدث أو أقدم.
+/// - الطلبات **المدفوعة** (فوري / مستعجل / أولوية) تتصدر داخل منطقة المشاهد فقط.
+/// - خارج المنطقة، تُرتب الطلبات المدفوعة زمنياً مثل بقية البطاقات.
 /// - داخل نافذة التعزيز الجغرافي: شارة ومدة متبقية (Chrome).
 /// - عند إتمام الصفقة يُخفى من الرئيسية وينتقل لتبويب الصفقات (عبر صلاحيات العرض).
 class InstantMarketRequestFeed {
@@ -23,10 +23,13 @@ class InstantMarketRequestFeed {
   /// أولوية داخل منطقة المعلن.
   static const int prioritySameRegionBoostMs = 86400000 * 3; // 72h
 
-  /// إزاحة ثابتة تضمن بقاء المدفوع فوق أي إعلان/طلب عادي زمنياً.
+  /// حدّ تقريبي للمنطقة عند توفر الإحداثيات فقط وعدم تحديد مدينة/منطقة.
+  static const double localPriorityRadiusKm = 75;
+
+  /// إزاحة ثابتة لرفع المدفوع المحلي فوق البطاقات العادية زمنياً.
   static const int _paidPinFloorMs = 50 * 365 * 86400000; // ~50 سنة
 
-  /// درجات مدفوعة (فوري / مستعجل / أولوية) — تُثبَّت أعلى الخلاصة دائماً.
+  /// درجات مدفوعة (فوري / مستعجل / أولوية).
   static bool isPaidPriorityPin(MarketPropertyRequestRow row) {
     switch (row.requestPriority) {
       case MarketPropertyRequestPriority.immediate:
@@ -37,6 +40,27 @@ class InstantMarketRequestFeed {
       case MarketPropertyRequestPriority.flexible:
         return false;
     }
+  }
+
+  /// لا تُثبّت الطلبات المدفوعة البعيدة أعلى رئيسية المشاهد.
+  static bool isLocalPaidPriorityPin(
+    MarketPropertyRequestRow row, {
+    String? viewerRegion,
+    double? viewerLat,
+    double? viewerLng,
+  }) {
+    if (!isPaidPriorityPin(row)) return false;
+    final viewer = normalizeLocationToken(viewerRegion ?? '');
+    if (viewer.isNotEmpty &&
+        !const {'all', 'الكل', 'كل المناطق'}.contains(viewer)) {
+      if (isInAdvertiserRegion(row, viewerRegion: viewerRegion)) return true;
+    }
+    final distance = distanceKmTo(
+      row,
+      viewerLat: viewerLat,
+      viewerLng: viewerLng,
+    );
+    return distance != null && distance <= localPriorityRadiusKm;
   }
 
   static Duration get sameRegionBoostDuration =>
@@ -98,8 +122,8 @@ class InstantMarketRequestFeed {
   }) {
     final hasViewer = (viewerRegion ?? '').trim().isNotEmpty;
     // بدون منطقة مشاهِد (شارة البطاقة): نفترض منطقة المعلن حتى تظهر الشارة طوال المدة.
-    final inRegion = !hasViewer ||
-        isInAdvertiserRegion(row, viewerRegion: viewerRegion);
+    final inRegion =
+        !hasViewer || isInAdvertiserRegion(row, viewerRegion: viewerRegion);
     final window = boostWindowFor(row, inRequestRegion: inRegion);
     if (window <= Duration.zero) return false;
     final clock = now ?? DateTime.now();
@@ -115,8 +139,8 @@ class InstantMarketRequestFeed {
     DateTime? now,
   }) {
     final hasViewer = (viewerRegion ?? '').trim().isNotEmpty;
-    final inRegion = !hasViewer ||
-        isInAdvertiserRegion(row, viewerRegion: viewerRegion);
+    final inRegion =
+        !hasViewer || isInAdvertiserRegion(row, viewerRegion: viewerRegion);
     final window = boostWindowFor(row, inRequestRegion: inRegion);
     if (window <= Duration.zero) return null;
     final clock = now ?? DateTime.now();
@@ -157,16 +181,21 @@ class InstantMarketRequestFeed {
     MarketPropertyRequestRow row, {
     String? viewerRegion,
     DateTime? now,
+    double? viewerLat,
+    double? viewerLng,
   }) {
     final base = row.sortTime.millisecondsSinceEpoch;
-    // المدفوع دائماً فوق غير المدفوع والإعلانات — بغض النظر عن تاريخ الطرح.
-    if (isPaidPriorityPin(row)) {
+    if (isLocalPaidPriorityPin(
+      row,
+      viewerRegion: viewerRegion,
+      viewerLat: viewerLat,
+      viewerLng: viewerLng,
+    )) {
       return _paidPinFloorMs +
           (row.requestPriority.feedRank * 86400000 * 30) +
           base;
     }
-    final inRegion =
-        isInAdvertiserRegion(row, viewerRegion: viewerRegion);
+    final inRegion = isInAdvertiserRegion(row, viewerRegion: viewerRegion);
     final window = boostWindowFor(row, inRequestRegion: inRegion);
     if (window <= Duration.zero) {
       // مرن: تأخير خفيف؛ الباقي زمني عادي.
@@ -192,10 +221,7 @@ class InstantMarketRequestFeed {
   }) {
     final lat = row.latitude;
     final lng = row.longitude;
-    if (viewerLat == null ||
-        viewerLng == null ||
-        lat == null ||
-        lng == null) {
+    if (viewerLat == null || viewerLng == null || lat == null || lng == null) {
       return null;
     }
     return GeoHelper.distanceKm(
@@ -213,39 +239,34 @@ class InstantMarketRequestFeed {
     DateTime? now,
     double? viewerLat,
     double? viewerLng,
+    bool pinLocalPaid = true,
   }) {
-    final aPaid = isPaidPriorityPin(a);
-    final bPaid = isPaidPriorityPin(b);
+    final aPaid = pinLocalPaid &&
+        isLocalPaidPriorityPin(
+          a,
+          viewerRegion: viewerRegion,
+          viewerLat: viewerLat,
+          viewerLng: viewerLng,
+        );
+    final bPaid = pinLocalPaid &&
+        isLocalPaidPriorityPin(
+          b,
+          viewerRegion: viewerRegion,
+          viewerLat: viewerLat,
+          viewerLng: viewerLng,
+        );
     if (aPaid != bPaid) return aPaid ? -1 : 1;
 
-    final byRank =
-        b.requestPriority.feedRank.compareTo(a.requestPriority.feedRank);
-    if (byRank != 0) return byRank;
-
-    final sa = sortEpochMs(a, viewerRegion: viewerRegion, now: now);
-    final sb = sortEpochMs(b, viewerRegion: viewerRegion, now: now);
-    final byBoost = sb.compareTo(sa);
-    if (byBoost != 0) return byBoost;
-
-    // نفس المدينة أولاً ثم الأقرب مسافةً.
-    final viewer = (viewerRegion ?? '').trim();
-    if (viewer.isNotEmpty) {
-      final aSame = regionsMatch(a.regionLabel, viewer) ||
-          regionsMatch(a.city, viewer);
-      final bSame = regionsMatch(b.regionLabel, viewer) ||
-          regionsMatch(b.city, viewer);
-      if (aSame != bSame) return aSame ? -1 : 1;
-    }
-
-    final da = distanceKmTo(a, viewerLat: viewerLat, viewerLng: viewerLng);
-    final db = distanceKmTo(b, viewerLat: viewerLat, viewerLng: viewerLng);
-    if (da != null && db != null) {
-      final byDist = da.compareTo(db);
-      if (byDist != 0) return byDist;
-    } else if (da != null) {
-      return -1;
-    } else if (db != null) {
-      return 1;
+    if (aPaid && bPaid) {
+      final byRank =
+          b.requestPriority.feedRank.compareTo(a.requestPriority.feedRank);
+      if (byRank != 0) return byRank;
+      final da = distanceKmTo(a, viewerLat: viewerLat, viewerLng: viewerLng);
+      final db = distanceKmTo(b, viewerLat: viewerLat, viewerLng: viewerLng);
+      if (da != null && db != null) {
+        final byDist = da.compareTo(db);
+        if (byDist != 0) return byDist;
+      }
     }
 
     return b.sortTime.compareTo(a.sortTime);

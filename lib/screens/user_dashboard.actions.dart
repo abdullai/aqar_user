@@ -2444,7 +2444,10 @@ extension _UserDashboardStateActions on _UserDashboardState {
   }
 
   Future<void> _reloadHiddenFeedPreferences() async {
-    if (_isGuest) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) {
+      _homeHiddenPreferencesLoaded = true;
       if (_hiddenPropertyIds.isNotEmpty ||
           _hiddenMarketRequestIds.isNotEmpty ||
           _hiddenCompletedDealPropertyIds.isNotEmpty ||
@@ -2456,6 +2459,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           _hiddenCartMarketOfferIds = {};
         });
       }
+      _tryReleaseHomeFeedIdentity(accountEpoch);
       return;
     }
     final hp = await UserListingPreferencesService.hiddenPropertyIds();
@@ -2463,13 +2467,15 @@ extension _UserDashboardStateActions on _UserDashboardState {
     final hc =
         await UserListingPreferencesService.hiddenCompletedDealPropertyIds();
     final ho = await UserListingPreferencesService.hiddenCartMarketOfferIds();
-    if (!mounted) return;
+    if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
     _ssHomeFeed(() {
       _hiddenPropertyIds = hp;
       _hiddenMarketRequestIds = hr;
       _hiddenCompletedDealPropertyIds = hc;
       _hiddenCartMarketOfferIds = ho;
     });
+    _homeHiddenPreferencesLoaded = true;
+    _tryReleaseHomeFeedIdentity(accountEpoch);
   }
 
   Future<void> _copyPlainToClipboard(

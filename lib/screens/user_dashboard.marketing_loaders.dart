@@ -291,8 +291,11 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
   }
 
   Future<void> _loadAccountRole() async {
-    if (_isGuest) {
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) {
       await AccountRoleCache.clear();
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _ss(() {
         _accountType = 'user';
         _verified = false;
@@ -308,7 +311,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     }
 
     try {
-      final uid = _uid;
+      final uid = requestUid;
 
       final row = await _net<Map<String, dynamic>?>(() async {
         final ap = await _sb
@@ -336,10 +339,10 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         return data;
       }, tag: 'ACCOUNT_ROLE');
 
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       final orgFlags = await _fetchOrgMembershipNavFlags(uid);
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       _ss(() {
         _accountType = (row?['account_type'] ?? 'user').toString().trim();
@@ -373,19 +376,19 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         ),
       );
     } catch (_) {
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       try {
         final fb = await _sb
             .from('users_profiles')
             .select('account_type, verification_status')
-            .eq('user_id', _uid)
+            .eq('user_id', requestUid)
             .maybeSingle();
-        if (!mounted) return;
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         if (fb != null) {
           final vs = (fb['verification_status'] ?? '').toString();
-          final orgFlags = await _fetchOrgMembershipNavFlags(_uid);
-          if (!mounted) return;
+          final orgFlags = await _fetchOrgMembershipNavFlags(requestUid);
+          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
           _ss(() {
             _accountType = (fb['account_type'] ?? 'user').toString().trim();
             if (_accountType.isEmpty) _accountType = 'user';
@@ -404,7 +407,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
           _ensureOrgJoinBadgePolling();
           await AccountRoleCache.save(
             AccountRoleSnapshot(
-              userId: _uid,
+              userId: requestUid,
               accountType: _accountType,
               verified: _verified,
               orgNavResolved: _orgNavResolved,
@@ -445,7 +448,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         ),
       );
     } finally {
-      if (kIsWeb && mounted && !_accountRoleLoaded) {
+      if (kIsWeb &&
+          _isCurrentDashboardAccount(requestUid, accountEpoch) &&
+          !_accountRoleLoaded) {
         _ss(() {
           _accountRoleLoaded = true;
           _orgNavResolved = true;
@@ -1040,7 +1045,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     bool silent = false,
   }) async {
     // المسوّق/المكتب قد يكون أيضاً مالك طلبات طرحها للسوق — نحمّل دلاء المالك دائماً لغير الضيوف.
-    if (_isGuest) return;
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty) return;
 
     _ensureSubTabControllers();
 
@@ -1048,8 +1055,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
     var hadOwnerCache = false;
     if (!force) {
       try {
-        final uid = _sb.auth.currentUser?.id ?? '';
-        final cached = MarketingBucketsCache.instance.readOwner(uid);
+        final cached = MarketingBucketsCache.instance.readOwner(requestUid);
         if (cached != null) {
           hadOwnerCache = true;
           _ss(() {
@@ -1060,7 +1066,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       } catch (_) {}
     } else {
       MarketingBucketsCache.instance.invalidateOwner(
-        _sb.auth.currentUser?.id ?? '',
+        requestUid,
       );
     }
 
@@ -1075,8 +1081,9 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       try {
         await MarketingFlowService(_sb).syncExpiredContractCreationWindows();
       } catch (_) {}
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
-      final uid = _uid;
+      final uid = requestUid;
 
       final data = await _net<List<Map<String, dynamic>>>(() async {
         // ويب: حدّ أعلى يمنع عاصفة البطاقات بعد الدخول (كل صلاحيات المالك الفرد).
@@ -1350,7 +1357,7 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
         }
       }
 
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       _ss(() {
         _ownerListingRequests = merged;
@@ -1368,10 +1375,12 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       // الخطأ يحفظ القائمة كما هي (لا نعرض رسالة بصرية حاليًا)؛ نحرص فقط على
       // رفع علم التحميل في `finally` كي لا تبقى التبويبات على «جارٍ التحميل…».
     } finally {
-      if (!silent) {
-        _loadingOwnerRequests = false;
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
+        if (!silent) {
+          _loadingOwnerRequests = false;
+        }
+        _ss(() {});
       }
-      if (mounted) _ss(() {});
     }
   }
 
@@ -2439,9 +2448,11 @@ preview_property_id
 
   Future<void> _refreshMarketerSameOrgUserIds() async {
     final uid = _uid.trim();
+    final accountEpoch = _dashboardAccountEpoch;
     final ids = <String>{if (uid.isNotEmpty) uid};
     try {
       final ctx = await OrgTeamService(_sb).myOrgContext();
+      if (!_isCurrentDashboardAccount(uid, accountEpoch)) return;
       final orgId = (ctx?['org_id'] ?? '').toString().trim();
       if (orgId.isNotEmpty && orgId != 'null') {
         final members = await _sb
@@ -2449,6 +2460,7 @@ preview_property_id
             .select('user_id')
             .eq('org_id', orgId)
             .inFilter('status', const ['active', 'accepted', 'approved']);
+        if (!_isCurrentDashboardAccount(uid, accountEpoch)) return;
         for (final m in _asMapList(members)) {
           final id = (m['user_id'] ?? '').toString().trim();
           if (id.isNotEmpty) ids.add(id);
@@ -2458,11 +2470,14 @@ preview_property_id
             .select('owner_user_id')
             .eq('id', orgId)
             .maybeSingle();
+        if (!_isCurrentDashboardAccount(uid, accountEpoch)) return;
         final owner = (unit?['owner_user_id'] ?? '').toString().trim();
         if (owner.isNotEmpty) ids.add(owner);
       }
     } catch (_) {}
-    _marketerSameOrgUserIds = ids;
+    if (_isCurrentDashboardAccount(uid, accountEpoch)) {
+      _marketerSameOrgUserIds = ids;
+    }
   }
 
   // =========================================================
@@ -2472,7 +2487,9 @@ preview_property_id
     bool force = false,
     bool silent = false,
   }) async {
-    if (_isGuest || !_usesMarketerMyPageHub) return;
+    final requestUid = _uid;
+    final accountEpoch = _dashboardAccountEpoch;
+    if (_isGuest || requestUid.isEmpty || !_usesMarketerMyPageHub) return;
 
     _ensureSubTabControllers();
 
@@ -2480,8 +2497,7 @@ preview_property_id
     var hadCache = false;
     if (!force) {
       try {
-        final uid = _sb.auth.currentUser?.id ?? '';
-        final cached = MarketingBucketsCache.instance.readMarketer(uid);
+        final cached = MarketingBucketsCache.instance.readMarketer(requestUid);
         if (cached != null) {
           hadCache = true;
           _ss(() {
@@ -2496,23 +2512,30 @@ preview_property_id
       } catch (_) {}
     } else {
       MarketingBucketsCache.instance.invalidateMarketer(
-        _sb.auth.currentUser?.id ?? '',
+        requestUid,
       );
     }
 
     try {
-      _marketerHiddenMarketRequestIds =
-          await MarketerMarketVisibilityPrefs.hiddenRequestIds(_uid);
+      final hiddenIds =
+          await MarketerMarketVisibilityPrefs.hiddenRequestIds(requestUid);
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      _marketerHiddenMarketRequestIds = hiddenIds;
     } catch (_) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _marketerHiddenMarketRequestIds = {};
     }
     await _refreshMarketerSameOrgUserIds();
+    if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       final raw =
-          prefs.getStringList('mk_dismissed_cancelled_v1_$_uid') ?? const [];
+          prefs.getStringList('mk_dismissed_cancelled_v1_$requestUid') ??
+              const [];
       _marketerDismissedCancelledIds = raw.toSet();
     } catch (_) {
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _marketerDismissedCancelledIds = {};
     }
 
@@ -2538,7 +2561,7 @@ preview_property_id
         } catch (_) {}
       })());
 
-      final uid = _uid;
+      final uid = requestUid;
 
       Future<List<Map<String, dynamic>>> loadPermitsSafe() async {
         try {
@@ -2881,7 +2904,7 @@ preview_property_id
       }).toList();
 
       // ويب: ارسم دعوات/عروض فوراً قبل جلب سوق waiting_marketers (غالباً الأبطأ).
-      if (kIsWeb && mounted) {
+      if (kIsWeb && _isCurrentDashboardAccount(requestUid, accountEpoch)) {
         final offersEarly = enrichedOffers
             .where((o) => !_marketerOfferExcludedFromOffersList(o, reqMap, uid))
             .toList();
@@ -2909,6 +2932,7 @@ preview_property_id
         } catch (_) {}
         // أعد التنفس للواجهة قبل إكمال الإثراء الثقيل.
         await Future<void>.delayed(Duration.zero);
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       }
 
       // سوق مفتوح: طلبات waiting_marketers لغير صاحب الطلب (مسوّق/مكتب/مؤسسة/شركة).
@@ -3196,7 +3220,7 @@ preview_property_id
         _backfillOwnerRequestCoverImagesFromDb(enrichedPublished),
       ]);
 
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       final invitesForMarketer = invitesVisible
           .where((r) => _isMarketerOpenMarketEligibleRow(r, uid: uid))
@@ -3233,7 +3257,7 @@ preview_property_id
         );
       } catch (_) {}
     } catch (e) {
-      if (!mounted) return;
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       if (kDebugMode) {
         print('[DBG][MARKETING_LOAD] ERR $e');
@@ -3243,7 +3267,7 @@ preview_property_id
         _errorMarketing = e.toString();
       });
     } finally {
-      if (mounted) {
+      if (_isCurrentDashboardAccount(requestUid, accountEpoch)) {
         _ss(() {
           if (!silent) {
             _loadingMarketing = false;

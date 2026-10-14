@@ -154,7 +154,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     // مالك فرد بلا طلبات تسويق: بطاقات إعلاناته مباشرة (المنشورة ليست في التبويبات السبعة).
-    if (kIsWeb && !_hasOwnerRequestsData) {
+    if (kIsWeb && !_hasOwnerRequestsData && !_loadingOwnerRequests) {
       return _buildOwnerDirectMineCards(cs, myItems);
     }
 
@@ -264,54 +264,41 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           separatorBuilder: (_, __) => const SizedBox(height: spacing),
           itemBuilder: (context, row) {
             final start = row * cross;
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var j = 0; j < cross; j++) ...[
-                  if (j > 0) const SizedBox(width: spacing),
-                  Expanded(
-                    child: start + j < items.length
-                        ? Builder(
-                            builder: (context) {
-                              final p = items[start + j];
-                              final isOwner = p.ownerId == _uid;
-                              return _wrapEqualGridCardHeight(
-                                height: equalH,
-                                child: _RealEstateCard(
-                                  property: p,
-                                  isOwner: isOwner,
-                                  isAr: ar,
-                                  bankColor: _brandPrimary,
-                                  favorite: !_isGuest && _isFav(p.id),
-                                  onToggleFav: () => _toggleFav(p.id),
-                                  onOpenDetails: () => _openDetails(p),
-                                  activeCartHoldsCount:
-                                      _activeReservationHoldCount(p.id),
-                                  isReserved: _isReservedByAnyone(p.id),
-                                  reservedUntil: _reservedUntil(p.id),
-                                  reservedByName: _reservedByName(p.id),
-                                  onAddToCart: null,
-                                  currentUserId: _uid.isEmpty ? 'guest' : _uid,
-                                  showEditDelete: isOwner,
-                                  onEditProperty:
-                                      isOwner ? () => _editProperty(p) : null,
-                                  onDeleteProperty: isOwner
-                                      ? () => _requestDeleteProperty(p)
-                                      : null,
-                                  timeAgo: _timeAgo,
-                                  canShowCartButton: false,
-                                  showListingQuickActions: true,
-                                  onCopyListingWebLink: _copyListingPublicLink,
-                                  suppressPublicOwnerIdentity: true,
-                                  preferStaticPrimaryImage: true,
-                                ),
-                              );
-                            },
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ],
-              ],
+            return _listingFeedCardsRow(
+              cross: cross,
+              start: start,
+              total: items.length,
+              spacing: spacing,
+              equalH: equalH,
+              cardAt: (index) {
+                final p = items[index];
+                final isOwner = p.ownerId == _uid;
+                return _RealEstateCard(
+                  property: p,
+                  isOwner: isOwner,
+                  isAr: ar,
+                  bankColor: _brandPrimary,
+                  favorite: !_isGuest && _isFav(p.id),
+                  onToggleFav: () => _toggleFav(p.id),
+                  onOpenDetails: () => _openDetails(p),
+                  activeCartHoldsCount: _activeReservationHoldCount(p.id),
+                  isReserved: _isReservedByAnyone(p.id),
+                  reservedUntil: _reservedUntil(p.id),
+                  reservedByName: _reservedByName(p.id),
+                  onAddToCart: null,
+                  currentUserId: _uid.isEmpty ? 'guest' : _uid,
+                  showEditDelete: isOwner,
+                  onEditProperty: isOwner ? () => _editProperty(p) : null,
+                  onDeleteProperty:
+                      isOwner ? () => _requestDeleteProperty(p) : null,
+                  timeAgo: _timeAgo,
+                  canShowCartButton: false,
+                  showListingQuickActions: true,
+                  onCopyListingWebLink: _copyListingPublicLink,
+                  suppressPublicOwnerIdentity: true,
+                  preferStaticPrimaryImage: true,
+                );
+              },
             );
           },
         );
@@ -1477,28 +1464,17 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final tiles = <Widget>[];
     for (var start = 0; start < requestRows.length; start += cross) {
       if (tiles.isNotEmpty) tiles.add(const SizedBox(height: spacing));
-      final end = start + cross > requestRows.length
-          ? requestRows.length
-          : start + cross;
-      final chunk = requestRows.sublist(start, end);
       tiles.add(
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var j = 0; j < cross; j++) ...[
-                if (j > 0) const SizedBox(width: spacing),
-                Expanded(
-                  child: j < chunk.length
-                      ? _buildOwnerListingRequestCard(
-                          chunk[j],
-                          horizontalLayout: true,
-                          ownerMarketingFeedScope: ownerMarketingFeedScope,
-                        )
-                      : const SizedBox.shrink(),
-                ),
-              ],
-            ],
+        _listingFeedCardsRow(
+          cross: cross,
+          start: start,
+          total: requestRows.length,
+          spacing: spacing,
+          equalH: null,
+          cardAt: (index) => _buildOwnerListingRequestCard(
+            requestRows[index],
+            horizontalLayout: true,
+            ownerMarketingFeedScope: ownerMarketingFeedScope,
           ),
         ),
       );
@@ -1521,23 +1497,14 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final tiles = <Widget>[];
     for (var start = 0; start < items.length; start += cross) {
       if (tiles.isNotEmpty) tiles.add(const SizedBox(height: spacing));
-      final end = start + cross > items.length ? items.length : start + cross;
-      final chunk = items.sublist(start, end);
       tiles.add(
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (var j = 0; j < cross; j++) ...[
-                if (j > 0) const SizedBox(width: spacing),
-                Expanded(
-                  child: j < chunk.length
-                      ? _buildOwnerPublishedPropertyCard(chunk[j])
-                      : const SizedBox.shrink(),
-                ),
-              ],
-            ],
-          ),
+        _listingFeedCardsRow(
+          cross: cross,
+          start: start,
+          total: items.length,
+          spacing: spacing,
+          equalH: null,
+          cardAt: (index) => _buildOwnerPublishedPropertyCard(items[index]),
         ),
       );
     }
@@ -2143,6 +2110,24 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       if (merged['preview_price'] == null && linkedProperty.price > 0) {
         merged['preview_price'] = linkedProperty.price;
       }
+      if (merged['preview_area'] == null && linkedProperty.area > 0) {
+        merged['preview_area'] = linkedProperty.area;
+      }
+      if ((merged['preview_city'] ?? '').toString().trim().isEmpty) {
+        merged['preview_city'] =
+            PropertyListingDisplay.cityLine(linkedProperty);
+      }
+      if ((merged['preview_district'] ?? '').toString().trim().isEmpty) {
+        merged['preview_district'] = linkedProperty.location;
+      }
+      if ((merged['preview_region'] ?? '').toString().trim().isEmpty) {
+        merged['preview_region'] =
+            linkedProperty.region ?? linkedProperty.province ?? '';
+      }
+      if ((merged['preview_type'] ?? '').toString().trim().isEmpty) {
+        merged['preview_type'] = linkedProperty.listingTypeKey;
+      }
+      merged['preview_bedrooms'] ??= linkedProperty.bedrooms;
       final pc = merged['preview_currency']?.toString().trim();
       if (pc == null || pc.isEmpty) {
         merged['preview_currency'] = linkedProperty.currency;
@@ -2197,9 +2182,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             : (purposeLabel.trim().isNotEmpty
                 ? purposeLabel
                 : (widget.isAr ? 'طلب تسويق' : 'Marketing request')));
-    final locationText = linkedProperty != null
-        ? _propertyCardLocationLine(linkedProperty)
-        : _marketingLocationText(merged);
     final statusWire = wfCtx.stage.wireValue;
     final statusLabel =
         _trMarketingStatus(statusWire, ownerHubPerspective: true);
@@ -2267,11 +2249,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             subtitleRaw != purposeLabel)
         ? subtitleRaw
         : '';
-    final areaRaw = merged['preview_area'];
-    final area =
-        areaRaw is num ? areaRaw.toDouble() : double.tryParse('$areaRaw') ?? 0;
-    final areaIc = PropertyListingDisplay.areaIconForRequestRow(merged);
-
     final ownerTrackTap = !_isGuest && !_isMarketerRole && id.isNotEmpty
         ? () => _showOwnerRequestActivityDialog(merged)
         : null;
@@ -2294,6 +2271,23 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       onReofferHelpTap:
           relisted ? () => _showMarketRelistReasonDialog(merged) : null,
     );
+    final peerPresenceId = _hubPeerUserIdFromRow(
+      merged,
+      marketerView: false,
+    );
+    final showPeerPresence =
+        _hubMayShowPeerPresenceOnCard(merged, marketerView: false) &&
+            peerPresenceId.isNotEmpty &&
+            peerPresenceId != _uid;
+    final Widget? presenceBelowCard = showPeerPresence
+        ? SizedBox(
+            height: 28,
+            child: _hubPeerPresenceStrip(
+              merged,
+              marketerView: false,
+            ),
+          )
+        : null;
 
     final dataColumn = Padding(
       padding: const EdgeInsetsDirectional.only(end: 4),
@@ -2301,34 +2295,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          LayoutBuilder(
-            builder: (_, c) {
-              final mw =
-                  c.maxWidth.isFinite && c.maxWidth > 0 ? c.maxWidth : 9999.0;
-              return FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: AlignmentDirectional.centerStart,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: mw),
-                  child: Text(
-                    title,
-                    maxLines: 2,
-                    softWrap: true,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                      height: 1.25,
-                      color: Color(0xFF041D18),
-                      fontFamily: 'Cairo',
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
           if (purposeLabel.trim().isNotEmpty &&
-              purposeLabel.trim() != title.trim()) ...[
+              !_hubTextLooksLikeDuplicateTitle(purposeLabel, title)) ...[
             const SizedBox(height: 6),
             Align(
               alignment: AlignmentDirectional.centerStart,
@@ -2375,6 +2343,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               ],
             ),
           ],
+          _hubUnifiedCardSpecRow(merged, cs),
           if (!_isMarketerRole &&
               wfCtx.isPublishedPublic &&
               _ownerRowShowsApprovedMarketerContact(merged) &&
@@ -2459,80 +2428,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               },
             ),
           ],
-          if (locationText.trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.place_outlined, size: 15, color: cs.primary),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (_, c) {
-                      final mw = c.maxWidth.isFinite && c.maxWidth > 0
-                          ? c.maxWidth
-                          : 9999.0;
-                      return FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: AlignmentDirectional.centerStart,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: mw),
-                          child: Text(
-                            locationText,
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 12.5,
-                              color: cs.onSurface,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (area > 0) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(areaIc, size: 15, color: purposeAccent),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (_, c) {
-                      final mw = c.maxWidth.isFinite && c.maxWidth > 0
-                          ? c.maxWidth
-                          : 9999.0;
-                      return FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: AlignmentDirectional.centerStart,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: mw),
-                          child: Text(
-                            widget.isAr
-                                ? '${AppMoney.formatNumber(area, isAr: false, maxFractionDigits: 0)} م²'
-                                : '${AppMoney.formatNumber(area, isAr: false, maxFractionDigits: 0)} m²',
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 12,
-                              color: cs.onSurface,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ],
           if (deedNo.isNotEmpty) ...[
             const SizedBox(height: 6),
             Row(
@@ -2578,12 +2473,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               ],
             ),
           ],
-          const SizedBox(height: 4),
-          _hubPeerPresenceStrip(
-            merged,
-            marketerView: false,
-            showMarketerName: true,
-          ),
           _hubRequestCreatedDateTimeRow(merged, cs),
           if (subtitle.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -2645,70 +2534,74 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ),
           ],
           const SizedBox(height: 8),
-          LayoutBuilder(
-            builder: (_, c) {
-              final mw =
-                  c.maxWidth.isFinite && c.maxWidth > 0 ? c.maxWidth : 9999.0;
-              return FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: AlignmentDirectional.centerStart,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: mw),
-                  child: Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                              color: statusColor.withValues(alpha: 0.35)),
-                        ),
-                        child: Text(
-                          statusLabel,
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 12,
-                            color: statusColor,
-                          ),
-                        ),
-                      ),
-                      if (merged['_owner_has_repeat_pending_offer'] == true)
+          SizedBox(
+            height: 30,
+            child: LayoutBuilder(
+              builder: (_, c) {
+                final mw =
+                    c.maxWidth.isFinite && c.maxWidth > 0 ? c.maxWidth : 9999.0;
+                return FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: AlignmentDirectional.centerStart,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: mw),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: cs.tertiaryContainer.withValues(alpha: 0.55),
+                            color: statusColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(999),
                             border: Border.all(
-                                color: cs.tertiary.withValues(alpha: 0.35)),
+                                color: statusColor.withValues(alpha: 0.35)),
                           ),
                           child: Text(
-                            widget.isAr
-                                ? 'عرض للمرة الثانية'
-                                : 'Second-time offer',
+                            statusLabel,
                             maxLines: 1,
                             softWrap: false,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontWeight: FontWeight.w900,
-                              fontSize: 11.5,
-                              color: cs.onTertiaryContainer,
+                              fontSize: 12,
+                              color: statusColor,
                             ),
                           ),
                         ),
-                    ],
+                        if (merged['_owner_has_repeat_pending_offer'] == true)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color:
+                                  cs.tertiaryContainer.withValues(alpha: 0.55),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                  color: cs.tertiary.withValues(alpha: 0.35)),
+                            ),
+                            child: Text(
+                              widget.isAr
+                                  ? 'عرض للمرة الثانية'
+                                  : 'Second-time offer',
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 11.5,
+                                color: cs.onTertiaryContainer,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -2742,10 +2635,22 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           isAr: widget.isAr,
           kind: UnifiedCardKind.request,
           onCardTap: onOpenDetails,
+          topChrome: UnifiedCardTitleChrome(
+            isAr: widget.isAr,
+            title: title,
+            leading: [
+              UnifiedCardKindPill(
+                label: widget.isAr ? 'طلبك' : 'Your request',
+                background: const Color(0xFFEA580C),
+                foreground: Colors.white,
+              ),
+            ],
+          ),
           belowMainRow: belowMainRow,
           cardRadius: _kHomeCardRadius,
           dataColumn: dataColumn,
           imageColumn: imageColumn,
+          belowCard: presenceBelowCard,
           // صورة بعرض كامل أعلى البيانات — نسبة أقصر لتفادي فراغ رأسي.
           fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
           heroAspectRatio: _homeListingHeroAspectRatio(context),
@@ -3551,6 +3456,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       districtText = _normalizeAdministrativeLocationPart(
         _marketingDistrictFromPayload(r),
       );
+    }
+    if (areaText.isEmpty &&
+        roomsText.isEmpty &&
+        regionText.isEmpty &&
+        cityText.isEmpty &&
+        districtText.isEmpty) {
+      return const SizedBox.shrink();
     }
     final purposeAccent = PropertyListingDisplay.accentForRequestRow(r);
     return Padding(
@@ -7402,28 +7314,17 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         final rows = <Widget>[];
         for (var start = 0; start < requestRows.length; start += cross) {
           if (rows.isNotEmpty) rows.add(const SizedBox(height: spacing));
-          final end = start + cross > requestRows.length
-              ? requestRows.length
-              : start + cross;
-          final chunk = requestRows.sublist(start, end);
           rows.add(
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (var j = 0; j < cross; j++) ...[
-                    if (j > 0) const SizedBox(width: spacing),
-                    Expanded(
-                      child: j < chunk.length
-                          ? _buildOwnerListingRequestCard(
-                              chunk[j],
-                              horizontalLayout: true,
-                              ownerMarketingFeedScope: ownerMarketingFeedScope,
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ],
-                ],
+            _listingFeedCardsRow(
+              cross: cross,
+              start: start,
+              total: requestRows.length,
+              spacing: spacing,
+              equalH: null,
+              cardAt: (index) => _buildOwnerListingRequestCard(
+                requestRows[index],
+                horizontalLayout: true,
+                ownerMarketingFeedScope: ownerMarketingFeedScope,
               ),
             ),
           );
@@ -9570,23 +9471,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             if (rowChildren.isNotEmpty) {
               rowChildren.add(const SizedBox(height: spacing));
             }
-            final end =
-                start + cross > items.length ? items.length : start + cross;
             rowChildren.add(
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var j = 0; j < cross; j++) ...[
-                      if (j > 0) const SizedBox(width: spacing),
-                      Expanded(
-                        child: start + j < end
-                            ? _buildOwnerPublishedPropertyCard(items[start + j])
-                            : const SizedBox.shrink(),
-                      ),
-                    ],
-                  ],
-                ),
+              _listingFeedCardsRow(
+                cross: cross,
+                start: start,
+                total: items.length,
+                spacing: spacing,
+                equalH: null,
+                cardAt: (index) =>
+                    _buildOwnerPublishedPropertyCard(items[index]),
               ),
             );
           }

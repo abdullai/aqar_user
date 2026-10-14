@@ -248,7 +248,7 @@ class SubscriptionService {
   ///   • المكتب / الوكالة   → الاحترافية (2) + الشامل (4) + توب-أب طلبات (21/22/23)
   ///   • المؤسسة            → الاحترافية (2) + الشامل (4) + توب-أب طلبات (21/22/23)
   ///   • الشركة             → المميّزة (3) + الشامل (4)
-  ///   • المالك الفردي / المستخدم العام → لا باقات (مجاني + طلب فوري من الكتالوج)
+  ///   • المالك الفردي / المستخدم العام → الشريك (1) + الشامل (14) + توب-أب صفقات (11/12/13)
   static List<int> allowedSortOrdersForAccountType(String? accountType) {
     if (AppRoleHelper.isPhotographerAccount(accountType)) {
       return const [31, 32, 33];
@@ -265,7 +265,7 @@ class SubscriptionService {
         return const [3, 4, 11, 12, 13];
       case AppRoleKind.ownerIndividual:
       case AppRoleKind.publicUser:
-        return const [];
+        return const [1, 14, 11, 12, 13];
     }
   }
 
