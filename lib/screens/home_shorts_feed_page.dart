@@ -115,6 +115,12 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
 
   void _togglePause() => setState(() => _paused = !_paused);
 
+  bool _requireLoginIfGuest() {
+    if (!widget.isGuest) return false;
+    widget.onRequireLogin?.call();
+    return true;
+  }
+
   Future<void> _stopShortsAndPop() async {
     ShortsFeedPrefs.markUserClosed();
     unawaited(ShortsFeedPrefs.setSessionActive(false));
@@ -287,6 +293,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
           : (item.property?.currency ?? 'SAR');
 
   Future<void> _openItem(HomeShortsItem item) async {
+    if (_requireLoginIfGuest()) return;
     final p = item.property;
     final r = item.request;
     if (p != null) {
@@ -797,7 +804,10 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
         color: selected ? Colors.white : Colors.black.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(999),
         child: InkWell(
-          onTap: onTap,
+          onTap: () {
+            if (_requireLoginIfGuest()) return;
+            onTap();
+          },
           borderRadius: BorderRadius.circular(999),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -820,7 +830,10 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
       color: on ? Colors.white : Colors.black54,
       borderRadius: BorderRadius.circular(999),
       child: InkWell(
-        onTap: tap,
+        onTap: () {
+          if (_requireLoginIfGuest()) return;
+          tap();
+        },
         borderRadius: BorderRadius.circular(999),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -857,7 +870,10 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
               shape: const CircleBorder(),
               child: InkWell(
                 customBorder: const CircleBorder(),
-                onTap: onTap,
+                onTap: () {
+                  if (_requireLoginIfGuest()) return;
+                  onTap();
+                },
                 child: Padding(
                   padding: EdgeInsets.all(pad),
                   child: Icon(icon, color: color, size: iconSize),

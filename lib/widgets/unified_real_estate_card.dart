@@ -331,9 +331,11 @@ class UnifiedCardSpecRow extends StatelessWidget {
     required this.roomsText,
     this.districtText = '',
     this.regionText = '',
+    this.governorateText = '',
     this.cityText = '',
     this.locationParts = const [],
     this.extraChips = const [],
+    this.onCopyLocation,
   });
 
   final Color bankColor;
@@ -341,11 +343,13 @@ class UnifiedCardSpecRow extends StatelessWidget {
   final String roomsText;
   final String districtText;
   final String regionText;
+  final String governorateText;
   final String cityText;
 
   /// مسار قديم: قائمة مسطّحة إن لم تُمرَّر حقول المنطقة/المدينة/الحي.
   final List<String> locationParts;
   final List<String> extraChips;
+  final VoidCallback? onCopyLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -363,162 +367,82 @@ class UnifiedCardSpecRow extends StatelessWidget {
     );
 
     final region = LocaleContent.forUi(regionText.trim(), isAr: isAr);
+    final governorate = LocaleContent.forUi(governorateText.trim(), isAr: isAr);
     final city = LocaleContent.forUi(cityText.trim(), isAr: isAr);
     final district = LocaleContent.forUi(districtText.trim(), isAr: isAr);
-    if (district.isEmpty &&
-        region.isEmpty &&
-        city.isEmpty &&
-        locationParts.isNotEmpty) {
-      final locs = LocaleContent.parts(locationParts, isAr: isAr);
-      return _legacyJoinedRow(
-        locs: locs,
-        iconFg: iconFg,
-        style: style,
-        isAr: isAr,
-      );
-    }
+    final seenLocations = <String>{};
+    final location = <String>[
+      region,
+      governorate,
+      city,
+      district,
+      ...LocaleContent.parts(locationParts, isAr: isAr),
+    ]
+        .where((part) => part.trim().isNotEmpty)
+        .where((part) => seenLocations.add(part.trim().toLowerCase()))
+        .join(isAr ? '، ' : ', ');
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxW = constraints.maxWidth;
-        List<({IconData icon, String text})> buildChips({
-          required bool withDistrict,
-          required bool withRooms,
-          required bool withExtras,
-        }) {
-          final out = <({IconData icon, String text})>[];
-          final area = areaText.trim();
-          if (area.isNotEmpty) {
-            out.add((
-              icon: Icons.square_foot_outlined,
-              text: LocaleContent.forUi(area, isAr: isAr),
-            ));
-          }
-          if (region.isNotEmpty) {
-            out.add((icon: Icons.public_outlined, text: region));
-          }
-          if (city.isNotEmpty) {
-            out.add((icon: Icons.location_city_outlined, text: city));
-          }
-          if (withDistrict && district.isNotEmpty) {
-            out.add((icon: Icons.home_work_outlined, text: district));
-          }
-          if (withRooms && roomsText.trim().isNotEmpty) {
-            out.add((
+        final chips = <({IconData icon, String text})>[
+          (
+            icon: Icons.square_foot_outlined,
+            text: LocaleContent.forUi(
+              areaText.trim().isEmpty ? '—' : areaText.trim(),
+              isAr: isAr,
+            ),
+          ),
+          (
+            icon: Icons.place_outlined,
+            text: location.isEmpty ? '—' : location,
+          ),
+          if (roomsText.trim().isNotEmpty)
+            (
               icon: Icons.bed_outlined,
               text: LocaleContent.forUi(roomsText.trim(), isAr: isAr),
-            ));
-          }
-          if (withExtras) {
-            for (final e in extraChips) {
-              final t = e.trim();
-              if (t.isEmpty) continue;
-              out.add((
+            ),
+          for (final extra in extraChips)
+            if (extra.trim().isNotEmpty)
+              (
                 icon: Icons.circle,
-                text: LocaleContent.forUi(t, isAr: isAr),
-              ));
-            }
-          }
-          return out;
-        }
-
-        final variants = <List<({IconData icon, String text})>>[
-          buildChips(withDistrict: true, withRooms: true, withExtras: true),
-          buildChips(withDistrict: false, withRooms: true, withExtras: true),
-          buildChips(withDistrict: false, withRooms: true, withExtras: false),
-          buildChips(withDistrict: false, withRooms: false, withExtras: false),
-          [
-            if (areaText.trim().isNotEmpty)
-              (
-                icon: Icons.square_foot_outlined,
-                text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
+                text: LocaleContent.forUi(extra.trim(), isAr: isAr),
               ),
-            if (region.isNotEmpty) (icon: Icons.public_outlined, text: region),
-            if (city.isNotEmpty)
-              (icon: Icons.location_city_outlined, text: city),
-          ],
-          [
-            if (areaText.trim().isNotEmpty)
-              (
-                icon: Icons.square_foot_outlined,
-                text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
-              ),
-            if (city.isNotEmpty)
-              (icon: Icons.location_city_outlined, text: city)
-            else if (region.isNotEmpty)
-              (icon: Icons.public_outlined, text: region),
-          ],
-          [
-            if (areaText.trim().isNotEmpty)
-              (
-                icon: Icons.square_foot_outlined,
-                text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
-              ),
-          ],
         ];
-
-        List<({IconData icon, String text})> chosen = const [];
-        for (final v in variants) {
-          if (v.isEmpty) continue;
-          if (!maxW.isFinite ||
-              maxW <= 0 ||
-              _measureChips(v, style) <= maxW + 0.5) {
-            chosen = v;
-            break;
-          }
-        }
-        if (chosen.isEmpty) return const SizedBox.shrink();
-        return _chipsRow(chosen, iconFg: iconFg, style: style);
+        return FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth:
+                  constraints.maxWidth.isFinite && constraints.maxWidth > 0
+                      ? constraints.maxWidth
+                      : 9999,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _chipsRow(chips, iconFg: iconFg, style: style),
+                if (onCopyLocation != null)
+                  IconButton(
+                    tooltip: isAr ? 'نسخ الموقع' : 'Copy location',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
+                    ),
+                    padding: EdgeInsets.zero,
+                    iconSize: 15,
+                    onPressed: onCopyLocation,
+                    icon: Icon(Icons.copy_rounded, color: iconFg),
+                  )
+                else
+                  const SizedBox(width: 28, height: 28),
+              ],
+            ),
+          ),
+        );
       },
     );
-  }
-
-  Widget _legacyJoinedRow({
-    required List<String> locs,
-    required Color iconFg,
-    required TextStyle style,
-    required bool isAr,
-  }) {
-    final chips = <({IconData icon, String text})>[];
-    if (areaText.trim().isNotEmpty) {
-      chips.add((
-        icon: Icons.square_foot_outlined,
-        text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
-      ));
-    }
-    if (locs.isNotEmpty) {
-      chips.add((icon: Icons.place_outlined, text: locs.join(' · ')));
-    }
-    if (roomsText.trim().isNotEmpty) {
-      chips.add((
-        icon: Icons.bed_outlined,
-        text: LocaleContent.forUi(roomsText.trim(), isAr: isAr),
-      ));
-    }
-    if (chips.isEmpty) return const SizedBox.shrink();
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: AlignmentDirectional.centerStart,
-      child: _chipsRow(chips, iconFg: iconFg, style: style),
-    );
-  }
-
-  static double _measureChips(
-    List<({IconData icon, String text})> chips,
-    TextStyle style,
-  ) {
-    var w = 0.0;
-    for (var i = 0; i < chips.length; i++) {
-      if (i > 0) w += 14;
-      w += 15 + 3;
-      final tp = TextPainter(
-        text: TextSpan(text: chips[i].text, style: style),
-        textDirection: TextDirection.ltr,
-        maxLines: 1,
-      )..layout();
-      w += tp.width;
-    }
-    return w;
   }
 
   static Widget _chipsRow(

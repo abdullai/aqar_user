@@ -24,6 +24,7 @@ class CatalogEstateCardBody extends StatelessWidget {
     required this.title,
     this.locationParts = const [],
     this.regionText = '',
+    this.governorateText = '',
     this.cityText = '',
     this.districtText = '',
     this.areaText = '',
@@ -39,6 +40,7 @@ class CatalogEstateCardBody extends StatelessWidget {
     this.publishedAt,
     this.timeAgo,
     this.dateCaption,
+    this.onCopyLocation,
     this.presence,
     this.leadingExtras = const [],
     this.trailingExtras = const [],
@@ -48,6 +50,7 @@ class CatalogEstateCardBody extends StatelessWidget {
   final String title;
   final List<String> locationParts;
   final String regionText;
+  final String governorateText;
   final String cityText;
   final String districtText;
   final String areaText;
@@ -63,6 +66,7 @@ class CatalogEstateCardBody extends StatelessWidget {
   final DateTime? publishedAt;
   final String Function(DateTime, bool)? timeAgo;
   final String? dateCaption;
+  final VoidCallback? onCopyLocation;
   final Widget? presence;
   final List<Widget> leadingExtras;
   final List<Widget> trailingExtras;
@@ -98,18 +102,11 @@ class CatalogEstateCardBody extends StatelessWidget {
             ),
           ),
         ...leadingExtras,
-        if (locationParts.isNotEmpty ||
-            areaText.trim().isNotEmpty ||
-            regionText.trim().isNotEmpty ||
-            cityText.trim().isNotEmpty ||
-            districtText.trim().isNotEmpty ||
-            roomsText.trim().isNotEmpty) ...[
-          const SizedBox(height: _gap),
-          SizedBox(
-            width: double.infinity,
-            child: _specChipsLine(context, cs: cs, muted: muted),
-          ),
-        ],
+        const SizedBox(height: _gap),
+        SizedBox(
+          width: double.infinity,
+          child: _specChipsLine(context, cs: cs, muted: muted),
+        ),
         if (publisherCaption.trim().isNotEmpty ||
             publisherName.trim().isNotEmpty) ...[
           const SizedBox(height: _gap),
@@ -140,10 +137,8 @@ class CatalogEstateCardBody extends StatelessWidget {
                           final name = publisherName.trim();
                           if (cap.isNotEmpty && name.isNotEmpty) {
                             final head = cap.endsWith(':') ? cap : '$cap:';
-                            return LocaleContent.forUi(
-                              '$head $name',
-                              isAr: isAr,
-                            );
+                            return LocaleContent.forUi('$head $name',
+                                isAr: isAr);
                           }
                           if (name.isNotEmpty) {
                             return LocaleContent.forUi(name, isAr: isAr);
@@ -214,56 +209,36 @@ class CatalogEstateCardBody extends StatelessWidget {
                       );
                     },
               );
-              if (amount != null && constraints.maxWidth >= 440) {
+              if (amount == null) {
+                return Row(children: [Expanded(child: idText), copyButton]);
+              }
+              if (constraints.maxWidth >= 380) {
                 return Row(
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: Row(
-                        children: [
-                          Expanded(child: idText),
-                          copyButton,
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 3,
-                      child: Align(
-                        alignment: AlignmentDirectional.centerEnd,
-                        child: amount!,
-                      ),
-                    ),
+                    Expanded(child: idText),
+                    copyButton,
+                    const SizedBox(width: 6),
+                    Flexible(
+                        child: Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: amount!,
+                    )),
                   ],
                 );
               }
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        idText,
-                        if (amount != null) ...[
-                          const SizedBox(height: 3),
-                          amount!,
-                        ],
-                      ],
-                    ),
-                  ),
-                  copyButton,
+                  Row(children: [Expanded(child: idText), copyButton]),
+                  const SizedBox(height: 3),
+                  amount!,
                 ],
               );
             },
           ),
         ] else if (amount != null) ...[
           const SizedBox(height: 3),
-          SizedBox(
-            width: double.infinity,
-            child: amount!,
-          ),
+          SizedBox(width: double.infinity, child: amount!),
         ],
         if (publishedAt != null) ...[
           const SizedBox(height: _gap),
@@ -314,118 +289,76 @@ class CatalogEstateCardBody extends StatelessWidget {
       chips.add((icon: icon, text: t));
     }
 
-    add(Icons.square_foot_outlined, areaText);
-    if (regionText.trim().isNotEmpty ||
-        cityText.trim().isNotEmpty ||
-        districtText.trim().isNotEmpty) {
-      add(Icons.public_outlined, regionText);
-      add(Icons.location_city_outlined, cityText);
-      add(Icons.home_work_outlined, districtText);
-    } else {
-      for (final p in LocaleContent.parts(locationParts, isAr: isAr)) {
-        add(Icons.place_outlined, p);
-      }
-    }
+    add(Icons.square_foot_outlined, areaText.trim().isEmpty ? '—' : areaText);
+    final locations = <String>[
+      regionText,
+      governorateText,
+      cityText,
+      districtText,
+      ...locationParts,
+    ]
+        .map((part) => LocaleContent.forUi(part.trim(), isAr: isAr))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    final seenLocations = <String>{};
+    final locationLine = locations
+        .where((part) => seenLocations.add(part.toLowerCase()))
+        .join(isAr ? '، ' : ', ');
+    add(Icons.place_outlined, locationLine.isEmpty ? '—' : locationLine);
     add(Icons.bed_outlined, roomsText);
-    if (chips.isEmpty) return const SizedBox.shrink();
-
     return LayoutBuilder(
       builder: (context, constraints) {
-        final maxW = constraints.maxWidth;
-        List<({IconData icon, String text})> pick() {
-          if (!maxW.isFinite || maxW <= 0) return chips;
-          final style = TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-            fontFamily: 'Cairo',
-            color: muted,
-          );
-          double measure(List<({IconData icon, String text})> list) {
-            var w = 0.0;
-            for (var i = 0; i < list.length; i++) {
-              if (i > 0) w += 14;
-              w += 18;
-              final tp = TextPainter(
-                text: TextSpan(text: list[i].text, style: style),
-                textDirection: TextDirection.ltr,
-                maxLines: 1,
-              )..layout();
-              w += tp.width;
-            }
-            return w;
-          }
-
-          final variants = <List<({IconData icon, String text})>>[
-            chips,
-            [
-              for (final c in chips)
-                if (c.icon != Icons.home_work_outlined) c,
-            ],
-            [
-              for (final c in chips)
-                if (c.icon != Icons.home_work_outlined &&
-                    c.icon != Icons.bed_outlined)
-                  c,
-            ],
-            [
-              for (final c in chips)
-                if (c.icon == Icons.square_foot_outlined ||
-                    c.icon == Icons.public_outlined ||
-                    c.icon == Icons.location_city_outlined)
-                  c,
-            ],
-            [
-              for (final c in chips)
-                if (c.icon == Icons.square_foot_outlined ||
-                    c.icon == Icons.location_city_outlined ||
-                    c.icon == Icons.public_outlined)
-                  c,
-            ].take(2).toList(),
-            [
-              for (final c in chips)
-                if (c.icon == Icons.square_foot_outlined) c,
-            ],
-          ];
-          for (final v in variants) {
-            if (v.isEmpty) continue;
-            if (measure(v) <= maxW + 0.5) return v;
-          }
-          return chips.take(1).toList();
-        }
-
-        final chosen = pick();
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var i = 0; i < chosen.length; i++) ...[
-              if (i > 0)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 5),
-                  child: Text(
-                    '·',
-                    style: TextStyle(
-                      color: muted.withValues(alpha: 0.55),
-                      fontWeight: FontWeight.w800,
+        return FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: AlignmentDirectional.centerStart,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var i = 0; i < chips.length; i++) ...[
+                if (i > 0)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    child: Text(
+                      '·',
+                      style: TextStyle(
+                        color: muted.withValues(alpha: 0.55),
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
+                Icon(chips[i].icon, size: 15, color: cs.primary),
+                const SizedBox(width: 3),
+                Text(
+                  chips[i].text,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: muted,
+                    fontFamily: 'Cairo',
+                    fontSize: 12,
+                    height: 1.15,
+                  ),
                 ),
-              Icon(chosen[i].icon, size: 15, color: cs.primary),
-              const SizedBox(width: 3),
-              Text(
-                chosen[i].text,
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  color: muted,
-                  fontFamily: 'Cairo',
-                  fontSize: 12,
-                  height: 1.15,
-                ),
-              ),
+              ],
+              if (onCopyLocation != null)
+                IconButton(
+                  tooltip: isAr ? 'نسخ الموقع' : 'Copy location',
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 28,
+                    height: 28,
+                  ),
+                  padding: EdgeInsets.zero,
+                  iconSize: 15,
+                  onPressed: onCopyLocation,
+                  icon: Icon(Icons.copy_rounded, color: cs.primary),
+                )
+              else
+                const SizedBox(width: 28, height: 28),
             ],
-          ],
+          ),
         );
       },
     );

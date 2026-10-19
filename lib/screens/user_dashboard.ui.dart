@@ -107,6 +107,7 @@ class _UserDashboardState extends State<UserDashboard>
   Timer? _homeFeedRealtimeDebounce;
   bool _didInitialLoad = false;
   bool _shortsRouteOpen = false;
+  bool _dashboardMapRouteOpen = false;
   bool _resumeQuickBrowseHandled = false;
   bool _reloading = false;
   int _dashboardAccountEpoch = 0;
@@ -604,6 +605,20 @@ class _UserDashboardState extends State<UserDashboard>
   ScrollController? _scrollControllerForOnboardingTab(int tabIndex) {
     if (!_showDashboardOnboarding || _tabIndex != tabIndex) return null;
     return _dashboardOnboardingBackdropScroll;
+  }
+
+  void _scrollHomeFeedToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final controller =
+          _scrollControllerForOnboardingTab(0) ?? _homeFeedScrollCtrl;
+      if (!controller.hasClients) return;
+      unawaited(controller.animateTo(
+        0,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeOutCubic,
+      ));
+    });
   }
 
   void _onOnboardingBackdropPointerScroll(double dy) {
@@ -5586,7 +5601,7 @@ class _UserDashboardState extends State<UserDashboard>
     final navIndex = _bottomNavSelectedIndex(bottomSlots);
     final useSideNav = AppLayout.useDashboardSideNavigation(context);
     final bodyNavCanPop = _dashboardCanGoBack();
-    final myPageFullscreen = _tabIndex == 1 && !bodyNavCanPop;
+    final isMyPageRoot = _tabIndex == 1 && !bodyNavCanPop;
 
     Widget buildBottomNavBar(BoxConstraints constraints) {
       final w = constraints.maxWidth;
@@ -5647,7 +5662,7 @@ class _UserDashboardState extends State<UserDashboard>
       backgroundColor: cs.surface,
       // صفحة فوق التبويب: شريط الترحيب يُخفى حتى لا يتكرر X بجانب الاسم.
       // الصفحة الداخلية تعرض إغلاقاً واحداً بجانب عنوانها.
-      appBar: bodyNavCanPop || myPageFullscreen
+      appBar: bodyNavCanPop
           ? null
           : AppBar(
               elevation: 0,
@@ -5709,7 +5724,7 @@ class _UserDashboardState extends State<UserDashboard>
           ),
         ),
       ),
-      floatingActionButton: _showBottomNavAddSlot && !myPageFullscreen
+      floatingActionButton: _showBottomNavAddSlot && !isMyPageRoot
           ? Builder(
               builder: (fabCtx) {
                 final isWide = MediaQuery.sizeOf(fabCtx).width >= 720;
@@ -5763,14 +5778,15 @@ class _UserDashboardState extends State<UserDashboard>
               },
             )
           : null,
-      bottomNavigationBar: useSideNav || bodyNavCanPop || myPageFullscreen
+      bottomNavigationBar: (useSideNav || bodyNavCanPop) &&
+              !_dashboardMapRouteOpen
           ? null
           : LayoutBuilder(
               builder: (context, constraints) => buildBottomNavBar(constraints),
             ),
     );
 
-    final mainChrome = useSideNav && !bodyNavCanPop && !myPageFullscreen
+    final mainChrome = useSideNav && !bodyNavCanPop
         ? Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -6083,6 +6099,7 @@ class _UserDashboardState extends State<UserDashboard>
     switch (slots[i]) {
       case DashboardBottomSlot.home:
         goTab(0);
+        _scrollHomeFeedToTop();
         break;
       case DashboardBottomSlot.shorts:
         unawaited(_openHomeShortsFeed(slotsIndex: i));
@@ -7643,8 +7660,6 @@ class _UserDashboardState extends State<UserDashboard>
     }
     mixedEntries = _pinRevealedMixedFirst(mixedEntries);
 
-    final showRequestsBelowListings = _homeFeedKind == HomeFeedKind.listings &&
-        homeRequestsFiltered.isNotEmpty;
     final localPaidRequestsAtTop =
         _homeFeedKind == HomeFeedKind.all && !useMergedTimeline
             ? homeRequestsFiltered
@@ -7671,7 +7686,7 @@ class _UserDashboardState extends State<UserDashboard>
         ? const SizedBox.shrink()
         : _buildMarketRequestsHomeSection(localPaidRequestsAtTop);
     final webHomeHasRequestsBlock = !useMergedTimeline &&
-        ((showRequests || showRequestsBelowListings) &&
+        (showRequests &&
             (localPaidRequestsAtTop.isNotEmpty ||
                 remainingHomeRequests.isNotEmpty));
     final gridStandaloneScrollOnWeb = kIsWeb &&
@@ -7813,13 +7828,9 @@ class _UserDashboardState extends State<UserDashboard>
 
     final requestBlock = useMergedTimeline
         ? const SizedBox.shrink()
-        : (((!showRequests && !showRequestsBelowListings) ||
-                remainingHomeRequests.isEmpty)
+        : ((!showRequests || remainingHomeRequests.isEmpty)
             ? const SizedBox.shrink()
-            : _buildMarketRequestsHomeSection(
-                remainingHomeRequests,
-                alwaysShowSectionTitle: showRequestsBelowListings,
-              ));
+            : _buildMarketRequestsHomeSection(remainingHomeRequests));
 
     final listingsHiddenByFilters = showListings &&
         homeItems.isEmpty &&
@@ -8025,7 +8036,7 @@ class _UserDashboardState extends State<UserDashboard>
     // ويب: ارسم البطاقات مباشرة — تجنّب LayoutBuilder/grid shrink داخل ListView.
     if (kIsWeb) {
       var paintListings = showListings ? homeItems : const <Property>[];
-      var paintRequests = (showRequests || showRequestsBelowListings)
+      var paintRequests = showRequests
           ? homeRequestsFiltered
           : const <MarketPropertyRequestRow>[];
       if (paintListings.isEmpty &&
@@ -8863,6 +8874,7 @@ class _UserDashboardState extends State<UserDashboard>
             suppressPublicOwnerIdentity: true,
             showRegulatoryIdentityOnCard: false,
             omitMarketingLicenseEntriesOnCard: true,
+            showMyPageCardMetrics: true,
             onShareListingFromCard: () => _shareListingFromCard(p),
             preferStaticPrimaryImage: true,
             relaxTextTruncation: true,

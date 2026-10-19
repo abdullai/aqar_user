@@ -880,6 +880,45 @@ abstract final class PropertyListingDisplay {
     );
   }
 
+  static String compactRequestTitleForRow(
+    Map<String, dynamic> row,
+    bool isAr,
+  ) {
+    final purpose = switch (purposeFilterKeyForRow(row)) {
+      'rent' => isAr ? 'للإيجار' : 'for rent',
+      'auction' => isAr ? 'للمزاد' : 'for auction',
+      'investment' => isAr ? 'للاستثمار' : 'for investment',
+      _ => isAr ? 'للبيع' : 'for sale',
+    };
+    return composeListingHeadline(
+      typeLabel: typeLabelForRequestRow(row, isAr),
+      purposeBit: purpose,
+      city: '',
+      isAr: isAr,
+      asRequest: true,
+      includeCity: false,
+    );
+  }
+
+  static String compactListingTitleForRow(
+    Map<String, dynamic> row,
+    bool isAr,
+  ) {
+    final purpose = switch (purposeFilterKeyForRow(row)) {
+      'rent' => isAr ? 'للإيجار' : 'for rent',
+      'auction' => isAr ? 'للمزاد' : 'for auction',
+      'investment' => isAr ? 'للاستثمار' : 'for investment',
+      _ => isAr ? 'للبيع' : 'for sale',
+    };
+    return composeListingHeadline(
+      typeLabel: typeLabelForRequestRow(row, isAr),
+      purposeBit: purpose,
+      city: '',
+      isAr: isAr,
+      includeCity: false,
+    );
+  }
+
   /// ينظّف لاحقات النوع المكررة مثل «فيلا للبيع - ارض».
   static String sanitizeListingTitle(
     String raw, {

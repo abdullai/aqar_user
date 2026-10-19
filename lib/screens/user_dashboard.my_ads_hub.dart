@@ -130,11 +130,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     }
 
-    // مثل النسخة الاحتياطية: مسوّق/مكتب/… → تبويبات صفحتي (وليس قائمة مسطّحة).
-    // ويب يستخدم AnimatedBuilder لتبويب واحد/إطار (سرعة) مع الإبقاء على TabBar.
-    final bool isMarketer = _isMarketingAccountType;
-
-    if (isMarketer) {
+    if (_isMarketingAccountType) {
       _ensureSubTabControllers();
       final ctrl = _marketerTabsCtrl;
       if (ctrl == null) {
@@ -1320,8 +1316,25 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     required String emptyText,
     int ownerMarketingFeedScope = 0,
   }) {
-    final hasReq = requestRows.isNotEmpty;
-    final hasProp = propertyItems.isNotEmpty;
+    final seenRequestIds = <String>{};
+    final uniqueRequestRows = requestRows.where((row) {
+      final id = (row['request_id'] ?? row['id'] ?? '').toString().trim();
+      return id.isEmpty || seenRequestIds.add(id);
+    }).toList();
+    final linkedPropertyIds = uniqueRequestRows
+        .map((row) => (row['preview_property_id'] ??
+                row['property_id'] ??
+                row['linked_property_id'] ??
+                '')
+            .toString()
+            .trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+    final uniquePropertyItems = propertyItems
+        .where((property) => !linkedPropertyIds.contains(property.id))
+        .toList();
+    final hasReq = uniqueRequestRows.isNotEmpty;
+    final hasProp = uniquePropertyItems.isNotEmpty;
 
     if (_loadingOwnerRequests && !hasReq && !hasProp) {
       return _buildTabLoadingState(
@@ -1380,7 +1393,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               ),
             ),
             ..._ownerMarketingRequestTiles(
-              requestRows,
+              uniqueRequestRows,
               ownerMarketingFeedScope: ownerMarketingFeedScope,
             ),
           ],
@@ -1408,7 +1421,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
       children.addAll(
         _ownerMarketingRequestTiles(
-          requestRows,
+          uniqueRequestRows,
           ownerMarketingFeedScope: ownerMarketingFeedScope,
         ),
       );
@@ -1430,7 +1443,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ),
         ),
       );
-      children.addAll(_ownerPublishedPropertyTiles(propertyItems));
+      children.addAll(_ownerPublishedPropertyTiles(uniquePropertyItems));
     }
     return _myAdsHubScrollWrap(
       ListView(
@@ -2158,30 +2171,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (urls.isNotEmpty && !coverVid) {
       coverVid = false;
     }
-    final purposeLabel =
-        PropertyListingDisplay.purposeLabelForRequestRow(merged, widget.isAr);
-    final requestTitle = PropertyListingDisplay.sanitizeListingTitle(
-      (merged['request_title'] ?? merged['title'] ?? '').toString().trim(),
-      typeLabel: PropertyListingDisplay.typeLabelForRequestRow(
-        merged,
-        widget.isAr,
-      ),
-      isAr: widget.isAr,
+    final title = PropertyListingDisplay.compactRequestTitleForRow(
+      merged,
+      widget.isAr,
     );
-    final propTitle = linkedProperty != null
-        ? PropertyListingDisplay.displayListingTitle(
-            linkedProperty,
-            widget.isAr,
-          )
-        : '';
-    // الموضوع أولاً — من بيانات العقار نفسه عند الربط، بدون لاحقات نوع متعارضة.
-    final title = propTitle.isNotEmpty
-        ? propTitle
-        : (requestTitle.isNotEmpty
-            ? requestTitle
-            : (purposeLabel.trim().isNotEmpty
-                ? purposeLabel
-                : (widget.isAr ? 'طلب تسويق' : 'Marketing request')));
     final statusWire = wfCtx.stage.wireValue;
     final statusLabel =
         _trMarketingStatus(statusWire, ownerHubPerspective: true);
@@ -2193,11 +2186,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             .trim();
     final typeAccent =
         typeKey.isEmpty ? cs.primary : PropertyTypeCatalog.accentFor(typeKey);
-    final typeLabel = typeKey.isEmpty
-        ? ''
-        : (widget.isAr
-            ? _trPropertyTypeAr(typeKey)
-            : _trPropertyTypeEn(typeKey));
     final deedNo = _hubDeedNumberFromRow(merged, linkedProperty);
     final deedDate = _hubDeedDateFromRow(merged, linkedProperty);
     final roundNo = (merged['marketing_round'] as num?)?.toInt() ?? 1;
@@ -2241,14 +2229,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         reqTen != null && listingTen != null && reqTen == listingTen;
     final showMarketingRequestRow =
         lrReqPub.isNotEmpty && !duplicateListingAndRequestTen;
-    final subtitleRaw =
-        (merged['request_title'] ?? merged['title'] ?? '').toString().trim();
-    // لا تكرر الموضوع إن كان هو العنوان الرئيسي.
-    final subtitle = (subtitleRaw.isNotEmpty &&
-            !_hubTextLooksLikeDuplicateTitle(subtitleRaw, title) &&
-            subtitleRaw != purposeLabel)
-        ? subtitleRaw
-        : '';
     final ownerTrackTap = !_isGuest && !_isMarketerRole && id.isNotEmpty
         ? () => _showOwnerRequestActivityDialog(merged)
         : null;
@@ -2270,79 +2250,14 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       reofferReason: relistTooltip,
       onReofferHelpTap:
           relisted ? () => _showMarketRelistReasonDialog(merged) : null,
+      onImageTap: onOpenDetails,
     );
-    final peerPresenceId = _hubPeerUserIdFromRow(
-      merged,
-      marketerView: false,
-    );
-    final showPeerPresence =
-        _hubMayShowPeerPresenceOnCard(merged, marketerView: false) &&
-            peerPresenceId.isNotEmpty &&
-            peerPresenceId != _uid;
-    final Widget? presenceBelowCard = showPeerPresence
-        ? SizedBox(
-            height: 28,
-            child: _hubPeerPresenceStrip(
-              merged,
-              marketerView: false,
-            ),
-          )
-        : null;
-
     final dataColumn = Padding(
       padding: const EdgeInsetsDirectional.only(end: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (purposeLabel.trim().isNotEmpty &&
-              !_hubTextLooksLikeDuplicateTitle(purposeLabel, title)) ...[
-            const SizedBox(height: 6),
-            Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: purposeAccent.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: purposeAccent.withValues(alpha: 0.35),
-                  ),
-                ),
-                child: Text(
-                  purposeLabel,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 11.5,
-                    color: purposeAccent,
-                  ),
-                ),
-              ),
-            ),
-          ],
-          if (typeLabel.trim().isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.home_work_outlined, size: 15, color: typeAccent),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    typeLabel,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12.5,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
           _hubUnifiedCardSpecRow(merged, cs),
           if (!_isMarketerRole &&
               wfCtx.isPublishedPublic &&
@@ -2428,79 +2343,22 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               },
             ),
           ],
-          if (deedNo.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Icon(Icons.description_outlined, size: 15, color: cs.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    widget.isAr ? 'رقم الصك: $deedNo' : 'Deed no.: $deedNo',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (deedDate.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(Icons.event_available_outlined,
-                    size: 15, color: cs.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    widget.isAr
-                        ? 'تاريخ الصك: $deedDate'
-                        : 'Deed date: $deedDate',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                      color: cs.onSurface,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+          _hubLabeledMetricRow(
+            context,
+            icon: Icons.description_outlined,
+            label: widget.isAr ? 'رقم الصك' : 'Deed no.',
+            value: deedNo.isEmpty ? '—' : deedNo,
+            copyPlain: deedNo.isEmpty ? null : deedNo,
+            valueMaxLines: 1,
+          ),
+          _hubLabeledMetricRow(
+            context,
+            icon: Icons.event_available_outlined,
+            label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
+            value: deedDate.isEmpty ? '—' : deedDate,
+            valueMaxLines: 1,
+          ),
           _hubRequestCreatedDateTimeRow(merged, cs),
-          if (subtitle.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            LayoutBuilder(
-              builder: (_, c) {
-                final mw =
-                    c.maxWidth.isFinite && c.maxWidth > 0 ? c.maxWidth : 9999.0;
-                return FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: AlignmentDirectional.centerStart,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: mw),
-                    child: Text(
-                      subtitle,
-                      maxLines: 1,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12.5,
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
           if (wfCtx.isPublishedPublic && propPublished != null) ...[
             const SizedBox(height: 6),
             LayoutBuilder(
@@ -2650,7 +2508,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           cardRadius: _kHomeCardRadius,
           dataColumn: dataColumn,
           imageColumn: imageColumn,
-          belowCard: presenceBelowCard,
           // صورة بعرض كامل أعلى البيانات — نسبة أقصر لتفادي فراغ رأسي.
           fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
           heroAspectRatio: _homeListingHeroAspectRatio(context),
@@ -2901,7 +2758,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                   toCopy,
                   ar ? 'تم النسخ' : 'Copied',
                 ),
-              ),
+              )
+            else
+              const SizedBox(width: 32, height: 32),
           ],
         ),
       ],
@@ -3457,13 +3316,20 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         _marketingDistrictFromPayload(r),
       );
     }
-    if (areaText.isEmpty &&
-        roomsText.isEmpty &&
-        regionText.isEmpty &&
-        cityText.isEmpty &&
-        districtText.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    final governorateText = pickAny(const [
+      'preview_governorate',
+      'governorate',
+      'province',
+      'preview_province',
+    ]);
+    final locationCopy = PropertyListingDisplay.addressLineFromParts(
+      region: regionText,
+      governorate: governorateText,
+      city: cityText,
+      district: districtText,
+      isAr: widget.isAr,
+      separator: widget.isAr ? '، ' : ', ',
+    );
     final purposeAccent = PropertyListingDisplay.accentForRequestRow(r);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
@@ -3474,8 +3340,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           areaText: areaText,
           roomsText: roomsText,
           regionText: regionText,
+          governorateText: governorateText,
           cityText: cityText,
           districtText: districtText,
+          onCopyLocation: locationCopy.isEmpty
+              ? null
+              : () => _copyPlainToClipboard(
+                    locationCopy,
+                    widget.isAr ? 'تم النسخ' : 'Copied',
+                  ),
         ),
       ),
     );
@@ -3577,62 +3450,32 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         ),
       if (createdLabel.isNotEmpty)
         cell(
-          widget.isAr ? 'تاريخ الإنشاء' : 'Created',
+          widget.isAr ? 'تاريخ الطلب' : 'Request date',
           createdLabel,
-          Icons.event_rounded,
+          Icons.event_outlined,
         ),
       if (priceLabel.isNotEmpty)
         cell(
-          widget.isAr ? 'السعر' : 'Price',
+          widget.isAr ? 'الميزانية' : 'Budget',
           priceLabel,
           Icons.payments_outlined,
         ),
     ];
     if (cells.isEmpty) return const SizedBox.shrink();
 
-    return Container(
-      margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            cs.primaryContainer.withValues(alpha: 0.28),
-            cs.secondaryContainer.withValues(alpha: 0.22),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: cs.outlineVariant.withValues(alpha: 0.45)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            widget.isAr ? 'تفاصيل السوق' : 'Market details',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              color: cs.primary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          LayoutBuilder(
-            builder: (context, c) {
-              final cross = c.maxWidth >= 420 ? 2 : 1;
-              return GridView.count(
-                crossAxisCount: cross,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                childAspectRatio: cross == 2 ? 2.8 : 3.2,
-                children: cells,
-              );
-            },
-          ),
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cross = constraints.maxWidth >= 560 ? 2 : 1;
+        return GridView.count(
+          crossAxisCount: cross,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+          childAspectRatio: cross == 2 ? 2.8 : 3.2,
+          children: cells,
+        );
+      },
     );
   }
 
@@ -4927,7 +4770,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
     }
 
-    return sourceRows().where((r) {
+    final filteredRows = sourceRows().where((r) {
       if (!_matchesMyPageRequestFilters(r)) return false;
       if (_marketerRowPublishedByOther(r)) return false;
       if (tabIndex == 0 && _marketerPhotographyMarketFilter != 'all') {
@@ -5048,6 +4891,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }).map((row) {
       return <String, dynamic>{...row, '_sourceHubTab': tabIndex};
     }).toList();
+    return _dedupeMarketerHubRowsByRequest(filteredRows);
   }
 
   Widget _marketerTabWithBadge(String label, int count) {
@@ -7037,83 +6881,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       );
     }
 
-    final purposeLabel =
-        PropertyListingDisplay.purposeLabelForRequestRow(r, widget.isAr);
-    if (purposeLabel.trim().isNotEmpty) {
-      chips.add(
-        _miniStatChip(
-          icon: Icons.sell_outlined,
-          content: Text(
-            purposeLabel,
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-              height: 1.2,
-            ),
-          ),
-        ),
-      );
-    }
-
-    final type = (r['preview_type'] ?? r['request_property_type'] ?? '')
-        .toString()
-        .trim();
-    final areaPreview = (r['preview_area'] as num?)?.toDouble();
-    final areaReq = (r['request_area'] as num?)?.toDouble();
-    final area = ((areaPreview ?? 0) > 0) ? areaPreview : areaReq;
-    final beds = (r['preview_bedrooms'] as num?)?.toInt();
     final baths = (r['preview_bathrooms'] as num?)?.toInt();
     final parking = (r['preview_parking_spots'] as num?)?.toInt();
-
-    if (type.isNotEmpty) {
-      chips.add(
-        _miniStatChip(
-          icon: Icons.home_work_outlined,
-          content: Text(
-            widget.isAr ? _trPropertyTypeAr(type) : _trPropertyTypeEn(type),
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-              height: 1.2,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (area != null && area > 0) {
-      chips.add(
-        _miniStatChip(
-          icon: Icons.straighten_outlined,
-          content: Text(
-            widget.isAr
-                ? '${AppMoney.formatNumber(area, isAr: widget.isAr, maxFractionDigits: 0)} م²'
-                : '${AppMoney.formatNumber(area, isAr: widget.isAr, maxFractionDigits: 0)} m²',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-              height: 1.2,
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (beds != null && beds > 0) {
-      chips.add(
-        _miniStatChip(
-          icon: Icons.bed_outlined,
-          content: Text(
-            widget.isAr ? '$beds غرف' : '$beds Beds',
-            style: const TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 12,
-              height: 1.2,
-            ),
-          ),
-        ),
-      );
-    }
 
     if (baths != null && baths > 0) {
       chips.add(
@@ -8861,6 +8630,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     String? tourPathOrUrl,
     InAppTour? inAppTour,
     bool coverPrefersVideo = false,
+    VoidCallback? onImageTap,
 
     /// أيقونة تتبّع أعلى الصورة (بداية الاتجاه) — يُفضّل تمرير [onImageTrackingTap].
     bool showTrackingMark = false,
@@ -8900,6 +8670,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                         isAr: widget.isAr,
                       ),
                     ),
+            onImageTap: onImageTap,
             isAr: widget.isAr,
             listingIdForWatermark: mediaOwnerKey,
             preferVideoCover: showVideoLead,
@@ -10242,9 +10013,19 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     bool marketerMyOffersTabLayout = false,
     bool marketerInvitesSingleActionFooter = false,
   }) {
-    final row = <String, dynamic>{...r, '_ui_type': type};
-    final title = _mkRowTitle(row);
-    final ownerDispPhone = _marketingOwnerPhone(r);
+    final title = type == 'published'
+        ? PropertyListingDisplay.compactListingTitleForRow(r, widget.isAr)
+        : PropertyListingDisplay.compactRequestTitleForRow(r, widget.isAr);
+    final priorRound = r['_hub_prior_round_marketer_offer'] == true;
+    final relistReoffer = _allowPreviousMarketersRetryOnRequest(r) ||
+        priorRound ||
+        (int.tryParse('${r['round_no'] ?? ''}') ?? 1) > 1 ||
+        (int.tryParse('${r['marketing_round'] ?? ''}') ?? 1) > 1;
+    final ownerDispPhone = relistReoffer ? '' : _marketingOwnerPhone(r);
+    final deedAccessAllowed =
+        type == 'published' || _marketerOwnerChatUnlocked(r);
+    final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
+    final deedDate = deedAccessAllowed ? _hubDeedDateFromRow(r) : '';
     final purposeAccent = PropertyListingDisplay.accentForRequestRow(r);
     final typeKey = (r['preview_type'] ?? r['request_property_type'] ?? '')
         .toString()
@@ -10256,8 +10037,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         (r['preview_property_id'] ?? '').toString().trim();
     final statusRaw = (statusForDisplay ?? '').toString().trim().toLowerCase();
 
-    final priorRound = r['_hub_prior_round_marketer_offer'] == true;
-    final relistReoffer = _allowPreviousMarketersRetryOnRequest(r);
     final inviteSeenEye = statusRaw == 'seen';
     final VoidCallback? trackingTap =
         showTrackingMarkOnImage && requestId.trim().isNotEmpty
@@ -10285,6 +10064,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       onReofferHelpTap: relistReoffer && marketerInvitesTabLayout
           ? () => _showMarketRelistReasonDialog(r)
           : null,
+      onImageTap: bodyTap,
     );
 
     final dataColumn = Padding(
@@ -10293,36 +10073,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          LayoutBuilder(
-            builder: (_, c) {
-              final mw =
-                  c.maxWidth.isFinite && c.maxWidth > 0 ? c.maxWidth : 9999.0;
-              return FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: AlignmentDirectional.centerStart,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: mw),
-                  child: Text(
-                    title,
-                    maxLines: 1,
-                    softWrap: false,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 16,
-                      height: 1.2,
-                      color: Color(0xFF041D18),
-                      fontFamily: 'Cairo',
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-          if (type == 'published') ...[
-            const SizedBox(height: 4),
-            _hubPublishedOrReservedStatusChip(r, cs),
-          ],
           if (showPriorRoundChip && priorRound) ...[
             const SizedBox(height: 6),
             Align(
@@ -10345,12 +10095,27 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           _hubMarketerPriceStrip(r, cs),
           if (marketerInvitesTabLayout || !_marketerOwnerChatUnlocked(r))
             _hubRequestCreatedDateTimeRow(r, cs),
-          _hubPeerPresenceStrip(
-            r,
-            marketerView: true,
-            showAdvertiserName: _marketerOwnerChatUnlocked(r),
+          _hubLabeledMetricRow(
+            context,
+            icon: Icons.description_outlined,
+            label: widget.isAr ? 'رقم الصك' : 'Deed no.',
+            value: deedNo.isEmpty ? '—' : deedNo,
+            copyPlain: deedNo.isEmpty ? null : deedNo,
+            valueMaxLines: 1,
           ),
+          _hubLabeledMetricRow(
+            context,
+            icon: Icons.event_available_outlined,
+            label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
+            value: deedDate.isEmpty ? '—' : deedDate,
+            valueMaxLines: 1,
+          ),
+          if (type == 'published') ...[
+            const SizedBox(height: 4),
+            _hubPublishedOrReservedStatusChip(r, cs),
+          ],
           if (_isMarketerRole &&
+              !relistReoffer &&
               (_listingRevealsOwnerPhoneFromMarket(r) ||
                   !marketerInvitesTabLayout) &&
               _marketerOwnerPhoneVisibleOnCard(r) &&
@@ -10482,6 +10247,17 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           isAr: widget.isAr,
           kind: UnifiedCardKind.request,
           onCardTap: bodyTap,
+          topChrome: UnifiedCardTitleChrome(
+            isAr: widget.isAr,
+            title: title,
+            leading: [
+              UnifiedCardKindPill.forKind(
+                kind: UnifiedCardKind.request,
+                isAr: widget.isAr,
+                cs: cs,
+              ),
+            ],
+          ),
           belowMainRow: belowContract,
           cardRadius: _kHomeCardRadius,
           dataColumn: dataColumn,
@@ -10588,7 +10364,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final cs = Theme.of(context).colorScheme;
     final row = <String, dynamic>{...r, '_ui_type': type};
 
-    final title = _mkRowTitle(row);
+    final title = type == 'published'
+        ? PropertyListingDisplay.compactListingTitleForRow(row, widget.isAr)
+        : PropertyListingDisplay.compactRequestTitleForRow(row, widget.isAr);
     final subLine = _mkRowSubLine(row);
     final typeLabel = _mkTypeLabel(type);
     final String? statusForDisplay;
@@ -10616,7 +10394,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final statusColor = _marketingStatusColor(statusForDisplay, cs);
     final requestId = _marketingRequestIdFromRow(r);
     final ownerName = _marketingOwnerName(r);
-    final ownerPhone = _marketingOwnerPhone(r);
+    final isRelisted = _allowPreviousMarketersRetryOnRequest(r) ||
+        r['_hub_prior_round_marketer_offer'] == true ||
+        (int.tryParse('${r['round_no'] ?? ''}') ?? 1) > 1 ||
+        (int.tryParse('${r['marketing_round'] ?? ''}') ?? 1) > 1;
+    final ownerPhone = isRelisted ? '' : _marketingOwnerPhone(r);
     final ownerAvatarUrl = _marketingOwnerAvatarUrl(r);
     final locationText = _marketingLocationText(r);
 
@@ -10712,6 +10494,20 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+              child: UnifiedCardTitleChrome(
+                isAr: widget.isAr,
+                title: title,
+                leading: [
+                  UnifiedCardKindPill.forKind(
+                    kind: UnifiedCardKind.request,
+                    isAr: widget.isAr,
+                    cs: cs,
+                  ),
+                ],
+              ),
+            ),
             Card(
               elevation: mkCardHl ? 3 : 1.5,
               clipBehavior: Clip.antiAlias,
@@ -10750,6 +10546,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                                 inAppTour:
                                     ListingMediaUrls.inAppTourFromPayload(r),
                                 coverPrefersVideo: coverPrefersVideo,
+                                onImageTap: bt,
                               ),
                             ),
                           ),
@@ -10847,6 +10644,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                                   inAppTour:
                                       ListingMediaUrls.inAppTourFromPayload(r),
                                   coverPrefersVideo: coverPrefersVideo,
+                                  onImageTap: bt,
                                 ),
                               ),
                             ),
@@ -10974,6 +10772,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       Map<String, dynamic>.from(r),
     );
     final permitWorkflowChrome = _marketerRowShowsPermitWorkflowChrome(type, r);
+    final deedAccessAllowed =
+        type == 'published' || _marketerOwnerChatUnlocked(r);
+    final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
+    final deedDate = deedAccessAllowed ? _hubDeedDateFromRow(r) : '';
 
     final descNorm = description.trim();
     final titleNorm = title.trim();
@@ -10992,19 +10794,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            title,
-            maxLines: 2,
-            softWrap: false,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 16,
-              height: 1.2,
-              color: Color(0xFF041D18),
-              fontFamily: 'Cairo',
-            ),
-          ),
+          _hubUnifiedCardSpecRow(r, cs),
           Builder(
             builder: (ctx) {
               String raw =
@@ -11081,115 +10871,41 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               ),
             ),
           ),
-          _hubPeerPresenceStrip(
-            r,
-            marketerView: true,
-            showAdvertiserName: _marketerOwnerChatUnlocked(r),
-          ),
           _hubRequestCreatedDateTimeRow(r, cs),
-          const SizedBox(height: 8),
+          _hubLabeledMetricRow(
+            context,
+            icon: Icons.description_outlined,
+            label: widget.isAr ? 'رقم الصك' : 'Deed no.',
+            value: deedNo.isEmpty ? '—' : deedNo,
+            copyPlain: deedNo.isEmpty ? null : deedNo,
+            valueMaxLines: 1,
+          ),
+          _hubLabeledMetricRow(
+            context,
+            icon: Icons.event_available_outlined,
+            label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
+            value: deedDate.isEmpty ? '—' : deedDate,
+            valueMaxLines: 1,
+          ),
+          if (ownerPhone.trim().isNotEmpty)
+            _hubLabeledMetricRow(
+              context,
+              icon: Icons.phone_outlined,
+              label: widget.isAr ? 'جوال المعلن' : 'Advertiser mobile',
+              value: ownerPhone,
+              copyPlain: ownerPhone,
+              valueMaxLines: 1,
+            ),
           if (wfCtxRow.isPublishedPublic &&
               marketerEntityLine != null &&
-              marketerEntityLine.trim().isNotEmpty) ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.business_outlined,
-                  size: 16,
-                  color: _brandPrimary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.isAr ? 'جهة التسويق' : 'Marketing entity',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                              fontWeight: FontWeight.w800,
-                            ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        marketerEntityLine.trim(),
-                        maxLines: 2,
-                        softWrap: false,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 13,
-                          color: cs.onSurface,
-                          height: 1.2,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-          ],
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Icon(
-                Icons.location_on_outlined,
-                size: 16,
-                color: _brandPrimary,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      widget.isAr ? 'الموقع' : 'Location',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      locationText,
-                      maxLines: 2,
-                      softWrap: false,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: cs.onSurface,
-                        fontWeight: FontWeight.w900,
-                        fontSize: 13,
-                        height: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          if (subNorm.isNotEmpty &&
-              !_hubTextLooksLikeDuplicateTitle(subNorm, titleNorm) &&
-              !_hubTextLooksLikeDuplicateTitle(subNorm, locNorm))
-            Text(
-              subLine,
-              maxLines: 2,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-                height: 1.25,
-              ),
+              marketerEntityLine.trim().isNotEmpty)
+            _hubLabeledMetricRow(
+              context,
+              icon: Icons.business_outlined,
+              label: widget.isAr ? 'جهة التسويق' : 'Marketing entity',
+              value: marketerEntityLine.trim(),
+              valueMaxLines: 2,
+              valueAllowWrap: false,
             ),
           if (showDescription) ...[
             const SizedBox(height: 10),
@@ -11209,30 +10925,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             spacing: 8,
             runSpacing: 8,
             children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: _brandPrimary.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: _brandPrimary.withValues(alpha: 0.16),
-                  ),
-                ),
-                child: Text(
-                  typeLabel,
-                  maxLines: 2,
-                  softWrap: true,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                    height: 1.2,
-                  ),
-                ),
-              ),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,

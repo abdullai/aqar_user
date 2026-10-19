@@ -1907,7 +1907,7 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
     final requestTourUrl = ListingMediaUrls.marketRequestTourUrl(r);
     final requestInAppTour = ListingMediaUrls.inAppTourFromPayload(r.details);
 
-    final headline = PropertyListingDisplay.displayRequestTitle(r, isAr);
+    final headline = PropertyListingDisplay.compactRequestTitle(r, isAr);
     final requestTen = _requestPublicTenDigit(r);
     final regionText = r.regionLabel.trim();
     final cityText = r.city.trim();
@@ -1915,6 +1915,14 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .join(isAr ? '، ' : ', ');
+    final requestLocationLine = PropertyListingDisplay.addressLineFromParts(
+      region: regionText,
+      governorate: r.governorateLabel,
+      city: cityText,
+      district: districtText,
+      isAr: isAr,
+      separator: isAr ? '، ' : ', ',
+    );
 
     final showPublisher = (r.showRequesterName ||
             (r.requesterPublicName?.trim().isNotEmpty == true)) &&
@@ -1947,9 +1955,13 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
       isAr: isAr,
       title: '',
       regionText: regionText,
+      governorateText: r.governorateLabel.trim(),
       cityText: cityText,
       districtText: districtText,
       areaText: _areaSpec(r, isAr),
+      onCopyLocation: requestLocationLine.isEmpty
+          ? null
+          : () => unawaited(_copyValue(context, requestLocationLine, isAr)),
       roomsText: roomsDeal,
       publisherCaption: showPublisher
           ? (isAr ? 'نشر الطلب بواسطة' : 'Request posted by')
@@ -2159,27 +2171,14 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
                         ),
                       ),
           emptyChild: ColoredBox(
-            color: theme.brightness == Brightness.dark
-                ? const Color(0xFF3B2114)
-                : const Color(0xFFFFF4EC),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topRight,
-                  end: Alignment.bottomLeft,
-                  colors: theme.brightness == Brightness.dark
-                      ? const [
-                          Color(0xFF4A2818),
-                          Color(0xFF2A1810),
-                        ]
-                      : const [
-                          Color(0xFFFFF7ED),
-                          Color(0xFFFFEDD5),
-                        ],
-                ),
-              ),
+            color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+            child: const BrandingLogoImage(
+              fillFrame: true,
+              filterQuality: FilterQuality.high,
+              errorIcon: Icons.request_quote_outlined,
             ),
           ),
+          onOpenImage: onOpen,
         ),
         if (showMenu)
           PositionedDirectional(
@@ -2573,6 +2572,9 @@ class _RealEstateCard extends StatelessWidget {
   /// تبويب «صفحتي» — إعلانات المالك: هوية المالك قبل النشر ثم الوسيط والترخيص بعد النشر.
   final bool ownerHubListingCard;
 
+  /// إظهار صفوف الصك الثابتة في بطاقات «طلباتي/إعلاناتي».
+  final bool showMyPageCardMetrics;
+
   /// «صفحتي»: إخفاء أسطر رقم فال / رقم إعلان الهيئة مع الإبقاء على سطر الوسيط.
   final bool omitMarketingLicenseEntriesOnCard;
 
@@ -2613,6 +2615,7 @@ class _RealEstateCard extends StatelessWidget {
     this.showRegulatoryIdentityOnCard = true,
     this.preferStaticPrimaryImage = false,
     this.ownerHubListingCard = false,
+    this.showMyPageCardMetrics = false,
     this.omitMarketingLicenseEntriesOnCard = false,
     this.cardBelowMainRow,
   });
@@ -3005,6 +3008,7 @@ class _RealEstateCard extends StatelessWidget {
           videoPathOrUrl: property.videoUrl,
           preferVideoCover:
               ListingMediaUrls.propertyPrefersVideoCover(property),
+          onImageTap: onOpenDetails,
           isAr: isAr,
           listingIdForWatermark: property.id,
           showListingWatermark: property.photographerMediaPaths.isNotEmpty,
@@ -3416,6 +3420,43 @@ class _RealEstateCard extends StatelessWidget {
         st == ListingWorkflowStage.reserved;
   }
 
+  Widget _propertyCardMetricRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    String? copyValue,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final text = value.trim().isEmpty ? '—' : value.trim();
+    final copy = (copyValue ?? '').trim();
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: cs.primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '$label: $text',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: cs.onSurface,
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          if (copy.isNotEmpty)
+            _copyInlineIcon(context, copy)
+          else
+            const SizedBox(width: 28, height: 28),
+        ],
+      ),
+    );
+  }
+
   Widget _unifiedListCard(
     BuildContext context, {
     required ThemeData theme,
@@ -3435,6 +3476,7 @@ class _RealEstateCard extends StatelessWidget {
     String peerPresenceId = '',
     required double layoutWidth,
     bool ownerHubListingCard = false,
+    bool showMyPageCardMetrics = false,
     Widget? belowMainRow,
     bool omitMarketingLicenseEntries = false,
   }) {
@@ -3457,6 +3499,10 @@ class _RealEstateCard extends StatelessWidget {
             : '${AppMoney.formatNumber(areaVal, isAr: isAr, maxFractionDigits: 0)} m²')
         : '';
     final licenseEntries = listingLicenseEntries(property, isAr);
+    final deedNo = (property.deedNumber ?? '').trim();
+    final deedDate = property.deedDate == null
+        ? ''
+        : DateHelper.fmtCivilDate(property.deedDate!, isAr: isAr);
     final ownerPrePublish =
         ownerHubListingCard && isOwner && marketerLine == null;
     // عند وجود جهة تسويق لا نكرّر نفس الاسم تحت «منشئ الإعلان».
@@ -3472,9 +3518,8 @@ class _RealEstateCard extends StatelessWidget {
     final gapSm = compactHome ? 2.0 : 4.0;
     // لا نخفي الرخص/الصك على الشاشات الضيقة — نفس بيانات الويب.
     final hideLicenses = omitMarketingLicenseEntries;
-    final regionRaw = (property.region ?? '').trim().isNotEmpty
-        ? (property.region ?? '').trim()
-        : (property.province ?? '').trim();
+    final regionRaw = (property.region ?? '').trim();
+    final governorateRaw = (property.province ?? '').trim();
     final regionText = LocaleContent.forUi(regionRaw, isAr: isAr);
     final cityRaw = PropertyListingDisplay.cityLine(property);
     final cityText =
@@ -3482,6 +3527,11 @@ class _RealEstateCard extends StatelessWidget {
     final districtText = LocaleContent.forUi(
       (property.location ?? '').trim(),
       isAr: isAr,
+    );
+    final locationCopy = PropertyListingDisplay.addressLine(
+      property,
+      isAr: isAr,
+      separator: isAr ? '، ' : ', ',
     );
     final extraChips = PropertyListingDisplay.diversifySpecChips(
       property,
@@ -3519,9 +3569,13 @@ class _RealEstateCard extends StatelessWidget {
             areaText: areaText,
             roomsText: roomsText,
             regionText: regionText,
+            governorateText: LocaleContent.forUi(governorateRaw, isAr: isAr),
             cityText: cityText,
             districtText: districtText,
             extraChips: extraChips,
+            onCopyLocation: locationCopy.isEmpty
+                ? null
+                : () => unawaited(_copyValue(context, locationCopy)),
           ),
         ),
         if (marketerLine != null && marketerLine.trim().isNotEmpty) ...[
@@ -3812,6 +3866,22 @@ class _RealEstateCard extends StatelessWidget {
             );
           },
         ),
+        if (ownerHubListingCard || showMyPageCardMetrics) ...[
+          const SizedBox(height: 4),
+          _propertyCardMetricRow(
+            context,
+            icon: Icons.description_outlined,
+            label: isAr ? 'رقم الصك' : 'Deed no.',
+            value: deedNo,
+            copyValue: deedNo,
+          ),
+          _propertyCardMetricRow(
+            context,
+            icon: Icons.event_available_outlined,
+            label: isAr ? 'تاريخ الصك' : 'Deed date',
+            value: deedDate,
+          ),
+        ],
         const SizedBox(height: 2),
         listingCardCreatedPublishedTimes(
           context: context,
@@ -3968,7 +4038,7 @@ class _RealEstateCard extends StatelessWidget {
       heroHeight: _homeListingHeroImageHeight(context),
       topChrome: UnifiedCardTitleChrome(
         isAr: isAr,
-        title: property.title,
+        title: PropertyListingDisplay.compactListingTitle(property, isAr),
         leading: [
           UnifiedCardKindPill.forKind(
             kind: UnifiedCardKind.ad,
@@ -4121,6 +4191,7 @@ class _RealEstateCard extends StatelessWidget {
           peerPresenceId: peerPresenceId,
           layoutWidth: w,
           ownerHubListingCard: ownerHubListingCard,
+          showMyPageCardMetrics: showMyPageCardMetrics,
           belowMainRow: cardBelowMainRow,
           omitMarketingLicenseEntries: omitMarketingLicenseEntriesOnCard,
         );
@@ -4219,6 +4290,7 @@ class _PropertyImage extends StatelessWidget {
   final String? videoPathOrUrl;
   final String? tourPathOrUrl;
   final VoidCallback? onOpenTour;
+  final VoidCallback? onImageTap;
   final bool isAr;
 
   final String? listingIdForWatermark;
@@ -4236,6 +4308,7 @@ class _PropertyImage extends StatelessWidget {
     this.videoPathOrUrl,
     this.tourPathOrUrl,
     this.onOpenTour,
+    this.onImageTap,
     this.isAr = true,
     this.listingIdForWatermark,
     this.showListingWatermark = false,
@@ -4363,6 +4436,7 @@ class _PropertyImage extends StatelessWidget {
                       mode: LaunchMode.externalApplication,
                     ),
                   )),
+      onOpenImage: onImageTap,
       watermarkBuilder: (context, index) => index < cleanUrls.length
           ? _photographerWatermark(cleanUrls[index])
           : null,

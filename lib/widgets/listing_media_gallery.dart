@@ -26,6 +26,7 @@ class ListingMediaGallery extends StatefulWidget {
     this.mediaOwnerKey,
     this.onOpenVideo,
     this.onOpenTour,
+    this.onOpenImage,
     this.watermark,
     this.watermarkBuilder,
     this.emptyChild,
@@ -45,6 +46,7 @@ class ListingMediaGallery extends StatefulWidget {
   final String? mediaOwnerKey;
   final VoidCallback? onOpenVideo;
   final VoidCallback? onOpenTour;
+  final VoidCallback? onOpenImage;
   final Widget? watermark;
   final Widget? Function(BuildContext context, int index)? watermarkBuilder;
   final Widget? emptyChild;
@@ -213,7 +215,7 @@ class _ListingMediaGalleryState extends State<ListingMediaGallery> {
             }
             final imageIndex = _imageIndexForSlide(i);
             return GestureDetector(
-              onTap: () => _openLightbox(imageIndex),
+              onTap: widget.onOpenImage ?? () => _openLightbox(imageIndex),
               child: CrystalListingMedia(
                 url: urls[imageIndex],
                 fit: widget.fit,

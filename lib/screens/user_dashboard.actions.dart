@@ -50,6 +50,15 @@ extension _UserDashboardStateActions on _UserDashboardState {
     });
   }
 
+  Future<T?> _pushMapBody<T extends Object?>(Route<T> route) async {
+    if (mounted) _ss(() => _dashboardMapRouteOpen = true);
+    try {
+      return await _pushBody<T>(route);
+    } finally {
+      if (mounted) _ss(() => _dashboardMapRouteOpen = false);
+    }
+  }
+
   /// نماذج زر + — داخل جسم اللوحة فوراً بلا انتقال متحرك.
   Future<T?> _pushPlusForm<T extends Object?>(WidgetBuilder builder) {
     return _pushBody<T>(
@@ -360,7 +369,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
     if (!mounted) return;
 
-    await _pushBody<void>(
+    await _pushMapBody<void>(
       MaterialPageRoute<void>(
         settings: const RouteSettings(name: '/dashboard/my-page-map'),
         builder: (_) => PropertyMapDiscoveryPage(
@@ -497,7 +506,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
     if (!mounted) return;
 
-    await _pushBody<void>(
+    await _pushMapBody<void>(
       MaterialPageRoute<void>(
         settings: const RouteSettings(name: '/dashboard/property-map'),
         builder: (_) => PropertyMapDiscoveryPage(
@@ -949,7 +958,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
   Future<void> _openCenterPlus() async {
     _rememberPlusOriginTab();
     if (_isGuest) {
-      await _guestOpenCenterPlusFlow();
+      _showLoginDialog();
       return;
     }
 

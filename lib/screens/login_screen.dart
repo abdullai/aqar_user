@@ -23,7 +23,6 @@ import 'package:aqar_user/theme.dart';
 import '../core/auth/login_success_banner.dart';
 import '../core/auth/inactivity_auth_landing.dart';
 import '../core/auth/in_app_otp_handoff.dart';
-import 'package:aqar_user/widgets/app_busy_indicator.dart';
 import 'package:aqar_user/widgets/app_logo_loading.dart';
 import 'package:aqar_user/widgets/inline_property_video.dart';
 import 'package:aqar_user/widgets/field_group_frame.dart';
@@ -732,9 +731,8 @@ class _LoginScreenState extends State<LoginScreen>
       _storedUsername = u.isEmpty ? resumeUser : u;
       if ((_storedUsername ?? '').isEmpty) _storedUsername = resumeUser;
       final dn = (prefs.getString('rememberDisplayName') ?? '').trim();
-      _rememberDisplayName = dn.isEmpty
-          ? resumeName
-          : CompoundDisplayName.normalize(dn);
+      _rememberDisplayName =
+          dn.isEmpty ? resumeName : CompoundDisplayName.normalize(dn);
       if ((_rememberDisplayName ?? '').isEmpty && resumeName != null) {
         _rememberDisplayName = CompoundDisplayName.normalize(resumeName);
       }
@@ -742,9 +740,8 @@ class _LoginScreenState extends State<LoginScreen>
       await prefs.remove('username');
       await prefs.remove('rememberDisplayName');
       _storedUsername = resumeUser;
-      _rememberDisplayName = resumeName == null
-          ? null
-          : CompoundDisplayName.normalize(resumeName);
+      _rememberDisplayName =
+          resumeName == null ? null : CompoundDisplayName.normalize(resumeName);
     }
 
     final hasIdentity = (_storedUsername ?? '').isNotEmpty &&
@@ -757,7 +754,8 @@ class _LoginScreenState extends State<LoginScreen>
 
     var forcePasswordLogin = false;
     try {
-      forcePasswordLogin = await FastLoginService.consumeForcePasswordLoginOnce();
+      forcePasswordLogin =
+          await FastLoginService.consumeForcePasswordLoginOnce();
     } catch (_) {}
 
     if (!forcePasswordLogin &&
@@ -1300,7 +1298,8 @@ class _LoginScreenState extends State<LoginScreen>
       otpRes = await AuthService.requestOtpDetailed(u);
     }
     if ((challenge.error ?? otpRes.error) != null && kDebugMode) {
-      debugPrint('[login] OTP request hint: ${challenge.error ?? otpRes.error}');
+      debugPrint(
+          '[login] OTP request hint: ${challenge.error ?? otpRes.error}');
     }
 
     final greetFuture = InAppOtpHandoff.fetchGreeting(isAr: _isAr);
@@ -1317,7 +1316,20 @@ class _LoginScreenState extends State<LoginScreen>
 
     final handoffName = (greet.displayName ?? prefetchFullName ?? '').trim();
     if (handoffName.isNotEmpty) {
-      args['fullName'] = handoffName;
+      final rememberedName = CompoundDisplayName.normalize(handoffName);
+      args['fullName'] = rememberedName;
+      _rememberDisplayName = rememberedName;
+      if (rememberMe) {
+        _storedUsername = u;
+        await _savePreferences();
+      }
+      try {
+        await FastLoginService.saveUserContext(
+          uid: uid,
+          usernameNationalId: u,
+          displayName: rememberedName,
+        );
+      } catch (_) {}
     }
     if (greet.lastLogin != null) {
       args['lastLogin'] = greet.lastLogin!.toUtc().toIso8601String();
@@ -1325,8 +1337,8 @@ class _LoginScreenState extends State<LoginScreen>
     if ((greet.avatarUrl ?? '').isNotEmpty) {
       args['avatarUrl'] = greet.avatarUrl;
     }
-    final code = (prefetchedCode ?? otpRes.devCode ?? challenge.devCode ?? '')
-        .trim();
+    final code =
+        (prefetchedCode ?? otpRes.devCode ?? challenge.devCode ?? '').trim();
     if (code.length >= InAppOtpHandoff.otpLen) {
       args['code'] = code.substring(0, InAppOtpHandoff.otpLen);
     }
@@ -1470,111 +1482,113 @@ class _LoginScreenState extends State<LoginScreen>
             resizeToAvoidBottomInset: false,
             body: AppKeyboardStableScope(
               child: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, c) {
-                  final w = c.maxWidth;
+                child: LayoutBuilder(
+                  builder: (context, c) {
+                    final w = c.maxWidth;
 
-                  // تمرير عمودي دائماً يحسّن الجوال + الويب مع لوحة المفاتيح.
-                  const allowVerticalScroll = true;
-                  final showAdsSide = w >= 980;
+                    // تمرير عمودي دائماً يحسّن الجوال + الويب مع لوحة المفاتيح.
+                    const allowVerticalScroll = true;
+                    final showAdsSide = w >= 980;
 
-                  if (showAdsSide) {
-                    final adsW = (w * 0.52).clamp(520.0, 860.0);
+                    if (showAdsSide) {
+                      final adsW = (w * 0.52).clamp(520.0, 860.0);
 
-                    return Row(
-                      children: [
-                        Expanded(
-                          child: DecoratedBox(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  Color(0xFF0B4D47),
-                                  _bankColor,
-                                  Color(0xFF0A3D38),
-                                ],
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: DecoratedBox(
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Color(0xFF0B4D47),
+                                    _bankColor,
+                                    Color(0xFF0A3D38),
+                                  ],
+                                ),
+                              ),
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 22,
+                                  ),
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 600,
+                                    ),
+                                    child: _loginCard(
+                                      maxWidth: 600,
+                                      borderRadius: 20,
+                                      t: t,
+                                      allowVerticalScroll: allowVerticalScroll,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 22,
-                                ),
+                          ),
+                          SizedBox(width: adsW, child: _adsPanelRight(t: t)),
+                        ],
+                      );
+                    }
+
+                    final surface = AppSurfaceScope.maybeOf(context);
+                    final host = LoginMethodPolicy.detectHost();
+                    final fillScreen = surface?.isPhone ??
+                        (host == LoginHostKind.nativeMobile ||
+                            host == LoginHostKind.webMobile);
+                    final padH = fillScreen ? 8.0 : (w < 560 ? 8.0 : 18.0);
+                    final padV = fillScreen ? 8.0 : 18.0;
+                    final cardMax = fillScreen
+                        ? (w - padH * 2).clamp(260.0, w)
+                        : (surface?.formMaxWidth ??
+                                (w < 560
+                                    ? (w - padH * 2).clamp(260.0, 900.0)
+                                    : 600.0))
+                            .clamp(260.0, 720.0);
+
+                    return Column(
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(padH, padV, padH, 6),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: cardMax),
+                            child: _topBarUnified(),
+                          ),
+                        ),
+                        Expanded(
+                          child: ScrollConfiguration(
+                            behavior: const _LoginScrollBehavior(),
+                            child: SingleChildScrollView(
+                              keyboardDismissBehavior:
+                                  ScrollViewKeyboardDismissBehavior.onDrag,
+                              physics: const ClampingScrollPhysics(),
+                              padding:
+                                  EdgeInsets.fromLTRB(padH, 0, padH, padV + 16),
+                              child: Align(
+                                alignment: Alignment.topCenter,
                                 child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 600,
-                                  ),
+                                  constraints:
+                                      BoxConstraints(maxWidth: cardMax),
                                   child: _loginCard(
-                                    maxWidth: 600,
-                                    borderRadius: 20,
+                                    maxWidth: cardMax,
+                                    borderRadius: fillScreen ? 14 : 18,
                                     t: t,
-                                    allowVerticalScroll: allowVerticalScroll,
+                                    allowVerticalScroll: false,
+                                    includeTopBar: false,
                                   ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                        SizedBox(width: adsW, child: _adsPanelRight(t: t)),
                       ],
                     );
-                  }
-
-                  final surface = AppSurfaceScope.maybeOf(context);
-                  final host = LoginMethodPolicy.detectHost();
-                  final fillScreen = surface?.isPhone ??
-                      (host == LoginHostKind.nativeMobile ||
-                          host == LoginHostKind.webMobile);
-                  final padH = fillScreen ? 8.0 : (w < 560 ? 8.0 : 18.0);
-                  final padV = fillScreen ? 8.0 : 18.0;
-                  final cardMax = fillScreen
-                      ? (w - padH * 2).clamp(260.0, w)
-                      : (surface?.formMaxWidth ??
-                              (w < 560
-                                  ? (w - padH * 2).clamp(260.0, 900.0)
-                                  : 600.0))
-                          .clamp(260.0, 720.0);
-
-                  return Column(
-                    children: [
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(padH, padV, padH, 6),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(maxWidth: cardMax),
-                          child: _topBarUnified(),
-                        ),
-                      ),
-                      Expanded(
-                        child: ScrollConfiguration(
-                          behavior: const _LoginScrollBehavior(),
-                          child: SingleChildScrollView(
-                            keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            physics: const ClampingScrollPhysics(),
-                            padding: EdgeInsets.fromLTRB(padH, 0, padH, padV + 16),
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(maxWidth: cardMax),
-                                child: _loginCard(
-                                  maxWidth: cardMax,
-                                  borderRadius: fillScreen ? 14 : 18,
-                                  t: t,
-                                  allowVerticalScroll: false,
-                                  includeTopBar: false,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+                  },
+                ),
               ),
-            ),
             ),
           );
         },
@@ -1756,121 +1770,114 @@ class _LoginScreenState extends State<LoginScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: _bankColor,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: _bankColor,
+                disabledForegroundColor: Colors.white,
                 elevation: 3,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
               onPressed: _busy ? null : _login,
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 120),
-                child: isBusy
-                    ? AppBusyIndicator.button(
-                        key: const ValueKey('loading'),
-                        label: _isAr ? 'جاري تسجيل الدخول' : 'Signing in…',
-                      )
-                    : Text(
-                        t.userSignIn,
-                        key: const ValueKey('text'),
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
+              child: Text(
+                t.userSignIn,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
             ),
           ),
           if (!kIsOpsDesktopSurface) ...[
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _bankColor,
-                foregroundColor: Colors.white,
-                elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _bankColor,
+                  foregroundColor: Colors.white,
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-              ),
-              onPressed: (isBusy || _nafathBusy)
-                  ? null
-                  : () {
-                      try {
-                        Navigator.pushNamed(context, '/register');
-                      } catch (_) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              _isAr
-                                  ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
-                                  : 'Register screen is not enabled yet',
+                onPressed: (isBusy || _nafathBusy)
+                    ? null
+                    : () {
+                        try {
+                          Navigator.pushNamed(context, '/register');
+                        } catch (_) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                _isAr
+                                    ? 'صفحة إنشاء حساب غير مفعّلة حالياً'
+                                    : 'Register screen is not enabled yet',
+                              ),
                             ),
-                          ),
+                          );
+                        }
+                      },
+                child: Text(
+                  _isAr ? 'إنشاء حساب جديد' : 'Create new account',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _bankColor,
+                  backgroundColor: _fieldFill,
+                  side: BorderSide(color: _fieldOutline, width: 1.8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: (isBusy || _nafathBusy)
+                    ? null
+                    : () async {
+                        final okNet = await _ensureInternetOrAlert();
+                        if (!mounted) return;
+                        ConnectivityGuard.showOfflineSnackIfNeeded(
+                            context, okNet);
+                        if (!okNet) return;
+
+                        await context.read<AppSession>().setGuest();
+                        if (!mounted) return;
+                        await _setGuestModePrefs();
+                        if (!mounted) return;
+                        unawaited(
+                          syncSessionAppearanceNotifiers?.call() ??
+                              Future.value(),
                         );
-                      }
-                    },
-              child: Text(
-                _isAr ? 'إنشاء حساب جديد' : 'Create new account',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
+                        unawaited(touchWebGuestActivity());
+
+                        if (!mounted) return;
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!context.mounted) return;
+                          unawaited(PostAuthNavigation.openDashboard(context));
+                        });
+                      },
+                child: Text(
+                  _isAr ? 'الدخول كضيف' : 'Continue as guest',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _bankColor,
-                backgroundColor: _fieldFill,
-                side: BorderSide(color: _fieldOutline, width: 1.8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: (isBusy || _nafathBusy)
-                  ? null
-                  : () async {
-                      final okNet = await _ensureInternetOrAlert();
-                      if (!mounted) return;
-                      ConnectivityGuard.showOfflineSnackIfNeeded(
-                          context, okNet);
-                      if (!okNet) return;
-
-                      await context.read<AppSession>().setGuest();
-                      if (!mounted) return;
-                      await _setGuestModePrefs();
-                      if (!mounted) return;
-                      unawaited(
-                        syncSessionAppearanceNotifiers?.call() ??
-                            Future.value(),
-                      );
-                      unawaited(touchWebGuestActivity());
-
-                      if (!mounted) return;
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (!context.mounted) return;
-                        unawaited(PostAuthNavigation.openDashboard(context));
-                      });
-                    },
-              child: Text(
-                _isAr ? 'الدخول كضيف' : 'Continue as guest',
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 16,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
           ],
           const SizedBox(height: 10),
           Row(
@@ -2316,7 +2323,6 @@ class _LoginScreenState extends State<LoginScreen>
       ],
     );
   }
-
 
   Widget _buildCaptchaSection({required AppLocalizations t}) {
     return Container(
