@@ -256,16 +256,16 @@ class SubscriptionService {
     final k = AppRoleHelper.fromAccountType(accountType);
     switch (k) {
       case AppRoleKind.marketer:
-        return const [1, 4, 11, 12, 13, 21, 22, 23];
+        return const [1, 4, 11, 12, 16, 21, 22, 24];
       case AppRoleKind.realEstateOffice:
       case AppRoleKind.realEstateInstitution:
       case AppRoleKind.agency:
-        return const [2, 4, 11, 12, 13, 21, 22, 23];
+        return const [2, 4, 11, 12, 16, 21, 22, 24];
       case AppRoleKind.realEstateCompany:
-        return const [3, 4, 11, 12, 13];
+        return const [3, 4, 11, 12, 16, 24];
       case AppRoleKind.ownerIndividual:
       case AppRoleKind.publicUser:
-        return const [1, 14, 11, 12, 13];
+        return const [1, 14, 11, 12, 16, 23];
     }
   }
 
@@ -291,11 +291,11 @@ class SubscriptionService {
 
   /// هل هذا sort_order تَوب-أب طلبات عقارية إضافية؟
   static bool isListingRequestsTopUpSortOrder(int sortOrder) =>
-      sortOrder == 21 || sortOrder == 22 || sortOrder == 23;
+      sortOrder == 21 || sortOrder == 22 || sortOrder == 23 || sortOrder == 24;
 
   /// هل هذا sort_order توب-أب عروض السوق (للفرد)؟
   static bool isMarketOffersTopUpSortOrder(int sortOrder) =>
-      sortOrder == 11 || sortOrder == 12 || sortOrder == 13;
+      sortOrder == 11 || sortOrder == 12 || sortOrder == 13 || sortOrder == 16;
 
   /// يحوّل استجابة [list_subscription_catalog_plans] إلى قائمة صفوف.
   static List<Map<String, dynamic>> _plansFromCatalogRpc(dynamic raw) {
@@ -526,15 +526,28 @@ class SubscriptionService {
     DateTime? latestEnd;
     for (final raw in rows) {
       final row = Map<String, dynamic>.from(raw as Map);
+      if (row['is_topup'] == true) continue;
       final end = subscriptionExclusiveEndUtc(row);
+      final plan = row['plan'] is Map
+          ? Map<String, dynamic>.from(row['plan'] as Map)
+          : const <String, dynamic>{};
+      final isLifetime = row['is_lifetime'] == true ||
+          '${plan['plan_program'] ?? ''}'.trim() == 'lifetime_one_time';
       if (end != null && (latestEnd == null || end.isAfter(latestEnd))) {
         latestEnd = end;
         latest = row;
       }
-      if (!subscriptionRowGrantsMarketingAccess(row) || end == null) {
+      if (!subscriptionRowGrantsMarketingAccess(row) ||
+          (end == null && !isLifetime)) {
         continue;
       }
-      if (bestEnd == null || end.isAfter(bestEnd)) {
+      if (isLifetime) {
+        bestAccess = row;
+        bestEnd = null;
+        continue;
+      }
+      if (bestEnd == null && bestAccess != null) continue;
+      if (bestEnd == null || end!.isAfter(bestEnd)) {
         bestEnd = end;
         bestAccess = row;
       }
@@ -682,6 +695,12 @@ class SubscriptionService {
     if (row == null) return false;
     final st = '${row['status'] ?? ''}'.trim().toLowerCase();
     if (st == 'pending' || st == 'expired') return false;
+    final plan = row['plan'] is Map
+        ? Map<String, dynamic>.from(row['plan'] as Map)
+        : const <String, dynamic>{};
+    final isLifetime = row['is_lifetime'] == true ||
+        '${plan['plan_program'] ?? ''}'.trim() == 'lifetime_one_time';
+    if (isLifetime) return st == 'active' || st == 'cancelled';
     final end = subscriptionExclusiveEndUtc(row);
     if (end == null) return false;
     final now = DateTime.now().toUtc();

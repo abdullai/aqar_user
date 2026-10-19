@@ -19,6 +19,7 @@ class AppRuntimeEnv {
     put('ALLOW_PAYMENT_MOCK');
     put('ALLOW_INVALID_MOCK_CARD_INPUT');
     put('ALLOW_INVALID_MOYASAR_TEST_CARD_INPUT');
+    put('PAYMENT_CARD_MODE');
     put('GOOGLE_MAPS_WEB_KEY');
   }
 

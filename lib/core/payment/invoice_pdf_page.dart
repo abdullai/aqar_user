@@ -438,7 +438,8 @@ void addOfficialInvoicePage({
                   maxLines: 1,
                 ),
               ],
-              if (safe(paymentReference).isNotEmpty) ...[
+              if (safe(paymentReference).isNotEmpty &&
+                  safe(paymentReference) != invoiceNo) ...[
                 pw.SizedBox(height: 3),
                 pw.Directionality(
                   textDirection: pw.TextDirection.ltr,

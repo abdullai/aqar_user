@@ -136,6 +136,9 @@ abstract final class SubscriptionUiHelpers {
         : <String, dynamic>{};
     if (curPlan.isEmpty) return false;
     final targetSort = planSortOrder(targetPlan);
+    if ('${targetPlan['plan_program'] ?? ''}'.trim() == 'lifetime_one_time') {
+      return false;
+    }
     if (SubscriptionService.isListingRequestsTopUpSortOrder(targetSort) ||
         SubscriptionService.isMarketOffersTopUpSortOrder(targetSort)) {
       return false;

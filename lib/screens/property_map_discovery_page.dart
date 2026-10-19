@@ -879,11 +879,7 @@ class _PropertyMapDiscoveryPageState extends State<PropertyMapDiscoveryPage> {
       child: Scaffold(
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          leading: !widget.embedAppBar
-              ? AppPageCloseButton(
-                  isArabic: _isAr,
-                )
-              : null,
+          leading: AppPageCloseButton(isArabic: _isAr),
           title: Text(
             widget.contextTitle == null || widget.contextTitle!.trim().isEmpty
                 ? (_isAr ? 'خريطة العقارات' : 'Property map')

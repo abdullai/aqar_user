@@ -8,6 +8,8 @@ enum MarketingSubscriptionResumeKind {
   reportRegaMismatch,
   contractChat,
   addPropertyListing,
+  createMarketRequest,
+
   /// بعد الدفع من بوابة إرسال/إلغاء عقد أو RPC مشابه — لا يُعاد إلا تحديث القائمة.
   postPaidUnlock,
 }
@@ -33,6 +35,7 @@ class MarketingSubscriptionResumeIntent {
   bool get isValid {
     switch (kind) {
       case MarketingSubscriptionResumeKind.addPropertyListing:
+      case MarketingSubscriptionResumeKind.createMarketRequest:
       case MarketingSubscriptionResumeKind.postPaidUnlock:
         return true;
       case MarketingSubscriptionResumeKind.contractChat:

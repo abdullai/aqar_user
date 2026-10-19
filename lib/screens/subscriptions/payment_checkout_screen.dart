@@ -66,8 +66,10 @@ class PaymentCheckoutScreen extends StatefulWidget {
   final String? organizationId;
   final String? renewSubscriptionId;
   final String? upgradeSubscriptionId;
+
   /// تحويل شهري → سنوي لنفس الباقة بعد احتساب الفرق.
   final String? periodSwitchSubscriptionId;
+
   /// مبلغ التحصيل (ترقية باقة / تحويل فترة / إلخ). إن لم يُمرَّر يُستخدم سعر الباقة للفترة المختارة.
   final double? chargeAmountOverride;
   final SubscriptionBillingContext? billingContext;
@@ -83,6 +85,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
 
   bool _loading = true;
   bool _paying = false;
+  bool _completionRequestInProgress = false;
   bool _processingOverlayShown = false;
   bool _recoveringPending = false;
   AppSession? _session;
@@ -137,8 +140,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         periodSwitchSubscriptionId: widget.periodSwitchSubscriptionId,
       );
 
-  bool get _isAddOnCheckout =>
-      _checkoutKind == SubscriptionCheckoutKind.addOn;
+  bool get _isAddOnCheckout => CheckoutJourney.isAddOnPlan(widget.plan);
 
   bool get _allowsAutoPay =>
       !_isOneTimePeriod &&
@@ -155,8 +157,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     return double.tryParse('$v') ?? 0;
   }
 
-  bool get _promoAlreadyApplied =>
-      (_appliedPromoCode ?? '').trim().isNotEmpty;
+  bool get _promoAlreadyApplied => (_appliedPromoCode ?? '').trim().isNotEmpty;
 
   bool get _hasEligiblePromos =>
       _promoAllowed || (_offer?.hasEligiblePromos ?? false);
@@ -176,17 +177,10 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   }
 
   bool get _showPromoField {
-    if (_promoAlreadyApplied) return true;
-    if (!_hasEligiblePromos) return false;
-    if (_autoRenew && _allowsAutoPay) {
-      if (!_hasBetterPromoThanAutoPay) return false;
-      return _promoIntentOpen;
-    }
     return true;
   }
 
-  bool get _payLockedByPromoIntent =>
-      _promoIntentOpen && !_promoAlreadyApplied;
+  bool get _payLockedByPromoIntent => _promoIntentOpen && !_promoAlreadyApplied;
 
   bool _cardRowIsMoyasarReady(Map<String, dynamic> row) =>
       PaymentService.canChargeSavedCard(row);
@@ -308,7 +302,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
 
   Future<void> _tryRecoverPendingPayment() async {
     if (_recoveringPending || _paying || !mounted) return;
-    final pending = await PaymentRecoveryCoordinator.loadPending();
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return;
+    final pending = await PaymentRecoveryCoordinator.loadPending(userId: uid);
     if (pending == null) return;
     final bid = '${pending['billing_transaction_id'] ?? ''}'.trim();
     if (bid.isEmpty) return;
@@ -325,7 +321,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     _recoveringPending = false;
     if (!mounted) return;
     if (poll['ok'] == true) {
-      await PaymentRecoveryCoordinator.clearPending();
+      await PaymentRecoveryCoordinator.clearPending(userId: uid);
       final name = AppBranding.planNameFromRow(widget.plan, isAr: _isAr);
       final fin = await _finalizeSubscriptionAfterMoyasar(
         billingTransactionId: bid,
@@ -413,6 +409,35 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
           : 'The bank or payment gateway declined this card.';
     }
     return s;
+  }
+
+  String _moyasarSetupIssueLabel(String issue) {
+    switch (issue) {
+      case 'client_publishable_key_missing':
+        return _isAr ? 'مفتاح النشر غير مهيأ' : 'publishable key is missing';
+      case 'server_secret_key_missing':
+        return _isAr
+            ? 'المفتاح السري غير مهيأ في Supabase'
+            : 'Supabase secret key is missing';
+      case 'client_server_mode_mismatch':
+        return _isAr
+            ? 'مفتاحا الاختبار والإنتاج غير متطابقين'
+            : 'test/live keys do not match';
+      case 'callback_url_missing_on_server':
+        return _isAr
+            ? 'رابط العودة غير مهيأ في Supabase'
+            : 'server callback URL is missing';
+      case 'webhook_secret_missing':
+        return _isAr
+            ? 'سر Webhook غير مهيأ في Supabase'
+            : 'Supabase webhook secret is missing';
+      case 'live_mode_requires_moyasar_account_activation_otherwise_http_405':
+        return _isAr
+            ? 'حساب ميسر للإنتاج يحتاج إلى التفعيل'
+            : 'Moyasar live account needs activation';
+      default:
+        return _isAr ? 'إعداد دفع غير مكتمل' : 'payment setup is incomplete';
+    }
   }
 
   Future<void> _applyPromo() async {
@@ -622,12 +647,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     if (!mounted) return;
     setState(() => _promoBusy = false);
     var codes = CheckoutPromoOption.listFrom(raw['codes']);
-    final minPct =
-        (_autoRenew && _allowsAutoPay) ? _planAutoPayPct : 0.0;
+    final minPct = (_autoRenew && _allowsAutoPay) ? _planAutoPayPct : 0.0;
     if (minPct > 0) {
-      codes = codes
-          .where((c) => c.percent > minPct + 0.0001)
-          .toList();
+      codes = codes.where((c) => c.percent > minPct + 0.0001).toList();
     }
     if (codes.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -651,9 +673,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         );
         var list = CheckoutPromoOption.listFrom(next['codes']);
         if (minPct > 0) {
-          list = list
-              .where((c) => c.percent > minPct + 0.0001)
-              .toList();
+          list = list.where((c) => c.percent > minPct + 0.0001).toList();
         }
         return list;
       },
@@ -677,8 +697,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     if (!mounted) return;
     String? sel;
     for (final row in c) {
-      if (row['is_default'] == true &&
-          PaymentService.canChargeSavedCard(row)) {
+      if (row['is_default'] == true && PaymentService.canChargeSavedCard(row)) {
         sel = '${row['id']}';
         break;
       }
@@ -851,6 +870,13 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     final bid = '${pend['transaction_id'] ?? ''}'.trim();
     final billed = _canonicalAmountFromPending(pend, charge);
     _serverExpectedChargeSar = billed;
+    await PaymentRecoveryCoordinator.savePending(
+      userId: Supabase.instance.client.auth.currentUser?.id ?? '',
+      billingTransactionId: bid,
+      expectedAmountSar: billed,
+      planId: '${widget.plan['id']}',
+      period: widget.period,
+    );
     final chargeRes = await _pay.chargeSavedCardViaMoyasar(
       billingTransactionId: bid,
       cardId: cardId,
@@ -963,6 +989,13 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     final bid = '${pend['transaction_id'] ?? ''}'.trim();
     final billed = _canonicalAmountFromPending(pend, charge);
     _serverExpectedChargeSar = billed;
+    await PaymentRecoveryCoordinator.savePending(
+      userId: Supabase.instance.client.auth.currentUser?.id ?? '',
+      billingTransactionId: bid,
+      expectedAmountSar: billed,
+      planId: '${widget.plan['id']}',
+      period: widget.period,
+    );
     final meta = _pay.buildMoyasarSubscriptionMetadata(
       billingTransactionId: bid,
       purpose: _moyasarPurpose(),
@@ -1018,17 +1051,17 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         context,
         name: '/subscriptions/moyasar-pay',
         page: MoyasarSubscriptionPaymentScreen(
-            config: cfg,
-            walletMode: walletMode,
-            isAr: _isAr,
-            planName: planName,
-            amountSar: billed,
-            periodLabel: widget.period == 'yearly'
-                ? (_isAr ? 'سنوي' : 'Yearly')
-                : widget.period == 'lifetime_one_time'
-                    ? (_isAr ? 'مرة واحدة' : 'One-time')
-                    : (_isAr ? 'شهري' : 'Monthly'),
-          ),
+          config: cfg,
+          walletMode: walletMode,
+          isAr: _isAr,
+          planName: planName,
+          amountSar: billed,
+          periodLabel: widget.period == 'yearly'
+              ? (_isAr ? 'سنوي' : 'Yearly')
+              : widget.period == 'lifetime_one_time'
+                  ? (_isAr ? 'مرة واحدة' : 'One-time')
+                  : (_isAr ? 'شهري' : 'Monthly'),
+        ),
       );
     } catch (e, st) {
       debugPrint('Moyasar checkout error: $e\n$st');
@@ -1061,7 +1094,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   }
 
   Future<void> _payWithWalletMode(String mode) async {
-    if (_paying || _payLockedByPromoIntent) return;
+    if (_paying || _completionRequestInProgress || _payLockedByPromoIntent) {
+      return;
+    }
     setState(() => _mode = mode);
     await _complete();
   }
@@ -1073,6 +1108,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   }) async {
     if (trackPending) {
       await PaymentRecoveryCoordinator.savePending(
+        userId: Supabase.instance.client.auth.currentUser?.id ?? '',
         billingTransactionId: billingTransactionId,
         expectedAmountSar: expectedAmountSar,
         planId: '${widget.plan['id']}',
@@ -1086,7 +1122,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         expectedAmountSar: expectedAmountSar,
       );
       if (result['ok'] == true) {
-        await PaymentRecoveryCoordinator.clearPending();
+        await PaymentRecoveryCoordinator.clearPending(
+          userId: Supabase.instance.client.auth.currentUser?.id ?? '',
+        );
       }
       return result;
     } finally {
@@ -1151,6 +1189,18 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   }
 
   Future<void> _complete() async {
+    if (_completionRequestInProgress || _paying) return;
+    _completionRequestInProgress = true;
+    if (mounted) setState(() {});
+    try {
+      await _performCheckout();
+    } finally {
+      _completionRequestInProgress = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _performCheckout() async {
     final t = AppLocalizations.of(context)!;
     if (_payLockedByPromoIntent) {
       if (!mounted) return;
@@ -1189,7 +1239,29 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       );
       return;
     }
-  final falCtx = widget.billingContext;
+    if (PaymentService.useMoyasarLiveFlow) {
+      final health = await _pay.checkMoyasarServerHealth();
+      if (!mounted) return;
+      final rawIssues = health['issues'];
+      if (rawIssues is List && rawIssues.isNotEmpty) {
+        final issues = rawIssues
+            .map((issue) => _moyasarSetupIssueLabel('$issue'))
+            .toSet()
+            .join(_isAr ? '، ' : ', ');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 7),
+            content: Text(
+              _isAr
+                  ? 'تعذّر بدء الدفع: $issues. راجع إعدادات ميسر في Supabase.'
+                  : 'Payment cannot start: $issues. Check the Moyasar settings in Supabase.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+    final falCtx = widget.billingContext;
     if (falCtx != null && falCtx.ok && falCtx.falBlocksPayment) {
       if (!mounted) return;
       await showAppDialog<void>(
@@ -1249,8 +1321,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
 
     // مبلغ كانوني + أحقيّة: الاشتراك الجديد يُحظر إن وُجدت باقة رئيسية.
     // الإضافة/الترقية/التحويل لا تُعامل كاشتراك جديد.
-    final relatedSubId = widget.upgradeSubscriptionId ??
-        widget.periodSwitchSubscriptionId;
+    final relatedSubId =
+        widget.upgradeSubscriptionId ?? widget.periodSwitchSubscriptionId;
     final mustValidateIntent = !_isExistingSubscriptionPayment ||
         _isAddOnCheckout ||
         _isBelowMinPayable(_effectiveChargeForPayment());
@@ -1277,8 +1349,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         final err = () {
           var e = '${intent['error'] ?? ''}';
           final detail = intent['detail'];
-          if (detail is Map &&
-              (e == 'not_allowed' || e.isEmpty)) {
+          if (detail is Map && (e == 'not_allowed' || e.isEmpty)) {
             e = '${detail['reason'] ?? e}';
           }
           return e;
@@ -1390,8 +1461,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
           walletMode: MoyasarWalletMode.samsungPay,
           madaPreferredNetworksOnly: false,
         );
-      } else if (useMs &&
-          (pm == 'card' || pm == 'mada_pay')) {
+      } else if (useMs && (pm == 'card' || pm == 'mada_pay')) {
         res = await _payWithMoyasarHostedCheckout(
           charge: charge,
           titleAr: titleAr,
@@ -1482,8 +1552,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         maxFractionDigits: 2,
       );
       msg = _isAr
-                ? 'المبلغ المستحق ($due) أقل من الحد الأدنى للدفع ($_minPayablePhrase). إجمالي الباقة: $total'
-                : 'Amount due ($due) is below the minimum charge ($_minPayablePhrase). Plan total: $total';
+          ? 'المبلغ المستحق ($due) أقل من الحد الأدنى للدفع ($_minPayablePhrase). إجمالي الباقة: $total'
+          : 'Amount due ($due) is below the minimum charge ($_minPayablePhrase). Plan total: $total';
     } else if (err.startsWith('moyasar_validation:') ||
         err.startsWith('moyasar_api:') ||
         err == 'moyasar_validation_error' ||
@@ -1553,8 +1623,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     String planName = AppBranding.planNameFromRow(widget.plan, isAr: _isAr);
     if (planName.trim().isEmpty) planName = '—';
 
-    final tx = '${res['billing_transaction_id'] ?? res['transaction_id'] ?? res['payment_id'] ?? ''}'
-        .trim();
+    final tx =
+        '${res['billing_transaction_id'] ?? res['transaction_id'] ?? res['payment_id'] ?? ''}'
+            .trim();
     final promo = _appliedPromoCode;
     if (promo != null && promo.isNotEmpty && tx.isNotEmpty) {
       await _sub.redeemPromoCode(code: promo, billingTransactionId: tx);
@@ -1653,7 +1724,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     return res;
   }
 
-  double _canonicalAmountFromPending(Map<String, dynamic> pend, double fallback) {
+  double _canonicalAmountFromPending(
+      Map<String, dynamic> pend, double fallback) {
     final a = pend['amount'] ?? pend['expected_amount'];
     if (a is num && a.toDouble() > 0) return a.toDouble();
     final parsed = double.tryParse('$a');
@@ -1684,428 +1756,442 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         : AppKeyboardPad(
             extra: 16,
             child: AqarPrimaryScrollScope(
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: AppKeyboardInset.scrollViewPadding(
-                context,
-                base: const EdgeInsets.all(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SubscriptionUiHelpers.section(
-                    context: context,
-                    title: t.subscriptionsCheckoutTitle,
-                    children: [
-                      SubscriptionUiHelpers.tableRow(
-                        context: context,
-                        label: _isAr ? 'نوع العملية' : 'Payment kind',
-                        value: CheckoutJourney.title(
-                          isAr: _isAr,
-                          kind: _checkoutKind,
-                        ),
-                      ),
-                      SubscriptionUiHelpers.tableRow(
-                        context: context,
-                        label: t.subscriptionsPlanLine,
-                        value: name,
-                      ),
-                      SubscriptionUiHelpers.tableRow(
-                        context: context,
-                        label: t.subscriptionsPeriodLine,
-                        value: widget.period == 'lifetime_one_time'
-                            ? (_isAr ? 'مرة واحدة' : 'One-time')
-                            : widget.period == 'yearly'
-                                ? t.subscriptionsYearly
-                                : t.subscriptionsMonthly,
-                      ),
-                      if (_offer != null && _offer!.showBeforeDiscount)
-                        SubscriptionUiHelpers.priceTableRow(
+              child: SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: AppKeyboardInset.scrollViewPadding(
+                  context,
+                  base: const EdgeInsets.all(16),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SubscriptionUiHelpers.section(
+                      context: context,
+                      title: t.subscriptionsCheckoutTitle,
+                      children: [
+                        SubscriptionUiHelpers.tableRow(
                           context: context,
-                          isAr: _isAr,
-                          label: t.invoiceBreakdownSubtotal,
-                          amount: _offer!.basePrice,
-                        ),
-                      if (_offer != null && _offer!.showAutoPayRow)
-                        SubscriptionUiHelpers.priceTableRow(
-                          context: context,
-                          isAr: _isAr,
-                          label: t.checkoutAutoRenewDiscountPlain,
-                          amount: _offer!.autoPaySar,
-                          negative: true,
-                        ),
-                      if (_offer != null && _offer!.showPromoRow)
-                        SubscriptionUiHelpers.priceTableRow(
-                          context: context,
-                          isAr: _isAr,
-                          label: t.checkoutPromoCodeDiscountPlain,
-                          amount: _offer!.promoDiscountSar,
-                          negative: true,
-                        ),
-                      SubscriptionUiHelpers.priceTableRow(
-                        context: context,
-                        isAr: _isAr,
-                        label: t.subscriptionsTotalLine,
-                        amount: _effectiveChargeForPayment(),
-                        emphasize: true,
-                      ),
-                      if (_allowsAutoPay) ...[
-                        const SizedBox(height: 8),
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          visualDensity: VisualDensity.compact,
-                          title: Text(
-                            t.checkoutAutoRenew,
-                            style: SubscriptionUiHelpers.denseLabel(context),
-                          ),
-                          subtitle: _planAutoPayPct > 0
-                              ? Text(
-                                  t.checkoutAutoRenewHint(
-                                    _planAutoPayPct ==
-                                            _planAutoPayPct.roundToDouble()
-                                        ? _planAutoPayPct.toStringAsFixed(0)
-                                        : _planAutoPayPct.toStringAsFixed(1),
-                                  ),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(fontWeight: FontWeight.w700),
-                                )
-                              : null,
-                          value: _autoRenew,
-                          onChanged: (v) {
-                            setState(() {
-                              _autoRenew = v;
-                              if (v) {
-                                if (!_promoAlreadyApplied) {
-                                  _promoIntentOpen = false;
-                                  if (!_hasBetterPromoThanAutoPay) {
-                                    _promoCtrl.clear();
-                                  }
-                                }
-                              } else {
-                                _promoIntentOpen = false;
-                              }
-                            });
-                            unawaited(_prefetchServerCharge());
-                          },
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      if (_showBetterPromoHint)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: 8,
-                            runSpacing: 4,
-                            children: [
-                              Text(
-                                t.checkoutBetterPromoNote,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              ),
-                              TextButton(
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                  visualDensity: VisualDensity.compact,
-                                  tapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                onPressed: _openPromoIntent,
-                                child: Text(t.checkoutWantPromoLink),
-                              ),
-                            ],
-                          ),
-                        ),
-                      AnimatedSize(
-                        duration: const Duration(milliseconds: 180),
-                        curve: Curves.easeOut,
-                        alignment: Alignment.topCenter,
-                        child: _showPromoField
-                            ? Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: _promoField(t),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-                      const SizedBox(height: 4),
-                      SubscriptionUiHelpers.legalNote(
-                        context: context,
-                        isAr: _isAr,
-                      ),
-                    ],
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .outlineVariant
-                              .withValues(alpha: 0.7),
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(
-                          CheckoutJourney.body(
+                          label: _isAr ? 'نوع العملية' : 'Payment kind',
+                          value: CheckoutJourney.title(
                             isAr: _isAr,
                             kind: _checkoutKind,
                           ),
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                height: 1.4,
-                                fontWeight: FontWeight.w700,
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
+                        ),
+                        SubscriptionUiHelpers.tableRow(
+                          context: context,
+                          label: t.subscriptionsPlanLine,
+                          value: name,
+                        ),
+                        SubscriptionUiHelpers.tableRow(
+                          context: context,
+                          label: t.subscriptionsPeriodLine,
+                          value: widget.period == 'lifetime_one_time'
+                              ? (_isAr ? 'مرة واحدة' : 'One-time')
+                              : widget.period == 'yearly'
+                                  ? t.subscriptionsYearly
+                                  : t.subscriptionsMonthly,
+                        ),
+                        if (_offer != null && _offer!.showBeforeDiscount)
+                          SubscriptionUiHelpers.priceTableRow(
+                            context: context,
+                            isAr: _isAr,
+                            label: t.invoiceBreakdownSubtotal,
+                            amount: _offer!.basePrice,
+                          ),
+                        if (_offer != null && _offer!.showAutoPayRow)
+                          SubscriptionUiHelpers.priceTableRow(
+                            context: context,
+                            isAr: _isAr,
+                            label: t.checkoutAutoRenewDiscountPlain,
+                            amount: _offer!.autoPaySar,
+                            negative: true,
+                          ),
+                        if (_offer != null && _offer!.showPromoRow)
+                          SubscriptionUiHelpers.priceTableRow(
+                            context: context,
+                            isAr: _isAr,
+                            label: t.checkoutPromoCodeDiscountPlain,
+                            amount: _offer!.promoDiscountSar,
+                            negative: true,
+                          ),
+                        SubscriptionUiHelpers.priceTableRow(
+                          context: context,
+                          isAr: _isAr,
+                          label: t.subscriptionsTotalLine,
+                          amount: _effectiveChargeForPayment(),
+                          emphasize: true,
+                        ),
+                        if (_allowsAutoPay) ...[
+                          const SizedBox(height: 8),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            title: Text(
+                              t.checkoutAutoRenew,
+                              style: SubscriptionUiHelpers.denseLabel(context),
+                            ),
+                            subtitle: _planAutoPayPct > 0
+                                ? Text(
+                                    t.checkoutAutoRenewHint(
+                                      _planAutoPayPct ==
+                                              _planAutoPayPct.roundToDouble()
+                                          ? _planAutoPayPct.toStringAsFixed(0)
+                                          : _planAutoPayPct.toStringAsFixed(1),
+                                    ),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  )
+                                : null,
+                            value: _autoRenew,
+                            onChanged: (v) {
+                              setState(() {
+                                _autoRenew = v;
+                                if (v) {
+                                  if (!_promoAlreadyApplied) {
+                                    _promoIntentOpen = false;
+                                    if (!_hasBetterPromoThanAutoPay) {
+                                      _promoCtrl.clear();
+                                    }
+                                  }
+                                } else {
+                                  _promoIntentOpen = false;
+                                }
+                              });
+                              unawaited(_prefetchServerCharge());
+                            },
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        if (_showBetterPromoHint)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              runSpacing: 4,
+                              children: [
+                                Text(
+                                  t.checkoutBetterPromoNote,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                ),
+                                TextButton(
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                    visualDensity: VisualDensity.compact,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  onPressed: _openPromoIntent,
+                                  child: Text(t.checkoutWantPromoLink),
+                                ),
+                              ],
+                            ),
+                          ),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          alignment: Alignment.topCenter,
+                          child: _showPromoField
+                              ? Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: _promoField(t),
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                        const SizedBox(height: 4),
+                        SubscriptionUiHelpers.legalNote(
+                          context: context,
+                          isAr: _isAr,
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outlineVariant
+                                .withValues(alpha: 0.7),
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            CheckoutJourney.body(
+                              isAr: _isAr,
+                              kind: _checkoutKind,
+                            ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      height: 1.4,
+                                      fontWeight: FontWeight.w700,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                          ),
                         ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    t.subscriptionsPaymentMethod,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    CheckoutJourney.surfaceHint(isAr: _isAr),
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                          height: 1.35,
-                        ),
-                  ),
-                  const SizedBox(height: 10),
-                  if (showAppleWallet || showSamsungWallet) ...[
-                    _buildWalletQuickPayRow(
-                      showApple: showAppleWallet,
-                      showSamsung: showSamsungWallet,
-                      showMada: false,
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      _isAr
-                          ? 'أو ادفع ببطاقة ائتمان / مدى'
-                          : 'Or pay with a credit / mada card',
+                      t.subscriptionsPaymentMethod,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      CheckoutJourney.surfaceHint(isAr: _isAr),
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                            height: 1.35,
                           ),
                     ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (_cards.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Material(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest
-                          .withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(12),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => setState(
-                          () => _savedCardsExpanded = !_savedCardsExpanded,
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 10,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.credit_card,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  _isAr
-                                      ? 'بطاقاتي (${_cards.length})'
-                                      : 'My cards (${_cards.length})',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(fontWeight: FontWeight.w800),
-                                ),
-                              ),
-                              Icon(
-                                _savedCardsExpanded
-                                    ? Icons.expand_less
-                                    : Icons.expand_more,
-                              ),
-                            ],
-                          ),
-                        ),
+                    const SizedBox(height: 10),
+                    if (showAppleWallet || showSamsungWallet) ...[
+                      _buildWalletQuickPayRow(
+                        showApple: showAppleWallet,
+                        showSamsung: showSamsungWallet,
+                        showMada: false,
                       ),
-                    ),
-                    if (_savedCardsExpanded) ...[
-                      const SizedBox(height: 8),
-                      ..._cards.map(_buildSavedCardVisual),
-                    ],
-                    const SizedBox(height: 8),
-                  ],
-                  if (_cards.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
+                      const SizedBox(height: 12),
+                      Text(
                         _isAr
-                            ? 'بعد أول دفع تُحفظ بطاقتك هنا للخصم المباشر'
-                            : 'After your first payment, your card appears here for one-tap checkout',
+                            ? 'أو ادفع ببطاقة ائتمان / مدى'
+                            : 'Or pay with a credit / mada card',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ),
-                  for (final method in otherPaymentMethods)
-                    _paymentOptionTile(
-                      title: PaymentMethodManager.displayName(
-                        method,
-                        isAr: _isAr,
-                      ),
-                      value: PaymentMethodManager.modeKey(method),
-                      icon: PaymentMethodManager.icon(method),
-                    ),
-                  const SizedBox(height: 16),
-                  if (_mode == 'new' && PaymentService.useMoyasarLiveFlow)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        _isAr
-                            ? 'اضغط «إتمام الدفع» لإدخال بطاقة ائتمان / مدى — تُحفظ تلقائياً للخصم المباشر لاحقاً.'
-                            : 'Tap «Complete payment» to enter a credit / mada card — it saves automatically for one-tap checkout.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w800,
                               color: Theme.of(context)
                                   .colorScheme
                                   .onSurfaceVariant,
                             ),
                       ),
-                    )
-                  else if (_mode == 'new')
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final ok = await PaymentOverlay.push<bool>(
-                          context,
-                          name: '/subscriptions/add-card',
-                          page: AddPaymentCardScreen(lang: widget.lang),
-                        );
-                        if (ok == true) await _loadCards();
-                      },
-                      icon: const Icon(Icons.add_card_outlined),
-                      label: Text(t.subscriptionsAddCard),
-                    ),
-                  const SizedBox(height: 16),
-                  Text(
-                    PaymentPlainExplain.checkoutTrust(isAr: _isAr),
-                    style: TextStyle(
-                      height: 1.45,
-                      fontSize: 13,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (_payLockedByPromoIntent)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        t.checkoutPayLockedUntilPromo,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: Theme.of(context).colorScheme.error,
-                          height: 1.35,
+                      const SizedBox(height: 8),
+                    ],
+                    if (_cards.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Material(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.35),
+                        borderRadius: BorderRadius.circular(12),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () => setState(
+                            () => _savedCardsExpanded = !_savedCardsExpanded,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.credit_card,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _isAr
+                                        ? 'بطاقاتي (${_cards.length})'
+                                        : 'My cards (${_cards.length})',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                                Icon(
+                                  _savedCardsExpanded
+                                      ? Icons.expand_less
+                                      : Icons.expand_more,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
+                      if (_savedCardsExpanded) ...[
+                        const SizedBox(height: 8),
+                        ..._cards.map(_buildSavedCardVisual),
+                      ],
+                      const SizedBox(height: 8),
+                    ],
+                    if (_cards.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          _isAr
+                              ? 'بعد أول دفع تُحفظ بطاقتك هنا للخصم المباشر'
+                              : 'After your first payment, your card appears here for one-tap checkout',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                        ),
+                      ),
+                    for (final method in otherPaymentMethods)
+                      _paymentOptionTile(
+                        title: PaymentMethodManager.displayName(
+                          method,
+                          isAr: _isAr,
+                        ),
+                        value: PaymentMethodManager.modeKey(method),
+                        icon: PaymentMethodManager.icon(method),
+                      ),
+                    const SizedBox(height: 16),
+                    if (_mode == 'new' && PaymentService.useMoyasarLiveFlow)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          _isAr
+                              ? 'اضغط «إتمام الدفع» لإدخال بطاقة ائتمان / مدى — تُحفظ تلقائياً للخصم المباشر لاحقاً.'
+                              : 'Tap «Complete payment» to enter a credit / mada card — it saves automatically for one-tap checkout.',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                        ),
+                      )
+                    else if (_mode == 'new')
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final ok = await PaymentOverlay.push<bool>(
+                            context,
+                            name: '/subscriptions/add-card',
+                            page: AddPaymentCardScreen(lang: widget.lang),
+                          );
+                          if (ok == true) await _loadCards();
+                        },
+                        icon: const Icon(Icons.add_card_outlined),
+                        label: Text(t.subscriptionsAddCard),
+                      ),
+                    const SizedBox(height: 16),
+                    Text(
+                      PaymentPlainExplain.checkoutTrust(isAr: _isAr),
+                      style: TextStyle(
+                        height: 1.45,
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  FilledButton(
-                    onPressed: (_paying || _payLockedByPromoIntent)
-                        ? null
-                        : () {
-                            if (_mode == 'saved' && _selectedCardId != null) {
-                              final row = _cardRowById(_selectedCardId);
-                              if (row != null &&
-                                  PaymentService.isCardExpired(row)) {
+                    const SizedBox(height: 12),
+                    if (_payLockedByPromoIntent)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          t.checkoutPayLockedUntilPromo,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: Theme.of(context).colorScheme.error,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    FilledButton(
+                      onPressed: (_paying ||
+                              _completionRequestInProgress ||
+                              _payLockedByPromoIntent)
+                          ? null
+                          : () {
+                              if (_mode == 'saved' && _selectedCardId != null) {
+                                final row = _cardRowById(_selectedCardId);
+                                if (row != null &&
+                                    PaymentService.isCardExpired(row)) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        _isAr
+                                            ? 'انتهت صلاحية البطاقة المختارة'
+                                            : 'Selected card has expired',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+                              }
+                              if (!PaymentService.useMoyasarLiveFlow &&
+                                  _mode == 'saved' &&
+                                  (_selectedCardId == null ||
+                                      _selectedCardId!.isEmpty)) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(
                                       _isAr
-                                          ? 'انتهت صلاحية البطاقة المختارة'
-                                          : 'Selected card has expired',
+                                          ? 'اختر بطاقة'
+                                          : 'Pick a saved card',
                                     ),
                                   ),
                                 );
                                 return;
                               }
-                            }
-                            if (!PaymentService.useMoyasarLiveFlow &&
-                                _mode == 'saved' &&
-                                (_selectedCardId == null ||
-                                    _selectedCardId!.isEmpty)) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    _isAr ? 'اختر بطاقة' : 'Pick a saved card',
+                              if (_shouldUseSavedCardForPayment() &&
+                                  _resolvedSavedCardId() == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      _isAr
+                                          ? 'اختر بطاقة محفوظة'
+                                          : 'Select a saved card',
+                                    ),
                                   ),
-                                ),
-                              );
-                              return;
-                            }
-                            if (_shouldUseSavedCardForPayment() &&
-                                _resolvedSavedCardId() == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    _isAr
-                                        ? 'اختر بطاقة محفوظة'
-                                        : 'Select a saved card',
-                                  ),
-                                ),
-                              );
-                              return;
-                            }
-                            unawaited(_complete());
-                          },
-                    child: _paying
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(t.subscriptionsPay),
-                  ),
-                ],
+                                );
+                                return;
+                              }
+                              unawaited(_complete());
+                            },
+                      child: _paying || _completionRequestInProgress
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(t.subscriptionsPay),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
+          );
 
     return PaymentPopGuard(
-      busy: _paying,
+      busy: _paying || _completionRequestInProgress,
       child: Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        leading: AppPageCloseButton(
-          isArabic: _isAr,
-          onPressed: () {
-            if (_paying) return;
-            SafeOverlayPop.pop(context);
-          },
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(
+            isArabic: _isAr,
+            onPressed: () {
+              if (_paying || _completionRequestInProgress) return;
+              SafeOverlayPop.pop(context);
+            },
+          ),
+          title: Text(t.subscriptionsCheckoutTitle),
         ),
-        title: Text(t.subscriptionsCheckoutTitle),
+        body: body,
       ),
-      body: body,
-    ),
     );
   }
 
@@ -2120,7 +2206,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       buttons.add(
         Expanded(
           child: FilledButton(
-            onPressed: (_paying || _payLockedByPromoIntent)
+            onPressed: (_paying ||
+                    _completionRequestInProgress ||
+                    _payLockedByPromoIntent)
                 ? null
                 : () => unawaited(_payWithWalletMode('apple_pay')),
             style: FilledButton.styleFrom(
@@ -2148,7 +2236,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       buttons.add(
         Expanded(
           child: FilledButton(
-            onPressed: (_paying || _payLockedByPromoIntent)
+            onPressed: (_paying ||
+                    _completionRequestInProgress ||
+                    _payLockedByPromoIntent)
                 ? null
                 : () => unawaited(_payWithWalletMode('samsung_pay')),
             style: FilledButton.styleFrom(
@@ -2169,7 +2259,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       buttons.add(
         Expanded(
           child: FilledButton.tonal(
-            onPressed: (_paying || _payLockedByPromoIntent)
+            onPressed: (_paying ||
+                    _completionRequestInProgress ||
+                    _payLockedByPromoIntent)
                 ? null
                 : () => unawaited(_payWithWalletMode('mada_pay')),
             child: Text(
@@ -2226,9 +2318,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         borderRadius: BorderRadius.circular(16),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: expired
-              ? null
-              : () => unawaited(_selectSavedCardAndMaybePay(c)),
+          onTap:
+              expired ? null : () => unawaited(_selectSavedCardAndMaybePay(c)),
           child: Ink(
             decoration: BoxDecoration(gradient: gradient),
             child: Opacity(

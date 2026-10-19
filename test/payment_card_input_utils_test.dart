@@ -1,8 +1,12 @@
 import 'package:aqar_user/core/payment/payment_input_utils.dart';
+import 'package:aqar_user/core/payment/payment_recovery_coordinator.dart';
 import 'package:aqar_user/core/subscription/card_scheme.dart';
 import 'package:aqar_user/services/payment_gateway_mock.dart';
+import 'package:aqar_user/services/payment_service.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:moyasar/moyasar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('CardHolderLatinUppercaseFormatter uppercases latin and strips Arabic',
@@ -77,5 +81,47 @@ void main() {
       allowInvalidCardNumber: true,
     );
     expect(mockResult, isNull);
+  });
+
+  test('Moyasar authorization errors map to a safe actionable code', () {
+    final error = ValidationError.messageOnly(
+      'type: authentication_error, message: Invalid authorization credentials',
+    );
+
+    expect(PaymentService.mapMoyasarResultToError(error), 'moyasar_auth_error');
+  });
+
+  test('pending payment recovery is isolated per signed-in user', () async {
+    SharedPreferences.setMockInitialValues({});
+    await PaymentRecoveryCoordinator.savePending(
+      userId: 'user-a',
+      billingTransactionId: 'billing-a',
+      expectedAmountSar: 99,
+      planId: 'plan-a',
+      period: 'monthly',
+    );
+    await PaymentRecoveryCoordinator.savePending(
+      userId: 'user-b',
+      billingTransactionId: 'billing-b',
+      expectedAmountSar: 149,
+      planId: 'plan-b',
+      period: 'monthly',
+    );
+
+    expect(
+      (await PaymentRecoveryCoordinator.loadPending(
+          userId: 'user-a'))?['billing_transaction_id'],
+      'billing-a',
+    );
+    await PaymentRecoveryCoordinator.clearPending(userId: 'user-b');
+    expect(
+      (await PaymentRecoveryCoordinator.loadPending(
+          userId: 'user-a'))?['billing_transaction_id'],
+      'billing-a',
+    );
+    expect(
+      await PaymentRecoveryCoordinator.loadPending(userId: 'user-b'),
+      isNull,
+    );
   });
 }

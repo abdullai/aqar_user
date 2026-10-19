@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/app_config.dart';
-import '../payment/platform_fee_catalog.dart';
 import '../workflow/app_role_helper.dart';
 import '../../services/individual_market_offer_service.dart';
 import '../../services/subscription_service.dart';
@@ -67,7 +66,6 @@ class AppSubscriptionGate extends ChangeNotifier {
   bool get canAddMarketPropertyRequest {
     if (AppConfig.devBypassSubscriptionGate) return true;
     if (isGuest) return false;
-    if (!isMarketingAccount) return true;
     final a = listingRequestsAllowance;
     if (a == null) return false;
     return a.canCreateNow;
@@ -123,7 +121,7 @@ class AppSubscriptionGate extends ChangeNotifier {
         return isMarketingAccount
             ? (listingRequestsAllowance?.shortStatusAr() ??
                 'اشترك في الباقة المناسبة لنشر طلباتك في الرئيسية.')
-            : 'نشر الطلب العقاري في الرئيسية مجاني — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: true) ?? 'ادفع فقط عند اختيار «فوري»'}.';
+            : 'نشر الطلب العقاري في الرئيسية يتطلب اشتراكاً فعالاً. إضافة الإعلان تبقى مجانية.';
       case SubscriptionGateAction.addPropertyListing:
         if (isMarketingAccount) {
           return 'اشترك في الباقة المناسبة لنوع حسابك (أساسية/احترافية/تميز) لنشر الإعلانات.';
@@ -143,7 +141,7 @@ class AppSubscriptionGate extends ChangeNotifier {
         return isMarketingAccount
             ? (listingRequestsAllowance?.shortStatusEn() ??
                 'Subscribe to post property requests on the home feed.')
-            : 'Posting on the home feed is free — ${PlatformFeeCatalog.instance?.instantPayOnlyHint(isAr: false) ?? 'pay only when you choose Instant'}.';
+            : 'Posting a property request on the home feed requires an active subscription. Adding a listing remains free.';
       case SubscriptionGateAction.addPropertyListing:
         if (isMarketingAccount) {
           return 'Subscribe to the plan for your account type to publish listings.';

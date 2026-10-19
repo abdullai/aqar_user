@@ -20,7 +20,6 @@ class MarketRequestOffersService {
         .select(
           'id,created_at,updated_at,status,message,price_offer,offerer_id,owner_accepted_at,owner_rejection_reason,owner_rejected_at,owner_rejected_by',
         )
-        .eq('market_request_id', id)
         .order('created_at', ascending: false);
 
     final rows = (res as List).cast<Map>();
@@ -183,68 +182,30 @@ class MarketRequestOffersService {
     final uid = _sb.auth.currentUser?.id ?? '';
     if (uid.isEmpty) return false;
 
-    try {
-      await _sb.from('market_request_offers').insert({
-        'market_request_id': rid,
-        'offerer_id': uid,
-        'message': (offerMessage ?? '').trim().isEmpty
+    final dynamic result = await _sb.rpc(
+      'submit_market_request_offer_with_quota',
+      params: {
+        'p_request_id': rid,
+        'p_message': (offerMessage ?? '').trim().isEmpty
             ? null
             : (offerMessage ?? '').trim(),
-        'price_offer': priceOffer,
-        'status': 'submitted',
-      });
-      await _notifyRequesterOfferSubmitted(rid, uid, updated: false);
-      return true;
-    } on PostgrestException catch (e) {
-      if (e.code == '23505') {
-        final patch = {
-          'message': (offerMessage ?? '').trim().isEmpty
-              ? null
-              : (offerMessage ?? '').trim(),
-          'price_offer': priceOffer,
-          'status': 'submitted',
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-        };
-        try {
-          await _sb
-              .from('market_request_offers')
-              .update(patch)
-              .eq('market_request_id', rid)
-              .eq('offerer_id', uid)
-              .inFilter('status', [
-            'submitted',
-            'pending',
-            'withdrawn',
-            'rejected',
-            'declined',
-            'cancelled',
-            'canceled',
-          ]);
-        } on PostgrestException catch (updateError) {
-          final detail = '${updateError.message} ${updateError.details ?? ''}'
-              .toLowerCase();
-          if (!detail.contains('updated_at')) rethrow;
-          patch.remove('updated_at');
-          await _sb
-              .from('market_request_offers')
-              .update(patch)
-              .eq('market_request_id', rid)
-              .eq('offerer_id', uid)
-              .inFilter('status', [
-            'submitted',
-            'pending',
-            'withdrawn',
-            'rejected',
-            'declined',
-            'cancelled',
-            'canceled',
-          ]);
-        }
-        await _notifyRequesterOfferSubmitted(rid, uid, updated: true);
-        return true;
-      }
-      rethrow;
+        'p_price_offer': priceOffer,
+      },
+    );
+    if (result is! Map) {
+      throw StateError('unexpected_response');
     }
+    if (result['ok'] != true) {
+      final error = '${result['error'] ?? 'offer_submit_failed'}';
+      if (error == 'offer_already_active') return false;
+      throw StateError(error);
+    }
+    await _notifyRequesterOfferSubmitted(
+      rid,
+      uid,
+      updated: result['updated'] == true,
+    );
+    return true;
   }
 
   Future<void> respondOffer({

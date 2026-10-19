@@ -24,7 +24,8 @@ class PlanDisplayCopy {
     return '$n';
   }
 
-  static String _descriptionFromDb(Map<String, dynamic> plan, {required bool isAr}) {
+  static String _descriptionFromDb(Map<String, dynamic> plan,
+      {required bool isAr}) {
     final key = isAr ? 'description_ar' : 'description_en';
     final alt = isAr ? 'description_en' : 'description_ar';
     for (final k in [key, alt]) {
@@ -66,12 +67,32 @@ class PlanDisplayCopy {
     final program =
         (plan['plan_program'] ?? 'monthly').toString().trim().toLowerCase();
 
+    if (order == 15 && program == 'lifetime_one_time') {
+      return isAr
+          ? 'خطة قديمة محفوظة للمشتركين الحاليين؛ ليست خيار شراء جديدًا.'
+          : 'Legacy one-time plan retained for existing subscribers; it is no longer for sale.';
+    }
+
+    if ((order == 23 || order == 24) &&
+        program == 'lifetime_one_time' &&
+        (_intOf(plan['max_listing_requests']) ?? 0) == 1) {
+      return isAr
+          ? 'رصيد لنشر طلب عقاري واحد — دفعة واحدة، دون اشتراك رئيسي.'
+          : 'One property-request credit — one-time payment, no main plan required.';
+    }
+
+    if (order == 16 && program == 'lifetime_one_time') {
+      return isAr
+          ? 'رصيد لإتمام صفقة واحدة — دفعة واحدة، دون اشتراك رئيسي.'
+          : 'One deal credit — one-time payment, no main plan required.';
+    }
+
     if (isTrial) {
       return isAr
           ? 'باقة تجريبية لمرة واحدة لكل مستخدم — تمنحك تجربة عملية لميزات المنصة قبل الاشتراك المدفوع.'
           : 'A one-time trial per user to explore platform features before a paid subscription.';
     }
-    if (program == 'lifetime_one_time' || order == 11 || order == 12 || order == 13) {
+    if (order == 11 || order == 12 || order == 13 || order == 16) {
       return isAr
           ? 'باقة «عروض السوق» — رصيد محدود لإتمام الصفقات على طلبات السوق من الرئيسية. لا تجديد تلقائي؛ ينتهي الرصيد عند استنفاده.'
           : 'Market Offers plan — a fixed balance to complete deals on home market requests. No auto-renewal; balance ends when used up.';
@@ -132,6 +153,11 @@ class PlanDisplayCopy {
     required String lang,
   }) {
     final isAr = _isAr(lang);
+    if ('${plan['user_type'] ?? ''}'.trim().toLowerCase() == 'individual') {
+      return isAr
+          ? '• إضافة الإعلان العقاري: مجانية للحساب الفردي'
+          : '• Add a property listing: free for individual accounts';
+    }
     if (plan['is_trial_plan'] == true) {
       return isAr
           ? '• الإعلانات العقارية (صفحتي): إعلان واحد (تجربة ٣ أيام)'
@@ -153,6 +179,8 @@ class PlanDisplayCopy {
   }) {
     final isAr = _isAr(lang);
     final v = plan['max_listing_requests'];
+    final program =
+        (plan['plan_program'] ?? 'monthly').toString().trim().toLowerCase();
     if (v == null) {
       return isAr
           ? '• طلبات عقارية من الرئيسية: غير محدود'
@@ -163,6 +191,17 @@ class PlanDisplayCopy {
       return isAr
           ? '• طلبات عقارية من الرئيسية: غير مشمولة'
           : '• Property requests from home: Not included';
+    }
+    if (program == 'lifetime_one_time') {
+      final order = _intOf(plan['sort_order']) ?? 0;
+      if ((order == 23 || order == 24) && n == 1) {
+        return isAr
+            ? '• نشر طلب عقاري: عملية واحدة'
+            : '• Publish one property request';
+      }
+      return isAr
+          ? '• طلبات عقارية من الرئيسية: $n طلبات (رصيد إجمالي)'
+          : '• Property requests from home: $n total requests';
     }
     return isAr
         ? '• طلبات عقارية من الرئيسية: $n / شهر'
@@ -194,9 +233,15 @@ class PlanDisplayCopy {
           : '• Deals from home: not included (requires offer plan)';
     }
     if (program == 'lifetime_one_time') {
+      final order = _intOf(plan['sort_order']) ?? 0;
+      if (order == 16 && n == 1) {
+        return isAr
+            ? '• إتمام صفقة من الرئيسية: عملية واحدة'
+            : '• Complete one deal from home';
+      }
       return isAr
-          ? '• إتمام الصفقة على طلبات السوق من الرئيسية: $n صفقة (رصيد إجمالي)'
-          : '• Deals from home: $n deals (lifetime balance)';
+          ? '• إتمام الصفقة على طلبات السوق من الرئيسية: $n صفقات (رصيد إجمالي)'
+          : '• Deals from home: $n deals (one-time balance)';
     }
     return isAr
         ? '• إتمام الصفقة على طلبات السوق من الرئيسية: $n صفقة / شهر'
@@ -229,7 +274,8 @@ class PlanDisplayCopy {
     final note = comprehensiveNote(plan, lang: lang);
     if (note != null) lines.add(note);
 
-    final support = _featureTextFromJson(plan, isAr: _isAr(lang), jsonKey: 'support');
+    final support =
+        _featureTextFromJson(plan, isAr: _isAr(lang), jsonKey: 'support');
     if (support.isNotEmpty) {
       lines.add('• $support');
     }
@@ -249,7 +295,9 @@ class PlanDisplayCopy {
 
     return [
       (
-        label: isAr ? 'رخصة فال / شارة الامتثال' : 'FAL license / compliance badge',
+        label: isAr
+            ? 'رخصة فال / شارة الامتثال'
+            : 'FAL license / compliance badge',
         included: hasFal,
       ),
       (
@@ -286,6 +334,10 @@ class PlanDisplayCopy {
           : 'Not included — requires a separate offers plan';
     }
     if (program == 'lifetime_one_time') {
+      final order = _intOf(plan['sort_order']) ?? 0;
+      if (order == 16 && n == 1) {
+        return isAr ? 'صفقة واحدة' : 'One deal';
+      }
       return isAr ? '$n صفقة (رصيد إجمالي)' : '$n deals (lifetime balance)';
     }
     return isAr ? '$n صفقة / شهر' : '$n deals / month';
@@ -299,7 +351,9 @@ class PlanDisplayCopy {
   }) {
     final isAr = _isAr(lang);
     final lim = _lim(v, isAr: isAr);
-    if (unitAr != null && unitEn != null && lim != (isAr ? 'غير محدود' : 'Unlimited')) {
+    if (unitAr != null &&
+        unitEn != null &&
+        lim != (isAr ? 'غير محدود' : 'Unlimited')) {
       return isAr ? '$lim $unitAr' : '$lim $unitEn';
     }
     return lim;

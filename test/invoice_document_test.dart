@@ -50,6 +50,21 @@ void main() {
       expect(ar.qrPayload.contains(uuid), isFalse);
     });
 
+    test('payment reference is numeric and never exposes gateway UUIDs', () {
+      final doc = InvoiceDocument.fromRow({
+        'id': 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        'user_invoice_seq': 42,
+        'gateway_transaction_id': '95f8b3a-a425-4f21-9c0f-ef1234567890',
+      }, isAr: true);
+      final numericReference = InvoiceDocument.fromRow({
+        'user_invoice_seq': 43,
+        'gateway_transaction_id': '7645123098',
+      }, isAr: true);
+
+      expect(doc.paymentReference, '42');
+      expect(numericReference.paymentReference, '7645123098');
+    });
+
     test('hides zero discount and does not add VAT', () {
       final doc = InvoiceDocument.fromRow({
         'user_invoice_seq': 1,

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:aqar_user/core/payment/payment_platform_detector.dart';
 import 'package:aqar_user/services/billing_transaction_repository.dart';
+import 'package:aqar_user/services/subscription_service.dart';
 
 void main() {
   group('BillingTransactionRepository.normalizedStatus', () {
@@ -55,6 +56,50 @@ void main() {
       expect(PaymentPlatformDetector.supportsTabby(), isFalse);
       expect(PaymentPlatformDetector.supportsTamara(), isFalse);
       expect(PaymentCapabilityDetector.supportsGooglePay(), isFalse);
+    });
+  });
+
+  group('Lifetime subscription access', () {
+    test('active lifetime plan remains paid with no end date', () {
+      final row = {
+        'status': 'active',
+        'is_lifetime': true,
+        'ends_at': null,
+      };
+
+      expect(SubscriptionService.subscriptionRowInPaidAccess(row), isTrue);
+      expect(
+        SubscriptionService.pickPreferredSubscriptionRow([row])?['is_lifetime'],
+        isTrue,
+      );
+    });
+
+    test('one-time operation credits are not selected as the main plan', () {
+      final main = {
+        'id': 'main-subscription',
+        'status': 'active',
+        'ends_at': DateTime.now()
+            .toUtc()
+            .add(const Duration(days: 10))
+            .toIso8601String(),
+        'is_topup': false,
+      };
+      final credit = {
+        'id': 'deal-credit',
+        'status': 'active',
+        'is_lifetime': true,
+        'is_topup': true,
+        'ends_at': null,
+      };
+
+      expect(
+        SubscriptionService.pickPreferredSubscriptionRow([main, credit])?['id'],
+        'main-subscription',
+      );
+      expect(
+        SubscriptionService.pickPreferredSubscriptionRow([credit]),
+        isNull,
+      );
     });
   });
 }

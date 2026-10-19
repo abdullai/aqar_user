@@ -144,286 +144,301 @@ class PaymentReceiptScreen extends StatelessWidget {
     return Directionality(
       textDirection: _isAr ? ui.TextDirection.rtl : ui.TextDirection.ltr,
       child: WillPopScope(
-      onWillPop: () async {
-        Navigator.of(context).pop(true);
-        return false;
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          leading: AppPageCloseButton(
-            isArabic: _isAr,
-            tooltip: close,
-            onPressed: () => Navigator.of(context).pop(true),
-          ),
-          title: Text(_doc?.documentTitle ?? (_isAr ? 'إيصال دفع' : 'Payment receipt')),
-        ),
-        body: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: AppConfig.maxContentWidth,
+        onWillPop: () async {
+          Navigator.of(context).pop(true);
+          return false;
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            leading: AppPageCloseButton(
+              isArabic: _isAr,
+              tooltip: close,
+              onPressed: () => Navigator.of(context).pop(true),
             ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: cs.primaryContainer.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(Icons.verified_outlined,
-                            color: cs.primary, size: 56),
-                        const SizedBox(height: 8),
-                        Text(
-                          _isAr ? 'تم الدفع بنجاح' : 'Payment successful',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleLarge
-                              ?.copyWith(
-                                color: cs.onPrimaryContainer,
-                                fontWeight: FontWeight.w900,
-                              ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          PaymentPlainExplain.receiptSubtitle(
-                            isAr: _isAr,
-                            period: period,
-                            purpose: purpose,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
+            title: Text(_doc?.documentTitle ??
+                (_isAr ? 'إيصال دفع' : 'Payment receipt')),
+          ),
+          body: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: AppConfig.maxContentWidth,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
                       padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: cs.primaryContainer.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          Icon(Icons.verified_outlined,
+                              color: cs.primary, size: 56),
+                          const SizedBox(height: 8),
                           Text(
-                            _isAr ? 'تفاصيل المعاملة' : 'Transaction details',
+                            _isAr ? 'تم الدفع بنجاح' : 'Payment successful',
                             style: Theme.of(context)
                                 .textTheme
-                                .titleMedium
-                                ?.copyWith(fontWeight: FontWeight.w900),
-                          ),
-                          const SizedBox(height: 10),
-                          _row(_isAr ? 'الباقة' : 'Plan', planName),
-                          _row(
-                            _isAr ? 'البيان' : 'Description',
-                            _doc?.statementLabel ??
-                                InvoiceCopy.statementForPlan(planName, isAr: _isAr),
-                          ),
-                          _row(
-                            _isAr ? 'الفترة' : 'Period',
-                            _doc?.periodLabel ?? _periodLabel(),
-                          ),
-                          if (_doc != null && _doc!.showSubtotal)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 130,
-                                    child: Text(
-                                      _isAr ? 'قبل الخصم' : 'Before discount',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(child: _moneyWidget(_doc!.subtotal)),
-                                ],
-                              ),
-                            ),
-                          if (_doc != null && _doc!.showAutoPayDiscount)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 130,
-                                    child: Text(
-                                      _doc!.autoPayDiscountLabel(isAr: _isAr),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: _moneyWidget(_doc!.autoPayDiscountSar),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          if (_doc != null && _doc!.showPromoDiscount)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 130,
-                                    child: Text(
-                                      _doc!.promoDiscountLabel(isAr: _isAr),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: _moneyWidget(_doc!.promoDiscountSar),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          if (_doc != null && _doc!.showCombinedDiscount)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              child: Row(
-                                children: [
-                                  SizedBox(
-                                    width: 130,
-                                    child: Text(
-                                      _doc!.discountLabel(isAr: _isAr),
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                  Expanded(child: _moneyWidget(_doc!.discount)),
-                                ],
-                              ),
-                            ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 130,
-                                  child: Text(
-                                    _isAr ? 'المبلغ' : 'Amount',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
+                                .titleLarge
+                                ?.copyWith(
+                                  color: cs.onPrimaryContainer,
+                                  fontWeight: FontWeight.w900,
                                 ),
-                                Expanded(child: _amountValue(context)),
-                              ],
-                            ),
                           ),
-                          _row(
-                            _isAr ? 'طريقة الدفع' : 'Method',
-                            _doc?.methodLabel ?? paymentMethodLabel,
-                          ),
-                          if ((cardLast4 ?? '').isNotEmpty)
-                            _row(
-                              _isAr ? 'البطاقة' : 'Card',
-                              '•••• ${cardLast4!.trim()}',
+                          const SizedBox(height: 6),
+                          Text(
+                            PaymentPlainExplain.receiptSubtitle(
+                              isAr: _isAr,
+                              period: period,
+                              purpose: purpose,
                             ),
-                          if ((payerName ?? '').isNotEmpty)
-                            _row(_isAr ? 'الدافع' : 'Payer', payerName!),
-                          _row(
-                            _isAr ? 'تاريخ الدفع' : 'Paid at',
-                            _formattedDate,
-                          ),
-                          if (_officialInvoiceNo.isNotEmpty)
-                            _row(
-                              _isAr ? 'رقم الفاتورة' : 'Invoice number',
-                              _officialInvoiceNo,
-                              valueSelectable: true,
-                            ),
-                          if ((_doc?.paymentReference ?? paymentReference ?? '')
-                              .trim()
-                              .isNotEmpty)
-                            _row(
-                              _isAr ? 'مرجع الدفع' : 'Payment reference',
-                              (_doc?.paymentReference ?? paymentReference)!,
-                              valueSelectable: true,
-                            ),
-                          _row(
-                            _isAr ? 'نوع العملية' : 'Purpose',
-                            _doc?.purposeLabel ?? _purposeLabel(),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  AppReadableQr(
-                    data: _qrPayload,
-                    isAr: _isAr,
-                    size: 188,
-                    caption: _officialInvoiceNo.isNotEmpty
-                        ? _officialInvoiceNo
-                        : null,
-                    title: _isAr ? 'رمز التحقق' : 'Verification code',
-                    hint: _isAr
-                        ? 'امسح الرمز للتحقق من رقم الفاتورة.'
-                        : 'Scan to verify the invoice number.',
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isAr
-                        ? 'ختم المطابقة: ${_matchSeal()} — يطابق المبلغ ورقم العملية على الفاتورة المطبوعة.'
-                        : 'Match seal: ${_matchSeal()} — must match amount and transaction on the printed invoice.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.4,
-                      fontWeight: FontWeight.w700,
-                      color: cs.onSurfaceVariant,
+                    const SizedBox(height: 16),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _isAr ? 'تفاصيل المعاملة' : 'Transaction details',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                            const SizedBox(height: 10),
+                            _row(_isAr ? 'الباقة' : 'Plan', planName),
+                            _row(
+                              _isAr ? 'البيان' : 'Description',
+                              _doc?.statementLabel ??
+                                  InvoiceCopy.statementForPlan(planName,
+                                      isAr: _isAr),
+                            ),
+                            _row(
+                              _isAr ? 'الفترة' : 'Period',
+                              _doc?.periodLabel ?? _periodLabel(),
+                            ),
+                            if (_doc != null && _doc!.showSubtotal)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 130,
+                                      child: Text(
+                                        _isAr ? 'قبل الخصم' : 'Before discount',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                        child: _moneyWidget(_doc!.subtotal)),
+                                  ],
+                                ),
+                              ),
+                            if (_doc != null && _doc!.showAutoPayDiscount)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 130,
+                                      child: Text(
+                                        _doc!.autoPayDiscountLabel(isAr: _isAr),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: _moneyWidget(
+                                          _doc!.autoPayDiscountSar),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (_doc != null && _doc!.showPromoDiscount)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 130,
+                                      child: Text(
+                                        _doc!.promoDiscountLabel(isAr: _isAr),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child:
+                                          _moneyWidget(_doc!.promoDiscountSar),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (_doc != null && _doc!.showCombinedDiscount)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 6),
+                                child: Row(
+                                  children: [
+                                    SizedBox(
+                                      width: 130,
+                                      child: Text(
+                                        _doc!.discountLabel(isAr: _isAr),
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                        child: _moneyWidget(_doc!.discount)),
+                                  ],
+                                ),
+                              ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 130,
+                                    child: Text(
+                                      _isAr ? 'المبلغ' : 'Amount',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  Expanded(child: _amountValue(context)),
+                                ],
+                              ),
+                            ),
+                            _row(
+                              _isAr ? 'طريقة الدفع' : 'Method',
+                              _doc?.methodLabel ?? paymentMethodLabel,
+                            ),
+                            if ((cardLast4 ?? '').isNotEmpty)
+                              _row(
+                                _isAr ? 'البطاقة' : 'Card',
+                                '•••• ${cardLast4!.trim()}',
+                              ),
+                            if ((payerName ?? '').isNotEmpty)
+                              _row(_isAr ? 'الدافع' : 'Payer', payerName!),
+                            _row(
+                              _isAr ? 'تاريخ الدفع' : 'Paid at',
+                              _formattedDate,
+                            ),
+                            if (_officialInvoiceNo.isNotEmpty)
+                              _row(
+                                _isAr ? 'رقم الفاتورة' : 'Invoice number',
+                                _officialInvoiceNo,
+                                valueSelectable: true,
+                              ),
+                            if ((_doc?.paymentReference ??
+                                        paymentReference ??
+                                        '')
+                                    .trim()
+                                    .isNotEmpty &&
+                                (_doc?.paymentReference ?? paymentReference)
+                                        ?.trim() !=
+                                    _officialInvoiceNo)
+                              _row(
+                                _isAr ? 'مرجع الدفع' : 'Payment reference',
+                                (_doc?.paymentReference ?? paymentReference)!,
+                                valueSelectable: true,
+                              ),
+                            _row(
+                              _isAr ? 'نوع العملية' : 'Purpose',
+                              _doc?.purposeLabel ?? _purposeLabel(),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    alignment: WrapAlignment.spaceBetween,
-                    children: [
-                      SizedBox(
-                        width: 170,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.ios_share_outlined),
-                          label: Text(share),
-                          onPressed: () => unawaited(_sharePdf()),
-                        ),
+                    const SizedBox(height: 16),
+                    AppReadableQr(
+                      data: _qrPayload,
+                      isAr: _isAr,
+                      size: 188,
+                      caption: _officialInvoiceNo.isNotEmpty
+                          ? _officialInvoiceNo
+                          : null,
+                      title: _isAr ? 'رمز التحقق' : 'Verification code',
+                      hint: _isAr
+                          ? 'امسح الرمز للتحقق من رقم الفاتورة.'
+                          : 'Scan to verify the invoice number.',
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _isAr
+                          ? 'ختم المطابقة: ${_matchSeal()} — يطابق المبلغ ورقم العملية على الفاتورة المطبوعة.'
+                          : 'Match seal: ${_matchSeal()} — must match amount and transaction on the printed invoice.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurfaceVariant,
                       ),
-                      SizedBox(
-                        width: 170,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.print_outlined),
-                          label: Text(printLabel),
-                          onPressed: () => unawaited(_printPdf()),
-                        ),
-                      ),
-                      SizedBox(
-                        width: 170,
-                        child: FilledButton.icon(
-                          icon: const Icon(Icons.check_circle_outline),
-                          label: Text(
-                            t?.subscriptionsPaywallCloseLabel ?? close,
+                    ),
+                    const SizedBox(height: 16),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      alignment: WrapAlignment.spaceBetween,
+                      children: [
+                        SizedBox(
+                          width: 170,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.ios_share_outlined),
+                            label: Text(share),
+                            onPressed: () => unawaited(_sharePdf()),
                           ),
-                          onPressed: () => Navigator.of(context).pop(true),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                        SizedBox(
+                          width: 170,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.print_outlined),
+                            label: Text(printLabel),
+                            onPressed: () => unawaited(_printPdf()),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 170,
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.check_circle_outline),
+                            label: Text(
+                              t?.subscriptionsPaywallCloseLabel ?? close,
+                            ),
+                            onPressed: () => Navigator.of(context).pop(true),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
     );
   }
 
@@ -446,8 +461,9 @@ class PaymentReceiptScreen extends StatelessWidget {
 
   String _matchSeal() {
     final id = _officialInvoiceNo.replaceAll('-', '');
-    final tail =
-        id.length >= 6 ? id.substring(id.length - 6) : _amount.toStringAsFixed(0);
+    final tail = id.length >= 6
+        ? id.substring(id.length - 6)
+        : _amount.toStringAsFixed(0);
     return '${tail.toUpperCase()}-${_amount.toStringAsFixed(2)}';
   }
 
@@ -478,16 +494,14 @@ class PaymentReceiptScreen extends StatelessWidget {
                 ? SelectableText(
                     value,
                     style: TextStyle(
-                      fontWeight:
-                          valueBold ? FontWeight.w900 : FontWeight.w500,
+                      fontWeight: valueBold ? FontWeight.w900 : FontWeight.w500,
                       color: valueColor,
                     ),
                   )
                 : Text(
                     value,
                     style: TextStyle(
-                      fontWeight:
-                          valueBold ? FontWeight.w900 : FontWeight.w500,
+                      fontWeight: valueBold ? FontWeight.w900 : FontWeight.w500,
                       color: valueColor,
                     ),
                   ),
@@ -551,8 +565,8 @@ Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentRef
       paidAtFormatted: InvoiceCopy.latinDateTime(completedAt),
       calendarLine: InvoiceCopy.latinDateTime(completedAt),
       payerName: payerName,
-      purposeLabel: d?.purposeLabel ??
-          ((purpose ?? '').isEmpty ? null : _purposeLabel()),
+      purposeLabel:
+          d?.purposeLabel ?? ((purpose ?? '').isEmpty ? null : _purposeLabel()),
       paymentReference: _doc?.paymentReference ?? paymentReference,
       qrPayload: _qrPayload,
       isAr: _isAr,
@@ -562,18 +576,21 @@ Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentRef
       autoPayDiscountLine: d != null && d.showAutoPayDiscount
           ? AppMoney.formatForPdf(d.autoPayDiscountSar, isAr: _isAr)
           : null,
-      autoPayDiscountLabel:
-          d != null && d.showAutoPayDiscount ? d.autoPayDiscountLabel(isAr: _isAr) : null,
+      autoPayDiscountLabel: d != null && d.showAutoPayDiscount
+          ? d.autoPayDiscountLabel(isAr: _isAr)
+          : null,
       promoDiscountLine: d != null && d.showPromoDiscount
           ? AppMoney.formatForPdf(d.promoDiscountSar, isAr: _isAr)
           : null,
-      promoDiscountLabel:
-          d != null && d.showPromoDiscount ? d.promoDiscountLabel(isAr: _isAr) : null,
+      promoDiscountLabel: d != null && d.showPromoDiscount
+          ? d.promoDiscountLabel(isAr: _isAr)
+          : null,
       discountLine: d != null && d.showCombinedDiscount
           ? AppMoney.formatForPdf(d.discount, isAr: _isAr)
           : null,
-      discountLabel:
-          d != null && d.showCombinedDiscount ? d.discountLabel(isAr: _isAr) : null,
+      discountLabel: d != null && d.showCombinedDiscount
+          ? d.discountLabel(isAr: _isAr)
+          : null,
     );
   }
 

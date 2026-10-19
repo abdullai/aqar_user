@@ -4,6 +4,7 @@ import 'payment_platform_detector.dart';
 /// نيّة شاشة الدفع — تُشتق من الزر/التبويب الذي فتح الملخص.
 enum SubscriptionCheckoutKind {
   newSubscribe,
+  oneTimeOperationCredit,
   upgrade,
   renew,
   periodSwitch,
@@ -17,6 +18,25 @@ class CheckoutJourney {
     final sort = SubscriptionService.planSortOrder(plan);
     return SubscriptionService.isListingRequestsTopUpSortOrder(sort) ||
         SubscriptionService.isMarketOffersTopUpSortOrder(sort);
+  }
+
+  static bool isStandaloneOperationCredit(Map<String, dynamic> plan) {
+    final sort = SubscriptionService.planSortOrder(plan);
+    final isDealCredit = sort == 16 &&
+        (int.tryParse('${plan['max_market_offers'] ?? 0}') ?? 0) == 1;
+    final isRequestCredit = (sort == 23 || sort == 24) &&
+        (int.tryParse('${plan['max_listing_requests'] ?? 0}') ?? 0) == 1;
+    final audience = '${plan['user_type'] ?? ''}'.trim().toLowerCase();
+    return const {
+          'individual',
+          'marketer',
+          'office',
+          'institution',
+          'company',
+          'agency',
+        }.contains(audience) &&
+        (isDealCredit || isRequestCredit) &&
+        '${plan['plan_program'] ?? ''}'.trim() == 'lifetime_one_time';
   }
 
   static SubscriptionCheckoutKind resolve({
@@ -34,6 +54,9 @@ class CheckoutJourney {
     if ((upgradeSubscriptionId ?? '').trim().isNotEmpty) {
       return SubscriptionCheckoutKind.upgrade;
     }
+    if (isStandaloneOperationCredit(plan)) {
+      return SubscriptionCheckoutKind.oneTimeOperationCredit;
+    }
     if (isAddOnPlan(plan)) return SubscriptionCheckoutKind.addOn;
     return SubscriptionCheckoutKind.newSubscribe;
   }
@@ -43,6 +66,8 @@ class CheckoutJourney {
     required SubscriptionCheckoutKind kind,
   }) {
     switch (kind) {
+      case SubscriptionCheckoutKind.oneTimeOperationCredit:
+        return isAr ? 'رصيد عملية واحدة' : 'Single operation credit';
       case SubscriptionCheckoutKind.upgrade:
         return isAr ? 'ترقية الباقة' : 'Plan upgrade';
       case SubscriptionCheckoutKind.renew:
@@ -61,6 +86,10 @@ class CheckoutJourney {
     required SubscriptionCheckoutKind kind,
   }) {
     switch (kind) {
+      case SubscriptionCheckoutKind.oneTimeOperationCredit:
+        return isAr
+            ? 'دفعة واحدة لعملية واحدة حسب نوع الرصيد. مستقلة عن حصص الباقة، ولا تتطلب باقة رئيسية أو تتجدد.'
+            : 'One payment for one operation matching the credit. It is separate from plan quotas, requires no main plan, and does not renew.';
       case SubscriptionCheckoutKind.upgrade:
         return isAr
             ? 'المبلغ هو فرق الترقية بعد احتساب المتبقي من باقتك الحالية — لا يُحتسب اشتراكاً جديداً.'

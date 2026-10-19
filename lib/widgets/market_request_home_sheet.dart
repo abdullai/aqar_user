@@ -299,13 +299,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
         marketRequestId: widget.row.id,
         offerMessage: message,
       );
-      if (added &&
-          !widget.row.isInstantPaid &&
-          AppRoleHelper.isMarketingAccountType(widget.accountType)) {
-        unawaited(IndividualMarketOfferService(widget.sb)
-            .recordUsageOnSuccess(widget.row.id));
-        unawaited(_reloadAllowance());
-      }
+      if (added && !widget.row.isInstantPaid) unawaited(_reloadAllowance());
       widget.onDidChange?.call();
       if (!mounted) return added;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -580,21 +574,6 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     );
     if (ok != true || !mounted) return;
 
-    if (!widget.row.isInstantPaid &&
-        AppRoleHelper.isMarketingAccountType(widget.accountType)) {
-      // تسجيل الحصة عند تأكيد الإرسال (حسابات التسويق فقط).
-      final usageRes = await IndividualMarketOfferService(widget.sb)
-          .recordUsageOnSuccess(widget.row.id);
-      if (!mounted) return;
-      if (usageRes['ok'] != true) {
-        final err = '${usageRes['error'] ?? ''}';
-        _toast(widget.isAr ? individualOfferShortReasonAr(err) : 'Quota: $err');
-        unawaited(_reloadAllowance());
-        return;
-      }
-      unawaited(_reloadAllowance());
-    }
-
     final svc = MarketRequestOffersService(widget.sb);
     final price = double.tryParse(
       arabicAndPersianDigitsToLatin(priceCtrl.text.trim()).replaceAll(',', ''),
@@ -608,6 +587,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
       priceOffer: price,
     );
     if (!mounted) return;
+    if (!widget.row.isInstantPaid) unawaited(_reloadAllowance());
     if (!sent) {
       await showAppDialog<void>(
         context: context,

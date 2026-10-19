@@ -63,6 +63,14 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
   Future<void> _afterPlusComposerClosed(Object? res) async {
     if (!mounted) return;
+    if (res == 'subscribe') {
+      await _pushSubscriptionsHubForPaidActionResume(
+        const MarketingSubscriptionResumeIntent(
+          kind: MarketingSubscriptionResumeKind.createMarketRequest,
+        ),
+      );
+      return;
+    }
     if (res == 'closed') {
       final origin = _tabBeforePlusComposer ?? 0;
       _ss(() {
@@ -1018,10 +1026,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
 
     if (selected == 'request') {
-      if (_isMarketingAccountType &&
-          !await _ensureSubscriptionGate(
-            SubscriptionGateAction.addMarketPropertyRequest,
-          )) {
+      if (!await _ensureSubscriptionGate(
+        SubscriptionGateAction.addMarketPropertyRequest,
+        resume: const MarketingSubscriptionResumeIntent(
+          kind: MarketingSubscriptionResumeKind.createMarketRequest,
+        ),
+      )) {
         return;
       }
       final res = await _pushPlusForm<Object?>(
@@ -1849,19 +1859,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
           return;
         }
       }
-
-      final usageRes =
-          await IndividualMarketOfferService(_sb).recordUsageOnSuccess(row.id);
-      if (!mounted) return;
-      if (usageRes['ok'] != true) {
-        final err = '${usageRes['error'] ?? ''}';
-        _showNotification(
-          widget.isAr ? individualOfferShortReasonAr(err) : 'Quota: $err',
-          '',
-          isError: true,
-        );
-        return;
-      }
     }
 
     try {
@@ -1872,6 +1869,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
       );
       if (!mounted) return;
 
+      if (added) unawaited(_subscriptionGate.refresh(force: true));
       await Future.wait([
         _loadCart(force: true),
         _loadHome(force: true),
@@ -2845,6 +2843,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
   Future<void> _openSubscriptionsFromGate(
     SubscriptionGateAction action, {
     MarketingSubscriptionResumeIntent? resume,
+    String? organizationId,
+    bool organizationIdResolved = false,
   }) async {
     if (_isGuest) {
       _showLoginDialog();
@@ -2870,6 +2870,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
     await _pushSubscriptionsHubForPaidActionResume(
       intent,
       marketOfferPlansOnly: marketOfferOnly,
+      organizationId: organizationId,
+      organizationIdResolved: organizationIdResolved,
     );
     await _refreshSubscriptionGate(force: true);
   }
@@ -2918,7 +2920,12 @@ extension _UserDashboardStateActions on _UserDashboardState {
         isAr: widget.isAr,
         subscriptionRow: row,
         onSubscribe: () => unawaited(
-          _openSubscriptionsFromGate(action, resume: resume),
+          _openSubscriptionsFromGate(
+            action,
+            resume: resume,
+            organizationId: oid,
+            organizationIdResolved: true,
+          ),
         ),
       );
       await _refreshSubscriptionGate(force: true);
@@ -3040,12 +3047,16 @@ extension _UserDashboardStateActions on _UserDashboardState {
     MarketingSubscriptionResumeIntent intent, {
     int initialIndex = 0,
     bool marketOfferPlansOnly = false,
+    String? organizationId,
+    bool organizationIdResolved = false,
   }) async {
     if (_isGuest) {
       _showLoginDialog();
       return;
     }
-    final oid = await _marketingSubscriptionOrganizationId();
+    final oid = organizationIdResolved
+        ? organizationId
+        : await _marketingSubscriptionOrganizationId();
     if (!mounted) return;
     final popped = await _pushBody<MarketingSubscriptionResumeIntent?>(
       MaterialPageRoute<MarketingSubscriptionResumeIntent?>(
@@ -3198,6 +3209,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
         break;
       case MarketingSubscriptionResumeKind.addPropertyListing:
         await _runAddPropertyListingFlow();
+        break;
+      case MarketingSubscriptionResumeKind.createMarketRequest:
+        await _openCreateMarketRequestOnly();
         break;
     }
   }

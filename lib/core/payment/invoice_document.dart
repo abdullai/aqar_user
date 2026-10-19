@@ -247,9 +247,10 @@ class InvoiceDocument {
         source.map((k, v) => MapEntry(k.toString(), v)),
       );
     }
-    final company = '${src?['company'] ?? src?['scheme'] ?? src?['brand'] ?? _gateway['card_brand'] ?? ''}'
-        .trim()
-        .toLowerCase();
+    final company =
+        '${src?['company'] ?? src?['scheme'] ?? src?['brand'] ?? _gateway['card_brand'] ?? ''}'
+            .trim()
+            .toLowerCase();
     if (company.contains('mada')) return 'mada';
     if (company.contains('visa')) return 'visa';
     if (company.contains('master')) return 'mastercard';
@@ -310,9 +311,10 @@ class InvoiceDocument {
 
   String? get paymentReference {
     final g = '${row['gateway_transaction_id'] ?? ''}'.trim();
-    if (g.isEmpty) return null;
-    if (looksLikeUuid(g) && g == '${row['id'] ?? ''}'.trim()) return null;
-    return g;
+    if (g.isNotEmpty && RegExp(r'^\d{1,24}$').hasMatch(g)) return g;
+    final seq = userInvoiceSeq;
+    if (seq != null && seq > 0) return '$seq';
+    return null;
   }
 
   String? get subscriptionStart {

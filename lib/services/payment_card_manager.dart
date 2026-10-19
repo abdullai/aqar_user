@@ -24,7 +24,9 @@ class PaymentCardManager {
     if (_uid == null) return [];
     final cards = await _pay.getSavedCards();
     return cards
-        .where((c) => !PaymentService.isMockCardToken(c['card_token']))
+        .where((c) =>
+            PaymentService.allowDevelopmentMockCards ||
+            !PaymentService.isMockCardToken(c['card_token']))
         .map(_sanitizeForUi)
         .toList();
   }
@@ -38,7 +40,7 @@ class PaymentCardManager {
     copy['can_charge'] = PaymentService.canChargeSavedCard(row);
     copy['needs_reverify'] =
         PaymentService.isMockCardToken(row['card_token']) ||
-        !PaymentService.isMoyasarReadyCardToken(row['card_token']);
+            !PaymentService.isMoyasarReadyCardToken(row['card_token']);
     return copy;
   }
 
@@ -56,7 +58,7 @@ class PaymentCardManager {
     String? label,
   }) async {
     final r = await _pay.updateCardLabel(cardId: cardId, label: label);
-    if (r['ok'] == true) {
+    if (r['ok'] == true && r['local_mock'] != true) {
       await PaymentSecurity.auditCardEvent(
         sb: _sb,
         event: 'card_label_updated',
@@ -69,7 +71,7 @@ class PaymentCardManager {
 
   Future<Map<String, dynamic>> setDefault(String cardId) async {
     final r = await _pay.setDefaultCard(cardId);
-    if (r['ok'] == true) {
+    if (r['ok'] == true && r['local_mock'] != true) {
       await PaymentSecurity.auditCardEvent(
         sb: _sb,
         event: 'card_set_default',
@@ -81,7 +83,7 @@ class PaymentCardManager {
 
   Future<Map<String, dynamic>> deleteCard(String cardId) async {
     final r = await _pay.deleteCard(cardId);
-    if (r['ok'] == true) {
+    if (r['ok'] == true && r['local_mock'] != true) {
       await PaymentSecurity.auditCardEvent(
         sb: _sb,
         event: 'card_deleted',
@@ -121,7 +123,8 @@ class PaymentCardManager {
 
   /// يُنظّف البطاقات الوهمية قبل عرض القائمة.
   Future<void> purgeMockCards() async {
-    if (PaymentService.useMoyasarLiveFlow) {
+    if (PaymentService.useMoyasarLiveFlow &&
+        !PaymentService.allowDevelopmentMockCards) {
       await _pay.purgeMockSavedCards();
     }
   }

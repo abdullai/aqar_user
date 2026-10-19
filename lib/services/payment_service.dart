@@ -13,7 +13,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:moyasar/moyasar.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../core/branding/app_branding.dart';
 import '../core/branding/branding_pdf.dart';
@@ -57,6 +59,16 @@ class PaymentService {
     return k.startsWith('pk_test_') || k.startsWith('pk_live_');
   }
 
+  /// Free fake cards are for local UI testing only; they never enter checkout.
+  static bool get allowDevelopmentMockCards {
+    if (!kDebugMode || kReleaseMode || kIsProd) return false;
+    final cardMode =
+        (dotenv.env['PAYMENT_CARD_MODE'] ?? '').trim().toLowerCase();
+    final allowMock =
+        (dotenv.env['ALLOW_PAYMENT_MOCK'] ?? '').trim().toLowerCase();
+    return cardMode == 'mock' && const {'1', 'true', 'yes'}.contains(allowMock);
+  }
+
   /// بوابة وهمية للتجربة المحلية حتى تفعيل ميسّر.
   /// إنتاج (`PROD` / release): ممنوعة دائماً. Debug فقط وبلا مفتاح ميسّر.
   static bool get allowMockGateway {
@@ -72,6 +84,7 @@ class PaymentService {
   /// Local-only validation bypass for fake PAN entry; never active with Moyasar
   /// keys or release builds. Keep this unset outside development testing.
   static bool get allowInvalidMockCardInput {
+    if (allowDevelopmentMockCards) return true;
     if (!allowMockGateway || !kDebugMode || useMoyasarLiveFlow) return false;
     final v = (dotenv.env['ALLOW_INVALID_MOCK_CARD_INPUT'] ?? '')
         .trim()
@@ -265,6 +278,12 @@ class PaymentService {
     if (result is ValidationError) {
       final msg = result.message.trim();
       final lower = msg.toLowerCase();
+      if (lower.contains('authorization credentials') ||
+          lower.contains('authentication_error') ||
+          lower.contains('unauthorized') ||
+          lower.contains('invalid api key')) {
+        return 'moyasar_auth_error';
+      }
       if (lower.contains('inactive') || lower.contains('activated')) {
         return 'moyasar_account_inactive';
       }
@@ -274,6 +293,12 @@ class PaymentService {
     if (result is ApiError) {
       final msg = result.message.trim();
       final lower = msg.toLowerCase();
+      if (lower.contains('authorization credentials') ||
+          lower.contains('authentication_error') ||
+          lower.contains('unauthorized') ||
+          lower.contains('invalid api key')) {
+        return 'moyasar_auth_error';
+      }
       if (lower.contains('inactive') || lower.contains('activated')) {
         return 'moyasar_account_inactive';
       }
@@ -339,8 +364,8 @@ class PaymentService {
             : 'The payment service is not ready yet. Try later or contact support.';
       case 'moyasar_auth_error':
         return isAr
-            ? 'تعذّر التحقق من بوابة الدفع. حاول لاحقاً أو تواصل مع الدعم.'
-            : 'Could not verify the payment gateway. Try later or contact support.';
+            ? 'إعدادات ميسر غير متطابقة. تحقق من أن مفتاح النشر ومفتاح الخادم من بيئة الاختبار نفسها، وأبقِ المفتاح السري في الخادم فقط.'
+            : 'Moyasar credentials do not match. Use publishable and secret keys from the same environment, and keep the secret key server-side.';
       case 'plan_account_mismatch':
         return isAr
             ? 'هذه الباقة غير متاحة لنوع حسابك.'
@@ -515,6 +540,35 @@ class PaymentService {
 
   static const int maxSavedCards = 8;
 
+  String _developmentCardsKey(String uid) => 'dev_mock_saved_cards_$uid';
+
+  Future<List<Map<String, dynamic>>> _readDevelopmentCards(String uid) async {
+    if (!allowDevelopmentMockCards) return [];
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_developmentCardsKey(uid));
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .where((row) => isMockCardToken(row['card_token']))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _writeDevelopmentCards(
+    String uid,
+    List<Map<String, dynamic>> cards,
+  ) async {
+    if (!allowDevelopmentMockCards) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_developmentCardsKey(uid), jsonEncode(cards));
+  }
+
   Future<int> savedCardCount() async {
     final cards = await getSavedCards();
     return cards.length;
@@ -527,18 +581,20 @@ class PaymentService {
     final uid = _user?.id;
     if (uid == null) return [];
     await PaymentSecurity.isolateForUid(uid);
+    var rows = <Map<String, dynamic>>[];
     try {
-      final rows = await _sb
+      final remote = await _sb
           .from(_cards)
           .select()
           .eq('user_id', uid)
           .order('is_default', ascending: false)
           .order('created_at', ascending: false);
-      return (rows as List)
+      rows = (remote as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
     } catch (_) {}
-    return [];
+    if (!allowDevelopmentMockCards) return rows;
+    return [...await _readDevelopmentCards(uid), ...rows];
   }
 
   /// هل البطاقة المحفوظة تستخدم رمزاً وهمياً (mock) وليس رمز ميسّر؟
@@ -699,10 +755,10 @@ class PaymentService {
     if (uid == null) {
       return {'ok': false, 'error': 'auth'};
     }
-    if (useMoyasarLiveFlow) {
+    if (useMoyasarLiveFlow && !allowDevelopmentMockCards) {
       return {'ok': false, 'error': 'moyasar_cards_via_payment'};
     }
-    if (!allowMockGateway) {
+    if (!allowMockGateway && !allowDevelopmentMockCards) {
       return Map<String, dynamic>.from(_mockGatewayBlocked);
     }
     if (!(await canAddMoreCards())) {
@@ -730,6 +786,35 @@ class PaymentService {
       expiryMonth: expiryMonth,
       expiryYear: expiryYear,
     );
+    if (allowDevelopmentMockCards) {
+      try {
+        final cards = await _readDevelopmentCards(uid);
+        if (setDefault) {
+          for (final card in cards) {
+            card['is_default'] = false;
+          }
+        }
+        final row = <String, dynamic>{
+          'id': 'mock_local_${(const Uuid()).v4()}',
+          'user_id': uid,
+          'card_token': token,
+          'card_bin': bin,
+          'last_four': last4,
+          'card_scheme': scheme,
+          'card_holder_name': holderName.trim(),
+          'expiry_month': expiryMonth,
+          'expiry_year': expiryYear,
+          'label': label?.trim().isEmpty ?? true ? null : label!.trim(),
+          'is_default': setDefault,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        };
+        cards.insert(0, row);
+        await _writeDevelopmentCards(uid, cards);
+        return {'ok': true, 'row': row, 'local_mock': true};
+      } catch (_) {
+        return {'ok': false, 'error': 'local_mock_storage_failed'};
+      }
+    }
     try {
       if (setDefault) {
         await _sb.from(_cards).update({'is_default': false}).eq('user_id', uid);
@@ -759,6 +844,12 @@ class PaymentService {
   Future<Map<String, dynamic>> deleteCard(String cardId) async {
     final uid = _user?.id;
     if (uid == null) return {'ok': false, 'error': 'auth'};
+    if (cardId.startsWith('mock_local_') && allowDevelopmentMockCards) {
+      final cards = await _readDevelopmentCards(uid);
+      cards.removeWhere((row) => '${row['id']}' == cardId);
+      await _writeDevelopmentCards(uid, cards);
+      return {'ok': true, 'local_mock': true};
+    }
     try {
       await _sb.from(_cards).delete().eq('id', cardId).eq('user_id', uid);
       return {'ok': true};
@@ -770,6 +861,18 @@ class PaymentService {
   Future<Map<String, dynamic>> setDefaultCard(String cardId) async {
     final uid = _user?.id;
     if (uid == null) return {'ok': false, 'error': 'auth'};
+    if (cardId.startsWith('mock_local_') && allowDevelopmentMockCards) {
+      final cards = await _readDevelopmentCards(uid);
+      final selected = cards.where((row) => '${row['id']}' == cardId);
+      if (selected.isEmpty) return {'ok': false, 'error': 'not_found'};
+      final row = selected.first;
+      if (isCardExpired(row)) return {'ok': false, 'error': 'card_expired'};
+      for (final card in cards) {
+        card['is_default'] = '${card['id']}' == cardId;
+      }
+      await _writeDevelopmentCards(uid, cards);
+      return {'ok': true, 'local_mock': true};
+    }
     try {
       final row = await _sb
           .from(_cards)
@@ -800,6 +903,14 @@ class PaymentService {
     final uid = _user?.id;
     if (uid == null) return {'ok': false, 'error': 'auth'};
     final trimmed = label?.trim();
+    if (cardId.startsWith('mock_local_') && allowDevelopmentMockCards) {
+      final cards = await _readDevelopmentCards(uid);
+      final row = cards.where((card) => '${card['id']}' == cardId);
+      if (row.isEmpty) return {'ok': false, 'error': 'not_found'};
+      row.first['label'] = trimmed == null || trimmed.isEmpty ? null : trimmed;
+      await _writeDevelopmentCards(uid, cards);
+      return {'ok': true, 'local_mock': true};
+    }
     try {
       await _sb
           .from(_cards)

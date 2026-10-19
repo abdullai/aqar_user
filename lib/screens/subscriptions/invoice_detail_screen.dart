@@ -58,8 +58,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     setState(() => _doc = doc);
   }
 
-  InvoiceDocument get _d =>
-      _doc ?? InvoiceDocument.fromRow(_row, isAr: _isAr);
+  InvoiceDocument get _d => _doc ?? InvoiceDocument.fromRow(_row, isAr: _isAr);
 
   Future<void> _run(Future<void> Function() job, String ok, String fail) async {
     if (_busy) return;
@@ -100,7 +99,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 runSpacing: 8,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: cs.primaryContainer.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(8),
@@ -116,7 +116,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: cs.secondaryContainer.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(8),
@@ -162,9 +163,11 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             if (d.showSubtotal)
               _kvMoney(t.invoiceBreakdownSubtotal, d.subtotal, d),
             if (d.showAutoPayDiscount)
-              _kvMoney(d.autoPayDiscountLabel(isAr: _isAr), d.autoPayDiscountSar, d),
+              _kvMoney(
+                  d.autoPayDiscountLabel(isAr: _isAr), d.autoPayDiscountSar, d),
             if (d.showPromoDiscount)
-              _kvMoney(d.promoDiscountLabel(isAr: _isAr), d.promoDiscountSar, d),
+              _kvMoney(
+                  d.promoDiscountLabel(isAr: _isAr), d.promoDiscountSar, d),
             if (d.showCombinedDiscount)
               _kvMoney(d.discountLabel(isAr: _isAr), d.discount, d),
             if (d.showVat) _kvMoney(t.invoiceVatLine, d.vat, d),
@@ -176,7 +179,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             _kv(_isAr ? 'طريقة الدفع' : 'Payment method', d.methodLabel),
             if (d.dateLine.isNotEmpty)
               _kv(_isAr ? 'تاريخ العملية' : 'Transaction date', d.dateLine),
-            if ((d.paymentReference ?? '').isNotEmpty) ...[
+            if ((d.paymentReference ?? '').isNotEmpty &&
+                d.paymentReference != d.invoiceNumber) ...[
               const SizedBox(height: 8),
               Text(
                 t.invoiceTechnicalSection,
@@ -194,7 +198,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               isAr: _isAr,
               size: 168,
               caption: d.hasInvoiceNumber ? d.invoiceNumber : null,
-              title: _isAr ? 'رمز التحقق من الفاتورة' : 'Invoice verification QR',
+              title:
+                  _isAr ? 'رمز التحقق من الفاتورة' : 'Invoice verification QR',
               hint: t.invoiceQrHint,
             ),
             const SizedBox(height: 24),
@@ -229,7 +234,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                       ? null
                       : () => _run(
                             () async {
-                              final bytes = await widget.invoices.exportAllExcel(
+                              final bytes =
+                                  await widget.invoices.exportAllExcel(
                                 [_row],
                                 sectionTitle: d.title,
                               );

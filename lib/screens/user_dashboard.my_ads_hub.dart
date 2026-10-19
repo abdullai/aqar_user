@@ -5097,12 +5097,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final cs = Theme.of(context).colorScheme;
     if (count <= 0) {
       return Tab(
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.fade,
-          softWrap: false,
-        ),
+        child: Text(label),
       );
     }
     final text = count > 99 ? '99+' : '$count';
@@ -5113,9 +5108,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         children: [
           Text(
             label,
-            maxLines: 1,
-            overflow: TextOverflow.fade,
-            softWrap: false,
           ),
           const SizedBox(width: 6),
           Container(
@@ -5192,8 +5184,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             SizedBox(width: narrow ? 6 : 8),
             Text(
               label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -5214,8 +5204,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               height: 52,
               child: TabBar(
                 controller: roleCtrl,
-                isScrollable: false,
-                labelPadding: EdgeInsets.symmetric(horizontal: narrow ? 6 : 12),
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                labelPadding: EdgeInsets.symmetric(horizontal: narrow ? 8 : 12),
                 labelColor: _brandPrimary,
                 unselectedLabelColor: cs.onSurfaceVariant,
                 indicatorColor: _brandPrimary,
@@ -8144,19 +8135,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         context: context,
         barrierDismissible: true,
         builder: (ctx) {
-          final bottomInset = MediaQuery.viewInsetsOf(ctx).bottom;
-          return AnimatedPadding(
-            padding: EdgeInsets.only(bottom: bottomInset),
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOutCubic,
-            child: Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: 520,
-                  maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
-                ),
-                child: dialog,
+          return Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 520,
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
               ),
+              child: dialog,
             ),
           );
         },
@@ -11882,7 +11867,7 @@ class _PublishMarketingListingDialogState
             maxHeight: MediaQuery.sizeOf(context).height * 0.82,
           ),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: MainAxisSize.max,
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
@@ -11904,16 +11889,11 @@ class _PublishMarketingListingDialogState
                   ],
                 ),
               ),
-              Flexible(
+              Expanded(
                 child: SingleChildScrollView(
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    8,
-                    20,
-                    8 + MediaQuery.viewInsetsOf(context).bottom,
-                  ),
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                   child: fields,
                 ),
               ),

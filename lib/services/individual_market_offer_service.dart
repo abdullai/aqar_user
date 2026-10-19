@@ -129,6 +129,8 @@ String individualOfferShortReasonAr(String code) {
   switch (code.trim().toLowerCase()) {
     case 'quota_exhausted':
       return 'استنفدت حصة العروض — اشترِ باقة شهرية أو لمرة واحدة.';
+    case 'single_use_credit_already_used':
+      return 'استُخدم رصيد هذه العملية من قبل؛ اشترِ رصيدًا جديدًا لعملية أخرى.';
     case 'no_subscription':
       return 'لا يوجد اشتراك عروض فعّال.';
     case 'withdraw_limit_reached':
@@ -237,23 +239,6 @@ class IndividualMarketOfferService {
         audience: isMarketing ? 'marketing' : 'individual',
         error: e.toString(),
       );
-    }
-  }
-
-  Future<Map<String, dynamic>> recordUsageOnSuccess(String requestId) async {
-    try {
-      final res = await _sb.rpc(
-        'record_market_request_offer_usage',
-        params: {'p_request_id': requestId},
-      );
-      if (res is Map) {
-        return Map<String, dynamic>.from(
-          res.map((k, v) => MapEntry(k.toString(), v)),
-        );
-      }
-      return {'ok': false, 'error': 'unexpected_response'};
-    } catch (e) {
-      return {'ok': false, 'error': e.toString()};
     }
   }
 

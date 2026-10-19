@@ -137,16 +137,29 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final amountText = AppMoney.formatWithCurrencyCode(
-      widget.amountSar,
-      isAr: widget.isAr,
-      maxFractionDigits:
-          widget.amountSar == widget.amountSar.roundToDouble() ? 0 : 2,
-    );
+    final amountStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w800,
+        );
+    Widget paymentLabel(String label, Color color) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: amountStyle?.copyWith(color: color)),
+            const SizedBox(width: 8),
+            AppMoneyLine(
+              amount: widget.amountSar,
+              currencyCode: 'SAR',
+              isAr: widget.isAr,
+              maxFractionDigits:
+                  widget.amountSar == widget.amountSar.roundToDouble() ? 0 : 2,
+              style: amountStyle?.copyWith(color: color),
+              symbolColor: color,
+            ),
+          ],
+        );
     final title = widget.isAr ? 'دفع لمرة واحدة' : 'One-time payment';
     final sub = widget.isAr
-        ? 'المبلغ $amountText — تجربة محلية على هذا الجهاز حتى تفعيل بوابة الدفع المعتمدة في المملكة.'
-        : '$amountText — local trial on this device until the licensed Saudi payment gateway is activated.';
+        ? 'تجربة محلية على هذا الجهاز حتى تفعيل بوابة الدفع المعتمدة في المملكة.'
+        : 'Local trial on this device until the licensed Saudi payment gateway is activated.';
 
     return SafeArea(
       child: Padding(
@@ -170,6 +183,27 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
                     fontWeight: FontWeight.w600,
                   ),
             ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(widget.isAr ? 'المبلغ المستحق' : 'Amount due'),
+                AppMoneyLine(
+                  amount: widget.amountSar,
+                  currencyCode: 'SAR',
+                  isAr: widget.isAr,
+                  maxFractionDigits:
+                      widget.amountSar == widget.amountSar.roundToDouble()
+                          ? 0
+                          : 2,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: cs.primary,
+                      ),
+                  symbolColor: cs.primary,
+                ),
+              ],
+            ),
             const SizedBox(height: 18),
             if (_busy)
               const Center(
@@ -183,7 +217,7 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
                 FilledButton.icon(
                   onPressed: () => _payWallet('apple_pay'),
                   icon: const Icon(Icons.apple_rounded),
-                  label: const Text('Apple Pay'),
+                  label: paymentLabel('Apple Pay', cs.onPrimary),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -195,7 +229,8 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
                   ),
                   onPressed: () => _payWallet('mada'),
                   icon: const Icon(Icons.credit_card_rounded),
-                  label: Text(widget.isAr ? 'مدى' : 'mada'),
+                  label:
+                      paymentLabel(widget.isAr ? 'مدى' : 'mada', Colors.white),
                 ),
                 const SizedBox(height: 10),
               ],
@@ -203,8 +238,9 @@ class _GuestPayBodyState extends State<_GuestPayBody> {
                 OutlinedButton.icon(
                   onPressed: _payCard,
                   icon: const Icon(Icons.payment_rounded),
-                  label: Text(
+                  label: paymentLabel(
                     widget.isAr ? 'بطاقة مدى أو ائتمان' : 'mada or credit card',
+                    cs.primary,
                   ),
                 ),
             ],

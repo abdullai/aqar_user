@@ -52,16 +52,59 @@ class SubscriptionsRootScreen extends StatefulWidget {
 class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
     with SingleTickerProviderStateMixin {
   TabController? _ctrl;
+  final TabBarScrollController _tabsScrollController = TabBarScrollController();
   List<Tab> _tabs = const [];
   List<Widget> _bodies = const [];
   int? _upgradeTabIndex;
   SubscriptionBillingContext? _billingCtx;
   bool _billingCtxLoading = true;
 
+  bool _shouldUseScrollableTabs(BuildContext context) {
+    final mq = MediaQuery.maybeOf(context);
+    final narrow = (mq?.size.width ?? double.infinity) < 720;
+    final textScale = mq?.textScaler.scale(1) ?? 1.0;
+    return _tabs.length > 4 || narrow || textScale > 1.1;
+  }
+
+  Widget _tabLabel(String label) {
+    return Text(
+      label,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.visible,
+    );
+  }
+
   @override
   void dispose() {
     _ctrl?.dispose();
+    _tabsScrollController.dispose();
     super.dispose();
+  }
+
+  Widget _buildTabsBar(BuildContext context) {
+    final scrollable = _shouldUseScrollableTabs(context);
+    return TabBar(
+      controller: _ctrl,
+      isScrollable: scrollable,
+      tabAlignment: scrollable ? TabAlignment.start : TabAlignment.fill,
+      scrollController: scrollable ? _tabsScrollController : null,
+      labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+      tabs: _tabs,
+    );
+  }
+
+  Widget _buildScrollableTabsBar(BuildContext context) {
+    if (!_shouldUseScrollableTabs(context)) return _buildTabsBar(context);
+    return Scrollbar(
+      controller: _tabsScrollController,
+      thumbVisibility: true,
+      trackVisibility: true,
+      interactive: true,
+      scrollbarOrientation: ScrollbarOrientation.bottom,
+      thickness: 3,
+      child: _buildTabsBar(context),
+    );
   }
 
   @override
@@ -106,7 +149,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
     add(
       Tab(
         icon: const Icon(Icons.inventory_2_outlined),
-        text: t.subscriptionsTabPlans,
+        child: _tabLabel(t.subscriptionsTabPlans),
       ),
       SubscriptionPlansScreen(
         lang: widget.lang,
@@ -123,7 +166,11 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       add(
         Tab(
           icon: const Icon(Icons.bolt_rounded),
-          text: widget.lang.toLowerCase() != 'en' ? 'الطلب الفوري' : 'Instant',
+          child: _tabLabel(
+            widget.lang.toLowerCase() != 'en'
+                ? t.marketRequestPriorityImmediate
+                : 'Instant',
+          ),
         ),
         OwnerInstantPaymentsHubScreen(lang: widget.lang),
       );
@@ -131,14 +178,14 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
     add(
       Tab(
         icon: const Icon(Icons.credit_card),
-        text: t.subscriptionsTabPaymentMethods,
+        child: _tabLabel(t.subscriptionsTabPaymentMethods),
       ),
       PaymentMethodsScreen(lang: widget.lang),
     );
     add(
       Tab(
         icon: const Icon(Icons.receipt_long_outlined),
-        text: t.subscriptionsTabHistory,
+        child: _tabLabel(t.subscriptionsTabHistory),
       ),
       PaymentHistoryScreen(lang: widget.lang),
     );
@@ -147,7 +194,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       add(
         Tab(
           icon: const Icon(Icons.groups_outlined),
-          text: t.subscriptionsTabTeam,
+          child: _tabLabel(t.subscriptionsTabTeam),
         ),
         ManageTeamSubscriptionScreen(
           lang: widget.lang,
@@ -164,7 +211,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       add(
         Tab(
           icon: const Icon(Icons.pie_chart_outline),
-          text: t.subscriptionsTabUsage,
+          child: _tabLabel(t.subscriptionsTabUsage),
         ),
         SubscriptionDetailsScreen(
           lang: widget.lang,
@@ -179,7 +226,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       add(
         Tab(
           icon: const Icon(Icons.rocket_launch_outlined),
-          text: t.subscriptionsTabUpgrade,
+          child: _tabLabel(t.subscriptionsTabUpgrade),
         ),
         SubscriptionPlansScreen(
           lang: widget.lang,
@@ -194,7 +241,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
       add(
         Tab(
           icon: const Icon(Icons.verified_outlined),
-          text: t.subscriptionsTabRenewFal,
+          child: _tabLabel(t.subscriptionsTabRenewFal),
         ),
         _RenewFalTab(
           lang: widget.lang,
@@ -251,11 +298,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
               color: cs.surface,
               elevation: 0.5,
               shadowColor: Colors.black26,
-              child: TabBar(
-                controller: _ctrl,
-                isScrollable: _tabs.length > 4,
-                tabs: _tabs,
-              ),
+              child: _buildScrollableTabsBar(context),
             ),
             Expanded(
               child: TabBarView(
@@ -280,10 +323,12 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
           isArabic: widget.lang.toLowerCase() != 'en',
         ),
         title: Text(t.subscriptionsTitle),
-        bottom: TabBar(
-          controller: _ctrl,
-          isScrollable: _tabs.length > 4,
-          tabs: _tabs,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(72),
+          child: Material(
+            color: Theme.of(context).colorScheme.surface,
+            child: _buildScrollableTabsBar(context),
+          ),
         ),
       ),
       body: TabBarView(

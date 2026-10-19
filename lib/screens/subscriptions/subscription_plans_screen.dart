@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/branding/app_branding.dart';
@@ -53,6 +54,8 @@ class SubscriptionPlansScreen extends StatefulWidget {
 }
 
 class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
+  static final Set<String> _trialNoticeDismissedUntilLogin = {};
+
   final _svc = SubscriptionService(Supabase.instance.client);
   bool _loading = true;
   bool _activatingTrial = false;
@@ -60,6 +63,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   String _period = 'monthly';
   Map<String, dynamic>? _current;
   bool _trialAlreadyUsed = true;
+  bool _trialNoticeHiddenForever = false;
+  StreamSubscription<AuthState>? _trialAuthSubscription;
   SubscriptionBillingContext? _billingCtx;
   bool _teamNoteDismissed = false;
 
@@ -94,7 +99,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
   String _dealTopupHint() {
     final monthly = _catalogPrice(11, period: 'monthly');
-    final once = _catalogPrice(13, period: 'one_time');
+    final once = _catalogPrice(16, period: 'one_time');
     final mLabel = monthly == null
         ? ''
         : AppMoney.formatWithCurrencyCode(monthly,
@@ -105,12 +110,12 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
             isAr: _isAr, maxFractionDigits: 0);
     if (_isAr) {
       if (monthly != null && once != null) {
-        return 'عند نفاد حصة «إتمام الصفقة»: اشترِ «إضافة صفقات» — شهري $mLabel (+10 صفقات) أو مرة واحدة $oLabel (+5 صفقات). تُفعَّل فوراً.';
+        return 'عند نفاد حصة «إتمام الصفقة»: اشترِ «إضافة صفقات» — شهري $mLabel (+10 صفقات) أو مرة واحدة $oLabel (صفقة واحدة). تُفعَّل فوراً.';
       }
       return 'عند نفاد حصة «إتمام الصفقة»: اشترِ «إضافة صفقات» من الباقات أدناه. تُفعَّل فوراً.';
     }
     if (monthly != null && once != null) {
-      return 'When deal quota runs out: buy «Deal top-up» — $mLabel/month (+10 deals) or $oLabel one-time (+5 deals). Applies immediately.';
+      return 'When deal quota runs out: buy «Deal top-up» — $mLabel/month (+10 deals) or $oLabel one-time (one deal). Applies immediately.';
     }
     return 'When deal quota runs out: buy «Deal top-up» from the plans below. Applies immediately.';
   }
@@ -179,7 +184,12 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   /// سجل تجربة قديم منتهٍ (is_trial=true && ends_at <= now).
   /// لا تُظهر للأشخاص الذين لم يستخدموها بعد، ولا أثناء التجربة الفعّالة.
   bool get _showTrialExhaustedBadge {
-    if ((!_isMarketingRole && !_isPhotographerPlan) || _loading) return false;
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    if (!_isTrialEligibleAccount || _loading || uid.isEmpty) return false;
+    if (_trialNoticeHiddenForever ||
+        _trialNoticeDismissedUntilLogin.contains(uid)) {
+      return false;
+    }
     if (_hasActiveTrial) return false;
     if (SubscriptionService.subscriptionRowGrantsMarketingAccess(_current)) {
       return false;
@@ -195,8 +205,27 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   @override
   void initState() {
     super.initState();
+    _trialAuthSubscription =
+        Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+      if (event.event == AuthChangeEvent.signedOut) {
+        _trialNoticeDismissedUntilLogin.clear();
+        return;
+      }
+      if (event.event == AuthChangeEvent.signedIn ||
+          event.event == AuthChangeEvent.initialSession) {
+        final uid = event.session?.user.id;
+        if (uid != null) _trialNoticeDismissedUntilLogin.remove(uid);
+        if (mounted) unawaited(_load());
+      }
+    });
     SubscriptionService.invalidateSubscriptionCache();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _trialAuthSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -255,11 +284,21 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       }
     }
 
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    var hideTrialNoticeForever = false;
+    if (uid.isNotEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        hideTrialNoticeForever =
+            prefs.getBool('trial_exhausted_notice_hidden_$uid') ?? false;
+      } catch (_) {}
+    }
+
     var visible = plans;
     if (widget.marketOfferPlansOnly) {
       visible = plans.where((p) {
         final n = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
-        return n >= 11;
+        return n == 11 || n == 12 || n == 13;
       }).toList();
     }
 
@@ -270,8 +309,46 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       _current = cur;
       _period = initialPeriod;
       _trialAlreadyUsed = used;
+      _trialNoticeHiddenForever = hideTrialNoticeForever;
       _loading = false;
     });
+  }
+
+  Future<void> _dismissTrialExhaustedBadge() async {
+    final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
+    if (uid.isEmpty) return;
+    final choice = await showAppDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_isAr ? 'تنبيه انتهاء التجربة' : 'Trial notice'),
+        content: Text(
+          _isAr
+              ? 'هل تريد إخفاء التنبيه حتى تسجيل الدخول القادم، أم عدم عرضه مجددًا لهذا الحساب؟'
+              : 'Hide this notice until your next login, or never show it again for this account?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'next_login'),
+            child: Text(_isAr ? 'حتى الدخول القادم' : 'Until next login'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'forever'),
+            child: Text(_isAr ? 'لا تعرضه مجددًا' : 'Never show again'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'forever') {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('trial_exhausted_notice_hidden_$uid', true);
+      } catch (_) {}
+      if (mounted) setState(() => _trialNoticeHiddenForever = true);
+      return;
+    }
+    _trialNoticeDismissedUntilLogin.add(uid);
+    setState(() {});
   }
 
   /// نافذة تأكيد تشرح حدود التجربة قبل التفعيل (لا رجعة بعد التأكيد).
@@ -301,8 +378,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                         ? 'تجربة مصور عقاري لمدة ٣ أيام لاستقبال طلبات التصوير وتسليم الوسائط. تنتهي تلقائيًا، ويمكنك الاشتراك بعدها للاستمرار.'
                         : 'Try photographer requests and media delivery for 3 days. Access ends automatically; subscribe afterward to continue.')
                     : (_isAr
-                        ? 'لديك صلاحية استخدام الميزة المدفوعة لمدة ٣ أيام فقط. عند انتهائها لا بد من الاشتراك للمتابعة.'
-                        : 'You will have access to the paid feature for 3 days only. After it ends, a subscription is required to continue.'),
+                        ? 'فعّل التجربة مرة واحدة لمدة ٣ أيام. تنتهي تلقائيًا دون خصم.'
+                        : 'Activate the one-time 3-day trial. It ends automatically with no charge.'),
               ),
               if (!_isPhotographerPlan) ...[
                 const SizedBox(height: 12),
@@ -317,9 +394,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                 Text(_isAr
                     ? '• إعلان عقاري واحد فقط داخل تبويب «صفحتي» (تستفيد منه في كل التبويبات: تعاقد، عروض، رسائل…).'
                     : '• Only 1 real-estate listing under "My desk" (full access on it: contract, offers, chat…).'),
-                Text(_isAr
-                    ? '• طلبات عقارية غير محدودة.'
-                    : '• Unlimited real-estate requests.'),
+                Text(
+                  _isAr
+                      ? '• إعلان عقاري واحد، وطلب واحد، وصفقة واحدة خلال التجربة.'
+                      : '• 1 listing, 1 property request, and 1 deal during the trial.',
+                ),
               ],
               const SizedBox(height: 10),
               Container(
@@ -331,11 +410,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                 child: Text(
                   _isPhotographerPlan
                       ? (_isAr
-                          ? 'تنبيه: تجربة المصور مرة واحدة لهذا المستخدم، ولا تستهلك تجربة نوع حسابه الأساسي.'
-                          : 'Note: The photographer trial is one-time and separate from the primary account trial.')
+                          ? 'تنبيه: التجربة لمدة ٣ أيام مرة واحدة لكل مستخدم، سواء من الحساب الأساسي أو المصور.'
+                          : 'Note: One 3-day trial per user, shared by primary and photographer accounts.')
                       : (_isAr
-                          ? 'تنبيه: التجربة لمرّة واحدة فقط لهذا المستخدم — لا يمكن تكرارها.'
-                          : 'Note: This trial is one-time per user — cannot be repeated.'),
+                          ? 'تنبيه: التجربة مرة واحدة لكل مستخدم، ولا يمكن تكرارها بعد انتهائها.'
+                          : 'Note: The trial is available once per user and cannot be repeated after it ends.'),
                   style: TextStyle(color: cs.onErrorContainer),
                 ),
               ),
@@ -677,6 +756,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                     ),
               ),
             ),
+            IconButton(
+              tooltip: _isAr ? 'إغلاق التنبيه' : 'Dismiss notice',
+              onPressed: _dismissTrialExhaustedBadge,
+              icon: Icon(Icons.close_rounded, color: cs.onErrorContainer),
+            ),
           ],
         ),
       ),
@@ -699,12 +783,14 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   bool _planMatchesCurrentPeriod(Map<String, dynamic> p) {
     final program = (p['plan_program'] ?? 'monthly').toString().trim();
     final sort = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
+    final audience = '${p['user_type'] ?? ''}'.trim().toLowerCase();
     final isMainPlan = SubscriptionService.isMainPlanSortOrder(sort);
 
     if (_period == 'one_time') {
-      return program == 'lifetime_one_time' || sort == 23 || sort == 13;
+      if (program != 'lifetime_one_time') return false;
+      return audience != 'individual' || sort == 16 || sort == 23;
     }
-    if (program == 'lifetime_one_time' || sort == 23 || sort == 13) {
+    if (program == 'lifetime_one_time') {
       return false;
     }
     // الباقة الرئيسية تظهر في شهري وسنوي (السعر يتغيّر حسب الشريحة).
@@ -1018,6 +1104,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                 planSortOrder: SubscriptionService.planSortOrder,
               );
               final isAddon = CheckoutJourney.isAddOnPlan(p);
+              final isStandaloneOneTimeCredit =
+                  isAddon && CheckoutJourney.isStandaloneOperationCredit(p);
+              final addonNeedsMainPlan = isAddon &&
+                  !isStandaloneOneTimeCredit &&
+                  !_inPaidPeriod(_current);
               final blockedLowerMain = _inPaidPeriod(_current) &&
                   !isCurrent &&
                   !canUpgrade &&
@@ -1182,47 +1273,64 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                                           height: 1.35,
                                         ),
                                   )
-                                : FilledButton(
-                                    onPressed: _paymentBlockedByFal
-                                        ? null
-                                        : () async {
-                                            final ok =
-                                                await PaymentOverlay.push<bool>(
-                                              context,
-                                              name: '/subscriptions/checkout',
-                                              page: PaymentCheckoutScreen(
-                                                lang: widget.lang,
-                                                accountType: widget.accountType,
-                                                plan: p,
-                                                period:
-                                                    _billingPeriodForCheckout(),
-                                                organizationId:
-                                                    widget.organizationId,
-                                                upgradeSubscriptionId:
-                                                    canUpgrade
-                                                        ? '${_current?['id']}'
-                                                        : null,
-                                                chargeAmountOverride: canUpgrade
-                                                    ? upgradeCharge
-                                                    : null,
-                                                billingContext:
-                                                    _isPhotographerPlan
-                                                        ? null
-                                                        : _ctx,
-                                              ),
-                                            );
-                                            await _afterCheckoutPop(ok);
-                                          },
-                                    child: Text(
-                                      canUpgrade
-                                          ? t.subscriptionsUpgradeCta
-                                          : isAddon
-                                              ? (_isAr
-                                                  ? 'شراء الإضافة'
-                                                  : 'Buy add-on')
-                                              : t.subscriptionsSubscribeNow,
-                                    ),
-                                  )
+                                : addonNeedsMainPlan
+                                    ? Text(
+                                        _isAr
+                                            ? 'هذه إضافة عروض وليست باقة رئيسية. فعّل باقة رئيسية أولاً لتتمكن من شرائها.'
+                                            : 'This is an offer add-on, not a main plan. Activate a main plan first to purchase it.',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: cs.onSurfaceVariant,
+                                              fontWeight: FontWeight.w700,
+                                              height: 1.35,
+                                            ),
+                                      )
+                                    : FilledButton(
+                                        onPressed: _paymentBlockedByFal
+                                            ? null
+                                            : () async {
+                                                final ok = await PaymentOverlay
+                                                    .push<bool>(
+                                                  context,
+                                                  name:
+                                                      '/subscriptions/checkout',
+                                                  page: PaymentCheckoutScreen(
+                                                    lang: widget.lang,
+                                                    accountType:
+                                                        widget.accountType,
+                                                    plan: p,
+                                                    period:
+                                                        _billingPeriodForCheckout(),
+                                                    organizationId:
+                                                        widget.organizationId,
+                                                    upgradeSubscriptionId:
+                                                        canUpgrade
+                                                            ? '${_current?['id']}'
+                                                            : null,
+                                                    chargeAmountOverride:
+                                                        canUpgrade
+                                                            ? upgradeCharge
+                                                            : null,
+                                                    billingContext:
+                                                        _isPhotographerPlan
+                                                            ? null
+                                                            : _ctx,
+                                                  ),
+                                                );
+                                                await _afterCheckoutPop(ok);
+                                              },
+                                        child: Text(
+                                          canUpgrade
+                                              ? t.subscriptionsUpgradeCta
+                                              : isAddon
+                                                  ? (_isAr
+                                                      ? 'شراء الإضافة'
+                                                      : 'Buy add-on')
+                                                  : t.subscriptionsSubscribeNow,
+                                        ),
+                                      )
                       else ...[
                         if (isPeriodSwitch && periodSwitchCharge != null) ...[
                           Text(
