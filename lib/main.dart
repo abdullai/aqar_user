@@ -702,6 +702,8 @@ class _AqarUserAppState extends State<AqarUserApp> with WidgetsBindingObserver {
       // ADMIN_HOOK: Remote force-logout trigger — استخدم Admin API أو bump_user_session_epoch من الخادم.
       if (event == AuthChangeEvent.signedIn && data.session != null) {
         InactivityAuthLanding.release();
+        // دخول جديد: صفّر مهلة الخمول القديمة كي لا تُخرجه فور الانتقال لشاشة الرمز.
+        unawaited(InactivityService.prepareDashboardEntry());
         final uid = data.session!.user.id;
         // كل دخول جديد: أعد بوابة استكمال البيانات (حتى بعد «ذكرني لاحقاً»).
         unawaited(AccountCompletionService.clearEnrollmentDeferred());

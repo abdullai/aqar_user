@@ -33,6 +33,7 @@ import '../core/utils/date_helper.dart';
 import '../main.dart' show suspendAutoLock;
 
 import '../services/fast_login_service.dart';
+import '../services/inactivity_service.dart';
 import '../services/notification_service.dart';
 import '../services/auth_service.dart';
 import '../services/profile_compliance_service.dart';
@@ -52,7 +53,6 @@ import '../core/auth/auth_challenge_service.dart';
 import '../widgets/aqar_text_field.dart';
 import '../core/gestures/app_keyboard_inset.dart';
 import '../core/gestures/app_keyboard_stable.dart';
-import '../core/platform/app_surface.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/compound_display_name.dart';
 import '../core/utils/dashboard_greeting.dart';
@@ -227,6 +227,7 @@ class _VerifyScreenState extends State<VerifyScreen>
     super.initState();
     // Prevent web auto-lock/sign-out during OTP or Chrome password checkup.
     suspendAutoLock.value = true;
+    unawaited(InactivityService.stampFreshActivity());
     SensitiveNavPolicy.enterVerify();
     WidgetsBinding.instance.addObserver(this);
 
@@ -1094,22 +1095,8 @@ class _VerifyScreenState extends State<VerifyScreen>
         ? 'وصل رمز تحقق إلى هاتفك. افتح التطبيق وأدخل الرمز في الشاشة.'
         : 'A verification code was sent. Open the app and enter it on screen.';
 
-    // الويب: لا يوجد إشعار نظام محلي — SnackBar عام بدون كشف الرمز.
-    if (kIsWeb && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 5),
-          content: Text(
-            publicBody,
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-        ),
-      );
-    }
-
     if (kIsWeb) {
-      // إشعار OTP المحلي غير مدعوم على الويب — الكفاية: SnackBar أعلاه + نغمة الأصول.
+      // الويب: الشريط العلوي + النغمة تكفي (بلا إشعار سفلي).
       await _safeAsync(() => AppSoundCoordinator.playUiEffect(
             assetPath: 'sounds/otp_chime.wav',
             volume: 1.0,
@@ -1270,9 +1257,6 @@ class _VerifyScreenState extends State<VerifyScreen>
     _bannerEntry = OverlayEntry(
       builder: (overlayCtx) {
         final liveCode = InAppOtpHandoff.digitsFromAny(_expectedCode) ?? code;
-        final filled =
-            _otpDigitsFromUi().replaceAll(RegExp(r'\D'), '').length >= _otpLen;
-        final kb = _overlayKeyboardInset(overlayCtx);
         return Positioned.fill(
           child: Stack(
             children: [
@@ -1499,20 +1483,6 @@ class _VerifyScreenState extends State<VerifyScreen>
                         ),
                       );
                     },
-                  ),
-                ),
-              if (!filled &&
-                  liveCode.length >= _otpLen &&
-                  AppSurfaceScope.of(overlayCtx).showOtpKeyboardPasteChip)
-                Positioned(
-                  left: 12,
-                  right: 12,
-                  bottom: kb > 8 ? kb + 6 : 12,
-                  child: SafeArea(
-                    top: false,
-                    child: Center(
-                      child: _bankOtpKeyboardChip(liveCode, isDark: isDark),
-                    ),
                   ),
                 ),
             ],
@@ -2426,27 +2396,8 @@ class _VerifyScreenState extends State<VerifyScreen>
     );
   }
 
-  Widget _otpKeyboardDock() {
-    if (_bannerEntry != null) return const SizedBox.shrink();
-    if (!AppSurfaceScope.of(context).showOtpKeyboardPasteChip) {
-      return const SizedBox.shrink();
-    }
-    final kb = _overlayKeyboardInset(context);
-    final code = InAppOtpHandoff.digitsFromAny(_expectedCode);
-    if (code == null || code.length < _otpLen) return const SizedBox.shrink();
-    if (_otpDigitsFromUi().replaceAll(RegExp(r'\D'), '').length >= _otpLen) {
-      return const SizedBox.shrink();
-    }
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Positioned(
-      left: 12,
-      right: 12,
-      bottom: kb > 8 ? kb + 6 : 12,
-      child: Center(
-        child: _bankOtpKeyboardChip(code, isDark: isDark),
-      ),
-    );
-  }
+  // الرمز يظهر في الشريط العلوي فقط — لا شريحة سفلية.
+  Widget _otpKeyboardDock() => const SizedBox.shrink();
 
   @override
   Widget build(BuildContext context) {
