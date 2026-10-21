@@ -3543,25 +3543,19 @@ class _RealEstateCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        SizedBox(
-          height: 22,
-          child: Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: property.isAuction
-                ? Text(
-                    isAr ? 'مزايدة علنية' : 'Open auction',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 12,
-                      color: Colors.orange.shade800,
-                    ),
-                  )
-                : const SizedBox.shrink(),
+        if (property.isAuction) ...[
+          Text(
+            isAr ? 'مزايدة علنية' : 'Open auction',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 12,
+              color: Colors.orange.shade800,
+            ),
           ),
-        ),
-        const SizedBox(height: 2),
+          const SizedBox(height: 2),
+        ],
         SizedBox(
           width: double.infinity,
           child: UnifiedCardSpecRow(
@@ -3898,7 +3892,7 @@ class _RealEstateCard extends StatelessWidget {
       ],
     );
 
-    Widget listingPresenceUnderImage() {
+    Widget? listingPresenceUnderImage() {
       final publishedBy = (property.publishedByMarketerId ?? '').trim();
       final ownerUid = property.ownerId.trim();
       final selfUid = currentUserId.trim();
@@ -3911,9 +3905,9 @@ class _RealEstateCard extends StatelessWidget {
           publishedBy.isEmpty) {
         id = ownerUid;
       }
-      if (id.isEmpty) return const SizedBox.shrink();
+      if (id.isEmpty) return null;
       if (!isOwner && !property.publisherPublishPresence) {
-        return const SizedBox.shrink();
+        return null;
       }
       return UserPresenceStrip(
         userId: id,
@@ -4033,6 +4027,7 @@ class _RealEstateCard extends StatelessWidget {
       onCardTap: onOpenDetails,
       onCardDoubleTap: onToggleFav,
       cardRadius: _kHomeCardRadius,
+      compactContent: ownerHubListingCard || showMyPageCardMetrics,
       fullWidthHeroImage: true,
       heroAspectRatio: _homeListingHeroAspectRatio(context),
       heroHeight: _homeListingHeroImageHeight(context),
@@ -4053,10 +4048,7 @@ class _RealEstateCard extends StatelessWidget {
         canAddToCart: canAddToCart,
         canBidFromCard: canBidFromCard,
       ),
-      belowCard: SizedBox(
-        height: 28,
-        child: listingPresenceUnderImage(),
-      ),
+      belowCard: listingPresenceUnderImage(),
       belowMainRow: dateBelow,
       footer: footer,
     );

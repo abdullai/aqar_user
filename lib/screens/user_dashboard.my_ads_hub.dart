@@ -14,6 +14,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return const [1, 2];
   }
 
+  String _hubRequestCardTitle(Map<String, dynamic> row) {
+    final title =
+        PropertyListingDisplay.compactRequestTitleForRow(row, widget.isAr);
+    if (widget.isAr) {
+      return title.replaceFirst(RegExp(r'^مطلوب\s+'), '');
+    }
+    return title.replaceFirst(RegExp(r'^Wanted:\s*'), '');
+  }
+
   void _ensureMyPageRoleTabsCtrl() {
     final options = _myPageRoleOptions;
     final oldOptions = _myPageRoleKinds;
@@ -2147,6 +2156,21 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
     }
     final id = (merged['request_id'] ?? merged['id'] ?? '').toString().trim();
+    final selectedMarketerId = (merged['selected_marketer_id'] ??
+            merged['request_selected_marketer_id'] ??
+            '')
+        .toString()
+        .trim();
+    final selectedMarketerPresence =
+        selectedMarketerId.isNotEmpty && selectedMarketerId != _uid
+            ? UserPresenceStrip(
+                userId: selectedMarketerId,
+                isAr: widget.isAr,
+                compact: true,
+                showInfoButton: false,
+                surface: PresenceDisplaySurface.requestCards,
+              )
+            : null;
     final urlsFromProp = linkedProperty != null
         ? PropertyListingDisplay.propertyCardImagePaths(linkedProperty)
         : const <String>[];
@@ -2171,10 +2195,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     if (urls.isNotEmpty && !coverVid) {
       coverVid = false;
     }
-    final title = PropertyListingDisplay.compactRequestTitleForRow(
-      merged,
-      widget.isAr,
-    );
+    final title = _hubRequestCardTitle(merged);
     final statusWire = wfCtx.stage.wireValue;
     final statusLabel =
         _trMarketingStatus(statusWire, ownerHubPerspective: true);
@@ -2350,6 +2371,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             value: deedNo.isEmpty ? '—' : deedNo,
             copyPlain: deedNo.isEmpty ? null : deedNo,
             valueMaxLines: 1,
+            inlineLabel: true,
           ),
           _hubLabeledMetricRow(
             context,
@@ -2357,6 +2379,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
             value: deedDate.isEmpty ? '—' : deedDate,
             valueMaxLines: 1,
+            inlineLabel: true,
           ),
           _hubRequestCreatedDateTimeRow(merged, cs),
           if (wfCtx.isPublishedPublic && propPublished != null) ...[
@@ -2508,9 +2531,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           cardRadius: _kHomeCardRadius,
           dataColumn: dataColumn,
           imageColumn: imageColumn,
+          compactContent: true,
           // صورة بعرض كامل أعلى البيانات — نسبة أقصر لتفادي فراغ رأسي.
           fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
           heroAspectRatio: _homeListingHeroAspectRatio(context),
+          belowCard: selectedMarketerPresence,
           footer: fa.isEmpty ? null : _buildSmartMarketerActionBar(fa),
         ),
       ),
@@ -2689,7 +2714,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     );
   }
 
-  /// «صفحتي» فقط: عنوان صغير فوق القيمة، أيقونة اختيارية، نسخ للأرقام، قيمة بخط غامق دون التفاف غير ضروري.
+  /// «صفحتي» فقط: سطر بيانات مع أيقونة اختيارية ونسخ، ووسم أفقي عند الحاجة.
   Widget _hubLabeledMetricRow(
     BuildContext context, {
     required IconData icon,
@@ -2699,6 +2724,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     int valueMaxLines = 2,
     bool valueAllowWrap = false,
     bool showLeadingIcon = true,
+    bool inlineLabel = false,
   }) {
     final v = value.trim();
     if (v.isEmpty) return const SizedBox.shrink();
@@ -2722,49 +2748,70 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       height: 1.1,
     );
 
-    final valueBlock = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: labelStyle,
-        ),
-        const SizedBox(height: 3),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Text(
-                v,
-                maxLines: valueMaxLines,
-                overflow: TextOverflow.ellipsis,
-                softWrap: valueAllowWrap,
-                style: valueStyle,
-              ),
-            ),
-            if (showCopy)
-              IconButton(
-                tooltip: ar ? 'نسخ' : 'Copy',
-                visualDensity: VisualDensity.compact,
-                constraints:
-                    const BoxConstraints.tightFor(width: 32, height: 32),
-                padding: EdgeInsets.zero,
-                iconSize: 18,
-                icon: Icon(Icons.copy_rounded, color: cs.primary),
-                onPressed: () => _copyPlainToClipboard(
-                  toCopy,
-                  ar ? 'تم النسخ' : 'Copied',
-                ),
-              )
-            else
-              const SizedBox(width: 32, height: 32),
-          ],
-        ),
-      ],
+    final valueText = Text(
+      v,
+      maxLines: valueMaxLines,
+      overflow: TextOverflow.ellipsis,
+      softWrap: valueAllowWrap,
+      style: valueStyle,
     );
+
+    final copyButton = showCopy
+        ? IconButton(
+            tooltip: ar ? 'نسخ' : 'Copy',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            padding: EdgeInsets.zero,
+            iconSize: 18,
+            icon: Icon(Icons.copy_rounded, color: cs.primary),
+            onPressed: () => _copyPlainToClipboard(
+              toCopy,
+              ar ? 'تم النسخ' : 'Copied',
+            ),
+          )
+        : const SizedBox.shrink();
+
+    final valueBlock = inlineLabel
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  '$label:',
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: labelStyle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(child: valueText),
+              copyButton,
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: labelStyle,
+              ),
+              const SizedBox(height: 3),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(child: valueText),
+                  if (showCopy)
+                    copyButton
+                  else
+                    const SizedBox(width: 32, height: 32),
+                ],
+              ),
+            ],
+          );
 
     if (!showLeadingIcon) {
       return Padding(
@@ -10015,13 +10062,27 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }) {
     final title = type == 'published'
         ? PropertyListingDisplay.compactListingTitleForRow(r, widget.isAr)
-        : PropertyListingDisplay.compactRequestTitleForRow(r, widget.isAr);
+        : _hubRequestCardTitle(r);
     final priorRound = r['_hub_prior_round_marketer_offer'] == true;
     final relistReoffer = _allowPreviousMarketersRetryOnRequest(r) ||
         priorRound ||
         (int.tryParse('${r['round_no'] ?? ''}') ?? 1) > 1 ||
         (int.tryParse('${r['marketing_round'] ?? ''}') ?? 1) > 1;
     final ownerDispPhone = relistReoffer ? '' : _marketingOwnerPhone(r);
+    final requestOwnerId =
+        (r['request_owner_id'] ?? r['owner_id'] ?? r['requester_id'] ?? '')
+            .toString()
+            .trim();
+    final requestOwnerPresence =
+        requestOwnerId.isNotEmpty && requestOwnerId != _uid
+            ? UserPresenceStrip(
+                userId: requestOwnerId,
+                isAr: widget.isAr,
+                compact: true,
+                showInfoButton: false,
+                surface: PresenceDisplaySurface.requestCards,
+              )
+            : null;
     final deedAccessAllowed =
         type == 'published' || _marketerOwnerChatUnlocked(r);
     final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
@@ -10102,6 +10163,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             value: deedNo.isEmpty ? '—' : deedNo,
             copyPlain: deedNo.isEmpty ? null : deedNo,
             valueMaxLines: 1,
+            inlineLabel: true,
           ),
           _hubLabeledMetricRow(
             context,
@@ -10109,6 +10171,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
             value: deedDate.isEmpty ? '—' : deedDate,
             valueMaxLines: 1,
+            inlineLabel: true,
           ),
           if (type == 'published') ...[
             const SizedBox(height: 4),
@@ -10263,6 +10326,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           dataColumn: dataColumn,
           imageColumn: imageColumn,
           footer: footer,
+          belowCard: requestOwnerPresence,
+          compactContent: true,
           fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
           heroAspectRatio: _homeListingHeroAspectRatio(context),
         ),
@@ -10366,7 +10431,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
     final title = type == 'published'
         ? PropertyListingDisplay.compactListingTitleForRow(row, widget.isAr)
-        : PropertyListingDisplay.compactRequestTitleForRow(row, widget.isAr);
+        : _hubRequestCardTitle(row);
     final subLine = _mkRowSubLine(row);
     final typeLabel = _mkTypeLabel(type);
     final String? statusForDisplay;
@@ -10879,6 +10944,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             value: deedNo.isEmpty ? '—' : deedNo,
             copyPlain: deedNo.isEmpty ? null : deedNo,
             valueMaxLines: 1,
+            inlineLabel: true,
           ),
           _hubLabeledMetricRow(
             context,
@@ -10886,6 +10952,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
             value: deedDate.isEmpty ? '—' : deedDate,
             valueMaxLines: 1,
+            inlineLabel: true,
           ),
           if (ownerPhone.trim().isNotEmpty)
             _hubLabeledMetricRow(

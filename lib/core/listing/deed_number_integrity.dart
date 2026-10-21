@@ -62,9 +62,7 @@ abstract final class DeedNumberIntegrity {
             'id,title,status,purpose,is_auction,deleted_by_user,delete_approved',
           )
           .eq('deed_number', deed);
-      final res = await (exclude.isEmpty
-              ? filter
-              : filter.neq('id', exclude))
+      final res = await (exclude.isEmpty ? filter : filter.neq('id', exclude))
           .limit(40);
       for (final raw in (res as List)) {
         final row = Map<String, dynamic>.from(raw as Map);

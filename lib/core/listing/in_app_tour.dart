@@ -89,6 +89,7 @@ class InAppTour {
   });
 
   final List<InAppTourScene> scenes;
+
   /// جولة داخلية تفاعلية داخل المنصة — ليست محرك Matterport سحابي.
   final String engine;
 

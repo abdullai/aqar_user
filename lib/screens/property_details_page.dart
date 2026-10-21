@@ -48,6 +48,8 @@ import '../services/user_listing_preferences_service.dart';
 import '../widgets/listing_pricing_breakdown.dart';
 import '../widgets/listing_public_actions_menu.dart';
 import '../widgets/listing_report_sheet.dart';
+import '../widgets/rega_official_bench_card.dart';
+import '../widgets/property_viewing_panel.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../core/navigation/safe_overlay_pop.dart';
@@ -5455,6 +5457,25 @@ $licLine
                           ],
                         ),
                       ),
+                      if (_property.city.trim().isNotEmpty &&
+                          _property.listingTypeKey.trim().isNotEmpty)
+                        RegaOfficialBenchCard(
+                          isAr: widget.isAr,
+                          city: _property.city,
+                          typeCode: _property.listingTypeKey,
+                          isRent: PropertyListingDisplay.purposeFilterKey(
+                                _property,
+                              ) ==
+                              'rent',
+                        ),
+                      if (!_isGuest && _property.ownerId.trim().isNotEmpty)
+                        PropertyViewingPanel(
+                          key: ValueKey('viewing_${_property.id}'),
+                          propertyId: _property.id,
+                          ownerId: _property.ownerId,
+                          currentUserId: widget.currentUserId,
+                          isAr: widget.isAr,
+                        ),
                       if (_hasDeedInfo) ...[
                         const SizedBox(height: 12),
                         _Card(

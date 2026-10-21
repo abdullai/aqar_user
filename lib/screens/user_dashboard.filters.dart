@@ -418,7 +418,41 @@ extension _UserDashboardStateFilters on _UserDashboardState {
   bool _matchesSearch(Property p, String queryRaw) {
     final q = _norm(queryRaw);
     if (q.isEmpty) return true;
+    final intent = ArabicSearchIntent.parse(queryRaw);
+    if (intent.isStructured) return _matchesSearchIntent(p, intent);
     return _searchScore(p, q) > 0;
+  }
+
+  bool _matchesSearchIntent(Property p, ArabicSearchIntent intent) {
+    if (intent.type != null && p.type != intent.type) return false;
+    if (intent.purpose != null &&
+        !PropertyListingDisplay.matchesPurposeFilter(p, intent.purpose)) {
+      return false;
+    }
+    if (intent.priceMax != null && p.price > intent.priceMax!) return false;
+    if (intent.priceMin != null && p.price < intent.priceMin!) return false;
+    if (intent.bedroomsMin != null &&
+        (p.bedrooms == null || p.bedrooms! < intent.bedroomsMin!)) {
+      return false;
+    }
+    for (final k in intent.keywords) {
+      if (_searchScore(p, k) <= 0) return false;
+    }
+    if (intent.nearWork && WorkLocationPrefs.isSet) {
+      final plat = p.latitude;
+      final plng = p.longitude;
+      if (plat == null || plng == null) return false;
+      final km = GeoHelper.distanceKm(
+        lat1: WorkLocationPrefs.lat!,
+        lon1: WorkLocationPrefs.lng!,
+        lat2: plat,
+        lon2: plng,
+      );
+      if (km > (intent.workRadiusKm ?? WorkLocationPrefs.defaultRadiusKm)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   bool _matchesCityFilterForRequest(

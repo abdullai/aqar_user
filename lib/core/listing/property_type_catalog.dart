@@ -148,12 +148,20 @@ class PropertyTypeCatalog {
       'ar': 'أرض مسوّرة',
       'en': 'Walled land parcel',
     },
-    {'code': 'land_fenced', 'ar': 'أرض بسور (حوش)', 'en': 'Fenced land (courtyard)'},
+    {
+      'code': 'land_fenced',
+      'ar': 'أرض بسور (حوش)',
+      'en': 'Fenced land (courtyard)'
+    },
     {'code': 'palace', 'ar': 'قصر', 'en': 'Palace'},
     {'code': 'hotel', 'ar': 'فندق', 'en': 'Hotel'},
     {'code': 'warehouse', 'ar': 'مستودع', 'en': 'Warehouse'},
     {'code': 'station', 'ar': 'محطة', 'en': 'Station'},
-    {'code': 'commercial_center', 'ar': 'مركز تجاري', 'en': 'Commercial center'},
+    {
+      'code': 'commercial_center',
+      'ar': 'مركز تجاري',
+      'en': 'Commercial center'
+    },
     {'code': 'commercial_market', 'ar': 'سوق تجاري', 'en': 'Commercial market'},
     {'code': 'office_tower', 'ar': 'برج مكتبي', 'en': 'Office tower'},
     {'code': 'residential_tower', 'ar': 'برج سكني', 'en': 'Residential tower'},
@@ -543,7 +551,8 @@ class PropertyTypeCatalog {
     if (isLandLikeEffective(code)) return false;
     final raw = (code ?? '').trim();
     if (PropertyTypeCustomRegistry.isUserType(raw)) {
-      return (PropertyTypeCustomRegistry.groupIdForCode(raw) ?? '') != 'project';
+      return (PropertyTypeCustomRegistry.groupIdForCode(raw) ?? '') !=
+          'project';
     }
     final c = normalize(code);
     return c != 'project';

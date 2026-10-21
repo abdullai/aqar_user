@@ -19,6 +19,7 @@ import '../core/permissions/runtime_permission_helper.dart';
 import '../l10n/app_localizations.dart';
 import '../main.dart' show suspendAutoLock;
 import '../services/marketing_flow_service.dart';
+import '../services/listing_image_similarity_service.dart';
 import '../services/org_activity_service.dart';
 import '../services/saudi_districts_service.dart';
 import '../services/saudi_locations_service.dart';
@@ -4114,6 +4115,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final bucket = _sb.storage.from('property-images');
     final paths = <String>[];
     final hashes = <String>[];
+    final sealedForSimilarity = <({Uint8List bytes, String sha256})>[];
     Object? lastErr;
     for (final picked in _images) {
       var uploaded = false;
@@ -4135,6 +4137,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               .timeout(const Duration(seconds: 45));
           paths.add(path);
           hashes.add(sealed.sha256Hex);
+          sealedForSimilarity
+              .add((bytes: sealed.bytes, sha256: sealed.sha256Hex));
           uploaded = true;
         } catch (e) {
           lastErr = e;
@@ -4161,6 +4165,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       throw lastErr ?? StateError('Not all listing media uploaded');
     }
     final vPath = _videoUrl.text.trim();
+    unawaited(
+      ListingImageSimilarityService.register(
+        images: sealedForSimilarity,
+        propertyId: propertyId,
+        requestId: requestId,
+      ),
+    );
     return _PreparedListingMedia(
       imagePaths: paths,
       imageHashes: hashes,

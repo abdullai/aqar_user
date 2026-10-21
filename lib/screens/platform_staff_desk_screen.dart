@@ -34,6 +34,7 @@ import '../services/photographer_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/aqar_text_field.dart';
 import '../widgets/subscription_staff_reports_panel.dart';
+import '../widgets/staff_listing_integrity_panel.dart';
 import '../widgets/support/support_labeled_table.dart';
 
 /// لوحة تشغيل المنصة — قرارات مالية/حظر عبر RPC + تدقيق فقط.
@@ -3635,6 +3636,13 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
             icon: Icons.flag_outlined,
             label: l10n.opsDeskTabReports,
             page: _reportsTab(l10n),
+          ),
+        if (_canModerate)
+          (
+            id: 'integrity',
+            icon: Icons.verified_outlined,
+            label: _isAr ? 'سلامة الإعلانات' : 'Listing integrity',
+            page: StaffListingIntegrityPanel(isAr: _isAr),
           ),
         if (_canDirectory)
           (

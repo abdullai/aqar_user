@@ -30,7 +30,8 @@ class MarketingAddPropertyFlowConfig {
 
   bool get simplifiedOwnerForm => path == MarketingListingPath.noLicenseMarket;
 
-  bool get noLicenseMarketConsent => path == MarketingListingPath.noLicenseMarket;
+  bool get noLicenseMarketConsent =>
+      path == MarketingListingPath.noLicenseMarket;
 
   /// يظهر في الرئيسية فقط عند مسار «نعم» + ترخيص REGA مكتمل.
   bool get publishToHomeFeed => path == MarketingListingPath.licensed;

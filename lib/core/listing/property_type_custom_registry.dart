@@ -18,7 +18,8 @@ abstract final class PropertyTypeCustomRegistry {
       try {
         final list = jsonDecode(raw) as List<dynamic>;
         _rows = list
-            .map((e) => _CustomTypeRow.fromJson(Map<String, dynamic>.from(e as Map)))
+            .map((e) =>
+                _CustomTypeRow.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
       } catch (_) {
         _rows = [];
@@ -123,8 +124,7 @@ abstract final class PropertyTypeCustomRegistry {
         .toList();
   }
 
-  static bool hasCode(String code) =>
-      _rows.any((r) => r.code == code.trim());
+  static bool hasCode(String code) => _rows.any((r) => r.code == code.trim());
 }
 
 class _CustomTypeRow {

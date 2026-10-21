@@ -90,7 +90,10 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
     }
     _poll?.cancel();
     _poll = Timer.periodic(
-      Duration(seconds: widget.surface == PresenceDisplaySurface.chat ? 5 : (kIsWeb ? 12 : 15)),
+      Duration(
+          seconds: widget.surface == PresenceDisplaySurface.chat
+              ? 5
+              : (kIsWeb ? 12 : 15)),
       (_) => _pull(),
     );
   }
@@ -98,13 +101,22 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
   Future<void> _pull() async {
     final id = widget.userId.trim();
     if (id.isEmpty) return;
+    final cached = _cache[id];
+    if (cached != null &&
+        DateTime.now().difference(cached.at) < const Duration(seconds: 8)) {
+      if (mounted) {
+        setState(() {
+          _row = cached.row;
+          _bootstrapped = true;
+        });
+      }
+      return;
+    }
     try {
-      final res = await _sb
-          .rpc(
-            'get_user_presence_summary',
-            params: {'p_user_id': id},
-          )
-          .timeout(const Duration(seconds: 5));
+      final res = await _sb.rpc(
+        'get_user_presence_summary',
+        params: {'p_user_id': id},
+      ).timeout(const Duration(seconds: 5));
       if (!mounted) return;
       Map<String, dynamic>? row;
       if (res is Map) {
@@ -115,6 +127,7 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
           row = <String, dynamic>{
             'chat_last_seen_at': m['last_seen_at'],
             'chat_last_seen_hidden': m['hidden'] == true,
+            'publish_presence_on_cards': m['show_on_cards'] != false,
             '_online_now_hint': m['online_now'] == true,
           };
         }
@@ -132,7 +145,9 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
       try {
         final r = await _sb
             .from('users_profiles')
-            .select('chat_last_seen_at, chat_last_seen_hidden')
+            .select(
+              'chat_last_seen_at, chat_last_seen_hidden, publish_presence_on_cards',
+            )
             .eq('user_id', id)
             .maybeSingle();
         if (!mounted) return;
@@ -151,9 +166,7 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
   void _subscribe(String id) {
     if (_sb.auth.currentSession == null) return;
     try {
-      _ch = _sb
-          .channel('presence_strip_$id')
-          .onPostgresChanges(
+      _ch = _sb.channel('presence_strip_$id').onPostgresChanges(
             event: PostgresChangeEvent.update,
             schema: 'public',
             table: 'users_profiles',
@@ -169,8 +182,7 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
               _cache[id] = (row: row, at: DateTime.now());
               setState(() => _row = row);
             },
-          )
-          ..subscribe();
+          )..subscribe();
     } catch (_) {}
   }
 
@@ -197,13 +209,16 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
     if (!PresenceDisplayPrefs.instance.isVisible(widget.surface)) {
       return const SizedBox.shrink();
     }
+    if (widget.surface != PresenceDisplaySurface.chat &&
+        _row?['publish_presence_on_cards'] == false) {
+      return const SizedBox.shrink();
+    }
 
     final cs = Theme.of(context).colorScheme;
     final line = _bootstrapped
         ? ChatPeerService.formatPresenceLine(
             _row,
             widget.isAr,
-            fallbackTimestamp: widget.fallbackTimestamp,
           )
         : (widget.isAr ? 'جاري التحديث…' : 'Updating…');
     final online = line == (widget.isAr ? 'متصل الآن' : 'Online');
@@ -230,7 +245,8 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
                             .withValues(alpha: isDark ? 0.22 : 0.12)
                         : (isDark
                             ? cs.surfaceContainerHighest.withValues(alpha: 0.55)
-                            : cs.surfaceContainerHighest.withValues(alpha: 0.4)),
+                            : cs.surfaceContainerHighest
+                                .withValues(alpha: 0.4)),
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(
                   color: online
@@ -265,9 +281,8 @@ class _UserPresenceStripState extends State<UserPresenceStrip> {
                   const SizedBox(width: 5),
                   Flexible(
                     child: Directionality(
-                      textDirection: widget.isAr
-                          ? TextDirection.rtl
-                          : TextDirection.ltr,
+                      textDirection:
+                          widget.isAr ? TextDirection.rtl : TextDirection.ltr,
                       child: AqarMarqueeText(
                         text: line,
                         height: widget.compact ? 14 : 16,

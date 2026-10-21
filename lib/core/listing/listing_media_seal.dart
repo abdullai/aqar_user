@@ -38,10 +38,7 @@ abstract final class ListingMediaSeal {
         b[11] == 0x50) {
       return 'image/webp';
     }
-    if (b.length >= 6 &&
-        b[0] == 0x47 &&
-        b[1] == 0x49 &&
-        b[2] == 0x46) {
+    if (b.length >= 6 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46) {
       return 'image/gif';
     }
     final n = name.toLowerCase();
@@ -88,7 +85,8 @@ abstract final class ListingMediaSeal {
     return h.substring(0, 8);
   }
 
-  static String encodeIntegrityJson(Map<String, dynamic> map) => jsonEncode(map);
+  static String encodeIntegrityJson(Map<String, dynamic> map) =>
+      jsonEncode(map);
 }
 
 class ListingSealedBytes {

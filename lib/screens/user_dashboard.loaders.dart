@@ -181,6 +181,8 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
     try {
       await _fetchProfilesByUserIds([requestUid]);
       if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      await ViewingReminderService.runIfDue();
+      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       _syncInAppHubFromProfileCache();
 
       // الاعتماد دائماً على user_id حتى لا يختلط عداد/قائمة الإشعارات مع مستخدم آخر

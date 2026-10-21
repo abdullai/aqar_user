@@ -61,10 +61,15 @@ if (!root || !outFile) {
 }
 
 const files = walk(root);
-const salesFiles = files.filter((f) => /sales/i.test(f) && /Q1-2026/i.test(path.basename(f)));
-const rentalFiles = files.filter(
-  (f) => /rental/i.test(f) && /4th-Q-2025/i.test(path.basename(f)),
-);
+const SALES_Q = process.env.REGA_SALES_Q || '2026-1'; // year-quarter
+const RENTAL_Q = process.env.REGA_RENTAL_Q || '2026-1';
+const qRegex = (yq) => {
+  const [y, q] = yq.split('-');
+  const ord = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th' }[q];
+  return new RegExp(`(Q${q}-${y}|${ord}-?Q-?${y})`, 'i');
+};
+const salesFiles = files.filter((f) => /sales/i.test(f) && qRegex(SALES_Q).test(path.basename(f)));
+const rentalFiles = files.filter((f) => /rental/i.test(f) && qRegex(RENTAL_Q).test(path.basename(f)));
 
 const sales = [];
 for (const f of salesFiles) {
@@ -130,8 +135,8 @@ const rentals = [...rentAcc.values()].map((r) => ({
 const payload = {
   source: 'REGA open indicators (MOJ/REGA via Saudi National Open Data)',
   attribution: 'civillizard/Saudi-Real-Estate-Data — KSA Open Data License',
-  sales_period: { year: 2026, quarter: 1 },
-  rental_period: { year: 2025, quarter: 4 },
+  sales_period: { year: Number(SALES_Q.split('-')[0]), quarter: Number(SALES_Q.split('-')[1]) },
+  rental_period: { year: Number(RENTAL_Q.split('-')[0]), quarter: Number(RENTAL_Q.split('-')[1]) },
   sales,
   rentals,
 };

@@ -2690,16 +2690,193 @@ class _UserDashboardState extends State<UserDashboard>
     }
 
     if (_searchQuery.trim().isNotEmpty) {
+      final intent = ArabicSearchIntent.parse(_searchQuery);
       chips.add(
         item(
-          text: _isArabic
-              ? 'بحث: ${_searchQuery.trim()}'
-              : 'Search: ${_searchQuery.trim()}',
-          icon: Icons.search,
+          text: intent.isStructured
+              ? (_isArabic
+                  ? 'فهمنا بحثك: ${intent.describe(arabic: true).join(' · ')}'
+                  : 'Understood: ${intent.describe(arabic: false).join(' · ')}')
+              : (_isArabic
+                  ? 'بحث: ${_searchQuery.trim()}'
+                  : 'Search: ${_searchQuery.trim()}'),
+          icon: intent.isStructured ? Icons.auto_awesome : Icons.search,
           onRemove: () {
             _inlineSearchCtrl.clear();
             _setSearchQuery('');
           },
+        ),
+      );
+      if (intent.nearWork) {
+        if (!WorkLocationPrefs.loaded) {
+          WorkLocationPrefs.load().then((_) {
+            if (mounted) setState(() {});
+          });
+        }
+        chips.add(
+          ActionChip(
+            avatar: Icon(
+              WorkLocationPrefs.isSet
+                  ? Icons.work_outline_rounded
+                  : Icons.add_location_alt_outlined,
+              size: 16,
+            ),
+            label: Text(
+              WorkLocationPrefs.isSet
+                  ? (_isArabic
+                      ? 'ضمن ${(intent.workRadiusKm ?? WorkLocationPrefs.defaultRadiusKm).round()} كم من عملك — تغيير'
+                      : 'Within ${(intent.workRadiusKm ?? WorkLocationPrefs.defaultRadiusKm).round()} km of work — change')
+                  : (_isArabic
+                      ? 'حدّد موقع عملك لتفعيل «قريب من عملي»'
+                      : 'Set your work location'),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            ),
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text(_isArabic ? 'موقع العمل' : 'Work location'),
+                  content: Text(
+                    _isArabic
+                        ? 'سنستخدم موقعك الحالي كموقع عملك. يُحفظ على جهازك فقط ولا يُرسل لأي جهة.'
+                        : 'Your current location will be saved on this device only.',
+                  ),
+                  actions: [
+                    if (WorkLocationPrefs.isSet)
+                      TextButton(
+                        onPressed: () async {
+                          await WorkLocationPrefs.clear();
+                          if (ctx.mounted) Navigator.pop(ctx, false);
+                        },
+                        child: Text(_isArabic ? 'مسح الموقع' : 'Clear'),
+                      ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: Text(_isArabic ? 'إلغاء' : 'Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: Text(
+                        _isArabic ? 'أنا في عملي الآن' : 'Use current location',
+                      ),
+                    ),
+                  ],
+                ),
+              );
+              if (ok == true) {
+                final err = await WorkLocationPrefs.saveFromCurrentPosition();
+                if (!mounted) return;
+                if (err != null) {
+                  _showNotification(
+                    _isArabic ? 'موقع العمل' : 'Work location',
+                    err == 'permission'
+                        ? (_isArabic
+                            ? 'يلزم السماح بالموقع لتحديد عملك.'
+                            : 'Location permission is required.')
+                        : (_isArabic
+                            ? 'تعذر تحديد الموقع الآن.'
+                            : 'Could not get your location.'),
+                  );
+                }
+              }
+              if (mounted) setState(() {});
+            },
+          ),
+        );
+      }
+      chips.add(
+        ActionChip(
+          avatar: const Icon(Icons.notifications_active_outlined, size: 16),
+          label: Text(
+            _isArabic ? 'نبّهني بمطابقات جديدة' : 'Alert me on new matches',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+          ),
+          onPressed: () async {
+            double? wLat, wLng, wRadius;
+            if (intent.nearWork) {
+              if (!WorkLocationPrefs.isSet) {
+                _showNotification(
+                  _isArabic ? 'قريب من عملي' : 'Near my work',
+                  _isArabic
+                      ? 'حدّد موقع عملك أولاً من الشريحة المجاورة ليعمل التنبيه بالقرب منه.'
+                      : 'Set your work location first so alerts can match nearby listings.',
+                );
+                return;
+              }
+              final agree = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text(
+                      _isArabic ? 'تنبيه قريب من عملك' : 'Near-work alerts'),
+                  content: Text(
+                    _isArabic
+                        ? 'لنُنبّهك عند ظهور عقار قريب من عملك سنحفظ موقع عملك مع هذا البحث بدقة تقريبية (نحو 1 كم) داخل حسابك فقط، ويمكنك حذف البحث في أي وقت.'
+                        : 'To alert you about listings near your work we will store an approximate (~1 km) work location with this search in your account only. You can delete it anytime.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: Text(_isArabic ? 'إلغاء' : 'Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: Text(_isArabic ? 'موافق وحفظ' : 'Agree & save'),
+                    ),
+                  ],
+                ),
+              );
+              if (agree != true) return;
+              wLat = WorkLocationPrefs.lat;
+              wLng = WorkLocationPrefs.lng;
+              wRadius =
+                  intent.workRadiusKm ?? WorkLocationPrefs.defaultRadiusKm;
+            }
+            final err = await SavedSearchService.save(
+              intent,
+              _searchQuery,
+              workLat: wLat,
+              workLng: wLng,
+              workRadiusKm: wRadius,
+            );
+            if (!mounted) return;
+            _showNotification(
+              _isArabic ? 'عمليات البحث' : 'Saved searches',
+              switch (err) {
+                null => _isArabic
+                    ? 'تم حفظ البحث، وسيصلك تنبيه داخل التطبيق عند نشر إعلان مطابق.'
+                    : 'Search saved. You will get an in-app alert on new matches.',
+                'not_signed_in' => _isArabic
+                    ? 'سجّل الدخول لحفظ البحث وتفعيل التنبيهات.'
+                    : 'Sign in to save searches.',
+                'limit' => _isArabic
+                    ? 'وصلت للحد الأقصى (20 بحثاً). احذف بحثاً قديماً أولاً.'
+                    : 'Limit reached (20). Delete an old search first.',
+                _ => _isArabic
+                    ? 'تعذر حفظ البحث الآن، حاول لاحقاً.'
+                    : 'Could not save the search.',
+              },
+            );
+          },
+        ),
+      );
+    }
+
+    if (_tabIndex == 0 && !_isGuest) {
+      chips.add(
+        ActionChip(
+          avatar: const Icon(Icons.bookmarks_outlined, size: 16),
+          label: Text(
+            _isArabic ? 'عمليات بحثي' : 'Saved searches',
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+          ),
+          onPressed: () => showSavedSearchesSheet(
+            context,
+            arabic: _isArabic,
+            onApply: (q) {
+              _inlineSearchCtrl.text = q;
+              _setSearchQuery(q);
+            },
+          ),
         ),
       );
     }

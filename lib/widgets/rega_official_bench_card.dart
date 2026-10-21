@@ -72,6 +72,11 @@ class _RegaOfficialBenchCardState extends State<RegaOfficialBenchCard> {
     final y = _period?['year'];
     final q = _period?['quarter'];
     final period = (y != null && q != null) ? '$y · Q$q' : '';
+    final now = DateTime.now();
+    final ageQ = (y != null && q != null)
+        ? (now.year * 4 + (now.month - 1) ~/ 3) - (y * 4 + q - 1)
+        : 0;
+    final stale = ageQ >= 2;
     final typeLabel = PropertyTypeCatalog.label(widget.typeCode, widget.isAr);
     final cityLabel = LocaleContent.forUi(hit.cityAr, isAr: widget.isAr);
     String amountLine() {
@@ -133,6 +138,18 @@ class _RegaOfficialBenchCardState extends State<RegaOfficialBenchCard> {
               fontWeight: FontWeight.w700,
               height: 1.35,
               color: cs.onSurface,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            widget.isAr
+                ? 'مؤشر استرشادي مجمّع وليس تقييمًا رسميًا للعقار.${stale ? ' بيانات هذه الفترة قد لا تعكس السوق الحالي ($ageQ أرباع مضت).' : ''}'
+                : 'Aggregate guidance only, not an official valuation.${stale ? ' This period may not reflect the current market ($ageQ quarters old).' : ''}',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.3,
+              fontWeight: FontWeight.w600,
+              color: stale ? Colors.orange.shade800 : cs.onSurfaceVariant,
             ),
           ),
         ],

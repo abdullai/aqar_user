@@ -1,0 +1,38 @@
+name: Update REGA price indicators
+
+on:
+  schedule:
+    - cron: '0 5 3 * *' # الثالث من كل شهر
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch latest REGA quarterly CSVs
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/civillizard/Saudi-Real-Estate-Data.git "$RUNNER_TEMP/rega"
+          git -C "$RUNNER_TEMP/rega" sparse-checkout set rega/quarterlies
+
+      - name: Rebuild indicators (latest quarter auto-detected)
+        run: |
+          python3 tool/build_rega_open_indicators.py \
+            "$RUNNER_TEMP/rega/rega/quarterlies" assets/data/rega_open_indicators.json
+
+      - name: Open pull request when data changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/rega-indicators-update
+          commit-message: 'chore: update REGA open price indicators'
+          title: 'تحديث مؤشرات الأسعار (الهيئة العامة للعقار)'
+          body: |
+            تحديث تلقائي لـ assets/data/rega_open_indicators.json من أحدث ربع منشور.
+            راجع الفرق ثم ادمج؛ لا يُنشر شيء دون مراجعة.
+          add-paths: assets/data/rega_open_indicators.json

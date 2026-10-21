@@ -298,6 +298,12 @@ abstract final class InAppNotificationCatalog {
     final t = type.toLowerCase().trim();
     final et = entityType.toLowerCase().trim();
 
+    if (t.startsWith('viewing_')) return Icons.event_available_rounded;
+    if (t == 'saved_search_match') return Icons.travel_explore_rounded;
+    if (t == 'listing_under_review' || t == 'listing_image_review') {
+      return Icons.fact_check_rounded;
+    }
+
     switch (et) {
       case InAppEntityTypes.billingTransaction:
         return Icons.receipt_long_rounded;
@@ -393,8 +399,15 @@ abstract final class InAppNotificationCatalog {
     final et = entityType.toLowerCase().trim();
 
     if (t == InAppNotifTypes.billingAutoRenewFailed ||
-        t == InAppNotifTypes.billingPaymentFailed) {
+        t == InAppNotifTypes.billingPaymentFailed ||
+        t == 'viewing_declined') {
       return const Color(0xFFDC2626);
+    }
+    if (t == 'viewing_confirmed') return const Color(0xFF16A34A);
+    if (t.startsWith('viewing_')) return const Color(0xFFDB2777);
+    if (t == 'saved_search_match') return const Color(0xFF2563EB);
+    if (t == 'listing_under_review' || t == 'listing_image_review') {
+      return const Color(0xFFCA8A04);
     }
 
     switch (et) {

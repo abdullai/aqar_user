@@ -38,6 +38,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
 
   /// ارتفاع ثابت لصورة الرأس — يوحّد صفوف الشبكة عند تمدد البطاقات.
   final double? heroHeight;
+  final bool compactContent;
 
   const UnifiedRealEstateCard({
     super.key,
@@ -58,12 +59,18 @@ class UnifiedRealEstateCard extends StatelessWidget {
     this.fullWidthHeroImage = true,
     this.heroAspectRatio = 2.4,
     this.heroHeight,
+    this.compactContent = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final inkContent = Padding(
-      padding: const EdgeInsetsDirectional.fromSTEB(8, 6, 8, 4),
+      padding: EdgeInsetsDirectional.fromSTEB(
+        8,
+        compactContent ? 4 : 6,
+        8,
+        compactContent ? 2 : 4,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
@@ -86,7 +93,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
             const SizedBox(height: 6),
             underImage!,
           ],
-          const SizedBox(height: 8),
+          SizedBox(height: compactContent ? 4 : 8),
           dataColumn,
         ],
       ),
