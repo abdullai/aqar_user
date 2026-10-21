@@ -55,7 +55,6 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
   final TabBarScrollController _tabsScrollController = TabBarScrollController();
   List<Tab> _tabs = const [];
   List<Widget> _bodies = const [];
-  int? _upgradeTabIndex;
   SubscriptionBillingContext? _billingCtx;
   bool _billingCtxLoading = true;
 
@@ -139,8 +138,6 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
 
     final tabs = <Tab>[];
     final bodies = <Widget>[];
-    int? upgradeIdx;
-
     void add(Tab tab, Widget body) {
       tabs.add(tab);
       bodies.add(body);
@@ -202,8 +199,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
           organizationId: widget.organizationId,
           onRequestUpgrade: orgEntity
               ? () {
-                  final u = _upgradeTabIndex;
-                  if (u != null && _ctrl != null) _ctrl!.animateTo(u);
+                  _ctrl?.animateTo(0);
                 }
               : null,
         ),
@@ -222,22 +218,6 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
     }
 
     if (orgEntity) {
-      upgradeIdx = tabs.length;
-      add(
-        Tab(
-          icon: const Icon(Icons.rocket_launch_outlined),
-          child: _tabLabel(t.subscriptionsTabUpgrade),
-        ),
-        SubscriptionPlansScreen(
-          lang: widget.lang,
-          accountType: widget.accountType,
-          organizationId: widget.organizationId,
-          upgradeOnly: true,
-          resumeAfterPurchase: widget.resumeAfterPurchase,
-          billingContext: _billingCtx,
-          billingContextLoading: _billingCtxLoading,
-        ),
-      );
       add(
         Tab(
           icon: const Icon(Icons.verified_outlined),
@@ -260,7 +240,6 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
     setState(() {
       _tabs = tabs;
       _bodies = bodies;
-      _upgradeTabIndex = upgradeIdx;
     });
   }
 

@@ -30,7 +30,6 @@ class SubscriptionPlansScreen extends StatefulWidget {
     required this.lang,
     required this.accountType,
     this.organizationId,
-    this.upgradeOnly = false,
     this.resumeAfterPurchase,
     this.billingContext,
     this.billingContextLoading = false,
@@ -40,7 +39,6 @@ class SubscriptionPlansScreen extends StatefulWidget {
   final String lang;
   final String accountType;
   final String? organizationId;
-  final bool upgradeOnly;
   final MarketingSubscriptionResumeIntent? resumeAfterPurchase;
   final SubscriptionBillingContext? billingContext;
   final bool billingContextLoading;
@@ -58,6 +56,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
   final _svc = SubscriptionService(Supabase.instance.client);
   bool _loading = true;
+  bool _plansLoadFailed = false;
   bool _activatingTrial = false;
   List<Map<String, dynamic>> _plans = [];
   String _period = 'monthly';
@@ -235,13 +234,16 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
     // (resolveBillingContext قد يفشل/يتأخّر بعد تخصيص الدفع حسب المستخدم).
     // لذلك نعزل كل نداء على حدة ولا نسمح لأي فشل بإسقاط تحميل الباقات.
     List<Map<String, dynamic>> plans = const [];
+    var plansLoadFailed = false;
     try {
       plans = await _svc.fetchPlansByUserType(widget.accountType);
       plans = SubscriptionService.filterCatalogPlansForAccountType(
         plans,
         widget.accountType,
       );
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[SubscriptionPlans] catalog load failed: $e\n$st');
+      plansLoadFailed = true;
       plans = const [];
     }
 
@@ -306,6 +308,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
     setState(() {
       _plans = visible;
+      _plansLoadFailed = plansLoadFailed;
       _current = cur;
       _period = initialPeriod;
       _trialAlreadyUsed = used;
@@ -894,12 +897,31 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                   ),
             ),
             const SizedBox(height: 8),
-            if (widget.upgradeOnly)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  t.subscriptionsUpgradeCta,
-                  style: Theme.of(context).textTheme.titleMedium,
+            if (_plansLoadFailed)
+              Card(
+                color: cs.errorContainer.withValues(alpha: 0.55),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        _isAr
+                            ? 'تعذّر تحميل الباقات من الخادم. تحقق من اتصال Supabase وتطبيق ترحيلات الاشتراكات، ثم أعد المحاولة.'
+                            : 'Plans could not be loaded from the server. Check the Supabase connection and subscription migrations, then retry.',
+                        style: TextStyle(
+                          color: cs.onErrorContainer,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: () => unawaited(_load()),
+                        icon: const Icon(Icons.refresh),
+                        label: Text(_isAr ? 'إعادة المحاولة' : 'Retry'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             SizedBox(
@@ -1045,7 +1067,8 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
               ),
             ],
             if (_showTrialExhaustedBadge) _trialExhaustedBadge(cs),
-            if (_plans.where(_planMatchesCurrentPeriod).isEmpty) ...[
+            if (!_plansLoadFailed &&
+                _plans.where(_planMatchesCurrentPeriod).isEmpty) ...[
               Card(
                 color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
                 margin: const EdgeInsets.only(bottom: 14),

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_credit_card/flutter_credit_card.dart';
+import 'package:moyasar/moyasar.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/gestures/app_keyboard_inset.dart';
@@ -18,6 +19,7 @@ import '../../l10n/app_localizations.dart';
 import '../../services/payment_service.dart';
 import '../../widgets/aqar_primary_scroll_scope.dart';
 import '../../widgets/app_page_close_button.dart';
+import 'moyasar_subscription_payment_screen.dart';
 
 class AddPaymentCardScreen extends StatefulWidget {
   const AddPaymentCardScreen({super.key, required this.lang});
@@ -141,6 +143,116 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
     );
   }
 
+  Future<void> _verifyMoyasarTestCard() async {
+    if (!PaymentService.isMoyasarTestMode || _saving) return;
+    setState(() => _saving = true);
+    try {
+      final pending = await _pay.createPendingBillingTransaction(
+        amount: 1,
+        paymentMethod: 'card',
+        purpose: 'save_card_verify',
+      );
+      if (pending['ok'] != true) {
+        throw StateError(
+          PaymentService.userFacingError(
+            pending['error'] ?? 'pending_tx',
+            isAr: _isAr,
+          ),
+        );
+      }
+      final billingId = '${pending['transaction_id'] ?? ''}'.trim();
+      final rawAmount = pending['amount'] ?? pending['expected_amount'];
+      final amount = rawAmount is num
+          ? rawAmount.toDouble()
+          : double.tryParse('$rawAmount') ?? 1;
+      if (billingId.isEmpty || amount <= 0) {
+        throw StateError(_isAr
+            ? 'تعذّر إنشاء معاملة التحقق.'
+            : 'Could not create the verification transaction.');
+      }
+
+      final config = _pay.buildMoyasarPaymentConfig(
+        amountHalalas: PaymentService.amountToHalalas(amount),
+        description: _isAr ? 'التحقق من البطاقة' : 'Card verification',
+        metadata: _pay.buildMoyasarSubscriptionMetadata(
+          billingTransactionId: billingId,
+          purpose: 'save_card_verify',
+        ),
+        madaPreferredNetworksOnly: false,
+      );
+      if (!mounted) return;
+      final result = await PaymentOverlay.push<dynamic>(
+        context,
+        name: '/subscriptions/moyasar-test-card-verification',
+        page: MoyasarSubscriptionPaymentScreen(
+          config: config,
+          walletMode: MoyasarWalletMode.none,
+          isAr: _isAr,
+          planName: _isAr ? 'التحقق من البطاقة' : 'Card verification',
+          amountSar: amount,
+          periodLabel: _isAr ? 'اختبار — بلا خصم حقيقي' : 'Test — no real charge',
+        ),
+      );
+      if (!mounted) return;
+      if (result is! PaymentResponse ||
+          !PaymentService.moyasarPaymentSucceeded(result)) {
+        throw StateError(
+          PaymentService.userFacingError(
+            PaymentService.mapMoyasarResultToError(result) ??
+                'moyasar_cancelled_or_failed',
+            isAr: _isAr,
+          ),
+        );
+      }
+
+      final verified = await _pay.pollUntilBillingTransactionPaid(
+        billingTransactionId: billingId,
+        expectedAmountSar: amount,
+      );
+      if (verified['ok'] != true) {
+        throw StateError(
+          PaymentService.userFacingError(
+            verified['error'] ?? 'webhook_timeout',
+            isAr: _isAr,
+          ),
+        );
+      }
+
+      var savedRealCard = false;
+      for (var attempt = 0; attempt < 6 && mounted; attempt++) {
+        final cards = await _pay.getSavedCards();
+        savedRealCard = cards.any(
+          (card) => !PaymentService.isMockCardToken(card['card_token']),
+        );
+        if (savedRealCard) break;
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+      if (!savedRealCard) {
+        throw StateError(_isAr
+            ? 'تم تأكيد اختبار البطاقة لكن لم تُحفَظ. تحقق من إعداد Moyasar Webhook.'
+            : 'The test payment was confirmed, but no card was saved. Check the Moyasar webhook setup.');
+      }
+      if (mounted) Navigator.pop(context, true);
+    } on StateError catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (e, st) {
+      debugPrint('[AddPaymentCard] Moyasar test verification failed: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            PaymentService.userFacingError(e, isAr: _isAr),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Future<void> _save() async {
     final t = AppLocalizations.of(context)!;
     final digits =
@@ -196,6 +308,28 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
+    if (!PaymentService.useMoyasarLiveFlow &&
+        !PaymentService.allowMockGateway &&
+        !PaymentService.allowDevelopmentMockCards) {
+      return PaymentPopGuard(
+        child: Scaffold(
+          resizeToAvoidBottomInset: false,
+          appBar: _closeAppBar(t),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                _isAr
+                    ? 'لا يمكن إضافة بطاقة حتى تهيئة بوابة الدفع لهذه البيئة.'
+                    : 'A card cannot be added until a payment gateway is configured for this environment.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     if (PaymentService.useMoyasarLiveFlow &&
         !PaymentService.allowDevelopmentMockCards) {
       return PaymentPopGuard(
@@ -232,20 +366,22 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                     const SizedBox(height: 12),
                     Text(
                       _isAr
-                          ? 'لن تُخصم رسوم لإضافة البطاقة. ستُحفَظ بأمان عند إتمام أول دفعة.'
-                          : 'No fee is charged to add a card. It is securely saved after your first successful payment.',
+                          ? PaymentService.isMoyasarTestMode
+                              ? 'سيُنفَّذ اختبار بقيمة 1 ريال في بيئة ميسر التجريبية فقط، ولن يكون هناك خصم حقيقي. تُحفَظ البطاقة بعد تأكيد Webhook.'
+                              : 'لن تُخصم رسوم مستقلة لإضافة البطاقة. ستُحفَظ بأمان بعد أول دفعة ناجحة عبر ميسر.'
+                          : PaymentService.isMoyasarTestMode
+                              ? 'A SAR 1 test transaction runs in Moyasar sandbox only; no real charge is made. The card is saved after webhook confirmation.'
+                              : 'No separate card-saving fee. The card is securely saved after your first successful Moyasar payment.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
-                    const SizedBox(height: 20),
-                    CheckboxListTile(
-                      value: _default,
-                      onChanged: (v) => setState(() => _default = v ?? false),
-                      title: Text(t.subscriptionsDefaultCard),
-                    ),
                     const SizedBox(height: 16),
                     FilledButton.icon(
-                      onPressed: _saving ? null : _showNoChargeCardInfo,
+                      onPressed: _saving
+                          ? null
+                          : PaymentService.isMoyasarTestMode
+                              ? _verifyMoyasarTestCard
+                              : _showNoChargeCardInfo,
                       icon: _saving
                           ? const SizedBox(
                               width: 18,
@@ -254,7 +390,13 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                             )
                           : const Icon(Icons.lock_outline),
                       label: Text(
-                        _isAr ? 'معلومات حفظ البطاقة' : 'Card saving details',
+                        _isAr
+                            ? PaymentService.isMoyasarTestMode
+                                ? 'تحقق من بطاقة الاختبار وحفظها'
+                                : 'معلومات حفظ البطاقة'
+                            : PaymentService.isMoyasarTestMode
+                                ? 'Verify and save test card'
+                                : 'Card saving details',
                       ),
                     ),
                   ],

@@ -11,7 +11,7 @@ import '../../services/payment_service.dart';
 import '../../widgets/aqar_primary_scroll_scope.dart';
 import '../../widgets/app_page_close_button.dart';
 
-enum MoyasarWalletMode { none, applePay, samsungPay }
+enum MoyasarWalletMode { none, applePay, samsungPay, stcPay }
 
 /// Full-screen Moyasar card / wallet flow; pops with [PaymentResponse] or an error object from the SDK.
 class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
@@ -34,6 +34,7 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
 
   bool get useApplePay => walletMode == MoyasarWalletMode.applePay;
   bool get useSamsungPay => walletMode == MoyasarWalletMode.samsungPay;
+  bool get useStcPay => walletMode == MoyasarWalletMode.stcPay;
 
   @override
   Widget build(BuildContext context) {
@@ -170,6 +171,14 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
                       if (context.mounted) Navigator.of(context).pop(r);
                     },
                   )
+                else if (useStcPay)
+                  STCPay(
+                    config: config,
+                    locale: loc,
+                    onPaymentResult: (dynamic r) {
+                      if (context.mounted) Navigator.of(context).pop(r);
+                    },
+                  )
                 else
                   AqarMoyasarCreditCard(
                     config: config,
@@ -189,8 +198,10 @@ class MoyasarSubscriptionPaymentScreen extends StatelessWidget {
         ? 'Apple Pay'
         : useSamsungPay
             ? 'Samsung Pay'
-            : (AppLocalizations.of(context)?.subscriptionsCreditMadaTitle ??
-                (isAr ? 'بطاقة ائتمان / مدى' : 'Credit / mada card'));
+            : useStcPay
+                ? 'STC Pay'
+                : (AppLocalizations.of(context)?.subscriptionsCreditMadaTitle ??
+                    (isAr ? 'بطاقة ائتمان / مدى' : 'Credit / mada card'));
 
     return PaymentPopGuard(
       child: Scaffold(

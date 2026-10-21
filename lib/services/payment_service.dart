@@ -61,7 +61,9 @@ class PaymentService {
 
   /// Free fake cards are for local UI testing only; they never enter checkout.
   static bool get allowDevelopmentMockCards {
-    if (!kDebugMode || kReleaseMode || kIsProd) return false;
+    if (!kDebugMode || kReleaseMode || kIsProd || useMoyasarLiveFlow) {
+      return false;
+    }
     final cardMode =
         (dotenv.env['PAYMENT_CARD_MODE'] ?? '').trim().toLowerCase();
     final allowMock =
@@ -569,6 +571,28 @@ class PaymentService {
     await prefs.setString(_developmentCardsKey(uid), jsonEncode(cards));
   }
 
+  Future<String?> _savedCardToken(String uid, String cardId) async {
+    if (allowDevelopmentMockCards && cardId.startsWith('mock_local_')) {
+      final cards = await _readDevelopmentCards(uid);
+      for (final card in cards) {
+        if ('${card['id']}' == cardId) {
+          return card['card_token']?.toString();
+        }
+      }
+    }
+    try {
+      final row = await _sb
+          .from(_cards)
+          .select('card_token')
+          .eq('id', cardId)
+          .eq('user_id', uid)
+          .maybeSingle();
+      return row?['card_token']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<int> savedCardCount() async {
     final cards = await getSavedCards();
     return cards.length;
@@ -941,15 +965,7 @@ class PaymentService {
     }
     String? token = cardTokenDirect;
     if (token == null && cardId != null) {
-      try {
-        final row = await _sb
-            .from(_cards)
-            .select('card_token')
-            .eq('id', cardId)
-            .eq('user_id', uid)
-            .maybeSingle();
-        token = row?['card_token']?.toString();
-      } catch (_) {}
+      token = await _savedCardToken(uid, cardId);
     }
     if (token == null || token.isEmpty) {
       return {'ok': false, 'error': 'no_card'};
@@ -1063,15 +1079,7 @@ class PaymentService {
 
     String? token = cardTokenDirect;
     if (token == null && cid.isNotEmpty) {
-      try {
-        final row = await _sb
-            .from(_cards)
-            .select('card_token')
-            .eq('id', cid)
-            .eq('user_id', uid)
-            .maybeSingle();
-        token = row?['card_token']?.toString();
-      } catch (_) {}
+      token = await _savedCardToken(uid, cid);
     }
     if (token == null || token.isEmpty) {
       return {'ok': false, 'error': 'no_card'};

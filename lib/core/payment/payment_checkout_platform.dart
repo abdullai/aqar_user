@@ -19,7 +19,8 @@ class PaymentCheckoutPlatform {
   static bool showSamsungPay(BuildContext context) =>
       PaymentPlatformDetector.supportsSamsungPay();
 
-  static bool showStcPay(BuildContext context) => false;
+  static bool showStcPay(BuildContext context) =>
+      PaymentPlatformDetector.supportsStcPay();
 
   static bool showCardPayment(BuildContext context) =>
       PaymentService.useMoyasarLiveFlow || PaymentService.allowMockGateway;
@@ -29,7 +30,7 @@ class PaymentCheckoutPlatform {
       case 'saved':
         return showCardPayment(context) ? mode : 'new';
       case 'new':
-        return showCardPayment(context) ? mode : mode;
+        return showCardPayment(context) ? mode : 'unavailable';
       case 'mada_pay':
         return showMadaPay(context) ? mode : 'new';
       case 'apple_pay':
@@ -39,7 +40,7 @@ class PaymentCheckoutPlatform {
       case 'samsung_pay':
         return showSamsungPay(context) ? mode : 'new';
       case 'stc_pay':
-        return 'new';
+        return showStcPay(context) ? mode : 'new';
       case 'web_pay':
         return 'new';
       default:

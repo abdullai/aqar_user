@@ -152,8 +152,8 @@ class PaymentPlatformDetector {
     return sid != null && sid.isNotEmpty;
   }
 
-  /// STC Pay — لا يُعرض بدون مسار مصدر حقيقي.
-  static bool supportsStcPay() => false;
+  /// STC Pay — متاح عبر مكوّن Moyasar المضمّن عندما تكون البوابة مهيأة.
+  static bool supportsStcPay() => moyasarEnabled;
 
   /// مدى — شبكة داخل نموذج البطاقة، وليست محفظة منفصلة.
   static bool supportsMada() => paymentsUiEnabled;
@@ -169,7 +169,7 @@ class PaymentPlatformDetector {
     required bool savedCardReady,
   }) {
     if (!paymentsUiEnabled) {
-      return const [SmartPaymentMethod.newCardMoyasar];
+      return const [];
     }
 
     final out = <SmartPaymentMethod>[];
@@ -180,6 +180,7 @@ class PaymentPlatformDetector {
     if (supportsApplePay()) out.add(SmartPaymentMethod.applePay);
     if (supportsSamsungPay()) out.add(SmartPaymentMethod.samsungPay);
     out.add(SmartPaymentMethod.newCardMoyasar);
+    if (supportsStcPay()) out.add(SmartPaymentMethod.stcPay);
 
     return out.toSet().toList();
   }

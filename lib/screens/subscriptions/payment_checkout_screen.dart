@@ -133,6 +133,9 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       widget.upgradeSubscriptionId != null ||
       widget.periodSwitchSubscriptionId != null;
 
+  String? get _relatedSubscriptionId =>
+      widget.periodSwitchSubscriptionId ?? widget.upgradeSubscriptionId;
+
   SubscriptionCheckoutKind get _checkoutKind => CheckoutJourney.resolve(
         plan: widget.plan,
         renewSubscriptionId: widget.renewSubscriptionId,
@@ -255,7 +258,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         period: widget.period,
         withAutoPay: _autoRenew && _allowsAutoPay,
         promoCode: _appliedPromoCode,
-        upgradeSubscriptionId: widget.upgradeSubscriptionId,
+        upgradeSubscriptionId: _relatedSubscriptionId,
         purpose: _moyasarPurpose(),
       );
       if (!mounted) return;
@@ -450,7 +453,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       period: widget.period,
       withAutoPay: _autoRenew && _allowsAutoPay,
       promoCode: code,
-      upgradeSubscriptionId: widget.upgradeSubscriptionId,
+      upgradeSubscriptionId: _relatedSubscriptionId,
       purpose: _moyasarPurpose(),
     );
     if (!mounted) return;
@@ -642,7 +645,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       planId: '${widget.plan['id']}',
       period: widget.period,
       sort: _promoSort,
-      upgradeSubscriptionId: widget.upgradeSubscriptionId,
+      upgradeSubscriptionId: _relatedSubscriptionId,
     );
     if (!mounted) return;
     setState(() => _promoBusy = false);
@@ -669,7 +672,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
           planId: '${widget.plan['id']}',
           period: widget.period,
           sort: sort,
-          upgradeSubscriptionId: widget.upgradeSubscriptionId,
+          upgradeSubscriptionId: _relatedSubscriptionId,
         );
         var list = CheckoutPromoOption.listFrom(next['codes']);
         if (minPct > 0) {
@@ -772,6 +775,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   String _paymentModeKey() {
     if (_mode == 'apple_pay') return 'apple_pay';
     if (_mode == 'samsung_pay') return 'samsung_pay';
+    if (_mode == 'stc_pay') return 'stc_pay';
     if (_mode == 'mada_pay') return 'mada_pay';
     return 'card';
   }
@@ -782,7 +786,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     if (PaymentService.useMoyasarLiveFlow &&
         (_mode == 'mada_pay' ||
             _mode == 'samsung_pay' ||
-            _mode == 'apple_pay')) {
+            _mode == 'apple_pay' ||
+            _mode == 'stc_pay')) {
       return false;
     }
     if (_cards.isEmpty) return false;
@@ -860,7 +865,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       planId: '${widget.plan['id'] ?? ''}',
       period: widget.period,
       withAutoPay: _autoRenew && _allowsAutoPay,
-      upgradeSubscriptionId: widget.upgradeSubscriptionId,
+      upgradeSubscriptionId: _relatedSubscriptionId,
       idempotencyKey: _checkoutIdempotencyKey,
       promoCode: _appliedPromoCode,
     );
@@ -942,6 +947,13 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     return MoyasarWalletMode.samsungPay;
   }
 
+  MoyasarWalletMode? _stcWallet(String pm) {
+    if (pm != 'stc_pay' || !PaymentPlatformDetector.supportsStcPay()) {
+      return null;
+    }
+    return MoyasarWalletMode.stcPay;
+  }
+
   Future<Map<String, dynamic>> _payWithMoyasarHostedCheckout({
     required double charge,
     required String titleAr,
@@ -962,6 +974,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     final paymentMethod = switch (pm) {
       'apple_pay' => 'apple_pay',
       'samsung_pay' => 'samsung_pay',
+      'stc_pay' => 'stc_pay',
       'mada_pay' => 'mada_pay',
       _ => 'card',
     };
@@ -978,7 +991,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       planId: '${widget.plan['id'] ?? ''}',
       period: widget.period,
       withAutoPay: _autoRenew && _allowsAutoPay,
-      upgradeSubscriptionId: widget.upgradeSubscriptionId,
+      upgradeSubscriptionId: _relatedSubscriptionId,
       idempotencyKey: _checkoutIdempotencyKey,
       promoCode: _appliedPromoCode,
     );
@@ -1321,8 +1334,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
 
     // مبلغ كانوني + أحقيّة: الاشتراك الجديد يُحظر إن وُجدت باقة رئيسية.
     // الإضافة/الترقية/التحويل لا تُعامل كاشتراك جديد.
-    final relatedSubId =
-        widget.upgradeSubscriptionId ?? widget.periodSwitchSubscriptionId;
+    final relatedSubId = _relatedSubscriptionId;
     final mustValidateIntent = !_isExistingSubscriptionPayment ||
         _isAddOnCheckout ||
         _isBelowMinPayable(_effectiveChargeForPayment());
@@ -1459,6 +1471,15 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
           titleEn: titleEn,
           pm: pm,
           walletMode: MoyasarWalletMode.samsungPay,
+          madaPreferredNetworksOnly: false,
+        );
+      } else if (useMs && _stcWallet(pm) != null) {
+        res = await _payWithMoyasarHostedCheckout(
+          charge: charge,
+          titleAr: titleAr,
+          titleEn: titleEn,
+          pm: pm,
+          walletMode: MoyasarWalletMode.stcPay,
           madaPreferredNetworksOnly: false,
         );
       } else if (useMs && (pm == 'card' || pm == 'mada_pay')) {
@@ -1688,6 +1709,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         return 'Apple Pay';
       case 'samsung_pay':
         return 'Samsung Pay';
+      case 'stc_pay':
+        return 'STC Pay';
       case 'mada_pay':
         return _isAr ? 'مدى (على البطاقة)' : 'mada (on card)';
       case 'new':
@@ -1962,6 +1985,27 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                           ),
                     ),
                     const SizedBox(height: 10),
+                    if (!PaymentPlatformDetector.paymentsUiEnabled)
+                      Card(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .errorContainer
+                            .withValues(alpha: 0.55),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Text(
+                            _isAr
+                                ? 'الدفع غير مهيأ لهذه البيئة. فعّل إعدادات Moyasar أو بوابة الاختبار قبل المتابعة.'
+                                : 'Payments are not configured for this environment. Configure Moyasar or the test gateway before continuing.',
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onErrorContainer,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
                     if (showAppleWallet || showSamsungWallet) ...[
                       _buildWalletQuickPayRow(
                         showApple: showAppleWallet,
@@ -2110,7 +2154,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                         ),
                       ),
                     FilledButton(
-                      onPressed: (_paying ||
+                      onPressed: (!PaymentPlatformDetector.paymentsUiEnabled ||
+                              _paying ||
                               _completionRequestInProgress ||
                               _payLockedByPromoIntent)
                           ? null

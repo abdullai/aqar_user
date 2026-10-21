@@ -348,15 +348,11 @@ class SubscriptionService {
   Future<List<Map<String, dynamic>>> fetchPlansByUserType(
     String? accountType,
   ) async {
-    try {
-      final rpc = await _sb.rpc(
-        'list_subscription_catalog_plans',
-        params: {'p_account_type': accountType},
-      );
-      return _dedupePlansBySortOrder(_plansFromCatalogRpc(rpc));
-    } catch (_) {
-      return const [];
-    }
+    final rpc = await _sb.rpc(
+      'list_subscription_catalog_plans',
+      params: {'p_account_type': accountType},
+    );
+    return _dedupePlansBySortOrder(_plansFromCatalogRpc(rpc));
   }
 
   /// هل استخدم المستخدم التجربة المجانية من قبل؟ (RPC has_user_used_trial)

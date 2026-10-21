@@ -35,7 +35,7 @@ abstract final class PaymentMethodManager {
       if (mode == 'saved') return false;
       // لا عنصر في الواجهة بدون مسار دفع حقيقي — تجنّب أخطاء Tabby/Tamara.
       if (mode == 'tabby' || mode == 'tamara') return false;
-      if (mode == 'google_pay' || mode == 'stc_pay') return false;
+      if (mode == 'google_pay') return false;
       return PaymentCheckoutPlatform.normalizeMode(context, mode) == mode;
     }).toList();
   }

@@ -406,12 +406,43 @@ serve(async (req) => {
     return json(200, { ok: false, reason: "mark_failed", detail: marked.error.message });
   }
 
+  const source = verified.source;
+  const sourceData =
+    source && typeof source === "object"
+      ? (source as Record<string, unknown>)
+      : null;
+  const sourceType = String(sourceData?.type ?? "").toLowerCase();
+  const company = String(sourceData?.company ?? "").toLowerCase();
+  let paymentMethod: string | null = null;
+  if (sourceType === "creditcard") {
+    paymentMethod = company === "mada" ? "mada_pay" : "card";
+  } else if (sourceType === "applepay") {
+    paymentMethod = "apple_pay";
+  } else if (sourceType === "samsungpay") {
+    paymentMethod = "samsung_pay";
+  } else if (sourceType === "stcpay" || sourceType === "stc_pay") {
+    paymentMethod = "stc_pay";
+  }
+  let paymentMethodWarning: string | null = null;
+  if (paymentMethod) {
+    const { error: methodError } = await svc
+      .from("billing_transactions")
+      .update({ payment_method: paymentMethod })
+      .eq("id", billingId);
+    if (methodError) {
+      paymentMethodWarning = methodError.message;
+      console.error("[moyasar-webhook] payment method update failed", methodError.message);
+    }
+  }
+
   const userId = String(row.user_id ?? "").trim();
+  let cardSaveWarning: string | null = null;
   if (userId) {
     try {
       await upsertSavedCardFromMoyasarPayment(svc, userId, verified);
-    } catch {
-      // لا نفشل التفعيل إن فشل حفظ البطاقة.
+    } catch (error) {
+      cardSaveWarning = error instanceof Error ? error.message : String(error);
+      console.error("[moyasar-webhook] saved card update failed", cardSaveWarning);
     }
   }
 
@@ -425,6 +456,8 @@ serve(async (req) => {
       billing_transaction_id: billingId,
       moyasar_payment_id: paymentId,
       fulfillment_warning: fulErr.message,
+      ...(paymentMethodWarning ? { payment_method_warning: paymentMethodWarning } : {}),
+      ...(cardSaveWarning ? { card_save_warning: cardSaveWarning } : {}),
     });
   }
 
@@ -433,5 +466,7 @@ serve(async (req) => {
     billing_transaction_id: billingId,
     moyasar_payment_id: paymentId,
     fulfillment: fulfilled,
+    ...(paymentMethodWarning ? { payment_method_warning: paymentMethodWarning } : {}),
+    ...(cardSaveWarning ? { card_save_warning: cardSaveWarning } : {}),
   });
 });

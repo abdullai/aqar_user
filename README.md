@@ -45,9 +45,14 @@ flutter build web --release --dart-define=SUPABASE_URL=https://example.supabase.
 
 - `ALLOW_PAYMENT_MOCK=true` يؤثر في Debug فقط.
 - أي بناء Release أو بناء مع `PROD=true` يمنع بوابة المحاكاة.
-- وجود `MOYASAR_PUBLISHABLE_KEY` ينقل التدفق إلى Moyasar.
-- أسرار Moyasar وFirebase وSupabase توضع في Secrets الخاصة بالخادم أو Edge
-	Functions، وليس في ملفات التطبيق.
+- استخدم `MOYASAR_PUBLISHABLE_KEY=pk_test_...` و`MOYASAR_CALLBACK_URL` في
+  `.env` لتجربة بوابة Moyasar من التطبيق. يجب أن يكون المفتاح من بيئة الاختبار.
+- اضبط `MOYASAR_SECRET_KEY=sk_test_...` و`MOYASAR_WEBHOOK_SECRET` كـ Supabase
+  Edge Function Secrets، ثم انشر `moyasar-webhook` وسجّل عنوانه في لوحة Moyasar.
+  تأكيد الدفع وحفظ البطاقة وتفعيل الشراء يعتمد على وصول الـ Webhook والتحقق منه.
+- حفظ بطاقة مستقلة متاح في وضع الاختبار عبر معاملة تحقق تجريبية بقيمة 1 ريال
+  فقط؛ لا تُضاف رسوم تحقق في وضع الإنتاج. في الإنتاج تُحفَظ البطاقة بعد أول دفعة
+  ناجحة. لا تضع مفاتيح `sk_...` أو أسرار Webhook داخل Flutter أو `.env` المضمّن.
 
 ## التحقق من الترخيص
 

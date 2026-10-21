@@ -5,18 +5,42 @@
   ],
   "typescript.tsserver.experimental.enableProjectDiagnostics": true,
   "mssql.intelliSense.enable": false,
+  "git.autofetch": true,
+  "git.confirmSync": true,
+  "git.enableSmartCommit": false,
+  "chat.agent.maxRequests": 100,
+  "github.copilot.nextEditSuggestions.eagerness": "auto",
   "files.associations": {
     "supabase/functions/**/*.ts": "typescript",
     "**/supabase/**/*.sql": "postgres"
   },
   "editor.formatOnSave": true,
+  "editor.minimap.enabled": false,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
+  },
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "search.exclude": {
+    "**/.dart_tool": true,
+    "**/build": true,
+    "**/node_modules": true,
+    "**/.firebase": true
+  },
   "[dart]": {
     "editor.formatOnSave": true,
-    "editor.defaultFormatter": "Dart-Code.dart-code"
-  },
-  "chat.tools.terminal.autoApprove": {
-    "Tee-Object": true,
-    ".\\scripts\\deploy-web.ps1": true,
-    "Get-FileHash": true
+    "editor.formatOnType": true,
+    "editor.defaultFormatter": "Dart-Code.dart-code",
+    "editor.rulers": [
+      80
+    ],
+    "editor.selectionHighlight": false,
+    "editor.suggest.snippetsPreventQuickSuggestions": false,
+    "editor.suggestSelection": "first",
+    "editor.tabCompletion": "onlySnippets",
+    "editor.wordBasedSuggestions": "off"
   }
 }

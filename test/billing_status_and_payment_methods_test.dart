@@ -1,10 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:aqar_user/core/payment/payment_platform_detector.dart';
 import 'package:aqar_user/services/billing_transaction_repository.dart';
+import 'package:aqar_user/services/payment_service.dart';
 import 'package:aqar_user/services/subscription_service.dart';
 
 void main() {
+  setUpAll(() => dotenv.testLoad(fileInput: ''));
+
   group('BillingTransactionRepository.normalizedStatus', () {
     test('maps paid aliases to success', () {
       expect(
@@ -52,10 +56,27 @@ void main() {
   group('PaymentCapabilityDetector / PaymentPlatformDetector', () {
     test('unsupported wallets stay disabled', () {
       expect(PaymentPlatformDetector.supportsGooglePay(), isFalse);
-      expect(PaymentPlatformDetector.supportsStcPay(), isFalse);
+      expect(
+        PaymentPlatformDetector.supportsStcPay(),
+        PaymentService.useMoyasarLiveFlow,
+      );
       expect(PaymentPlatformDetector.supportsTabby(), isFalse);
       expect(PaymentPlatformDetector.supportsTamara(), isFalse);
       expect(PaymentCapabilityDetector.supportsGooglePay(), isFalse);
+    });
+
+    test('STC Pay is wired only when Moyasar is configured', () {
+      expect(
+        PaymentPlatformDetector.methodToModeKey(SmartPaymentMethod.stcPay),
+        'stc_pay',
+      );
+      expect(PaymentPlatformDetector.supportsStcPay(), isFalse);
+
+      dotenv.testLoad(fileInput: 'MOYASAR_PUBLISHABLE_KEY=pk_test_example');
+      expect(PaymentPlatformDetector.supportsStcPay(), isTrue);
+
+      dotenv.testLoad(fileInput: '');
+      expect(PaymentPlatformDetector.supportsStcPay(), isFalse);
     });
   });
 
