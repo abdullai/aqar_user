@@ -1586,9 +1586,13 @@ class StartRouter extends StatefulWidget {
 class _StartRouterState extends State<StartRouter> {
   bool _loading = true;
   Widget? _target;
+  int _resolveGeneration = 0;
 
   bool _retryingNet = false;
   StreamSubscription<AuthState>? _authSub;
+
+  bool _isCurrentResolve(int generation) =>
+      mounted && generation == _resolveGeneration;
 
   bool get _isMobile =>
       !kIsWeb &&
@@ -1615,7 +1619,12 @@ class _StartRouterState extends State<StartRouter> {
     }
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (!mounted) return;
+      if (data.event == AuthChangeEvent.signedIn) {
+        _resolveGeneration++;
+        return;
+      }
       if (data.event == AuthChangeEvent.signedOut) {
+        _resolveGeneration++;
         if (SessionManager.duringPublicSessionReset) return;
         // ضيف: مسح JWT بعد setGuest يطلق signedOut — لا نُعيد شاشة التحميل (كان يعلّق).
         unawaited(() async {
@@ -1649,75 +1658,11 @@ class _StartRouterState extends State<StartRouter> {
     super.dispose();
   }
 
-  /// مايو: فتح اللوحة مباشرة داخل StartRouter — بدون WebDashboardShell.
-  Future<void> _openWebDashboardInPlace() async {
-    if (!mounted) return;
-    final prefs = await SharedPreferences.getInstance();
-    final entryMode =
-        (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
-    final guestMode = prefs.getBool(kPrefGuestMode) ?? false;
-    final session = Supabase.instance.client.auth.currentSession;
-    // Auth حيّ = مستخدم مسجّل حتى لو بقيت prefs الضيف.
-    final isGuest = session == null && (guestMode || entryMode == 'guest');
-    if (session != null && (guestMode || entryMode == 'guest')) {
-      try {
-        await prefs.setBool(kPrefGuestMode, false);
-        await prefs.setString(kPrefEntryMode, 'user');
-      } catch (_) {}
-    }
-
-    if (isGuest || session == null) {
-      if (!mounted) return;
-      if (kIsOpsDesktopSurface) {
-        setState(() {
-          _target = const LoginScreen();
-          _loading = false;
-        });
-        return;
-      }
-      setState(() {
-        _target = UserDashboard(
-          key: const ValueKey('dashboard-guest'),
-          lang: widget.lang,
-        );
-        _loading = false;
-      });
-      if (kIsWeb) syncWebDashboardHashInAddressBar();
-      return;
-    }
-
-    if (!await AuthChallengeService.isFullyAuthenticated()) {
-      await _resolve();
-      return;
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _target = _postAuthHome();
-      _loading = false;
-    });
-    if (kIsWeb) syncWebDashboardHashInAddressBar();
-  }
-
   /// بعد OTP/ضيف: تحديث اللوحة داخل نفس [StartRouter] دون إعادة بناء المكدس.
   Future<void> _refreshAfterWebAuth() async {
     if (!mounted) return;
-    final prefs = await SharedPreferences.getInstance();
-    final entryMode =
-        (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
-    final guestMode = prefs.getBool(kPrefGuestMode) ?? false;
-    final session = Supabase.instance.client.auth.currentSession;
-    final isGuest = session == null && (guestMode || entryMode == 'guest');
-
-    if (isGuest) {
-      await _openWebDashboardInPlace();
-      return;
-    }
-
-    if (await AuthChallengeService.isFullyAuthenticated()) {
-      await _openWebDashboardInPlace();
-      return;
-    }
+    // Invalidate an older startup resolve before evaluating the newly-authenticated session.
+    _resolveGeneration++;
     await _resolve();
   }
 
@@ -1742,8 +1687,9 @@ class _StartRouterState extends State<StartRouter> {
   }
 
   Future<void> _resolve() async {
+    final generation = ++_resolveGeneration;
     if (_isRecoveryUrlOrCode()) {
-      if (!mounted) return;
+      if (!_isCurrentResolve(generation)) return;
       setState(() {
         _target = const ResetPasswordScreen();
         _loading = false;
@@ -1752,7 +1698,7 @@ class _StartRouterState extends State<StartRouter> {
     }
 
     final okNet = await _hasInternet();
-    if (!mounted) return;
+    if (!_isCurrentResolve(generation)) return;
 
     if (!okNet) {
       setState(() {
@@ -1767,6 +1713,7 @@ class _StartRouterState extends State<StartRouter> {
     }
 
     final prefs = await SharedPreferences.getInstance();
+    if (!_isCurrentResolve(generation)) return;
 
     final String entryMode =
         (prefs.getString(kPrefEntryMode) ?? '').trim().toLowerCase();
@@ -1783,12 +1730,16 @@ class _StartRouterState extends State<StartRouter> {
         await prefs.setBool(kPrefGuestMode, false);
         await prefs.setString(kPrefEntryMode, 'user');
       } catch (_) {}
+      if (!_isCurrentResolve(generation)) return;
     }
 
     if (kIsWeb && session != null && !isGuest) {
-      if (await shouldForceWebReauthDueToIdle()) {
+      final forceReauth = await shouldForceWebReauthDueToIdle();
+      if (!_isCurrentResolve(generation)) return;
+      if (forceReauth) {
         final uid = sb.auth.currentUser?.id;
         await clearWebSessionAfterForcedLogout(uid);
+        if (!_isCurrentResolve(generation)) return;
         try {
           await sb.auth.signOut(scope: SignOutScope.global);
         } catch (_) {}
@@ -1802,27 +1753,29 @@ class _StartRouterState extends State<StartRouter> {
           await prefs.setBool(kPrefGuestMode, false);
           await prefs.remove(kPrefEntryMode);
         } catch (_) {}
-        if (!mounted) return;
+        if (!_isCurrentResolve(generation)) return;
         setState(() {
           _target = const LoginScreen();
           _loading = false;
         });
         return;
       }
-      if (kIsWeb && await shouldForceWebGuestEndDueToIdle()) {
+      final forceGuestEnd = kIsWeb && await shouldForceWebGuestEndDueToIdle();
+      if (!_isCurrentResolve(generation)) return;
+      if (forceGuestEnd) {
         await clearWebGuestIdleStamp();
         try {
           await prefs.remove(kPrefGuestMode);
           await prefs.remove(kPrefEntryMode);
         } catch (_) {}
-        if (!mounted) return;
+        if (!_isCurrentResolve(generation)) return;
         setState(() {
           _target = const EntryChoiceScreen();
           _loading = false;
         });
         return;
       }
-      if (!mounted) return;
+      if (!_isCurrentResolve(generation)) return;
       setState(() {
         _target = UserDashboard(
           key: const ValueKey('dashboard-guest'),
@@ -1836,6 +1789,7 @@ class _StartRouterState extends State<StartRouter> {
 
     if (session != null) {
       final fully = await AuthChallengeService.isFullyAuthenticated();
+      if (!_isCurrentResolve(generation)) return;
 
       if (fully) {
         unawaited(FastLoginService.syncBootstrapRoutePrefs());
@@ -1845,7 +1799,7 @@ class _StartRouterState extends State<StartRouter> {
             AuthChallengeService.allowQuickUnlockOnThisSurface() &&
             await FastLoginService.hasAnyLockEnabled() &&
             !FastLoginService.hasUnlockedThisRuntimeSession) {
-          if (!mounted) return;
+          if (!_isCurrentResolve(generation)) return;
           setState(() {
             _target = const FastLoginScreen();
             _loading = false;
@@ -1853,7 +1807,7 @@ class _StartRouterState extends State<StartRouter> {
           return;
         }
 
-        if (!mounted) return;
+        if (!_isCurrentResolve(generation)) return;
         setState(() {
           _target = _postAuthHome();
           _loading = false;
@@ -1863,15 +1817,17 @@ class _StartRouterState extends State<StartRouter> {
       }
 
       final pending = await AuthChallengeService.readPending();
+      if (!_isCurrentResolve(generation)) return;
       var username = (pending.username ?? '').trim();
       if (username.isEmpty) {
         try {
           username =
               (await FastLoginService.getUsernameNationalId() ?? '').trim();
         } catch (_) {}
+        if (!_isCurrentResolve(generation)) return;
       }
       if (username.isNotEmpty || (pending.challengeId ?? '').isNotEmpty) {
-        if (!mounted) return;
+        if (!_isCurrentResolve(generation)) return;
         setState(() {
           _target = VerifyScreen(
             initialUsername: username.isEmpty ? null : username,
@@ -1887,7 +1843,7 @@ class _StartRouterState extends State<StartRouter> {
         entryMode.isEmpty && (prefs.getBool(kPrefGuestMode) == null);
 
     if (isFirstRun) {
-      if (!mounted) return;
+      if (!_isCurrentResolve(generation)) return;
       setState(() {
         _target = kIsOpsDesktopSurface
             ? const LoginScreen()
@@ -1897,7 +1853,7 @@ class _StartRouterState extends State<StartRouter> {
       return;
     }
 
-    if (!mounted) return;
+    if (!_isCurrentResolve(generation)) return;
     setState(() {
       _target = const LoginScreen();
       _loading = false;

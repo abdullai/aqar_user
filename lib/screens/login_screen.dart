@@ -1282,8 +1282,7 @@ class _LoginScreenState extends State<LoginScreen>
       args['fullName'] = prefetchFullName.trim();
     }
 
-    // إرسال الرمز وجلبه + آخر دخول أثناء نافذة التحميل حتى تكون الشاشة فورية.
-    final requestedAt = DateTime.now().toUtc();
+    // إرسال الرمز المطلوب قبل الانتقال؛ قراءة الملف والبحث عن الرمز تتم داخل شاشة التحقق.
     var otpRes = challenge.needsOtp && challenge.ok
         ? InAppOtpRequestResult(
             expiresAt: challenge.expiresAt,
@@ -1302,47 +1301,20 @@ class _LoginScreenState extends State<LoginScreen>
           '[login] OTP request hint: ${challenge.error ?? otpRes.error}');
     }
 
-    final greetFuture = InAppOtpHandoff.fetchGreeting(isAr: _isAr);
-    final codeFuture = otpRes.ok
-        ? InAppOtpHandoff.pollLatestCode(requestedAtUtc: requestedAt)
-        : Future<String?>.value(null);
-    final greet = await greetFuture;
-    final prefetchedCode = await codeFuture;
-
     if (!mounted) return;
 
-    // أغلق نافذة التحميل فقط — لا تُسقط شاشة الدخول/الجلسة بـ canPop إضافي.
-    dismissLoginOverlay();
-
-    final handoffName = (greet.displayName ?? prefetchFullName ?? '').trim();
-    if (handoffName.isNotEmpty) {
-      final rememberedName = CompoundDisplayName.normalize(handoffName);
-      args['fullName'] = rememberedName;
-      _rememberDisplayName = rememberedName;
-      if (rememberMe) {
-        _storedUsername = u;
-        await _savePreferences();
-      }
-      try {
-        await FastLoginService.saveUserContext(
-          uid: uid,
-          usernameNationalId: u,
-          displayName: rememberedName,
-        );
-      } catch (_) {}
+    final responseChallengeId = (otpRes.challengeId ?? '').trim();
+    if ((args['challengeId'] as String? ?? '').isEmpty &&
+        responseChallengeId.isNotEmpty) {
+      args['challengeId'] = responseChallengeId;
     }
-    if (greet.lastLogin != null) {
-      args['lastLogin'] = greet.lastLogin!.toUtc().toIso8601String();
-    }
-    if ((greet.avatarUrl ?? '').isNotEmpty) {
-      args['avatarUrl'] = greet.avatarUrl;
-    }
-    final code =
-        (prefetchedCode ?? otpRes.devCode ?? challenge.devCode ?? '').trim();
+    final code = (otpRes.devCode ?? challenge.devCode ?? '').trim();
     if (code.length >= InAppOtpHandoff.otpLen) {
       args['code'] = code.substring(0, InAppOtpHandoff.otpLen);
     }
 
+    // Keep the busy overlay visible until the replacement route is pushed.
+    dismissLoginOverlay();
     Navigator.of(context).pushReplacement(
       PageRouteBuilder<void>(
         settings: RouteSettings(
