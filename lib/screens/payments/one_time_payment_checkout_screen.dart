@@ -71,6 +71,8 @@ class _OneTimePaymentCheckoutScreenState
   bool _paying = false;
   bool _processingOverlay = false;
   bool _promoBusy = false;
+  bool _billingChecking = true;
+  String? _billingIssue;
   List<Map<String, dynamic>> _cards = [];
   String? _selectedCardId;
   String _mode = 'saved';
@@ -81,6 +83,7 @@ class _OneTimePaymentCheckoutScreenState
   void initState() {
     super.initState();
     _chargeSar = widget.amountSar;
+    unawaited(_checkBillingStatus());
     unawaited(_loadCards());
   }
 
@@ -102,7 +105,8 @@ class _OneTimePaymentCheckoutScreenState
       _cards = c;
       _selectedCardId = c.isEmpty
           ? null
-          : (c.firstWhere(
+          : (c
+              .firstWhere(
                 (x) => x['is_default'] == true,
                 orElse: () => c.first,
               )['id']
@@ -111,6 +115,74 @@ class _OneTimePaymentCheckoutScreenState
           ? (PaymentService.useMoyasarLiveFlow ? 'new' : 'saved')
           : 'saved';
     });
+  }
+
+  Future<bool> _checkBillingStatus() async {
+    String? issue;
+    try {
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId == null) {
+        issue = 'auth';
+      } else {
+        final row = await Supabase.instance.client
+            .from('billing_transactions')
+            .select('status,currency')
+            .eq('id', widget.billingTransactionId.trim())
+            .eq('user_id', userId)
+            .maybeSingle();
+        if (row == null) {
+          issue = 'billing_not_found';
+        } else if ('${row['status'] ?? ''}'.trim().toLowerCase() != 'pending') {
+          issue = 'billing_not_pending';
+        } else if ('${row['currency'] ?? ''}'.trim().toUpperCase() != 'SAR') {
+          issue = 'currency_mismatch';
+        }
+      }
+    } catch (e, st) {
+      debugPrint('[OneTimePayment] billing status check failed: $e\n$st');
+      issue = 'billing_check_failed';
+    }
+
+    if (mounted) {
+      setState(() {
+        _billingChecking = false;
+        _billingIssue = issue;
+      });
+    }
+    return issue == null;
+  }
+
+  String _moyasarSetupIssueLabel(String issue) {
+    switch (issue) {
+      case 'client_server_mode_mismatch':
+        return widget.isAr
+            ? 'يجب تطابق وضع المفتاحين: pk_test_ مع sk_test_ أو pk_live_ مع sk_live_'
+            : 'Key modes must match: pk_test_ with sk_test_, or pk_live_ with sk_live_';
+      case 'client_publishable_key_missing':
+        return widget.isAr
+            ? 'مفتاح النشر غير مهيأ'
+            : 'Moyasar publishable key is missing';
+      case 'server_secret_key_missing':
+        return widget.isAr
+            ? 'المفتاح السري غير مهيأ في Supabase'
+            : 'Moyasar secret key is missing in Supabase';
+      case 'callback_url_missing_on_server':
+        return widget.isAr
+            ? 'رابط العودة غير مهيأ في Supabase'
+            : 'Server callback URL is missing';
+      case 'webhook_secret_missing':
+        return widget.isAr
+            ? 'سر Webhook غير مهيأ في Supabase'
+            : 'Webhook secret is missing in Supabase';
+      case 'live_mode_requires_moyasar_account_activation_otherwise_http_405':
+        return widget.isAr
+            ? 'حساب ميسر للإنتاج يحتاج إلى التفعيل'
+            : 'Moyasar live account needs activation';
+      default:
+        return widget.isAr
+            ? 'إعداد دفع غير مكتمل'
+            : 'Payment setup is incomplete';
+    }
   }
 
   String _promoErrorText(AppLocalizations t, String? err) {
@@ -285,9 +357,8 @@ class _OneTimePaymentCheckoutScreenState
         !PaymentService.moyasarPaymentSucceeded(result)) {
       return {
         'ok': false,
-        'error':
-            PaymentService.mapMoyasarResultToError(result) ??
-                'moyasar_cancelled_or_failed',
+        'error': PaymentService.mapMoyasarResultToError(result) ??
+            'moyasar_cancelled_or_failed',
       };
     }
 
@@ -358,6 +429,14 @@ class _OneTimePaymentCheckoutScreenState
         return widget.isAr
             ? 'فاتورة الدفع ليست قيد الانتظار.'
             : 'Payment invoice is not pending.';
+      case 'billing_check_failed':
+        return widget.isAr
+            ? 'تعذّر التحقق من حالة الفاتورة. أعد المحاولة قبل الدفع.'
+            : 'Could not verify the invoice. Retry before paying.';
+      case 'currency_mismatch':
+        return widget.isAr
+            ? 'عملة فاتورة الدفع غير مدعومة.'
+            : 'The invoice currency is not supported.';
       case 'webhook_timeout':
         return widget.isAr
             ? 'تأخر تأكيد الدفع — تحقق من سجل المدفوعات.'
@@ -373,6 +452,17 @@ class _OneTimePaymentCheckoutScreenState
 
   Future<void> _completePayment() async {
     if (_paying) return;
+    if (_billingChecking) return;
+    if (_billingIssue != null || !await _checkBillingStatus()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_paymentErrorMessage(_billingIssue)),
+        ),
+      );
+      return;
+    }
+
     final online = context.read<AppSession>().hasInternet;
     if (!online) {
       if (!mounted) return;
@@ -415,6 +505,38 @@ class _OneTimePaymentCheckoutScreenState
         SnackBar(content: Text(_paymentErrorMessage('card_expired'))),
       );
       return;
+    }
+
+    if (PaymentService.useMoyasarLiveFlow) {
+      final health = await _pay.checkMoyasarServerHealth();
+      if (!mounted) return;
+      final rawIssues = health['issues'];
+      if (health['ok'] != true || (rawIssues is List && rawIssues.isNotEmpty)) {
+        final issueLabels = rawIssues is List
+            ? rawIssues
+                .map((issue) => _moyasarSetupIssueLabel('$issue'))
+                .toSet()
+                .toList()
+            : <String>[];
+        if (issueLabels.isEmpty) {
+          issueLabels.add(
+            widget.isAr
+                ? 'تعذّر التحقق من إعدادات ميسر'
+                : 'Could not verify Moyasar configuration',
+          );
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 8),
+            content: Text(
+              widget.isAr
+                  ? 'تعذّر بدء الدفع: ${issueLabels.join('، ')}. لا ترسل المفاتيح أو الأسرار في المحادثة.'
+                  : 'Payment cannot start: ${issueLabels.join(', ')}. Do not share keys or secrets in chat.',
+            ),
+          ),
+        );
+        return;
+      }
     }
 
     setState(() => _paying = true);
@@ -541,8 +663,7 @@ class _OneTimePaymentCheckoutScreenState
         return;
       }
       final credit = await _instant.getAvailableCredit();
-      final creditId =
-          widget.creditId ?? credit['credit_id']?.toString() ?? '';
+      final creditId = widget.creditId ?? credit['credit_id']?.toString() ?? '';
 
       if (!mounted) return;
       Map<String, dynamic>? bill;
@@ -602,264 +723,319 @@ class _OneTimePaymentCheckoutScreenState
     return PaymentPopGuard(
       busy: _paying,
       child: Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-              automaticallyImplyLeading: false,
-              leading: AppPageCloseButton(isArabic: widget.isAr),
-              title: Text(widget.isAr ? 'الدفع' : 'Payment'),
-            ),
-      body: _paying
-          ? const Center(child: AppLogoLoading())
-          : AppKeyboardPad(
-              extra: 16,
-              child: AqarPrimaryScrollScope(
-              child: ListView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: AppKeyboardInset.scrollViewPadding(
-                context,
-                base: const EdgeInsets.all(16),
-              ),
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          widget.isAr ? widget.titleAr : widget.titleEn,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w900),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          widget.isAr ? 'المبلغ المستحق' : 'Amount due',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        AppMoneyLine(
-                          amount: _chargeSar,
-                          currencyCode: 'SAR',
-                          isAr: widget.isAr,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(
-                                color: cs.primary,
-                                fontWeight: FontWeight.w900,
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          leading: AppPageCloseButton(isArabic: widget.isAr),
+          title: Text(widget.isAr ? 'الدفع' : 'Payment'),
+        ),
+        body: _paying
+            ? const Center(child: AppLogoLoading())
+            : AppKeyboardPad(
+                extra: 16,
+                child: AqarPrimaryScrollScope(
+                  child: ListView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: AppKeyboardInset.scrollViewPadding(
+                      context,
+                      base: const EdgeInsets.all(16),
+                    ),
+                    children: [
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Text(
+                                widget.isAr ? widget.titleAr : widget.titleEn,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
-                        ),
-                        const SizedBox(height: 12),
-                        AqarTextField(
-                          controller: _promoCtrl,
-                          enabled: !_promoBusy &&
-                              !_paying &&
-                              _appliedPromoCode == null,
-                          keyboardType: TextInputType.text,
-                          textInputAction: TextInputAction.done,
-                          enableSuggestions: false,
-                          autocorrect: false,
-                          decoration: InputDecoration(
-                            labelText: AppLocalizations.of(context)!
-                                .checkoutPromoCode,
-                            suffixIcon: _appliedPromoCode == null
-                                ? TextButton(
-                                    onPressed: _promoBusy
-                                        ? null
-                                        : () => unawaited(_applyPromo()),
-                                    child: Text(
-                                      AppLocalizations.of(context)!
-                                          .checkoutPromoApply,
+                              const SizedBox(height: 8),
+                              Text(
+                                widget.isAr ? 'المبلغ المستحق' : 'Amount due',
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                              AppMoneyLine(
+                                amount: _chargeSar,
+                                currencyCode: 'SAR',
+                                isAr: widget.isAr,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall
+                                    ?.copyWith(
+                                      color: cs.primary,
+                                      fontWeight: FontWeight.w900,
                                     ),
-                                  )
-                                : Icon(
-                                    Icons.check_circle_outline,
-                                    color: cs.primary,
-                                  ),
+                              ),
+                              const SizedBox(height: 12),
+                              AqarTextField(
+                                controller: _promoCtrl,
+                                enabled: !_promoBusy &&
+                                    !_paying &&
+                                    _appliedPromoCode == null,
+                                keyboardType: TextInputType.text,
+                                textInputAction: TextInputAction.done,
+                                enableSuggestions: false,
+                                autocorrect: false,
+                                decoration: InputDecoration(
+                                  labelText: AppLocalizations.of(context)!
+                                      .checkoutPromoCode,
+                                  suffixIcon: _appliedPromoCode == null
+                                      ? TextButton(
+                                          onPressed: _promoBusy
+                                              ? null
+                                              : () => unawaited(_applyPromo()),
+                                          child: Text(
+                                            AppLocalizations.of(context)!
+                                                .checkoutPromoApply,
+                                          ),
+                                        )
+                                      : Icon(
+                                          Icons.check_circle_outline,
+                                          color: cs.primary,
+                                        ),
+                                ),
+                                onSubmitted: (_) => unawaited(_applyPromo()),
+                              ),
+                            ],
                           ),
-                          onSubmitted: (_) => unawaited(_applyPromo()),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  CheckoutJourney.surfaceHint(isAr: widget.isAr),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        height: 1.35,
-                        color: cs.onSurfaceVariant,
-                      ),
-                ),
-                const SizedBox(height: 12),
-                if (!PaymentPlatformDetector.paymentsUiEnabled)
-                  Card(
-                    color: cs.errorContainer.withValues(alpha: 0.55),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Text(
-                        widget.isAr
-                            ? 'الدفع غير مهيأ لهذه البيئة. فعّل إعدادات Moyasar أو بوابة الاختبار قبل المتابعة.'
-                            : 'Payments are not configured for this environment. Configure Moyasar or the test gateway before continuing.',
-                        style: TextStyle(
-                          color: cs.onErrorContainer,
-                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ),
-                  ),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        widget.isAr ? 'طريقة الدفع' : 'Payment method',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
+                      const SizedBox(height: 16),
+                      Text(
+                        CheckoutJourney.surfaceHint(isAr: widget.isAr),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              height: 1.35,
+                              color: cs.onSurfaceVariant,
                             ),
                       ),
-                    ),
-                    if (PaymentPlatformDetector.paymentsUiEnabled &&
-                        !PaymentService.useMoyasarLiveFlow)
-                      TextButton.icon(
-                        onPressed:
-                            _paying ? null : () => unawaited(_openAddCard()),
-                        icon: const Icon(Icons.add_card_outlined, size: 20),
-                        label: Text(widget.isAr ? 'إضافة بطاقة' : 'Add card'),
-                      ),
-                  ],
-                ),
-                if (_cards.isEmpty)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            widget.isAr
-                                ? !PaymentPlatformDetector.paymentsUiEnabled
-                                    ? 'الدفع غير مهيأ حالياً.'
-                                    : PaymentService.useMoyasarLiveFlow
-                                    ? 'لا توجد بطاقة محفوظة. اختر بطاقة جديدة لإتمام الدفع.'
-                                    : 'لا توجد بطاقات محفوظة. أضف بطاقة للمتابعة.'
-                                : !PaymentPlatformDetector.paymentsUiEnabled
-                                    ? 'Payments are not configured.'
-                                    : PaymentService.useMoyasarLiveFlow
-                                    ? 'No saved cards. Choose a new card to continue.'
-                                    : 'No saved cards. Add a card to continue.',
+                      const SizedBox(height: 12),
+                      if (!PaymentPlatformDetector.paymentsUiEnabled)
+                        Card(
+                          color: cs.errorContainer.withValues(alpha: 0.55),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(
+                              widget.isAr
+                                  ? 'الدفع غير مهيأ لهذه البيئة. فعّل إعدادات Moyasar أو بوابة الاختبار قبل المتابعة.'
+                                  : 'Payments are not configured for this environment. Configure Moyasar or the test gateway before continuing.',
+                              style: TextStyle(
+                                color: cs.onErrorContainer,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ),
-                          const SizedBox(height: 12),
+                        ),
+                      if (_billingChecking || _billingIssue != null)
+                        Card(
+                          color: _billingIssue == null
+                              ? cs.surfaceContainerHighest
+                                  .withValues(alpha: 0.45)
+                              : cs.errorContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    _billingChecking
+                                        ? (widget.isAr
+                                            ? 'جارٍ التحقق من أن الفاتورة قيد الانتظار...'
+                                            : 'Checking that the invoice is pending...')
+                                        : _paymentErrorMessage(_billingIssue),
+                                    style: TextStyle(
+                                      color: _billingIssue == null
+                                          ? cs.onSurface
+                                          : cs.onErrorContainer,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                if (!_billingChecking &&
+                                    _billingIssue == 'billing_check_failed')
+                                  IconButton(
+                                    tooltip: widget.isAr
+                                        ? 'إعادة المحاولة'
+                                        : 'Retry',
+                                    onPressed: _paying
+                                        ? null
+                                        : () =>
+                                            unawaited(_checkBillingStatus()),
+                                    icon: const Icon(Icons.refresh),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              widget.isAr ? 'طريقة الدفع' : 'Payment method',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                          ),
                           if (PaymentPlatformDetector.paymentsUiEnabled &&
                               !PaymentService.useMoyasarLiveFlow)
-                            FilledButton.icon(
+                            TextButton.icon(
                               onPressed: _paying
                                   ? null
                                   : () => unawaited(_openAddCard()),
-                              icon: const Icon(Icons.add_card_outlined),
-                              label:
-                                  Text(widget.isAr ? 'إضافة بطاقة' : 'Add card'),
+                              icon:
+                                  const Icon(Icons.add_card_outlined, size: 20),
+                              label: Text(
+                                  widget.isAr ? 'إضافة بطاقة' : 'Add card'),
                             ),
                         ],
                       ),
-                    ),
-                  )
-                else
-                  ..._cards.map((c) {
-                    final id = '${c['id']}';
-                    final last4 = '${c['last_four'] ?? '****'}';
-                    final scheme = '${c['scheme'] ?? c['brand'] ?? ''}'.trim();
-                    final expired = PaymentService.isCardExpired(c);
-                    return RadioListTile<String>(
-                      value: id,
-                      groupValue: _selectedCardId,
-                      onChanged: _paying || expired
-                          ? null
-                          : (v) => setState(() {
-                              _selectedCardId = v;
-                              _mode = 'saved';
-                            }),
-                      title: Text(
-                        scheme.isEmpty
-                            ? '•••• $last4'
-                            : '$scheme •••• $last4',
+                      if (_cards.isEmpty)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  widget.isAr
+                                      ? !PaymentPlatformDetector
+                                              .paymentsUiEnabled
+                                          ? 'الدفع غير مهيأ حالياً.'
+                                          : PaymentService.useMoyasarLiveFlow
+                                              ? 'لا توجد بطاقة محفوظة. اختر بطاقة جديدة لإتمام الدفع.'
+                                              : 'لا توجد بطاقات محفوظة. أضف بطاقة للمتابعة.'
+                                      : !PaymentPlatformDetector
+                                              .paymentsUiEnabled
+                                          ? 'Payments are not configured.'
+                                          : PaymentService.useMoyasarLiveFlow
+                                              ? 'No saved cards. Choose a new card to continue.'
+                                              : 'No saved cards. Add a card to continue.',
+                                ),
+                                const SizedBox(height: 12),
+                                if (PaymentPlatformDetector.paymentsUiEnabled &&
+                                    !PaymentService.useMoyasarLiveFlow)
+                                  FilledButton.icon(
+                                    onPressed: _paying
+                                        ? null
+                                        : () => unawaited(_openAddCard()),
+                                    icon: const Icon(Icons.add_card_outlined),
+                                    label: Text(widget.isAr
+                                        ? 'إضافة بطاقة'
+                                        : 'Add card'),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else
+                        ..._cards.map((c) {
+                          final id = '${c['id']}';
+                          final last4 = '${c['last_four'] ?? '****'}';
+                          final scheme =
+                              '${c['scheme'] ?? c['brand'] ?? ''}'.trim();
+                          final expired = PaymentService.isCardExpired(c);
+                          return RadioListTile<String>(
+                            value: id,
+                            groupValue: _selectedCardId,
+                            onChanged: _paying || expired
+                                ? null
+                                : (v) => setState(() {
+                                      _selectedCardId = v;
+                                      _mode = 'saved';
+                                    }),
+                            title: Text(
+                              scheme.isEmpty
+                                  ? '•••• $last4'
+                                  : '$scheme •••• $last4',
+                            ),
+                            subtitle: expired
+                                ? Text(
+                                    widget.isAr ? 'منتهية الصلاحية' : 'Expired',
+                                    style: TextStyle(color: cs.error),
+                                  )
+                                : null,
+                          );
+                        }),
+                      if (PaymentService.useMoyasarLiveFlow) ...[
+                        RadioListTile<String>(
+                          value: 'new',
+                          groupValue: _mode,
+                          onChanged: _paying
+                              ? null
+                              : (value) =>
+                                  setState(() => _mode = value ?? 'new'),
+                          secondary: const Icon(Icons.add_card_outlined),
+                          title: Text(widget.isAr
+                              ? 'بطاقة جديدة / مدى'
+                              : 'New card / mada'),
+                        ),
+                        if (PaymentPlatformDetector.supportsStcPay())
+                          RadioListTile<String>(
+                            value: 'stc_pay',
+                            groupValue: _mode,
+                            onChanged: _paying
+                                ? null
+                                : (value) =>
+                                    setState(() => _mode = value ?? 'stc_pay'),
+                            secondary: const Icon(Icons.phone_android_outlined),
+                            title: const Text('STC Pay'),
+                          ),
+                        if (PaymentPlatformDetector.supportsApplePay())
+                          RadioListTile<String>(
+                            value: 'apple_pay',
+                            groupValue: _mode,
+                            onChanged: _paying
+                                ? null
+                                : (value) => setState(
+                                    () => _mode = value ?? 'apple_pay'),
+                            secondary: const Icon(Icons.apple),
+                            title: const Text('Apple Pay'),
+                          ),
+                        if (PaymentPlatformDetector.supportsSamsungPay())
+                          RadioListTile<String>(
+                            value: 'samsung_pay',
+                            groupValue: _mode,
+                            onChanged: _paying
+                                ? null
+                                : (value) => setState(
+                                    () => _mode = value ?? 'samsung_pay'),
+                            secondary: const Icon(Icons.phone_android_outlined),
+                            title: const Text('Samsung Pay'),
+                          ),
+                      ],
+                      const SizedBox(height: 24),
+                      FilledButton.icon(
+                        onPressed: !PaymentPlatformDetector.paymentsUiEnabled ||
+                                _paying ||
+                                _billingChecking ||
+                                _billingIssue != null ||
+                                (_mode == 'saved' &&
+                                    (_selectedCardId == null ||
+                                        _selectedCardId!.isEmpty))
+                            ? null
+                            : _completePayment,
+                        icon: const Icon(Icons.lock_outline),
+                        label: Text(
+                          widget.isAr
+                              ? 'ادفع ${AppMoney.formatWithCurrencyCode(_chargeSar, isAr: true, maxFractionDigits: 0)}'
+                              : 'Pay ${AppMoney.formatWithCurrencyCode(_chargeSar, isAr: false, maxFractionDigits: 0)}',
+                        ),
                       ),
-                      subtitle: expired
-                          ? Text(
-                              widget.isAr ? 'منتهية الصلاحية' : 'Expired',
-                              style: TextStyle(color: cs.error),
-                            )
-                          : null,
-                    );
-                  }),
-                if (PaymentService.useMoyasarLiveFlow) ...[
-                  RadioListTile<String>(
-                    value: 'new',
-                    groupValue: _mode,
-                    onChanged: _paying
-                        ? null
-                        : (value) =>
-                            setState(() => _mode = value ?? 'new'),
-                    secondary: const Icon(Icons.add_card_outlined),
-                    title:
-                        Text(widget.isAr ? 'بطاقة جديدة / مدى' : 'New card / mada'),
-                  ),
-                  if (PaymentPlatformDetector.supportsStcPay())
-                    RadioListTile<String>(
-                      value: 'stc_pay',
-                      groupValue: _mode,
-                      onChanged: _paying
-                          ? null
-                          : (value) =>
-                              setState(() => _mode = value ?? 'stc_pay'),
-                      secondary: const Icon(Icons.phone_android_outlined),
-                      title: const Text('STC Pay'),
-                    ),
-                  if (PaymentPlatformDetector.supportsApplePay())
-                    RadioListTile<String>(
-                      value: 'apple_pay',
-                      groupValue: _mode,
-                      onChanged: _paying
-                          ? null
-                          : (value) =>
-                              setState(() => _mode = value ?? 'apple_pay'),
-                      secondary: const Icon(Icons.apple),
-                      title: const Text('Apple Pay'),
-                    ),
-                  if (PaymentPlatformDetector.supportsSamsungPay())
-                    RadioListTile<String>(
-                      value: 'samsung_pay',
-                      groupValue: _mode,
-                      onChanged: _paying
-                          ? null
-                          : (value) =>
-                              setState(() => _mode = value ?? 'samsung_pay'),
-                      secondary: const Icon(Icons.phone_android_outlined),
-                      title: const Text('Samsung Pay'),
-                    ),
-                ],
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: !PaymentPlatformDetector.paymentsUiEnabled ||
-                          _paying ||
-                          (_mode == 'saved' &&
-                              (_selectedCardId == null ||
-                                  _selectedCardId!.isEmpty))
-                      ? null
-                      : _completePayment,
-                  icon: const Icon(Icons.lock_outline),
-                  label: Text(
-                    widget.isAr
-                        ? 'ادفع ${AppMoney.formatWithCurrencyCode(_chargeSar, isAr: true, maxFractionDigits: 0)}'
-                        : 'Pay ${AppMoney.formatWithCurrencyCode(_chargeSar, isAr: false, maxFractionDigits: 0)}',
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-    ),
+              ),
+      ),
     );
   }
 }

@@ -424,8 +424,8 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
             : 'Supabase secret key is missing';
       case 'client_server_mode_mismatch':
         return _isAr
-            ? 'مفتاحا الاختبار والإنتاج غير متطابقين'
-            : 'test/live keys do not match';
+            ? 'يجب تطابق وضع المفتاحين: pk_test_ مع sk_test_ أو pk_live_ مع sk_live_'
+            : 'Key modes must match: pk_test_ with sk_test_, or pk_live_ with sk_live_';
       case 'callback_url_missing_on_server':
         return _isAr
             ? 'رابط العودة غير مهيأ في Supabase'
@@ -1256,18 +1256,27 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       final health = await _pay.checkMoyasarServerHealth();
       if (!mounted) return;
       final rawIssues = health['issues'];
-      if (rawIssues is List && rawIssues.isNotEmpty) {
-        final issues = rawIssues
-            .map((issue) => _moyasarSetupIssueLabel('$issue'))
-            .toSet()
-            .join(_isAr ? '، ' : ', ');
+      if (health['ok'] != true || (rawIssues is List && rawIssues.isNotEmpty)) {
+        final issues = rawIssues is List
+            ? rawIssues
+                .map((issue) => _moyasarSetupIssueLabel('$issue'))
+                .toSet()
+                .toList()
+            : <String>[];
+        if (issues.isEmpty) {
+          issues.add(
+            _isAr
+                ? 'تعذّر التحقق من إعدادات ميسر'
+                : 'Could not verify Moyasar configuration',
+          );
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             duration: const Duration(seconds: 7),
             content: Text(
               _isAr
-                  ? 'تعذّر بدء الدفع: $issues. راجع إعدادات ميسر في Supabase.'
-                  : 'Payment cannot start: $issues. Check the Moyasar settings in Supabase.',
+                  ? 'تعذّر بدء الدفع: ${issues.join('، ')}. راجع إعدادات ميسر في Supabase.'
+                  : 'Payment cannot start: ${issues.join(', ')}. Check the Moyasar settings in Supabase.',
             ),
           ),
         );

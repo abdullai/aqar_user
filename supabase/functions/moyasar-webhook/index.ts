@@ -29,6 +29,20 @@ function basicAuthHeader(secretKey: string): string {
   return `Basic ${btoa(s)}`;
 }
 
+function redactSensitiveFields(value: any): any {
+  if (Array.isArray(value)) return value.map(redactSensitiveFields);
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      /^(secret_token|token|card_token|cvv|password)$/i.test(key)
+        ? "[redacted]"
+        : redactSensitiveFields(entry),
+    ]),
+  );
+}
+
 async function fetchMoyasarPayment(
   secretKey: string,
   paymentId: string,
@@ -188,11 +202,12 @@ serve(async (req) => {
     ? (data.metadata as Record<string, unknown>)
     : {};
   const eventBillingId = String(eventMeta["billing_transaction_id"] ?? "").trim() || null;
+  const safePayload = redactSensitiveFields(payload);
   const recorded = await svc.rpc("record_moyasar_webhook_event", {
     p_event_type: type,
     p_payment_id: paymentId || null,
     p_billing_transaction_id: eventBillingId,
-    p_payload: payload,
+    p_payload: safePayload,
   });
   const duplicateEvent = recorded?.data?.duplicate === true;
 
@@ -210,7 +225,7 @@ serve(async (req) => {
         p_billing_transaction_id: bid,
         p_status: "authorized",
         p_gateway_transaction_id: paymentId || null,
-        p_gateway_response: payload,
+        p_gateway_response: safePayload,
       });
     }
     return json(200, { ok: true, handled: type, pending_capture: true });
@@ -226,7 +241,7 @@ serve(async (req) => {
         p_billing_transaction_id: bid,
         p_status: type === "payment_expired" ? "expired" : "failed",
         p_gateway_transaction_id: paymentId,
-        p_gateway_response: { moyasar_webhook: payload },
+        p_gateway_response: { moyasar_webhook: safePayload },
         p_failure_code: type,
         p_failure_reason: type,
       });
@@ -255,7 +270,7 @@ serve(async (req) => {
           p_billing_transaction_id: bid,
           p_status: "refunded",
           p_gateway_transaction_id: paymentId,
-          p_gateway_response: payload,
+          p_gateway_response: safePayload,
           p_failure_code: "payment_refunded",
         });
       }
@@ -311,7 +326,7 @@ serve(async (req) => {
       p_billing_transaction_id: billingId,
       p_status: "failed",
       p_gateway_transaction_id: paymentId,
-      p_gateway_response: verified,
+      p_gateway_response: redactSensitiveFields(verified),
       p_failure_code: "user_mismatch",
       p_failure_reason: "user_id_metadata_mismatch",
       p_review_required: true,
@@ -330,7 +345,7 @@ serve(async (req) => {
       p_billing_transaction_id: billingId,
       p_status: "expired",
       p_gateway_transaction_id: paymentId,
-      p_gateway_response: verified,
+      p_gateway_response: redactSensitiveFields(verified),
       p_failure_code: "intent_expired",
       p_review_required: true,
     });
@@ -349,7 +364,7 @@ serve(async (req) => {
       p_billing_transaction_id: billingId,
       p_status: "failed",
       p_gateway_transaction_id: paymentId,
-      p_gateway_response: verified,
+      p_gateway_response: redactSensitiveFields(verified),
       p_failure_code: "amount_mismatch",
       p_failure_reason: "moyasar_amount_ne_billing",
       p_review_required: true,
@@ -372,7 +387,7 @@ serve(async (req) => {
       p_billing_transaction_id: billingId,
       p_status: "failed",
       p_gateway_transaction_id: paymentId,
-      p_gateway_response: verified,
+      p_gateway_response: redactSensitiveFields(verified),
       p_failure_code: "currency_mismatch",
       p_failure_reason: "moyasar_currency_ne_billing",
       p_review_required: true,
@@ -399,7 +414,7 @@ serve(async (req) => {
     p_billing_transaction_id: billingId,
     p_status: "success",
     p_gateway_transaction_id: paymentId,
-    p_gateway_response: verified,
+    p_gateway_response: redactSensitiveFields(verified),
   });
 
   if (marked?.error) {
