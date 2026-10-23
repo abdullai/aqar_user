@@ -229,8 +229,8 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
       }
       if (!savedRealCard) {
         throw StateError(_isAr
-            ? 'تم تأكيد اختبار البطاقة لكن لم تُحفَظ. تحقق من إعداد Moyasar Webhook.'
-            : 'The test payment was confirmed, but no card was saved. Check the Moyasar webhook setup.');
+            ? 'تم التحقق من البطاقة لكن لم يكتمل حفظها بعد. أعد فتح بطاقات الدفع بعد لحظات، وإن لم تظهر تواصل مع الدعم.'
+            : 'The card was verified but saving has not completed yet. Reopen payment cards in a moment, or contact support.');
       }
       if (mounted) Navigator.pop(context, true);
     } on StateError catch (e) {
@@ -367,10 +367,10 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                     Text(
                       _isAr
                           ? PaymentService.isMoyasarTestMode
-                              ? 'سيُنفَّذ اختبار بقيمة 1 ريال في بيئة ميسر التجريبية فقط، ولن يكون هناك خصم حقيقي. تُحفَظ البطاقة بعد تأكيد Webhook.'
+                              ? 'ستُدخل بيانات بطاقتك في نافذة دفع آمنة للتحقق منها، ثم تُحفَظ تلقائياً. هذا وضع تجريبي: لن يتم خصم أي مبلغ حقيقي.'
                               : 'لن تُخصم رسوم مستقلة لإضافة البطاقة. ستُحفَظ بأمان بعد أول دفعة ناجحة عبر ميسر.'
                           : PaymentService.isMoyasarTestMode
-                              ? 'A SAR 1 test transaction runs in Moyasar sandbox only; no real charge is made. The card is saved after webhook confirmation.'
+                              ? 'Enter your card details in a secure payment window to verify it; it is then saved automatically. This is test mode: no real amount is charged.'
                               : 'No separate card-saving fee. The card is securely saved after your first successful Moyasar payment.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium,
@@ -392,10 +392,10 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
                       label: Text(
                         _isAr
                             ? PaymentService.isMoyasarTestMode
-                                ? 'تحقق من بطاقة الاختبار وحفظها'
+                                ? 'إضافة البطاقة وحفظها'
                                 : 'معلومات حفظ البطاقة'
                             : PaymentService.isMoyasarTestMode
-                                ? 'Verify and save test card'
+                                ? 'Add and save card'
                                 : 'Card saving details',
                       ),
                     ),

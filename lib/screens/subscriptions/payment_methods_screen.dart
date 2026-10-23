@@ -68,20 +68,55 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     if (ok == true) await _load();
   }
 
+  static const _replaceCardMarker = '\u0000replace';
+
+  // بيانات البطاقة مشفّرة لدى ميسر، فالتحديث = إضافة البطاقة الجديدة ثم إزالة القديمة.
+  Future<void> _replaceCard(String oldId) async {
+    final before = await _cardManager.getSavedCards();
+    if (!mounted) return;
+    final ok = await PaymentOverlay.push<bool>(
+      context,
+      name: '/subscriptions/add-card',
+      page: AddPaymentCardScreen(lang: widget.lang),
+    );
+    if (ok != true || !mounted) return;
+    final after = await _cardManager.getSavedCards();
+    final beforeIds = before.map((c) => '${c['id']}').toSet();
+    final added = after.any((c) => !beforeIds.contains('${c['id']}'));
+    if (added) await _cardManager.deleteCard(oldId);
+    if (mounted) await _load();
+  }
+
   Future<void> _editLabel(String id, String? current) async {
     final controller = TextEditingController(text: current ?? '');
     final label = await showAppDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_isAr ? 'تعديل اسم البطاقة' : 'Edit card label'),
-        content: AqarTextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 40,
-          decoration: InputDecoration(
-            hintText: _isAr ? 'مثال: بطاقة العمل' : 'e.g. Work card',
-            border: const OutlineInputBorder(),
-          ),
+        title: Text(_isAr ? 'تعديل البطاقة' : 'Edit card'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AqarTextField(
+              controller: controller,
+              maxLength: 40,
+              decoration: InputDecoration(
+                labelText: _isAr ? 'اسم البطاقة' : 'Card name',
+                hintText: _isAr ? 'مثال: بطاقة العمل' : 'e.g. Work card',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.autorenew),
+              label: Text(
+                _isAr
+                    ? 'تحديث بيانات البطاقة (منتهية أو جديدة)'
+                    : 'Update card details (expired or new)',
+              ),
+              onPressed: () => Navigator.pop(ctx, _replaceCardMarker),
+            ),
+          ],
         ),
         actions: [
           TextButton(
@@ -97,6 +132,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     );
     controller.dispose();
     if (label == null || !mounted) return;
+    if (label == _replaceCardMarker) {
+      await _replaceCard(id);
+      return;
+    }
     final messenger = ScaffoldMessenger.of(context);
     final res = await _cardManager.updateCardLabel(id, label);
     if (!mounted) return;
