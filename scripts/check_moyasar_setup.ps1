@@ -52,7 +52,18 @@ try {
 Write-Host ""
 Write-Host "=== 3) Supabase secrets (requires supabase CLI) ===" -ForegroundColor Cyan
 if (Get-Command supabase -ErrorAction SilentlyContinue) {
-  supabase secrets list 2>&1 | Select-String "MOYASAR"
+  $secretList = supabase secrets list 2>&1
+  foreach ($name in @(
+    "MOYASAR_SECRET_KEY",
+    "MOYASAR_WEBHOOK_SECRET",
+    "MOYASAR_CALLBACK_URL"
+  )) {
+    if (($secretList | Out-String) -match "(?m)^\s*$name\s+\|") {
+      Write-Host "  $name`: configured"
+    } else {
+      Write-Host "  $name`: missing" -ForegroundColor Yellow
+    }
+  }
   Write-Host "  Required: MOYASAR_SECRET_KEY, MOYASAR_WEBHOOK_SECRET, MOYASAR_CALLBACK_URL"
   Write-Host "  Match: sk_test_ with pk_test_ | sk_live_ with pk_live_"
 } else {

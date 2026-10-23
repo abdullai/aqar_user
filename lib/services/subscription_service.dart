@@ -265,7 +265,7 @@ class SubscriptionService {
         return const [3, 4, 11, 12, 16, 24];
       case AppRoleKind.ownerIndividual:
       case AppRoleKind.publicUser:
-        return const [1, 14, 11, 12, 16, 23];
+        return const [1, 14, 11, 12, 15, 16, 23];
     }
   }
 
@@ -284,6 +284,7 @@ class SubscriptionService {
         sortOrder == 3 ||
         sortOrder == 4 ||
         sortOrder == 14 ||
+        sortOrder == 15 ||
         sortOrder == 31 ||
         sortOrder == 32 ||
         sortOrder == 33;
@@ -312,17 +313,28 @@ class SubscriptionService {
         .toList();
   }
 
-  static List<Map<String, dynamic>> _dedupePlansBySortOrder(
+  static List<Map<String, dynamic>> _dedupePlansByCatalogIdentity(
     List<Map<String, dynamic>> rows,
   ) {
-    final bySort = <int, Map<String, dynamic>>{};
+    final byIdentity = <String, Map<String, dynamic>>{};
     for (final p in rows) {
       if (p['is_trial_plan'] == true) continue;
       final n = int.tryParse('${p['sort_order'] ?? 0}') ?? 0;
-      bySort.putIfAbsent(n, () => p);
+      final audience = '${p['user_type'] ?? ''}'.trim().toLowerCase();
+      final program =
+          '${p['plan_program'] ?? 'monthly'}'.trim().toLowerCase();
+      byIdentity.putIfAbsent('$audience:$n:$program', () => p);
     }
-    final keys = bySort.keys.toList()..sort();
-    return keys.map((k) => bySort[k]!).toList();
+    final plans = byIdentity.values.toList();
+    plans.sort((a, b) {
+      final sortA = int.tryParse('${a['sort_order'] ?? 0}') ?? 0;
+      final sortB = int.tryParse('${b['sort_order'] ?? 0}') ?? 0;
+      final bySort = sortA.compareTo(sortB);
+      if (bySort != 0) return bySort;
+      return '${a['plan_program'] ?? 'monthly'}'
+          .compareTo('${b['plan_program'] ?? 'monthly'}');
+    });
+    return plans;
   }
 
   /// يُبقي باقات [accountType] فقط — لا تُعرض باقة دور آخر حتى لو رجعها RPC.
@@ -342,7 +354,7 @@ class SubscriptionService {
       if (!allowed.contains(n)) continue;
       filtered.add(p);
     }
-    return _dedupePlansBySortOrder(filtered);
+    return _dedupePlansByCatalogIdentity(filtered);
   }
 
   Future<List<Map<String, dynamic>>> fetchPlansByUserType(
@@ -352,7 +364,7 @@ class SubscriptionService {
       'list_subscription_catalog_plans',
       params: {'p_account_type': accountType},
     );
-    return _dedupePlansBySortOrder(_plansFromCatalogRpc(rpc));
+    return _dedupePlansByCatalogIdentity(_plansFromCatalogRpc(rpc));
   }
 
   /// هل استخدم المستخدم التجربة المجانية من قبل؟ (RPC has_user_used_trial)

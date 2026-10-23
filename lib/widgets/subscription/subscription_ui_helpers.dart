@@ -80,6 +80,15 @@ abstract final class SubscriptionUiHelpers {
     return p != 'lifetime_one_time' && p != 'one_time';
   }
 
+  static String initialPlanPeriod(Map<String, dynamic>? row) {
+    final period = '${row?['period'] ?? ''}'.trim().toLowerCase();
+    if (period == 'yearly') return 'yearly';
+    if (period == 'lifetime_one_time' || period == 'one_time') {
+      return 'one_time';
+    }
+    return 'monthly';
+  }
+
   static bool canModifyAutoPay(Map<String, dynamic>? row) {
     if (row == null || !isRecurringSubscription(row)) return false;
     final status = '${row['status'] ?? ''}'.trim().toLowerCase();
@@ -122,6 +131,7 @@ abstract final class SubscriptionUiHelpers {
   static bool showUpgradePlanButton({
     required Map<String, dynamic>? currentRow,
     required Map<String, dynamic> targetPlan,
+    required String targetPeriod,
     required bool Function(Map<String, dynamic>? row) inPaidPeriod,
     required int Function(Map<String, dynamic> plan) planSortOrder,
   }) {
@@ -135,6 +145,10 @@ abstract final class SubscriptionUiHelpers {
         ? Map<String, dynamic>.from(currentRow['plan'] as Map)
         : <String, dynamic>{};
     if (curPlan.isEmpty) return false;
+    if ('${currentRow['period'] ?? ''}'.trim().toLowerCase() == 'yearly' &&
+        targetPeriod.trim().toLowerCase() != 'yearly') {
+      return false;
+    }
     final targetSort = planSortOrder(targetPlan);
     if ('${targetPlan['plan_program'] ?? ''}'.trim() == 'lifetime_one_time') {
       return false;

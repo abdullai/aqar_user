@@ -340,10 +340,8 @@ Future<void> main() async {
     } catch (_) {}
   }
 
-  await Future.wait([
-    _loadAppDotEnv(),
-    _tryLoadWebSupabaseRuntimeConfig(),
-  ]);
+  await _loadAppDotEnv();
+  await _tryLoadWebSupabaseRuntimeConfig();
   if (!kIsWeb) {
     await tryLoadDesktopSupabaseRuntimeConfig();
   }

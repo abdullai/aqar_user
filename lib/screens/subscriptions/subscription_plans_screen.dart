@@ -128,6 +128,11 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
   bool get _isPhotographerPlan =>
       AppRoleHelper.isPhotographerAccount(widget.accountType);
 
+  bool get _yearlySubscriptionSelectedMonthly =>
+      _period == 'monthly' &&
+      _inPaidPeriod(_current) &&
+      '${_current?['period'] ?? ''}'.trim().toLowerCase() == 'yearly';
+
   bool get _isTrialEligibleAccount {
     if (_isPhotographerPlan) return true;
     if (_isMarketingRole) return true;
@@ -304,7 +309,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
       }).toList();
     }
 
-    const initialPeriod = 'monthly';
+    final initialPeriod = SubscriptionUiHelpers.initialPlanPeriod(cur);
 
     setState(() {
       _plans = visible;
@@ -791,7 +796,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
 
     if (_period == 'one_time') {
       if (program != 'lifetime_one_time') return false;
-      return audience != 'individual' || sort == 16 || sort == 23;
+      return audience != 'individual' || sort == 15 || sort == 16 || sort == 23;
     }
     if (program == 'lifetime_one_time') {
       return false;
@@ -961,6 +966,19 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                 },
               ),
             ),
+            if (_yearlySubscriptionSelectedMonthly) ...[
+              const SizedBox(height: 10),
+              Text(
+                _isAr
+                    ? 'اشتراكك الحالي سنوي. لا يمكن شراء باقة رئيسية شهرية أو الترقية إلى دورة شهرية قبل انتهاء الاشتراك؛ اختر الباقة السنوية للترقية. تبقى الإضافات متاحة حسب شروطها.'
+                    : 'Your current subscription is yearly. You cannot buy a monthly main plan or switch an upgrade to monthly before it ends. Choose the yearly tab to upgrade. Add-ons remain available under their own terms.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                      height: 1.35,
+                    ),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(
               _period == 'one_time'
@@ -1123,6 +1141,7 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
               final canUpgrade = SubscriptionUiHelpers.showUpgradePlanButton(
                 currentRow: _current,
                 targetPlan: p,
+                targetPeriod: _period,
                 inPaidPeriod: _inPaidPeriod,
                 planSortOrder: SubscriptionService.planSortOrder,
               );
@@ -1284,9 +1303,13 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                               )
                             : blockedLowerMain
                                 ? Text(
-                                    _isAr
-                                        ? 'باقتك الحالية أعلى أو مساوية — لا اشتراك جديد هنا. استخدم الترقية لباقة أعلى أو «شراء الإضافة» للصفقات الإضافية.'
-                                        : 'Your current plan is equal or higher — no new subscribe here. Upgrade a higher tier or buy an add-on for extra deals.',
+                                    _yearlySubscriptionSelectedMonthly
+                                        ? (_isAr
+                                            ? 'الباقات الرئيسية الشهرية غير متاحة أثناء اشتراكك السنوي. اختر التبويب السنوي للترقية.'
+                                            : 'Monthly main plans are unavailable while your yearly subscription is active. Choose the yearly tab to upgrade.')
+                                        : _isAr
+                                            ? 'باقتك الحالية أعلى أو مساوية — لا اشتراك جديد هنا. استخدم الترقية لباقة أعلى أو «شراء الإضافة» للصفقات الإضافية.'
+                                            : 'Your current plan is equal or higher — no new subscribe here. Upgrade a higher tier or buy an add-on for extra deals.',
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodySmall

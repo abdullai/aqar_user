@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aqar_user/core/payment/checkout_journey.dart';
 import 'package:aqar_user/core/subscription/plan_display_copy.dart';
 import 'package:aqar_user/services/subscription_service.dart';
+import 'package:aqar_user/widgets/subscription/subscription_ui_helpers.dart';
 
 void main() {
   test('photographer paid catalog includes live plans 31 through 33 only', () {
@@ -42,23 +43,107 @@ void main() {
 
     expect(
       SubscriptionService.allowedSortOrdersForAccountType('owner_individual'),
-      [1, 14, 11, 12, 16, 23],
+      [1, 14, 11, 12, 15, 16, 23],
     );
     expect(
       SubscriptionService.filterCatalogPlansForAccountType(
         rows,
         'owner_individual',
       ).map((plan) => plan['sort_order']),
-      [1, 11, 12, 14, 16, 23],
-    );
-    expect(
-      SubscriptionService.allowedSortOrdersForAccountType('owner_individual'),
-      isNot(contains(15)),
+      [1, 11, 12, 14, 15, 16, 23],
     );
     expect(
       SubscriptionService.allowedSortOrdersForAccountType('owner_individual'),
       isNot(contains(13)),
     );
+  });
+
+  test('individual main lifetime plan remains visible beside recurring plans',
+      () {
+    final rows = [
+      {
+        'id': 'partner-monthly',
+        'user_type': 'individual',
+        'sort_order': 1,
+        'plan_program': 'monthly',
+      },
+      {
+        'id': 'partner-lifetime',
+        'user_type': 'individual',
+        'sort_order': 15,
+        'plan_program': 'lifetime_one_time',
+      },
+    ];
+
+    final visible = SubscriptionService.filterCatalogPlansForAccountType(
+      rows,
+      'user',
+    );
+
+    expect(visible.map((plan) => plan['id']), [
+      'partner-monthly',
+      'partner-lifetime',
+    ]);
+  });
+
+  test('catalog deduplication preserves different programs at the same rank',
+      () {
+    final rows = [
+      {
+        'id': 'monthly',
+        'user_type': 'individual',
+        'sort_order': 1,
+        'plan_program': 'monthly',
+      },
+      {
+        'id': 'lifetime',
+        'user_type': 'individual',
+        'sort_order': 1,
+        'plan_program': 'lifetime_one_time',
+      },
+    ];
+
+    final visible = SubscriptionService.filterCatalogPlansForAccountType(
+      rows,
+      'user',
+    );
+
+    expect(visible.map((plan) => plan['id']), ['lifetime', 'monthly']);
+  });
+
+  test('subscription plans open on the current billing period', () {
+    expect(
+      SubscriptionUiHelpers.initialPlanPeriod({'period': 'yearly'}),
+      'yearly',
+    );
+    expect(
+      SubscriptionUiHelpers.initialPlanPeriod({'period': 'lifetime_one_time'}),
+      'one_time',
+    );
+    expect(SubscriptionUiHelpers.initialPlanPeriod(null), 'monthly');
+  });
+
+  test('yearly subscribers can only upgrade to a yearly plan', () {
+    final current = {
+      'id': 'subscription-1',
+      'plan_id': 'plan-1',
+      'status': 'active',
+      'period': 'yearly',
+      'plan': {'sort_order': 1},
+    };
+    final higherTier = {'id': 'plan-2', 'sort_order': 4};
+
+    bool canUpgrade(String targetPeriod) =>
+        SubscriptionUiHelpers.showUpgradePlanButton(
+          currentRow: current,
+          targetPlan: higherTier,
+          targetPeriod: targetPeriod,
+          inPaidPeriod: (_) => true,
+          planSortOrder: (plan) => plan['sort_order'] as int,
+        );
+
+    expect(canUpgrade('monthly'), isFalse);
+    expect(canUpgrade('yearly'), isTrue);
   });
 
   test('one-time individual deal and request credits are standalone actions',
