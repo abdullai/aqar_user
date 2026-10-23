@@ -3812,6 +3812,24 @@ abstract class AppLocalizations {
   /// **'This device'**
   String get securityDeviceStatusCurrent;
 
+  /// No description provided for @securityDeviceStatusRecentlyActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently active'**
+  String get securityDeviceStatusRecentlyActive;
+
+  /// No description provided for @securityDeviceStatusInactive.
+  ///
+  /// In en, this message translates to:
+  /// **'Inactive'**
+  String get securityDeviceStatusInactive;
+
+  /// No description provided for @securityDeviceStatusUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get securityDeviceStatusUnknown;
+
   /// No description provided for @securityDeviceUnknownBrowser.
   ///
   /// In en, this message translates to:

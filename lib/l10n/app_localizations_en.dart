@@ -2043,6 +2043,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get securityDeviceStatusCurrent => 'This device';
 
   @override
+  String get securityDeviceStatusRecentlyActive => 'Recently active';
+
+  @override
+  String get securityDeviceStatusInactive => 'Inactive';
+
+  @override
+  String get securityDeviceStatusUnknown => 'Unknown';
+
+  @override
   String get securityDeviceUnknownBrowser => 'Unknown device';
 
   @override

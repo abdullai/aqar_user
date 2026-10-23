@@ -5,13 +5,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'saudi_locations_service.dart';
+
 /// تتبع جلسات الدخول/الخروج عبر RPCs آمنة (`log_user_session_*`).
 class SessionTrackingService {
   SessionTrackingService._();
 
   static const _kPrefSessionId = 'tracked_user_session_row_v1';
 
-  static Future<({String device, String browser, String os})> _deviceContext() async {
+  static Future<({String device, String browser, String os})>
+      _deviceContext() async {
     final plugin = DeviceInfoPlugin();
     if (kIsWeb) {
       final w = await plugin.webBrowserInfo;
@@ -69,21 +72,40 @@ class SessionTrackingService {
 
   /// مدينة/منطقة تقريبية فقط (بدون تخزين إحداثيات دقيقة في التطبيق).
   static Future<String?> coarseLocationLabel() async {
-    // على الويب [Geolocator] قد يطيل أو يعلّق أول إطار بعد الدخول.
-    if (kIsWeb) return null;
     try {
       var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
+      if (kIsWeb &&
+          perm != LocationPermission.whileInUse &&
+          perm != LocationPermission.always) {
+        return null;
+      }
+      if (!kIsWeb && perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) {
+          perm == LocationPermission.deniedForever ||
+          perm == LocationPermission.unableToDetermine) {
         return null;
       }
       final pos = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.low,
-        timeLimit: const Duration(seconds: 12),
+        timeLimit:
+            kIsWeb ? const Duration(seconds: 2) : const Duration(seconds: 12),
       );
+      if (kIsWeb) {
+        if (pos.latitude < 16 ||
+            pos.latitude > 33 ||
+            pos.longitude < 34 ||
+            pos.longitude > 56) {
+          return null;
+        }
+        final nearest = await SaudiLocationsService.instance.findNearest(
+          pos.latitude,
+          pos.longitude,
+        );
+        if (nearest == null || nearest.cityAr.trim().isEmpty) return null;
+        return '${nearest.cityAr}, ${nearest.regionAr}';
+      }
       final marks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
       if (marks.isEmpty) return null;
       final m = marks.first;
@@ -114,19 +136,17 @@ class SessionTrackingService {
         onTimeout: () => null,
       );
       // الويب والجوال: نفس الـ RPC عند توفره على المشروع — الفشل صامت ولا يعيق الدخول.
-      final raw = await client
-          .rpc(
-            'log_user_session_start',
-            params: {
-              'p_device_info': ctx.device,
-              'p_browser_info': ctx.browser,
-              'p_os_info': ctx.os,
-              'p_ip': null,
-              'p_location': loc,
-              'p_login_method': loginMethod,
-            },
-          )
-          .timeout(const Duration(seconds: 4));
+      final raw = await client.rpc(
+        'log_user_session_start',
+        params: {
+          'p_device_info': ctx.device,
+          'p_browser_info': ctx.browser,
+          'p_os_info': ctx.os,
+          'p_ip': null,
+          'p_location': loc,
+          'p_login_method': loginMethod,
+        },
+      ).timeout(const Duration(seconds: 4));
       if (raw is Map && raw['ok'] == true) {
         final id = raw['session_id']?.toString() ?? '';
         if (id.isNotEmpty) await prefs.setString(_kPrefSessionId, id);
@@ -134,7 +154,8 @@ class SessionTrackingService {
     } catch (_) {
       if (kDebugMode && kIsWeb) {
         // ignore: avoid_print
-        print('[session_tracking] log_user_session_start skipped: RPC or network');
+        print(
+            '[session_tracking] log_user_session_start skipped: RPC or network');
       }
     }
   }
@@ -147,15 +168,13 @@ class SessionTrackingService {
       final prefs = await SharedPreferences.getInstance();
       final id = prefs.getString(_kPrefSessionId);
       if (id == null || id.isEmpty) return;
-      await client
-          .rpc(
-            'log_user_session_end',
-            params: {
-              'p_session_id': id,
-              'p_reason': reason,
-            },
-          )
-          .timeout(const Duration(seconds: 6));
+      await client.rpc(
+        'log_user_session_end',
+        params: {
+          'p_session_id': id,
+          'p_reason': reason,
+        },
+      ).timeout(const Duration(seconds: 6));
       await prefs.remove(_kPrefSessionId);
     } catch (_) {}
   }

@@ -15,6 +15,7 @@ import '../core/auth/auth_local_sign_out.dart';
 import '../core/security/install_device_identity.dart';
 import '../core/session/return_after_auth.dart';
 import 'auth_service.dart';
+import 'session_tracking_service.dart';
 import 'user_session_coordination_service.dart';
 
 class RegisterDeviceSlotResult {
@@ -72,18 +73,27 @@ class UserInstallSessionService {
     return jsonEncode(map);
   }
 
-  static Future<String?> _preferredCityDisplay() async {
+  static Future<String?> _preferredCityDisplay({
+    bool allowLocationLookup = false,
+  }) async {
     try {
       final p = await SharedPreferences.getInstance();
-      return p.getString(AppConfig.prefPreferredExploreDisplayKey);
+      final preferred =
+          p.getString(AppConfig.prefPreferredExploreDisplayKey)?.trim();
+      if (preferred != null && preferred.isNotEmpty) return preferred;
     } catch (_) {
-      return null;
+      // Use a coarse browser location when there is no saved city preference.
     }
+    if (!allowLocationLookup) return null;
+    return SessionTrackingService.coarseLocationLabel().timeout(
+      const Duration(seconds: 3),
+      onTimeout: () => null,
+    );
   }
 
   /// تلميحات لـ bump_user_session_epoch (مدينة + وصف الجهاز + منصة + تثبيت).
   static Future<
-      ({String? city, String? label, String platform, String installId})>
+          ({String? city, String? label, String platform, String installId})>
       sessionHintsForBump() async {
     final city = await _preferredCityDisplay();
     final label = await AuthService.devicePlatformModelLabel();
@@ -148,7 +158,7 @@ class UserInstallSessionService {
     }
 
     final payload = await _devicePayload();
-    final city = await _preferredCityDisplay();
+    final city = await _preferredCityDisplay(allowLocationLookup: true);
 
     try {
       final raw = await Supabase.instance.client.rpc(

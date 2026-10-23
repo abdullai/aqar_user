@@ -209,6 +209,32 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     return DateHelper.fmtCivilDateTime(dt, isAr: isAr);
   }
 
+  String _deviceStatusLabel(
+    Map<String, dynamic> row, {
+    required bool isAr,
+    required AppLocalizations? l10n,
+  }) {
+    final raw = row['last_seen'] ?? row['updated_at'];
+    final lastSeen = raw is DateTime
+        ? raw.toLocal()
+        : DateTime.tryParse('${raw ?? ''}')?.toLocal();
+    if (lastSeen == null) {
+      return l10n?.securityDeviceStatusUnknown ??
+          (isAr ? 'غير معروف' : 'Unknown');
+    }
+    final age = DateTime.now().difference(lastSeen);
+    if (age < -const Duration(minutes: 1)) {
+      return l10n?.securityDeviceStatusUnknown ??
+          (isAr ? 'غير معروف' : 'Unknown');
+    }
+    if (age <= const Duration(minutes: 5)) {
+      return l10n?.securityDeviceStatusRecentlyActive ??
+          (isAr ? 'نشط مؤخرًا' : 'Recently active');
+    }
+    return l10n?.securityDeviceStatusInactive ??
+        (isAr ? 'غير نشط' : 'Inactive');
+  }
+
   String _friendlyBrowserLabel(Map<String, dynamic> r, {required bool isAr}) {
     final raw = '${r['device_label'] ?? ''}'.trim();
     if (raw.isEmpty) {
@@ -308,6 +334,9 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
         l10n?.securityDeviceColStatus ?? (isAr ? 'الحالة' : 'Status');
     final statusCurrent = l10n?.securityDeviceStatusCurrent ??
         (isAr ? 'هذا الجهاز' : 'This device');
+    final status = isSelf
+        ? statusCurrent
+        : _deviceStatusLabel(row, isAr: isAr, l10n: l10n);
     final removeLabel =
         l10n?.securityDeviceRemoveAction ?? (isAr ? 'حذف' : 'Remove');
 
@@ -352,7 +381,7 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
             _deviceDetailRow(label: colRegistered, value: registered, cs: cs),
             _deviceDetailRow(
               label: colStatus,
-              value: isSelf ? statusCurrent : '—',
+              value: status,
               cs: cs,
             ),
           ],
@@ -383,60 +412,103 @@ class _DeviceManagementPageState extends State<DeviceManagementPage> {
     final removeLabel =
         l10n?.securityDeviceRemoveAction ?? (isAr ? 'حذف' : 'Remove');
 
+    Widget cell(Widget child,
+        {bool heading = false,
+        AlignmentGeometry alignment = AlignmentDirectional.centerStart}) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+        child: Align(
+          alignment: alignment,
+          child: DefaultTextStyle(
+            style: TextStyle(
+              color: heading ? cs.onSurfaceVariant : cs.onSurface,
+              fontWeight: heading ? FontWeight.w700 : FontWeight.normal,
+              fontSize: 12,
+            ),
+            child: child,
+          ),
+        ),
+      );
+    }
+
+    Widget textCell(String value, {bool heading = false}) => cell(
+          Text(value, softWrap: true),
+          heading: heading,
+        );
+
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          headingRowColor: WidgetStatePropertyAll(cs.surfaceContainerHighest),
-          columns: [
-            DataColumn(label: Text(colBrowser)),
-            DataColumn(label: Text(colPlatform)),
-            DataColumn(label: Text(colLocation)),
-            DataColumn(label: Text(colLast)),
-            DataColumn(label: Text(colRegistered)),
-            DataColumn(label: Text(colStatus)),
-            DataColumn(label: Text(removeLabel)),
-          ],
-          rows: _rows.map((r) {
-            final fp = '${r['device_fingerprint'] ?? ''}'.trim();
-            final isSelf = fp == _currentFp;
-            return DataRow(
-              cells: [
-                DataCell(Text(
-                  _friendlyBrowserLabel(r, isAr: isAr),
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                )),
-                DataCell(Text(_platformLabel(r, isAr: isAr))),
-                DataCell(Text(
-                  '${r['city'] ?? r['last_signin_city'] ?? ''}'.trim().isEmpty
-                      ? '—'
-                      : '${r['city'] ?? r['last_signin_city']}',
-                )),
-                DataCell(Text(_formatDeviceTimestamp(
-                  r['last_seen'] ?? r['updated_at'],
-                  isAr: isAr,
-                ))),
-                DataCell(Text(_formatDeviceTimestamp(
-                  r['created_at'],
-                  isAr: isAr,
-                ))),
-                DataCell(isSelf
-                    ? Chip(
-                        label: Text(statusCurrent),
-                        visualDensity: VisualDensity.compact,
-                      )
-                    : const Text('—')),
-                DataCell(isSelf
-                    ? const SizedBox.shrink()
-                    : IconButton(
-                        tooltip: removeLabel,
-                        icon: const Icon(Icons.delete_outline_rounded),
-                        onPressed: () => _requestOtpAndRemove('${r['id']}'),
-                      )),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Table(
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          border: TableBorder(
+            horizontalInside: BorderSide(color: cs.outlineVariant),
+          ),
+          columnWidths: const {
+            0: FlexColumnWidth(1.45),
+            1: FlexColumnWidth(0.9),
+            2: FlexColumnWidth(1.05),
+            3: FlexColumnWidth(1.25),
+            4: FlexColumnWidth(1.25),
+            5: FlexColumnWidth(1.2),
+            6: FlexColumnWidth(0.65),
+          },
+          children: [
+            TableRow(
+              decoration: BoxDecoration(color: cs.surfaceContainerHighest),
+              children: [
+                textCell(colBrowser, heading: true),
+                textCell(colPlatform, heading: true),
+                textCell(colLocation, heading: true),
+                textCell(colLast, heading: true),
+                textCell(colRegistered, heading: true),
+                textCell(colStatus, heading: true),
+                cell(
+                  Text(removeLabel, textAlign: TextAlign.center),
+                  heading: true,
+                  alignment: Alignment.center,
+                ),
               ],
-            );
-          }).toList(),
+            ),
+            ..._rows.map((r) {
+              final fp = '${r['device_fingerprint'] ?? ''}'.trim();
+              final isSelf = fp == _currentFp;
+              final rawCity =
+                  '${r['city'] ?? r['last_signin_city'] ?? ''}'.trim();
+              final status = isSelf
+                  ? statusCurrent
+                  : _deviceStatusLabel(r, isAr: isAr, l10n: l10n);
+              return TableRow(
+                children: [
+                  cell(Text(
+                    _friendlyBrowserLabel(r, isAr: isAr),
+                    softWrap: true,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  )),
+                  textCell(_platformLabel(r, isAr: isAr)),
+                  textCell(rawCity.isEmpty ? '—' : rawCity),
+                  textCell(_formatDeviceTimestamp(
+                    r['last_seen'] ?? r['updated_at'],
+                    isAr: isAr,
+                  )),
+                  textCell(_formatDeviceTimestamp(r['created_at'], isAr: isAr)),
+                  textCell(status),
+                  cell(
+                    isSelf
+                        ? const SizedBox.shrink()
+                        : IconButton(
+                            tooltip: removeLabel,
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () => _requestOtpAndRemove('${r['id']}'),
+                          ),
+                    alignment: Alignment.center,
+                  ),
+                ],
+              );
+            }),
+          ],
         ),
       ),
     );
@@ -1189,8 +1261,8 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
                           BoxShadow(
                             blurRadius: 18,
                             offset: const Offset(0, 10),
-                            color:
-                                Colors.black.withValues(alpha: isDark ? 0.35 : 0.12),
+                            color: Colors.black
+                                .withValues(alpha: isDark ? 0.35 : 0.12),
                           ),
                         ],
                       ),
@@ -1384,7 +1456,9 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
           _otp = '';
           _otpController.clear();
         });
-        if (verified.locked || _attemptsLeft <= 0 || _failCount >= _maxAttempts) {
+        if (verified.locked ||
+            _attemptsLeft <= 0 ||
+            _failCount >= _maxAttempts) {
           await _notifyAttemptsLocked();
           if (!mounted) return;
           _toast(AppLocalizations.of(context)?.otpAttemptsLocked ??
@@ -1401,10 +1475,11 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
           await _notifyThirdAttempt();
         }
         if (!mounted) return;
-        _toast(AppLocalizations.of(context)?.otpAttemptsRemaining(_attemptsLeft) ??
-            (_isAr
-                ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
-                : 'Invalid code. Left: $_attemptsLeft'));
+        _toast(
+            AppLocalizations.of(context)?.otpAttemptsRemaining(_attemptsLeft) ??
+                (_isAr
+                    ? 'الرمز غير صحيح. المتبقي: $_attemptsLeft'
+                    : 'Invalid code. Left: $_attemptsLeft'));
         _otpFocus.requestFocus();
         return;
       }
@@ -1508,80 +1583,82 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
             final metrics = OtpPinLayout.of(c.maxWidth);
             return AutofillGroup(
               child: PinCodeTextField(
-              appContext: context,
-              length: _otpLen,
-              controller: _otpController,
-              focusNode: _otpFocus,
-              autoDisposeControllers: false,
-              autoFocus: true,
-              autoUnfocus: false,
-              enablePinAutofill: true,
-              useExternalAutoFillGroup: true,
-              keyboardType: TextInputType.number,
-              enableActiveFill: true,
-              animationType: AnimationType.fade,
-              animationDuration: const Duration(milliseconds: 120),
-              errorTextSpace: 0,
-              scrollPadding: aqarFieldScrollPadding(context),
-              onTap: () => OtpAutofill.stampFocusedHtmlField(),
-              inputFormatters: [
-                TextInputFormatter.withFunction((oldValue, newValue) {
-                  final normalized =
-                      digitsOnly(normalizeAsciiDigits(newValue.text));
-                  final clipped = normalized.length > _otpLen
-                      ? normalized.substring(0, _otpLen)
-                      : normalized;
-                  return TextEditingValue(
-                    text: clipped,
-                    selection: TextSelection.collapsed(offset: clipped.length),
-                  );
-                }),
-                LengthLimitingTextInputFormatter(_otpLen),
-              ],
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              pinTheme: PinTheme(
-                shape: PinCodeFieldShape.box,
-                borderRadius: BorderRadius.circular(12),
-                fieldHeight: metrics.fieldHeight,
-                fieldWidth: metrics.fieldWidth,
-                fieldOuterPadding: EdgeInsets.zero,
-                inactiveColor: _error ? cs.error : inactiveBorder,
-                activeColor: border.withValues(alpha: 0.65),
-                selectedColor: border,
-                inactiveFillColor: fill,
-                selectedFillColor: fill,
-                activeFillColor: fill,
-                borderWidth: 1.4,
+                appContext: context,
+                length: _otpLen,
+                controller: _otpController,
+                focusNode: _otpFocus,
+                autoDisposeControllers: false,
+                autoFocus: true,
+                autoUnfocus: false,
+                enablePinAutofill: true,
+                useExternalAutoFillGroup: true,
+                keyboardType: TextInputType.number,
+                enableActiveFill: true,
+                animationType: AnimationType.fade,
+                animationDuration: const Duration(milliseconds: 120),
+                errorTextSpace: 0,
+                scrollPadding: aqarFieldScrollPadding(context),
+                onTap: () => OtpAutofill.stampFocusedHtmlField(),
+                inputFormatters: [
+                  TextInputFormatter.withFunction((oldValue, newValue) {
+                    final normalized =
+                        digitsOnly(normalizeAsciiDigits(newValue.text));
+                    final clipped = normalized.length > _otpLen
+                        ? normalized.substring(0, _otpLen)
+                        : normalized;
+                    return TextEditingValue(
+                      text: clipped,
+                      selection:
+                          TextSelection.collapsed(offset: clipped.length),
+                    );
+                  }),
+                  LengthLimitingTextInputFormatter(_otpLen),
+                ],
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                pinTheme: PinTheme(
+                  shape: PinCodeFieldShape.box,
+                  borderRadius: BorderRadius.circular(12),
+                  fieldHeight: metrics.fieldHeight,
+                  fieldWidth: metrics.fieldWidth,
+                  fieldOuterPadding: EdgeInsets.zero,
+                  inactiveColor: _error ? cs.error : inactiveBorder,
+                  activeColor: border.withValues(alpha: 0.65),
+                  selectedColor: border,
+                  inactiveFillColor: fill,
+                  selectedFillColor: fill,
+                  activeFillColor: fill,
+                  borderWidth: 1.4,
+                ),
+                textStyle: TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: metrics.fontSize,
+                ),
+                onChanged: (v) {
+                  final only = v.replaceAll(RegExp(r'\D'), '');
+                  _otp =
+                      only.length > _otpLen ? only.substring(0, _otpLen) : only;
+                  if (_error) {
+                    setState(() => _error = false);
+                  }
+                  _maybeAutoSubmit();
+                },
+                onCompleted: (_) {
+                  AppHaptics.selection();
+                  _maybeAutoSubmit();
+                },
+                beforeTextPaste: (text) {
+                  final sent = InAppOtpHandoff.digitsFromAny(_expectedCode);
+                  final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
+                  final use =
+                      (sent != null && sent.length >= _otpLen) ? sent : only;
+                  if (use.isEmpty) return true;
+                  AppHaptics.selection();
+                  _applyIncomingCode(use, fromUserAction: true);
+                  _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted',
+                      duration: const Duration(milliseconds: 1200));
+                  return false;
+                },
               ),
-              textStyle: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: metrics.fontSize,
-              ),
-              onChanged: (v) {
-                final only = v.replaceAll(RegExp(r'\D'), '');
-                _otp = only.length > _otpLen ? only.substring(0, _otpLen) : only;
-                if (_error) {
-                  setState(() => _error = false);
-                }
-                _maybeAutoSubmit();
-              },
-              onCompleted: (_) {
-                AppHaptics.selection();
-                _maybeAutoSubmit();
-              },
-              beforeTextPaste: (text) {
-                final sent = InAppOtpHandoff.digitsFromAny(_expectedCode);
-                final only = (text ?? '').replaceAll(RegExp(r'\D'), '');
-                final use =
-                    (sent != null && sent.length >= _otpLen) ? sent : only;
-                if (use.isEmpty) return true;
-                AppHaptics.selection();
-                _applyIncomingCode(use, fromUserAction: true);
-                _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted',
-                    duration: const Duration(milliseconds: 1200));
-                return false;
-              },
-            ),
             );
           },
         ),
@@ -1683,8 +1760,8 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
               textDirection:
                   _isAr ? ui.TextDirection.rtl : ui.TextDirection.ltr,
               child: AlertDialog(
-                insetPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 12),
+                insetPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 titlePadding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
                 title: Row(
                   children: [
@@ -1736,15 +1813,15 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
                             final sent =
                                 InAppOtpHandoff.digitsFromAny(_expectedCode);
                             if (sent == null || sent.length < _otpLen) {
-                              _toast(
-                                  _isAr ? 'لا يوجد رمز بعد' : 'No code yet');
+                              _toast(_isAr ? 'لا يوجد رمز بعد' : 'No code yet');
                               return;
                             }
                             AppHaptics.selection();
                             _applyIncomingCode(sent, fromUserAction: true);
                             _toast(_isAr ? 'تم لصق الرمز' : 'Code pasted');
                           },
-                          icon: const Icon(Icons.content_paste_rounded, size: 18),
+                          icon:
+                              const Icon(Icons.content_paste_rounded, size: 18),
                           label: Text(_isAr ? 'لصق الرمز' : 'Paste code'),
                         ),
                         const SizedBox(height: 8),
@@ -1791,8 +1868,7 @@ class _DeviceOtpDialogState extends State<_DeviceOtpDialog>
                                               strokeWidth: 2),
                                         )
                                       : const Icon(Icons.refresh),
-                                  label:
-                                      Text(_isAr ? 'إعادة إرسال' : 'Resend'),
+                                  label: Text(_isAr ? 'إعادة إرسال' : 'Resend'),
                                 ),
                               ],
                             );

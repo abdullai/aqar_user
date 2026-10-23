@@ -2021,6 +2021,15 @@ class AppLocalizationsAr extends AppLocalizations {
   String get securityDeviceStatusCurrent => 'هذا الجهاز';
 
   @override
+  String get securityDeviceStatusRecentlyActive => 'نشط مؤخرًا';
+
+  @override
+  String get securityDeviceStatusInactive => 'غير نشط';
+
+  @override
+  String get securityDeviceStatusUnknown => 'غير معروف';
+
+  @override
   String get securityDeviceUnknownBrowser => 'جهاز غير معروف';
 
   @override
