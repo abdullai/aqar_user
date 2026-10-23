@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -147,6 +147,8 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
     if (!PaymentService.isMoyasarTestMode || _saving) return;
     setState(() => _saving = true);
     try {
+      final existingCardIds =
+          (await _pay.getSavedCards()).map((card) => '${card['id']}').toSet();
       final pending = await _pay.createPendingBillingTransaction(
         amount: 1,
         paymentMethod: 'card',
@@ -190,7 +192,8 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
           isAr: _isAr,
           planName: _isAr ? 'التحقق من البطاقة' : 'Card verification',
           amountSar: amount,
-          periodLabel: _isAr ? 'اختبار — بلا خصم حقيقي' : 'Test — no real charge',
+          periodLabel:
+              _isAr ? 'اختبار — بلا خصم حقيقي' : 'Test — no real charge',
         ),
       );
       if (!mounted) return;
@@ -205,10 +208,19 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
         );
       }
 
-      final verified = await _pay.pollUntilBillingTransactionPaid(
+      final confirmation = await _pay.confirmMoyasarPayment(
         billingTransactionId: billingId,
-        expectedAmountSar: amount,
+        paymentId: result.id,
       );
+      final verified = confirmation['ok'] == true
+          ? await _pay.verifyBillingTransactionPaid(
+              billingTransactionId: billingId,
+              expectedAmountSar: amount,
+            )
+          : await _pay.pollUntilBillingTransactionPaid(
+              billingTransactionId: billingId,
+              expectedAmountSar: amount,
+            );
       if (verified['ok'] != true) {
         throw StateError(
           PaymentService.userFacingError(
@@ -218,12 +230,13 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
         );
       }
 
-      var savedRealCard = false;
+      var savedRealCard = confirmation['card_saved'] == true;
       for (var attempt = 0; attempt < 6 && mounted; attempt++) {
+        if (savedRealCard) break;
         final cards = await _pay.getSavedCards();
-        savedRealCard = cards.any(
-          (card) => !PaymentService.isMockCardToken(card['card_token']),
-        );
+        savedRealCard = cards.any((card) =>
+            !existingCardIds.contains('${card['id']}') &&
+            !PaymentService.isMockCardToken(card['card_token']));
         if (savedRealCard) break;
         await Future<void>.delayed(const Duration(milliseconds: 500));
       }

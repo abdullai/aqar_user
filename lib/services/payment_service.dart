@@ -7,7 +7,8 @@ import 'package:flutter/foundation.dart'
         defaultTargetPlatform,
         kDebugMode,
         kIsWeb,
-        kReleaseMode;
+        kReleaseMode,
+        debugPrint;
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:moyasar/moyasar.dart';
@@ -378,8 +379,8 @@ class PaymentService {
             : 'The amount did not match. The payment was stopped for review.';
       case 'webhook_timeout':
         return isAr
-            ? 'تم استلام الدفع من البوابة، وجارٍ تأكيد السجل. أعد فتح الباقات خلال دقيقة.'
-            : 'The gateway accepted the payment. Confirming the ledger — reopen plans in a minute.';
+            ? 'استلمت بوابة الدفع العملية لكن لم يصل تأكيدها للنظام بعد. لا تعاود الدفع الآن؛ حدّث سجل المدفوعات بعد لحظات، وإذا بقيت معلّقة فتواصل مع الدعم.'
+            : 'The payment gateway received the payment, but confirmation has not reached the app yet. Do not pay again; refresh payment history shortly, and contact support if it remains pending.';
       case 'billing_not_paid':
       case 'billing_not_success':
         return isAr
@@ -516,8 +517,8 @@ class PaymentService {
   Future<Map<String, dynamic>> pollUntilBillingTransactionPaid({
     required String billingTransactionId,
     required double expectedAmountSar,
-    int maxAttempts = 30,
-    Duration step = const Duration(seconds: 1),
+    int maxAttempts = 12,
+    Duration step = const Duration(milliseconds: 500),
   }) async {
     for (var i = 0; i < maxAttempts; i++) {
       final v = await verifyBillingTransactionPaid(
@@ -533,6 +534,37 @@ class PaymentService {
       await Future<void>.delayed(step);
     }
     return {'ok': false, 'error': 'webhook_timeout'};
+  }
+
+  /// Confirms a browser payment with Moyasar server-side and immediately runs
+  /// the same verified fulfillment path used by the webhook.
+  Future<Map<String, dynamic>> confirmMoyasarPayment({
+    required String billingTransactionId,
+    required String paymentId,
+  }) async {
+    if (_user == null) return {'ok': false, 'error': 'auth'};
+    try {
+      final res = await _sb.functions.invoke(
+        'moyasar-confirm-payment',
+        body: {
+          'billing_transaction_id': billingTransactionId,
+          'payment_id': paymentId,
+        },
+      );
+      if (res.data is! Map) {
+        return {'ok': false, 'error': 'unexpected_response'};
+      }
+      return Map<String, dynamic>.from(
+        (res.data as Map).map((key, value) => MapEntry(key.toString(), value)),
+      );
+    } on FunctionException catch (e) {
+      final parsed = _parseEdgeFunctionErrorBody(e);
+      if (parsed != null) return parsed;
+      return {'ok': false, 'error': 'payment_confirmation_unavailable'};
+    } catch (e, st) {
+      debugPrint('[PaymentService] Moyasar confirmation failed: $e\n$st');
+      return {'ok': false, 'error': 'payment_confirmation_unavailable'};
+    }
   }
 
   static double _toDouble(dynamic v) {

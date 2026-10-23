@@ -101,13 +101,13 @@ async function upsertSavedCardFromMoyasarPayment(
   svc: ReturnType<typeof createClient>,
   userId: string,
   verified: Record<string, unknown>,
-): Promise<void> {
+): Promise<boolean> {
   const source = verified?.source;
-  if (!source || typeof source !== "object") return;
+  if (!source || typeof source !== "object") return false;
   const src = source as Record<string, unknown>;
-  if (String(src.type ?? "").toLowerCase() !== "creditcard") return;
+  if (String(src.type ?? "").toLowerCase() !== "creditcard") return false;
   const token = String(src.token ?? "").trim();
-  if (!token || token.startsWith("mock_")) return;
+  if (!token || token.startsWith("mock_")) return false;
   const number = String(src.number ?? "");
   const digits = number.replace(/\D/g, "");
   const lastFour = digits.length >= 4 ? digits.slice(-4) : "0000";
@@ -117,21 +117,23 @@ async function upsertSavedCardFromMoyasarPayment(
   const yearRaw = Number.parseInt(String(src.year ?? src.exp_year ?? "0"), 10);
   const year = yearRaw > 0 ? (yearRaw < 100 ? yearRaw + 2000 : yearRaw) : 2099;
 
-  const { data: existing } = await svc
+  const { data: existing, error: existingError } = await svc
     .from("saved_cards")
     .select("id")
     .eq("user_id", userId)
     .eq("card_token", token)
     .maybeSingle();
-  if (existing) return;
+  if (existingError) throw existingError;
+  if (existing) return true;
 
-  const { count } = await svc
+  const { count, error: countError } = await svc
     .from("saved_cards")
     .select("id", { count: "exact", head: true })
     .eq("user_id", userId);
+  if (countError) throw countError;
   const isDefault = (count ?? 0) === 0;
 
-  await svc.from("saved_cards").insert({
+  const { error: insertError } = await svc.from("saved_cards").insert({
     user_id: userId,
     card_token: token,
     last_four: lastFour,
@@ -141,6 +143,8 @@ async function upsertSavedCardFromMoyasarPayment(
     expiry_year: year,
     is_default: isDefault,
   });
+  if (insertError) throw insertError;
+  return true;
 }
 
 const FAIL_TYPES = new Set([
@@ -452,9 +456,10 @@ serve(async (req) => {
 
   const userId = String(row.user_id ?? "").trim();
   let cardSaveWarning: string | null = null;
+  let cardSaved = false;
   if (userId) {
     try {
-      await upsertSavedCardFromMoyasarPayment(svc, userId, verified);
+      cardSaved = await upsertSavedCardFromMoyasarPayment(svc, userId, verified);
     } catch (error) {
       cardSaveWarning = error instanceof Error ? error.message : String(error);
       console.error("[moyasar-webhook] saved card update failed", cardSaveWarning);
@@ -470,6 +475,7 @@ serve(async (req) => {
       ok: true,
       billing_transaction_id: billingId,
       moyasar_payment_id: paymentId,
+      card_saved: cardSaved,
       fulfillment_warning: fulErr.message,
       ...(paymentMethodWarning ? { payment_method_warning: paymentMethodWarning } : {}),
       ...(cardSaveWarning ? { card_save_warning: cardSaveWarning } : {}),
@@ -480,6 +486,7 @@ serve(async (req) => {
     ok: true,
     billing_transaction_id: billingId,
     moyasar_payment_id: paymentId,
+    card_saved: cardSaved,
     fulfillment: fulfilled,
     ...(paymentMethodWarning ? { payment_method_warning: paymentMethodWarning } : {}),
     ...(cardSaveWarning ? { card_save_warning: cardSaveWarning } : {}),

@@ -921,6 +921,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     final poll = await _pollBillingWithOverlay(
       billingTransactionId: bid,
       expectedAmountSar: billed,
+      paymentId: '${chargeRes['pay_id'] ?? ''}'.trim(),
     );
     if (poll['ok'] == true) {
       return _finalizeSubscriptionAfterMoyasar(
@@ -1117,6 +1118,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
   Future<Map<String, dynamic>> _pollBillingWithOverlay({
     required String billingTransactionId,
     required double expectedAmountSar,
+    String? paymentId,
     bool trackPending = true,
   }) async {
     if (trackPending) {
@@ -1130,10 +1132,21 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
     }
     _showProcessingOverlay();
     try {
-      final result = await _pay.pollUntilBillingTransactionPaid(
-        billingTransactionId: billingTransactionId,
-        expectedAmountSar: expectedAmountSar,
-      );
+      final confirmation = paymentId == null
+          ? const <String, dynamic>{'ok': false}
+          : await _pay.confirmMoyasarPayment(
+              billingTransactionId: billingTransactionId,
+              paymentId: paymentId,
+            );
+      final result = confirmation['ok'] == true
+          ? await _pay.verifyBillingTransactionPaid(
+              billingTransactionId: billingTransactionId,
+              expectedAmountSar: expectedAmountSar,
+            )
+          : await _pay.pollUntilBillingTransactionPaid(
+              billingTransactionId: billingTransactionId,
+              expectedAmountSar: expectedAmountSar,
+            );
       if (result['ok'] == true) {
         await PaymentRecoveryCoordinator.clearPending(
           userId: Supabase.instance.client.auth.currentUser?.id ?? '',

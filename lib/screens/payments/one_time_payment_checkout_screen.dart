@@ -364,7 +364,17 @@ class _OneTimePaymentCheckoutScreenState
 
     _showProcessingOverlay();
     try {
-      return await _pay.pollUntilBillingTransactionPaid(
+      final confirmation = await _pay.confirmMoyasarPayment(
+        billingTransactionId: billingId,
+        paymentId: result.id,
+      );
+      if (confirmation['ok'] == true) {
+        return _pay.verifyBillingTransactionPaid(
+          billingTransactionId: billingId,
+          expectedAmountSar: _chargeSar,
+        );
+      }
+      return _pay.pollUntilBillingTransactionPaid(
         billingTransactionId: billingId,
         expectedAmountSar: _chargeSar,
       );
