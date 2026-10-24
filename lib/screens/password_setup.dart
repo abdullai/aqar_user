@@ -3541,7 +3541,7 @@ class _PasswordSetupScreenState extends State<PasswordSetupScreen> {
       padding: const EdgeInsets.all(20),
       child: SingleChildScrollView(
         primary: true,
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         physics: const ClampingScrollPhysics(),
         child: content,
       ),

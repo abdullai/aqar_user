@@ -171,7 +171,8 @@ class AqarTextField extends StatelessWidget {
       showCursor: showCursor,
       buildCounter: buildCounter,
       textCapitalization: textCapitalization,
-      onTapOutside: onTapOutside ?? (_) => AppOutsideUnfocus.unfocusEditable(),
+      onTapOutside:
+          onTapOutside ?? AppOutsideUnfocus.unfocusEditableFromOutsidePointer,
       enableInteractiveSelection:
           obscureText ? false : enableInteractiveSelection,
       mouseCursor: SystemMouseCursors.text,
@@ -339,7 +340,7 @@ class AqarTextFormField extends FormField<String> {
               contextMenuBuilder: obscureText
                   ? AqarEditableDefaults.hiddenContextMenu
                   : AqarEditableDefaults.contextMenu,
-              onTapOutside: (_) => AppOutsideUnfocus.unfocusEditable(),
+              onTapOutside: AppOutsideUnfocus.unfocusEditableFromOutsidePointer,
               onEditingComplete: resolvedAction == TextInputAction.next
                   ? () {
                       AppHaptics.selection();

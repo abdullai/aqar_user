@@ -3866,14 +3866,17 @@ class _RealEstateCard extends StatelessWidget {
             context,
             icon: Icons.description_outlined,
             label: isAr ? 'رقم الصك' : 'Deed no.',
-            value: deedNo,
+            value:
+                deedNo.isEmpty ? (isAr ? 'غير مُدخل' : 'Not provided') : deedNo,
             copyValue: deedNo,
           ),
           _propertyCardMetricRow(
             context,
             icon: Icons.event_available_outlined,
             label: isAr ? 'تاريخ الصك' : 'Deed date',
-            value: deedDate,
+            value: deedDate.isEmpty
+                ? (isAr ? 'غير مُدخل' : 'Not provided')
+                : deedDate,
           ),
         ],
         const SizedBox(height: 2),

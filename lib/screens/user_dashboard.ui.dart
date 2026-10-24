@@ -114,10 +114,10 @@ class _UserDashboardState extends State<UserDashboard>
   bool _homeFeedIdentityReady = false;
   bool _homeCartVisibilityLoaded = false;
   bool _homeRequestTrackingLoaded = false;
-  bool _homeRequestApplicantCountsLoaded = false;
   bool _homeHiddenPreferencesLoaded = false;
   String? _homeFeedIdentityError;
   String? _lastAuthUserId;
+  int _plusComposerPhotographerRequestCount = 0;
 
   // =========================
   // Tabs + filters
@@ -315,7 +315,6 @@ class _UserDashboardState extends State<UserDashboard>
     final ready = _accountRoleLoaded &&
         _homeCartVisibilityLoaded &&
         _homeRequestTrackingLoaded &&
-        _homeRequestApplicantCountsLoaded &&
         _homeHiddenPreferencesLoaded;
     _homeFeedIdentityReady = ready;
     if (ready) _homeFeedIdentityError = null;
@@ -342,7 +341,6 @@ class _UserDashboardState extends State<UserDashboard>
     _homeFeedIdentityReady = false;
     _homeCartVisibilityLoaded = false;
     _homeRequestTrackingLoaded = false;
-    _homeRequestApplicantCountsLoaded = false;
     _homeHiddenPreferencesLoaded = false;
     _ss(() {});
     await Future.wait([
@@ -1671,8 +1669,7 @@ class _UserDashboardState extends State<UserDashboard>
       <Map<String, dynamic>>[];
   int _cartCount = 0;
   int _cartPaneIndex = 0;
-  bool _incomingDealSortNewest = false;
-  final String _incomingDealStatusFilter = 'all';
+  bool _incomingDealSortNewest = true;
   String _dealsTypeFilter = 'all';
   String _dealsSortFilter = 'newest';
   String _dealsExclusionRoleFilter = 'all';
@@ -2861,26 +2858,6 @@ class _UserDashboardState extends State<UserDashboard>
       );
     }
 
-    if (_tabIndex == 0 && !_isGuest) {
-      chips.add(
-        ActionChip(
-          avatar: const Icon(Icons.bookmarks_outlined, size: 16),
-          label: Text(
-            _isArabic ? 'عمليات بحثي' : 'Saved searches',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-          ),
-          onPressed: () => showSavedSearchesSheet(
-            context,
-            arabic: _isArabic,
-            onApply: (q) {
-              _inlineSearchCtrl.text = q;
-              _setSearchQuery(q);
-            },
-          ),
-        ),
-      );
-    }
-
     if (_typeFilter != null) {
       chips.add(
         item(
@@ -3056,7 +3033,6 @@ class _UserDashboardState extends State<UserDashboard>
       _homeFeedIdentityReady = _isGuest;
       _homeCartVisibilityLoaded = _isGuest;
       _homeRequestTrackingLoaded = _isGuest;
-      _homeRequestApplicantCountsLoaded = _isGuest;
       _homeHiddenPreferencesLoaded = _isGuest;
       _homeFeedIdentityError = null;
       _errorHome = null;
@@ -3826,7 +3802,6 @@ class _UserDashboardState extends State<UserDashboard>
       _homeFeedIdentityReady = signedOut;
       _homeCartVisibilityLoaded = signedOut;
       _homeRequestTrackingLoaded = signedOut;
-      _homeRequestApplicantCountsLoaded = signedOut;
       _homeHiddenPreferencesLoaded = signedOut;
       _homeFeedIdentityError = null;
       _errorHome = null;
@@ -4479,7 +4454,7 @@ class _UserDashboardState extends State<UserDashboard>
       ),
     );
     final hubChanged = _webTabChildrenHubSig != hubSig;
-    final cartSig = Object.hash(
+    final cartSig = Object.hashAll([
       _cart.length,
       _cartCount,
       _loadingCart,
@@ -4491,7 +4466,10 @@ class _UserDashboardState extends State<UserDashboard>
       _completedOwnedMarketRequests.length,
       _cartPaneIndex,
       _incomingDealSortNewest,
-      _incomingDealStatusFilter,
+      _dealsTypeFilter,
+      _dealsSortFilter,
+      _dealsOngoingStatusFilter,
+      _dealsExclusionRoleFilter,
       _myPendingMarketOffersForCart.length,
       _myArchivedMarketOffersForCart.length,
       _marketRequestIdsWithMyPendingOffer.length,
@@ -4500,7 +4478,7 @@ class _UserDashboardState extends State<UserDashboard>
       _myPendingMarketOffersForCart.isEmpty
           ? 0
           : identityHashCode(_myPendingMarketOffersForCart.first),
-    );
+    ]);
     final cartChanged = _webTabChildrenCartSig != cartSig;
     final active = _tabIndex.clamp(0, _kDashboardTabCount - 1);
     final tabSwitched = _webBuiltActiveTab != active;
@@ -6991,9 +6969,24 @@ class _UserDashboardState extends State<UserDashboard>
             decoration: InputDecoration(
               isDense: true,
               prefixIcon: const Icon(Icons.search),
-              suffixIcon: !hasDraft
-                  ? null
-                  : IconButton(
+              suffixIcon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!_isGuest && _tabIndex == 0)
+                    IconButton(
+                      tooltip: _isArabic ? 'عمليات بحثي' : 'Saved searches',
+                      onPressed: () => showSavedSearchesSheet(
+                        context,
+                        arabic: _isArabic,
+                        onApply: (q) {
+                          _inlineSearchCtrl.text = q;
+                          _setSearchQuery(q);
+                        },
+                      ),
+                      icon: const Icon(Icons.bookmarks_outlined),
+                    ),
+                  if (hasDraft)
+                    IconButton(
                       tooltip: _isArabic ? 'مسح' : 'Clear',
                       onPressed: () {
                         _debounce?.cancel();
@@ -7003,6 +6996,8 @@ class _UserDashboardState extends State<UserDashboard>
                       },
                       icon: const Icon(Icons.close),
                     ),
+                ],
+              ),
               hintText: searchHint,
               filled: true,
               fillColor: cs.surfaceContainerHighest.withValues(alpha: 0.20),
@@ -9506,6 +9501,18 @@ class _UserDashboardState extends State<UserDashboard>
   DateTime? _incomingDealCreatedAt(Map<String, dynamic> row) =>
       _tryParseDt(row['created_at']);
 
+  DateTime? _dealCreatedAt(Map<String, dynamic> row) =>
+      _tryParseDt(row['created_at']) ??
+      _tryParseDt(row['submitted_at']) ??
+      _tryParseDt(row['updated_at']);
+
+  int _compareDealDates(DateTime? a, DateTime? b) {
+    final fallback = DateTime.fromMillisecondsSinceEpoch(0);
+    final da = a ?? fallback;
+    final db = b ?? fallback;
+    return _dealsSortFilter == 'oldest' ? da.compareTo(db) : db.compareTo(da);
+  }
+
   bool _incomingDealAccepted(Map<String, dynamic> row) {
     final st = (row['status'] ?? '').toString().toLowerCase().trim();
     return DealMessagingGate.offerApprovedByOwner(st) ||
@@ -9515,14 +9522,9 @@ class _UserDashboardState extends State<UserDashboard>
   List<Map<String, dynamic>> _filteredIncomingDeals(
     List<Map<String, dynamic>> src,
   ) {
-    var list = List<Map<String, dynamic>>.from(src)
+    final list = List<Map<String, dynamic>>.from(src)
         .where((e) => !_incomingDealAccepted(e))
         .toList();
-    if (_incomingDealStatusFilter == 'waiting') {
-      list = list.where((e) => !_incomingDealAccepted(e)).toList();
-    } else if (_incomingDealStatusFilter == 'accepted') {
-      list = list.where(_incomingDealAccepted).toList();
-    }
     list.sort((a, b) {
       final da =
           _incomingDealCreatedAt(a) ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -9674,6 +9676,24 @@ class _UserDashboardState extends State<UserDashboard>
         child: Row(
           children: [
             chip(
+              _isArabic ? 'الأحدث' : 'Newest',
+              _dealsSortFilter == 'newest',
+              () => setState(() => _dealsSortFilter = 'newest'),
+            ),
+            const SizedBox(width: 8),
+            chip(
+              _isArabic ? 'الأقدم' : 'Oldest',
+              _dealsSortFilter == 'oldest',
+              () => setState(() => _dealsSortFilter = 'oldest'),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              width: 1,
+              height: 20,
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+            const SizedBox(width: 8),
+            chip(
               _isArabic ? 'الكل' : 'All status',
               _dealsOngoingStatusFilter == 'all',
               () => setState(() => _dealsOngoingStatusFilter = 'all'),
@@ -9764,13 +9784,19 @@ class _UserDashboardState extends State<UserDashboard>
             chip(
               _isArabic ? 'الأحدث' : 'Newest',
               _dealsSortFilter == 'newest',
-              () => setState(() => _dealsSortFilter = 'newest'),
+              () => setState(() {
+                _dealsSortFilter = 'newest';
+                _incomingDealSortNewest = true;
+              }),
             ),
             const SizedBox(width: 8),
             chip(
               _isArabic ? 'الأقدم' : 'Oldest',
               _dealsSortFilter == 'oldest',
-              () => setState(() => _dealsSortFilter = 'oldest'),
+              () => setState(() {
+                _dealsSortFilter = 'oldest';
+                _incomingDealSortNewest = false;
+              }),
             ),
           ],
         ),
@@ -9822,17 +9848,21 @@ class _UserDashboardState extends State<UserDashboard>
                 color: Theme.of(context).colorScheme.outlineVariant),
             const SizedBox(width: 8),
             chip(
+              _isArabic ? 'كل الأنواع' : 'All types',
+              _dealsTypeFilter == 'all',
+              () => setState(() => _dealsTypeFilter = 'all'),
+            ),
+            const SizedBox(width: 8),
+            chip(
               _isArabic ? 'إعلانات' : 'Listings',
               _dealsTypeFilter == 'listings',
-              () => setState(() => _dealsTypeFilter =
-                  _dealsTypeFilter == 'listings' ? 'all' : 'listings'),
+              () => setState(() => _dealsTypeFilter = 'listings'),
             ),
             const SizedBox(width: 8),
             chip(
               _isArabic ? 'طلبات' : 'Requests',
               _dealsTypeFilter == 'requests',
-              () => setState(() => _dealsTypeFilter =
-                  _dealsTypeFilter == 'requests' ? 'all' : 'requests'),
+              () => setState(() => _dealsTypeFilter = 'requests'),
             ),
           ],
         ),
@@ -9853,6 +9883,12 @@ class _UserDashboardState extends State<UserDashboard>
 
   bool get _hasOutgoingDealCards =>
       _cart.isNotEmpty || _myPendingMarketOffersForCart.isNotEmpty;
+
+  bool get _hasExcludedDealCards =>
+      _myArchivedMarketOffersForCart.isNotEmpty ||
+      _excludedUserReservationsForCart.isNotEmpty ||
+      _offers.any((r) =>
+          (r['owner_rejection_reason'] ?? '').toString().trim().isNotEmpty);
 
   bool get _hasCompletedDealCards =>
       _completedCart.isNotEmpty ||
@@ -10162,6 +10198,7 @@ class _UserDashboardState extends State<UserDashboard>
 
     if (!_hasOutgoingDealCards &&
         !_hasCompletedDealCards &&
+        !_hasExcludedDealCards &&
         !_hasIncomingDealCards) {
       return ListView(
         controller: onboardingScroll,
@@ -10324,16 +10361,6 @@ class _UserDashboardState extends State<UserDashboard>
 
         final activeChildren = <Widget>[
           _activeDealFilterBar(l10nCart),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
-            child: Text(
-              _dealRatioLabel(used, maxDeals),
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: cs.primary,
-                  ),
-            ),
-          ),
           if (!_hasOutgoingDealCards)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 8),
@@ -10375,6 +10402,12 @@ class _UserDashboardState extends State<UserDashboard>
             return st == 'accepted' || st == 'paid';
           }).toList();
         }
+        myActiveRequests = [...myActiveRequests];
+        myActiveListings = [...myActiveListings];
+        myActiveRequests.sort(
+            (a, b) => _compareDealDates(_dealCreatedAt(a), _dealCreatedAt(b)));
+        myActiveListings.sort(
+            (a, b) => _compareDealDates(_dealCreatedAt(a), _dealCreatedAt(b)));
 
         if (myActiveRequests.isNotEmpty) {
           activeChildren.add(sectionTitle(l10n.cartMarketOffersSectionTitle));
@@ -10403,9 +10436,7 @@ class _UserDashboardState extends State<UserDashboard>
         }
         final acceptedIncomingMarket = (_dealsTypeFilter == 'listings')
             ? <Map<String, dynamic>>[]
-            : _incomingMarketOffersOnMine
-                .where(_incomingDealAccepted)
-                .toList(growable: false);
+            : _incomingMarketOffersOnMine.where(_incomingDealAccepted).toList();
         final acceptedIncomingListings = (_dealsTypeFilter == 'requests')
             ? <Map<String, dynamic>>[]
             : _offers
@@ -10413,7 +10444,11 @@ class _UserDashboardState extends State<UserDashboard>
                     (r['user_id'] ?? '').toString().trim().isNotEmpty &&
                     (r['user_id'] ?? '').toString().trim() != _uid &&
                     _incomingDealAccepted(r))
-                .toList(growable: false);
+                .toList();
+        acceptedIncomingMarket.sort(
+            (a, b) => _compareDealDates(_dealCreatedAt(a), _dealCreatedAt(b)));
+        acceptedIncomingListings.sort(
+            (a, b) => _compareDealDates(_dealCreatedAt(a), _dealCreatedAt(b)));
         if (acceptedIncomingMarket.isNotEmpty &&
             _dealsOngoingStatusFilter != 'pending') {
           activeChildren.add(sectionTitle(
@@ -10456,6 +10491,25 @@ class _UserDashboardState extends State<UserDashboard>
         } else if (_dealsTypeFilter == 'requests') {
           completedProps = const [];
         }
+
+        DateTime completedAtOf(Map<String, dynamic> m) =>
+            _tryParseDt(m['completed_at']) ??
+            _tryParseDt(m['updated_at']) ??
+            _tryParseDt(m['created_at']) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        int byDate(DateTime a, DateTime b) =>
+            _dealsSortFilter == 'oldest' ? a.compareTo(b) : b.compareTo(a);
+        DateTime reqAtOf(MarketPropertyRequestRow r) =>
+            r.completedAt ??
+            r.updatedAt ??
+            r.createdAt ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        completedProps = [...completedProps]
+          ..sort((a, b) => byDate(completedAtOf(a), completedAtOf(b)));
+        completedOffers = [...completedOffers]
+          ..sort((a, b) => byDate(completedAtOf(a), completedAtOf(b)));
+        completedReqs = [...completedReqs]
+          ..sort((a, b) => byDate(reqAtOf(a), reqAtOf(b)));
 
         final completedCount = completedProps.length +
             completedOffers.length +
@@ -10657,7 +10711,8 @@ class _UserDashboardState extends State<UserDashboard>
                     ),
                   ),
                 ],
-                selected: {pane == 3 ? 2 : pane},
+                emptySelectionAllowed: true,
+                selected: pane == 3 ? <int>{} : {pane},
                 onSelectionChanged: (s) {
                   if (s.isEmpty) return;
                   setState(() => _cartPaneIndex = s.first);

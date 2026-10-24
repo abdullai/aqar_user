@@ -92,6 +92,39 @@ class MarketPropertyRequestRow {
     this.requesterAvatarUrl,
   });
 
+  MarketPropertyRequestRow withRequesterAvatar(String avatarUrl) {
+    return MarketPropertyRequestRow(
+      id: id,
+      requestPublicCode: requestPublicCode,
+      title: title,
+      description: description,
+      purpose: purpose,
+      propertyType: propertyType,
+      city: city,
+      districts: districts,
+      budgetMin: budgetMin,
+      budgetMax: budgetMax,
+      areaMinM2: areaMinM2,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      requesterId: requesterId,
+      showRequesterName: showRequesterName,
+      requesterPublicName: requesterPublicName,
+      coverImageStoragePath: coverImageStoragePath,
+      defaultCoverUsed: defaultCoverUsed,
+      requestPriority: requestPriority,
+      instantPaidAt: instantPaidAt,
+      status: status,
+      editCount: editCount,
+      maxEdits: maxEdits,
+      deletionRequestedAt: deletionRequestedAt,
+      completedAt: completedAt,
+      selectedOfferId: selectedOfferId,
+      details: details,
+      requesterAvatarUrl: avatarUrl,
+    );
+  }
+
   /// تاريخ إنشاء الطلب للعرض في الرئيسية: الأحدث إنشاءً أولاً.
   DateTime get sortTime =>
       createdAt ?? updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);

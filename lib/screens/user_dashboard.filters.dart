@@ -28,17 +28,22 @@ extension _UserDashboardStateFilters on _UserDashboardState {
     return s;
   }
 
-  String _flattenSearchValue(dynamic value) {
-    if (value == null) return '';
+  String _flattenSearchValue(dynamic value, [int depth = 0]) {
+    if (value == null || depth > 3) return '';
     if (value is Map) {
       return value.entries
-          .map((e) => '${e.key} ${_flattenSearchValue(e.value)}')
+          .take(40)
+          .map((e) => '${e.key} ${_flattenSearchValue(e.value, depth + 1)}')
           .join(' ');
     }
     if (value is Iterable) {
-      return value.map(_flattenSearchValue).join(' ');
+      return value
+          .take(40)
+          .map((e) => _flattenSearchValue(e, depth + 1))
+          .join(' ');
     }
-    return value.toString();
+    final s = value.toString();
+    return s.length > 600 ? s.substring(0, 600) : s;
   }
 
   List<String> _tokens(String? v) {

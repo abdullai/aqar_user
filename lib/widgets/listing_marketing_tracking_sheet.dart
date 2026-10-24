@@ -83,17 +83,46 @@ class ListingMarketingTrackingBody extends StatefulWidget {
 
 class _ListingMarketingTrackingBodyState
     extends State<ListingMarketingTrackingBody> {
-  late final Future<Map<String, dynamic>> _future;
+  late Future<Map<String, dynamic>> _future;
   Map<String, String>? _selectedMarketerName;
   bool _loadErrorSnackShown = false;
 
   @override
   void initState() {
     super.initState();
-    _future = MarketingFlowService(widget.sb).getRequestTrackingBundle(
+    _future = _loadTrackingBundle();
+  }
+
+  Future<Map<String, dynamic>> _loadTrackingBundle() {
+    return MarketingFlowService(widget.sb).getRequestTrackingBundle(
       widget.requestId,
       viewerUserId: widget.viewerUserId,
       preferArabicNames: widget.isAr,
+    );
+  }
+
+  void _refreshTracking() {
+    setState(() {
+      _selectedMarketerName = null;
+      _future = _loadTrackingBundle();
+    });
+  }
+
+  Widget _trackingHeader(String title) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+          ),
+        ),
+        IconButton(
+          tooltip: widget.isAr ? 'تحديث التتبع' : 'Refresh tracking',
+          onPressed: _refreshTracking,
+          icon: const Icon(Icons.refresh_rounded),
+        ),
+      ],
     );
   }
 
@@ -197,7 +226,6 @@ class _ListingMarketingTrackingBodyState
       if (c != null && c.hasClients) c.jumpTo(0);
     });
 
-    final st = (req?['status'] ?? '').toString();
     final resolvedStage = req != null
         ? ListingWorkflowUnified.fromMergedOwnerHubRow(
             Map<String, dynamic>.from(req),
@@ -219,9 +247,8 @@ class _ListingMarketingTrackingBodyState
       controller: widget.scrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        Text(
+        _trackingHeader(
           ar ? 'تتبع مسار إعلانك في التسويق' : 'Your listing marketing journey',
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
         const SizedBox(height: 12),
         RequestSummaryTable(
@@ -236,12 +263,8 @@ class _ListingMarketingTrackingBodyState
               value: _formatTrackDate(_parseDt(req?['updated_at']), ar),
             ),
             RequestSummaryRow(
-              label: ar ? 'مرحلة سير العمل' : 'Workflow stage',
+              label: ar ? 'الحالة الحالية' : 'Current status',
               value: stageLabel,
-            ),
-            RequestSummaryRow(
-              label: ar ? 'حالة الطلب' : 'Request status',
-              value: WorkflowDisplayTexts.requestStatus(st, ar),
             ),
             RequestSummaryRow(
               label: ar ? 'المسوق المختار' : 'Selected marketer',
@@ -410,9 +433,8 @@ class _ListingMarketingTrackingBodyState
       controller: widget.scrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
       children: [
-        Text(
+        _trackingHeader(
           ar ? 'تتبع تقدم عرضك التسويقي' : 'Your marketing offer progress',
-          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
         const SizedBox(height: 12),
         RequestSummaryTable(
@@ -436,15 +458,8 @@ class _ListingMarketingTrackingBodyState
               ),
             ),
             RequestSummaryRow(
-              label: ar ? 'مرحلة سير العمل الحالية' : 'Current workflow stage',
+              label: ar ? 'الحالة الحالية' : 'Current status',
               value: stageLabel,
-            ),
-            RequestSummaryRow(
-              label: ar ? 'حالة الطلب' : 'Request status',
-              value: WorkflowDisplayTexts.requestStatus(
-                (req?['status'] ?? '').toString(),
-                ar,
-              ),
             ),
           ],
         ),

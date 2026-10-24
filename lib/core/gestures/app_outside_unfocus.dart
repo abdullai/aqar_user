@@ -17,31 +17,14 @@ class AppOutsideUnfocus extends StatelessWidget {
     focus.unfocus();
   }
 
-  static bool hasNonCollapsedSelection() {
-    final focus = FocusManager.instance.primaryFocus;
-    final state = focus?.context?.findAncestorStateOfType<EditableTextState>();
-    if (state == null) return false;
-    try {
-      final sel = state.widget.controller.selection;
-      return sel.isValid && !sel.isCollapsed;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  static bool pointerHitsFocusedEditable(Offset global) {
-    final focus = FocusManager.instance.primaryFocus;
-    final ctx = focus?.context;
-    if (ctx == null || !ctx.mounted) return false;
-    final state = ctx.findAncestorStateOfType<EditableTextState>();
-    if (state == null) return false;
-    final box = state.context.findRenderObject() ?? ctx.findRenderObject();
-    if (box is! RenderBox || !box.hasSize || !box.attached) return false;
-    try {
-      final origin = box.localToGlobal(Offset.zero);
-      return (origin & box.size).inflate(48).contains(global);
-    } catch (_) {
-      return false;
+  static void unfocusEditableFromOutsidePointer(PointerDownEvent event) {
+    switch (event.kind) {
+      case PointerDeviceKind.touch:
+      case PointerDeviceKind.stylus:
+      case PointerDeviceKind.invertedStylus:
+        return;
+      default:
+        unfocusEditable();
     }
   }
 
@@ -57,27 +40,10 @@ class AppOutsideUnfocus extends StatelessWidget {
         }
         return false;
       },
-      child: Listener(
+      child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onPointerDown: (e) {
-          switch (e.kind) {
-            case PointerDeviceKind.touch:
-            case PointerDeviceKind.mouse:
-            case PointerDeviceKind.stylus:
-            case PointerDeviceKind.invertedStylus:
-              break;
-            default:
-              return;
-          }
-          if (hasNonCollapsedSelection()) return;
-          if (pointerHitsFocusedEditable(e.position)) return;
-          unfocusEditable();
-        },
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: unfocusEditable,
-          child: child,
-        ),
+        onTap: unfocusEditable,
+        child: child,
       ),
     );
   }

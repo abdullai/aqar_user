@@ -954,26 +954,20 @@ extension _UserDashboardStateActions on _UserDashboardState {
     await _afterPlusComposerClosed(res);
   }
 
-  /// زر +: إعلان، طلب، مصور عقاري، ومطور (قريباً).
-  Future<void> _openCenterPlus() async {
-    _rememberPlusOriginTab();
-    if (_isGuest) {
-      _showLoginDialog();
-      return;
-    }
+  Future<void> _warmCenterPlusPhotographerCounts() async {
+    if (!mounted || _isGuest) return;
 
-    var photographerRequestCount = 0;
     try {
       final photographerService = PhotographerService(_sb);
       final requesterShots = await photographerService.myShootsAsRequester();
       final incomingOffers =
           await photographerService.myIncomingPhotoShootOffers();
-      photographerRequestCount += incomingOffers
-          .where((offer) => offer['offer_status'] == 'submitted')
-          .length;
-      photographerRequestCount += requesterShots
-          .where((shoot) => shoot.deliveryReviewStatus == 'pending_review')
-          .length;
+      var photographerRequestCount = incomingOffers
+              .where((offer) => offer['offer_status'] == 'submitted')
+              .length +
+          requesterShots
+              .where((shoot) => shoot.deliveryReviewStatus == 'pending_review')
+              .length;
       final photographerSubscription = await SubscriptionService(_sb)
           .getCurrentSubscriptionForPlanUserType('photographer');
       if (SubscriptionService.subscriptionRowInPaidAccess(
@@ -994,12 +988,29 @@ extension _UserDashboardStateActions on _UserDashboardState {
             )
             .length;
       }
-    } catch (_) {}
-    if (!mounted) return;
+
+      if (!mounted || _isGuest) return;
+      _ss(() => _plusComposerPhotographerRequestCount = photographerRequestCount);
+    } catch (_) {
+      if (mounted && !_isGuest) {
+        _ss(() => _plusComposerPhotographerRequestCount = 0);
+      }
+    }
+  }
+
+  /// زر +: إعلان، طلب، مصور عقاري، ومطور (قريباً).
+  Future<void> _openCenterPlus() async {
+    _rememberPlusOriginTab();
+    if (_isGuest) {
+      _showLoginDialog();
+      return;
+    }
+
+    unawaited(_warmCenterPlusPhotographerCounts());
 
     final choice = await _showPlusComposerChoices(
       guest: false,
-      photographerRequestCount: photographerRequestCount,
+      photographerRequestCount: _plusComposerPhotographerRequestCount,
     );
 
     if (!mounted || choice == null) return;

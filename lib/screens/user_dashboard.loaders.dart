@@ -1266,8 +1266,9 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       }
 
       final rows = (data as List).cast<Map>();
-      await ListingMediaHydration.hydratePropertyRows(_sb, rows);
-      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      for (final row in rows) {
+        ListingMediaHydration.stampRow(row);
+      }
 
       if (kDebugMode) {
         print('[DBG][HOME] rows=${rows.length}');
@@ -1290,9 +1291,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       var list = kIsWeb
           ? await _parseHomeRowsYielding(
               rows,
-              kIsWeb && !_isGuest
-                  ? await _ownerProfilesForRows(rows)
-                  : const <String, Map<String, dynamic>>{},
+              const <String, Map<String, dynamic>>{},
               isCurrent: () =>
                   _isCurrentDashboardAccount(requestUid, accountEpoch),
             )
@@ -1304,8 +1303,6 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
                 ),
               )
               .toList();
-      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
-      list = await _hydratePublisherCardLabels(list);
       if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
 
       var activeRes = <String, Map<String, dynamic>>{};
@@ -1332,48 +1329,76 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
           accountEpoch: accountEpoch,
         ));
         unawaited(() async {
-          var enriched = await _enrichPublishedPropertiesFromRequests(
-            list,
-            rows.cast<Map<dynamic, dynamic>>(),
-          );
-          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
-          enriched = await _hydratePublisherCardLabels(enriched);
-          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
-          var changed = !identical(enriched, list);
-          if (!changed && enriched.length == list.length) {
-            for (var i = 0; i < list.length; i++) {
-              final a = list[i];
-              final b = enriched[i];
-              if (a.price != b.price ||
-                  a.area != b.area ||
-                  a.marketingCommissionKind != b.marketingCommissionKind ||
-                  a.marketingCommissionRate != b.marketingCommissionRate ||
-                  a.marketingCommissionAmount != b.marketingCommissionAmount ||
-                  a.vatRate != b.vatRate ||
-                  (a.marketerEntityPublicLine(_isArabic) ?? '') !=
-                      (b.marketerEntityPublicLine(_isArabic) ?? '')) {
-                changed = true;
-                break;
+          try {
+            await ListingMediaHydration.hydratePropertyRows(_sb, rows);
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+            final ownerProfiles = await _ownerProfilesForRows(rows);
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+            var enriched = rows
+                .map((row) => _propertyFromRowWithProfiles(row, ownerProfiles))
+                .toList(growable: false);
+            enriched = await _enrichPublishedPropertiesFromRequests(
+              enriched,
+              rows.cast<Map<dynamic, dynamic>>(),
+            );
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+            enriched = await _hydratePublisherCardLabels(enriched);
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+            var changed = !identical(enriched, list);
+            if (!changed && enriched.length == list.length) {
+              for (var i = 0; i < list.length; i++) {
+                final a = list[i];
+                final b = enriched[i];
+                if (a.price != b.price ||
+                    a.area != b.area ||
+                    !listEquals(a.images, b.images) ||
+                    a.ownerDisplayName != b.ownerDisplayName ||
+                    a.marketingCommissionKind != b.marketingCommissionKind ||
+                    a.marketingCommissionRate != b.marketingCommissionRate ||
+                    a.marketingCommissionAmount !=
+                        b.marketingCommissionAmount ||
+                    a.vatRate != b.vatRate ||
+                    (a.marketerEntityPublicLine(_isArabic) ?? '') !=
+                        (b.marketerEntityPublicLine(_isArabic) ?? '')) {
+                  changed = true;
+                  break;
+                }
               }
+            } else if (enriched.length != list.length) {
+              changed = true;
             }
-          } else if (enriched.length != list.length) {
-            changed = true;
+            if (!changed) return;
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+            _ssHomeFeed(() {
+              _all = enriched;
+              _rebuildFavoritesFromCache();
+            });
+          } catch (e) {
+            if (_isCurrentDashboardAccount(requestUid, accountEpoch) &&
+                kDebugMode) {
+              print('[DBG][HOME] card enrichment skipped: $e');
+            }
           }
-          // لا تستبدل القائمة إن لم يتغيّر شيء — يمنع وميض البطاقة.
-          if (!changed) return;
-          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
-          _ssHomeFeed(() {
-            _all = enriched;
-            _rebuildFavoritesFromCache();
-          });
         }());
       } else {
+        _ssHomeFeed(() {
+          _retainRevealedHomeProperty(list);
+          _all = list;
+          _lastHomeFetch = DateTime.now();
+          _rebuildFavoritesFromCache();
+        });
+        final mediaHydration = ListingMediaHydration.hydratePropertyRows(
+          _sb,
+          rows,
+        );
         // ملفّات المالك + الحجوزات معاً، ثم إثراء واحد (تجنّب إثراء يُستبدل فوراً).
         final homeEnrich =
             await Future.wait<Map<String, Map<String, dynamic>>>([
           _fetchActiveReservationsByPropertyIds(propIds),
           _ownerProfilesForRows(rows),
         ]);
+        await mediaHydration;
+        if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         activeRes = homeEnrich[0];
         final ownerProfiles = homeEnrich[1];
         list = rows
@@ -1663,44 +1688,12 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       if (rowMaps.isEmpty) {
         if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
         _ssHomeFeed(() => _marketHomeRequests = const []);
-        await _refreshHomeRequestApplicantCounts(const <String>[]);
+        unawaited(_refreshHomeRequestApplicantCounts(const <String>[]));
         return;
       }
 
-      final uids = rowMaps
-          .map((m) => (m['requester_id'] ?? '').toString().trim())
-          .where((s) => s.isNotEmpty)
-          .toSet()
-          .toList();
-      final avatarByUid = <String, String>{};
-      if (!_isGuest && uids.isNotEmpty) {
-        try {
-          // يجب _net/timeout — بدونها يعلق التحميل ويبقى _loadingMarketRequests=true
-          // فيُرجع _buildHomeBody شاشة فارغة إلى الأبد.
-          final prof = await _net(() {
-            return _sb
-                .from('users_profiles')
-                .select('user_id,avatar_url')
-                .inFilter('user_id', uids);
-          }, tag: 'MARKET_REQ_AVATARS', showDialog: false);
-          if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
-          if (prof != null) {
-            for (final p in (prof as List).cast<Map>()) {
-              final uid = (p['user_id'] ?? '').toString().trim();
-              final url = (p['avatar_url'] ?? '').toString().trim();
-              if (uid.isNotEmpty && url.isNotEmpty) avatarByUid[uid] = url;
-            }
-          }
-        } catch (_) {}
-      }
-
       final list = rowMaps
-          .map((m) {
-            final uid = (m['requester_id'] ?? '').toString().trim();
-            final u = avatarByUid[uid];
-            if (u != null) m['requester_avatar_url'] = u;
-            return MarketPropertyRequestRow.fromMap(m);
-          })
+          .map(MarketPropertyRequestRow.fromMap)
           .where(
             (r) =>
                 r.id.isNotEmpty &&
@@ -1717,8 +1710,48 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         _retainRevealedMarketRequest(list);
         _marketHomeRequests = list;
       });
-      await _refreshHomeRequestApplicantCounts(list.map((e) => e.id));
-      if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
+      unawaited(_refreshHomeRequestApplicantCounts(list.map((e) => e.id)));
+      if (!_isGuest) {
+        unawaited(() async {
+          final uids = rowMaps
+              .map((m) => (m['requester_id'] ?? '').toString().trim())
+              .where((s) => s.isNotEmpty)
+              .toSet()
+              .toList();
+          if (uids.isEmpty) return;
+          try {
+            final prof = await _net(() {
+              return _sb
+                  .from('users_profiles')
+                  .select('user_id,avatar_url')
+                  .inFilter('user_id', uids);
+            }, tag: 'MARKET_REQ_AVATARS', showDialog: false);
+            if (!_isCurrentDashboardAccount(requestUid, accountEpoch) ||
+                prof == null) {
+              return;
+            }
+            final avatarByUid = <String, String>{};
+            for (final p in (prof as List).cast<Map>()) {
+              final uid = (p['user_id'] ?? '').toString().trim();
+              final url = (p['avatar_url'] ?? '').toString().trim();
+              if (uid.isNotEmpty && url.isNotEmpty) avatarByUid[uid] = url;
+            }
+            if (avatarByUid.isEmpty) return;
+            _ssHomeFeed(() {
+              _marketHomeRequests = _marketHomeRequests.map((request) {
+                final avatar = avatarByUid[request.requesterId.trim()];
+                return avatar == null
+                    ? request
+                    : request.withRequesterAvatar(avatar);
+              }).toList(growable: false);
+            });
+          } catch (e) {
+            if (kDebugMode) {
+              print('[DBG][MARKET_REQ_AVATARS] enrichment skipped: $e');
+            }
+          }
+        }());
+      }
       if (mounted) {
         unawaited(_reloadHiddenFeedPreferences());
       }
@@ -1726,10 +1759,6 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
       if (!_isCurrentDashboardAccount(requestUid, accountEpoch)) return;
       if (kDebugMode) {
         print('[DBG][MARKET_REQ_HOME] skip: $e');
-      }
-      if (_marketHomeRequests.isEmpty) {
-        _homeRequestApplicantCountsLoaded = true;
-        _tryReleaseHomeFeedIdentity(accountEpoch);
       }
       _ssHomeFeed(() {
         _errorMarketRequests = e.toString();
@@ -2522,9 +2551,7 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         .toList();
     if (ids.isEmpty) {
       if (accountEpoch != _dashboardAccountEpoch) return;
-      _homeRequestApplicantCountsLoaded = true;
       _ssHomeFeed(() => _homeRequestApplicantCounts = const {});
-      _tryReleaseHomeFeedIdentity(accountEpoch);
       return;
     }
     try {
@@ -2552,11 +2579,12 @@ extension _UserDashboardStateLoaders on _UserDashboardState {
         if (rid.isEmpty) continue;
         counts[rid] = (counts[rid] ?? 0) + 1;
       }
-      _homeRequestApplicantCountsLoaded = true;
       _ssHomeFeed(() => _homeRequestApplicantCounts = counts);
-      _tryReleaseHomeFeedIdentity(accountEpoch);
-    } catch (_) {
-      _failHomeFeedIdentity(accountEpoch);
+    } catch (e) {
+      if (accountEpoch != _dashboardAccountEpoch || !mounted) return;
+      if (kDebugMode) {
+        print('[DBG][MR_APPLICANT_COUNTS] enrichment skipped: $e');
+      }
     }
   }
 

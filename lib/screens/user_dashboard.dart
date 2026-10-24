@@ -1,4 +1,4 @@
-library user_dashboard;
+﻿library user_dashboard;
 
 // =============================
 // IMPORTS
@@ -27,6 +27,7 @@ import '../l10n/app_localizations.dart';
 import '../core/l10n/locale_content.dart';
 import '../core/config/app_config.dart';
 import '../core/branding/branding_logo_image.dart';
+import '../core/listing/deed_row_meta.dart';
 import '../core/listing/listing_media_urls.dart';
 import '../core/search/arabic_search_intent.dart';
 import '../core/search/work_location_prefs.dart';
@@ -189,6 +190,7 @@ import '../widgets/listing_hero_thumb.dart';
 import '../widgets/listing_media_gallery.dart';
 import '../widgets/in_app_tour_viewer.dart';
 import '../core/listing/property_type_catalog.dart';
+import '../core/marketing/hub_card_rows.dart';
 import '../core/marketing/marketer_market_visibility_prefs.dart';
 import '../core/marketing/marketing_offer_fee.dart';
 import '../core/marketing/marketing_workflow_ui_config.dart';

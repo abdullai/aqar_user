@@ -14,6 +14,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return const [1, 2];
   }
 
+  /// بطاقات صفحتي لا تعرض جوال المعلن ولا أزرار الدردشة في أي مرحلة.
+  bool get _hubCardsShowOwnerContact => false;
+
   String _hubRequestCardTitle(Map<String, dynamic> row) {
     final title =
         PropertyListingDisplay.compactRequestTitleForRow(row, widget.isAr);
@@ -642,7 +645,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   /// طلبات التسويق حسب مرحلة الطلب (قبل النشر).
   List<Map<String, dynamic>> _ownerRequestRowsForTab(int tabIndex) {
     if (tabIndex >= 4) return const <Map<String, dynamic>>[];
-    return _ownerListingRequests.where((r) {
+    final rows = _ownerListingRequests.where((r) {
       if (!_matchesMyPageRequestFilters(r)) return false;
       final decision = ListingPostPublishUiHelper.decideFromRequestRow(
           Map<String, dynamic>.from(r));
@@ -661,6 +664,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
       return ListingStageUiHelper.ownerTabMatches(tabIndex, decision.stage);
     }).toList();
+    return HubCardRows.newestFirst(rows);
   }
 
   bool _ownerRequestRowInWaitingMarketersBucket(Map<String, dynamic> r) {
@@ -741,21 +745,23 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   /// تبويب «بانتظار المسوقين» — بدون عروض مقدَّمة بعد.
   List<Map<String, dynamic>> _ownerRequestRowsWaitingNoOffers() {
-    return _ownerListingRequests.where((r) {
+    final rows = _ownerListingRequests.where((r) {
       if (!_matchesMyPageRequestFilters(r)) return false;
       if (!_ownerRequestRowInWaitingMarketersBucket(r)) return false;
       if (_ownerRequestRowShowsInSubmittedOffersTab(r)) return false;
       if (_ownerRequestRowShowsInInactive72hTab(r)) return false;
       return true;
     }).toList();
+    return HubCardRows.newestFirst(rows);
   }
 
   /// تبويب «العروض المقدمة» — وصلت عروض ولم يُعاد توجيه الطلب لتعاقد بعد.
   List<Map<String, dynamic>> _ownerRequestRowsSubmittedOffersOnly() {
-    return _ownerListingRequests.where((r) {
+    final rows = _ownerListingRequests.where((r) {
       if (!_matchesMyPageRequestFilters(r)) return false;
       return _ownerRequestRowShowsInSubmittedOffersTab(r);
     }).toList();
+    return HubCardRows.newestFirst(rows);
   }
 
   Widget _buildOwnerMyAds(
@@ -1756,6 +1762,11 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     try {
       await MarketingFlowService(_sb).acceptListingOfferById(id);
       if (!mounted) return;
+      _ss(() {
+        _ownerListingRequests =
+            HubCardRows.withOfferAccepted(_ownerListingRequests, id);
+        _ownerTabsCtrl?.index = 2;
+      });
       _ownerAfterOfferMutation();
       _showNotification(
         widget.isAr ? 'تم' : 'Done',
@@ -1804,6 +1815,13 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         requestId: rid,
       );
       if (!mounted) return;
+      _ss(() {
+        _ownerListingRequests = HubCardRows.withOfferDeclined(
+          _ownerListingRequests,
+          offerId: oid,
+          requestId: rid,
+        );
+      });
       _showNotification(
         widget.isAr ? 'تم' : 'Done',
         ListingWorkflowCopy.snackOfferDeclined(widget.isAr),
@@ -2368,7 +2386,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             context,
             icon: Icons.description_outlined,
             label: widget.isAr ? 'رقم الصك' : 'Deed no.',
-            value: deedNo.isEmpty ? '—' : deedNo,
+            value: deedNo.isEmpty ? _hubDeedAbsentLabel : deedNo,
             copyPlain: deedNo.isEmpty ? null : deedNo,
             valueMaxLines: 1,
             inlineLabel: true,
@@ -2377,7 +2395,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             context,
             icon: Icons.event_available_outlined,
             label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
-            value: deedDate.isEmpty ? '—' : deedDate,
+            value: deedDate.isEmpty ? _hubDeedAbsentLabel : deedDate,
             valueMaxLines: 1,
             inlineLabel: true,
           ),
@@ -4655,6 +4673,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     try {
       await MarketingFlowService(_sb).marketerWithdrawListingOffer(offerId);
       if (!mounted) return;
+      _ss(() => _mkOffers = HubCardRows.withoutOfferId(_mkOffers, offerId));
       await _refreshMyPageHubAfterAction(notifyHub: false);
       if (!mounted) return;
       _showNotification(
@@ -4837,6 +4856,10 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           (r['_hubKind'] ?? r['_ui_type'] ?? '').toString() == 'offer') {
         if (_marketerRowHasContract(r)) return false;
         if (_marketerRowInactive72h(r)) return false;
+        if (HubCardRows.deadOfferStatuses
+            .contains((r['status'] ?? '').toString().toLowerCase().trim())) {
+          return false;
+        }
       }
       if (tabIndex == 1) {
         final hk = (r['_hubKind'] ?? r['_ui_type'] ?? '').toString();
@@ -4938,7 +4961,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }).map((row) {
       return <String, dynamic>{...row, '_sourceHubTab': tabIndex};
     }).toList();
-    return _dedupeMarketerHubRowsByRequest(filteredRows);
+    return _dedupeMarketerHubRowsByRequest(
+      HubCardRows.newestFirst(filteredRows),
+    );
   }
 
   Widget _marketerTabWithBadge(String label, int count) {
@@ -6562,46 +6587,18 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return b.toString();
   }
 
+  String get _hubDeedAbsentLabel => widget.isAr ? 'غير مُدخل' : 'Not provided';
+
   String _hubDeedNumberFromRow(Map<String, dynamic> r, [Property? prop]) {
-    final fromProp = (prop?.deedNumber ?? '').toString().trim();
-    if (fromProp.isNotEmpty) return _hubAsciiDigits(fromProp);
-    for (final k in const [
-      'deed_number',
-      'preview_deed_number',
-      'request_deed_number',
-    ]) {
-      final v = (r[k] ?? '').toString().trim();
-      if (v.isNotEmpty) return _hubAsciiDigits(v);
-    }
-    final payload = r['payload_json'] ?? r['payload'];
-    if (payload is Map) {
-      final v = (payload['deed_number'] ?? payload['preview_deed_number'] ?? '')
-          .toString()
-          .trim();
-      if (v.isNotEmpty) return _hubAsciiDigits(v);
-    }
-    return '';
+    final v = DeedRowMeta.number(r, prop?.deedNumber);
+    return v.isEmpty ? '' : _hubAsciiDigits(v);
   }
 
   String _hubDeedDateFromRow(Map<String, dynamic> r, [Property? prop]) {
     dynamic raw = prop?.deedDate;
     if (raw == null) {
-      for (final k in const [
-        'deed_date',
-        'preview_deed_date',
-        'request_deed_date',
-      ]) {
-        if (r[k] != null && '${r[k]}'.trim().isNotEmpty) {
-          raw = r[k];
-          break;
-        }
-      }
-    }
-    if (raw == null) {
-      final payload = r['payload_json'] ?? r['payload'];
-      if (payload is Map) {
-        raw = payload['deed_date'] ?? payload['preview_deed_date'];
-      }
+      final stored = DeedRowMeta.date(r);
+      raw = stored.isEmpty ? null : stored;
     }
     if (raw == null) return '';
     if (raw is DateTime) {
@@ -8501,7 +8498,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           title: title,
           locationLine: loc,
           ownerDisplayName: owner,
-          ownerPhoneRaw: phone,
+          ownerPhoneRaw: '',
           listingNoTenDigit: code,
           priceSar: base,
           areaM2: area,
@@ -8509,7 +8506,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           photographyFulfillment:
               (row['photography_fulfillment'] ?? 'independent_market')
                   .toString(),
-          hideOwnerContactActions: !_marketerMaySeeOwnerPhone(row),
+          hideOwnerContactActions: true,
           workflowStageLabel: stageLabel,
           requestSubmittedAt: submittedAt,
           marketingRound: round > 1 ? round : null,
@@ -9593,7 +9590,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ),
             // في تبويب «إصدار التصاريح» تظهر أيقونة الدردشة بجوار رقم المالك،
             // فلا نُكرّر زراً عريضاً للدردشة (نتجنّب الازدواج ونُنسّق التباعد).
-            if (_canShowMarketerChatIconForRow(r) &&
+            if (_hubCardsShowOwnerContact &&
+                _canShowMarketerChatIconForRow(r) &&
                 !(_marketerInPermit72SubTab &&
                     _canShowMarketerChatIconForRow(r)))
               OutlinedButton.icon(
@@ -9921,7 +9919,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         }
         final chatIconShownForRow = _marketerInApprovedWorkflowSubTab &&
             _canShowMarketerChatIconForRow(r);
-        if (!contractNavButtonsInlined && !chatIconShownForRow) {
+        if (_hubCardsShowOwnerContact &&
+            !contractNavButtonsInlined &&
+            !chatIconShownForRow) {
           actions.add(
             OutlinedButton.icon(
               onPressed: () {
@@ -10068,7 +10068,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         priorRound ||
         (int.tryParse('${r['round_no'] ?? ''}') ?? 1) > 1 ||
         (int.tryParse('${r['marketing_round'] ?? ''}') ?? 1) > 1;
-    final ownerDispPhone = relistReoffer ? '' : _marketingOwnerPhone(r);
+    final ownerDispPhone = (relistReoffer || !_hubCardsShowOwnerContact)
+        ? ''
+        : _marketingOwnerPhone(r);
     final requestOwnerId =
         (r['request_owner_id'] ?? r['owner_id'] ?? r['requester_id'] ?? '')
             .toString()
@@ -10087,6 +10089,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         type == 'published' || _marketerOwnerChatUnlocked(r);
     final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
     final deedDate = deedAccessAllowed ? _hubDeedDateFromRow(r) : '';
+    final deedMissingLabel = deedAccessAllowed ? _hubDeedAbsentLabel : '—';
     final purposeAccent = PropertyListingDisplay.accentForRequestRow(r);
     final typeKey = (r['preview_type'] ?? r['request_property_type'] ?? '')
         .toString()
@@ -10160,7 +10163,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             context,
             icon: Icons.description_outlined,
             label: widget.isAr ? 'رقم الصك' : 'Deed no.',
-            value: deedNo.isEmpty ? '—' : deedNo,
+            value: deedNo.isEmpty ? deedMissingLabel : deedNo,
             copyPlain: deedNo.isEmpty ? null : deedNo,
             valueMaxLines: 1,
             inlineLabel: true,
@@ -10169,7 +10172,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             context,
             icon: Icons.event_available_outlined,
             label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
-            value: deedDate.isEmpty ? '—' : deedDate,
+            value: deedDate.isEmpty ? deedMissingLabel : deedDate,
             valueMaxLines: 1,
             inlineLabel: true,
           ),
@@ -10177,7 +10180,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             const SizedBox(height: 4),
             _hubPublishedOrReservedStatusChip(r, cs),
           ],
-          if (_isMarketerRole &&
+          if (_hubCardsShowOwnerContact &&
+              _isMarketerRole &&
               !relistReoffer &&
               (_listingRevealsOwnerPhoneFromMarket(r) ||
                   !marketerInvitesTabLayout) &&
@@ -10463,7 +10467,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         r['_hub_prior_round_marketer_offer'] == true ||
         (int.tryParse('${r['round_no'] ?? ''}') ?? 1) > 1 ||
         (int.tryParse('${r['marketing_round'] ?? ''}') ?? 1) > 1;
-    final ownerPhone = isRelisted ? '' : _marketingOwnerPhone(r);
+    final ownerPhone = (isRelisted || !_hubCardsShowOwnerContact)
+        ? ''
+        : _marketingOwnerPhone(r);
     final ownerAvatarUrl = _marketingOwnerAvatarUrl(r);
     final locationText = _marketingLocationText(r);
 
@@ -10841,6 +10847,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         type == 'published' || _marketerOwnerChatUnlocked(r);
     final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
     final deedDate = deedAccessAllowed ? _hubDeedDateFromRow(r) : '';
+    final deedMissingLabel = deedAccessAllowed ? _hubDeedAbsentLabel : '—';
 
     final descNorm = description.trim();
     final titleNorm = title.trim();
@@ -10941,7 +10948,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             context,
             icon: Icons.description_outlined,
             label: widget.isAr ? 'رقم الصك' : 'Deed no.',
-            value: deedNo.isEmpty ? '—' : deedNo,
+            value: deedNo.isEmpty ? deedMissingLabel : deedNo,
             copyPlain: deedNo.isEmpty ? null : deedNo,
             valueMaxLines: 1,
             inlineLabel: true,
@@ -10950,7 +10957,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             context,
             icon: Icons.event_available_outlined,
             label: widget.isAr ? 'تاريخ الصك' : 'Deed date',
-            value: deedDate.isEmpty ? '—' : deedDate,
+            value: deedDate.isEmpty ? deedMissingLabel : deedDate,
             valueMaxLines: 1,
             inlineLabel: true,
           ),
@@ -11091,7 +11098,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                       icon: const Icon(Icons.timeline_outlined),
                       label: Text(widget.isAr ? 'تتبع' : 'Track'),
                     ),
-                  if (type == 'contract' &&
+                  if (_hubCardsShowOwnerContact &&
+                      type == 'contract' &&
                       _marketerContractFlowUnlocked(r) &&
                       !(_marketerInApprovedWorkflowSubTab &&
                           _canShowMarketerChatIconForRow(r))) ...[
