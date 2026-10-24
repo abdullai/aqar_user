@@ -8443,7 +8443,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     final title = _mkRowTitle(row);
     final loc = _marketingLocationText(row);
     final owner = _marketingOwnerName(row);
-    final phone = _marketingOwnerPhone(row);
     var rawCode = (row['listing_request_public_code'] ?? '').toString().trim();
     if (rawCode.length != 10 || !RegExp(r'^[0-9]{10}$').hasMatch(rawCode)) {
       rawCode = (row['preview_listing_public_code'] ??
