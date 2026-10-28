@@ -21,11 +21,13 @@ import '../core/workflow/listing_workflow_ui_context.dart';
 import '../core/haptics/app_haptics.dart';
 import '../core/notifications/app_sound_coordinator.dart';
 import '../core/notifications/hub_workflow_sound.dart';
+import '../core/listing/listing_media_hydration.dart';
 import '../services/chat_peer_service.dart';
 import '../services/marketing_flow_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/listing/request_summary_table.dart';
+import '../widgets/listing_media_preview.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
 import '../widgets/user_presence_strip.dart';
 import '../core/presence/presence_display_prefs.dart';
@@ -489,84 +491,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     return effectivePropertyPriceSarForMarketingFee(r, _linkedProperty);
   }
 
-  List<String> _propertyImageUrls() {
-    final prop = _linkedProperty;
-    if (prop != null && prop['default_cover_used'] != true) {
-      final imgs = prop['property_images'];
-      if (imgs is List && imgs.isNotEmpty) {
-        final rows =
-            imgs.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-              ..sort((a, b) {
-                final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
-                final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
-                return sa.compareTo(sb);
-              });
-        final fromProp = rows
-            .map((row) =>
-                (row['path'] ?? row['file_name'] ?? '').toString().trim())
-            .where((path) => path.isNotEmpty)
-            .map((path) {
-              if (path.startsWith('http')) return path;
-              return Supabase.instance.client.storage
-                  .from('property-images')
-                  .getPublicUrl(path);
-            })
-            .where((url) => url.trim().isNotEmpty)
-            .toList(growable: false);
-        if (fromProp.isNotEmpty) return fromProp;
-      }
-    }
-
-    final req = _request;
-    if (req == null) return const [];
-
-    String toPublic(String path) {
-      final s = path.trim();
-      if (s.isEmpty) return '';
-      if (s.startsWith('http://') || s.startsWith('https://')) return s;
-      return Supabase.instance.client.storage
-          .from('property-images')
-          .getPublicUrl(s);
-    }
-
-    final out = <String>[];
-    void addPaths(dynamic raw) {
-      if (raw is! List) return;
-      for (final e in raw) {
-        final u = toPublic(e.toString());
-        if (u.isNotEmpty && !out.contains(u)) out.add(u);
-      }
-    }
-
-    addPaths(req['preview_image_urls']);
-    final payload = req['payload_json'] ?? req['payload'];
-    if (payload is Map) {
-      for (final key in const [
-        'request_image_paths',
-        'image_paths',
-        'image_urls',
-        'images',
-      ]) {
-        addPaths(payload[key]);
-      }
-      final prim = (payload['primary_image'] ?? payload['primaryImage'] ?? '')
-          .toString()
-          .trim();
-      if (prim.isNotEmpty) {
-        final u = toPublic(prim);
-        if (u.isNotEmpty && !out.contains(u)) out.add(u);
-      }
-    }
-    return out;
-  }
-
-  String? _heroImageUrlFromProperty() {
-    final urls = _propertyImageUrls();
-    return urls.isEmpty ? null : urls.first;
-  }
-
-  String? _heroImageUrl() => _heroImageUrlFromProperty();
-
   /// أرقام لاتينية دائماً في عروض المسوقين (ويب/تطبيق).
   String _fmtNumericUi(String s) => normalizeAsciiDigits(s);
 
@@ -706,7 +630,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         .toString()
         .trim();
     final price = _propertyBasePriceSar;
-    final url = _heroImageUrl();
     final deedNo = _pickDeedNumber();
     final deedDate = _pickDeedDate();
     final roundLabel = ListingWorkflowCopy.marketingRoundLabel(
@@ -780,43 +703,24 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
             child: SizedBox(
               height: heroH,
               width: double.infinity,
-              child: url != null
-                  ? ColoredBox(
-                      color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
-                      child: CachedNetworkImage(
-                        imageUrl: url,
-                        fit: BoxFit.contain,
-                        width: double.infinity,
-                        height: heroH,
-                        placeholder: (_, __) => Container(
-                          color: _brandTeal.withValues(alpha: 0.12),
-                          alignment: Alignment.center,
-                          child: const SizedBox(
-                            width: 32,
-                            height: 32,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                        errorWidget: (_, __, ___) => Container(
-                          color: _brandTeal.withValues(alpha: 0.12),
-                          alignment: Alignment.center,
-                          child: const BrandingLogoImage(
-                            size: 120,
-                            fit: BoxFit.contain,
-                            errorIcon: Icons.apartment_rounded,
-                          ),
-                        ),
-                      ),
-                    )
-                  : Container(
-                      color: _brandTeal.withValues(alpha: 0.12),
-                      alignment: Alignment.center,
-                      child: const BrandingLogoImage(
-                        size: 132,
-                        fit: BoxFit.contain,
-                        errorIcon: Icons.apartment_rounded,
-                      ),
-                    ),
+              child: ListingMediaPreview(
+                mediaRow: ListingMediaHydration.resolveRow(
+                  property: _linkedProperty,
+                  request: _request,
+                ),
+                isAr: _isAr,
+                mediaOwnerKey: widget.requestId,
+                aspectRatio: 16 / 9,
+                maxHeight: heroH,
+                emptyChild: ColoredBox(
+                  color: _brandTeal.withValues(alpha: 0.12),
+                  child: const BrandingLogoImage(
+                    size: 132,
+                    fit: BoxFit.contain,
+                    errorIcon: Icons.apartment_rounded,
+                  ),
+                ),
+              ),
             ),
           ),
         ),

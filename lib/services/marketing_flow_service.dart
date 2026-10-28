@@ -12,6 +12,7 @@ import '../core/network/supabase_interceptor.dart';
 
 import '../core/contracts/marketing_contract_template.dart';
 import '../core/notifications/in_app_notifications.dart';
+import '../core/listing/listing_media_hydration.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../core/workflow/listing_workflow.dart';
@@ -923,10 +924,7 @@ class MarketingFlowService {
   Future<Map<String, dynamic>?> linkedPropertyForListingRequest(
     String requestId,
   ) async {
-    const propSelect =
-        'id,price,listing_public_code,title,city,location,address_line,area,'
-        'property_type,purpose,deed_number,deed_date,deed_issuer,'
-        'default_cover_used,property_images(path,file_name,sort_order)';
+    const propSelect = '*';
     try {
       final req = await ownerListingRequestSnapshot(requestId);
       final previewId = (req?['preview_property_id'] ?? '').toString().trim();
@@ -937,7 +935,13 @@ class MarketingFlowService {
               .select(propSelect)
               .eq('id', previewId)
               .maybeSingle();
-          if (byPreview != null) return _asMap(byPreview);
+          if (byPreview != null) {
+            return ListingMediaHydration.resolveRequest(
+              sb,
+              request: req ?? const <String, dynamic>{},
+              property: _asMap(byPreview),
+            );
+          }
         } catch (_) {}
       }
       final rows = await sb
@@ -948,7 +952,11 @@ class MarketingFlowService {
           .limit(1);
       final list = _asListOfMaps(rows);
       if (list.isEmpty) return null;
-      return list.first;
+      return ListingMediaHydration.resolveRequest(
+        sb,
+        request: req ?? const <String, dynamic>{},
+        property: list.first,
+      );
     } catch (_) {
       return null;
     }

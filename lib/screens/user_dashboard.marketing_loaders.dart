@@ -1012,6 +1012,40 @@ extension _UserDashboardStateMarketingLoaders on _UserDashboardState {
       if (t.isNotEmpty) row['preview_type'] = t;
     }
 
+    if (pick('preview_deed_number').isEmpty && pick('deed_number').isEmpty) {
+      final deedNumber = _payloadString(
+        payload,
+        const ['deed_number', 'preview_deed_number', 'request_deed_number'],
+      );
+      if (deedNumber.isNotEmpty) {
+        row['preview_deed_number'] = deedNumber;
+      }
+    }
+    if (row['preview_deed_date'] == null && row['deed_date'] == null) {
+      final deedDate = _payloadString(
+        payload,
+        const ['deed_date', 'preview_deed_date', 'request_deed_date'],
+      );
+      if (deedDate.isNotEmpty) row['preview_deed_date'] = deedDate;
+    }
+    if (pick('preview_video_url').isEmpty) {
+      final videoPath = _payloadString(
+        payload,
+        const ['request_video_path', 'video_url', 'video_path'],
+      );
+      if (videoPath.isNotEmpty) row['preview_video_url'] = videoPath;
+    }
+    if (pick('preview_virtual_tour_url').isEmpty) {
+      final tourUrl = _payloadString(
+        payload,
+        const ['virtual_tour_url', 'tour_url', 'virtualTourUrl'],
+      );
+      if (tourUrl.isNotEmpty) {
+        row['preview_virtual_tour_url'] = tourUrl;
+        row['preview_tour_url'] = tourUrl;
+      }
+    }
+
     for (final flag in const [
       'market_without_rega_license',
       'no_rega_ad_license',
@@ -2065,12 +2099,19 @@ preview_property_id
       'preview_created_at': row['created_at'],
       'preview_published_at': row['published_at'],
       'preview_marketing_license_snapshot': row['marketing_license_snapshot'],
+      'deed_number': (row['deed_number'] ?? '').toString().trim(),
+      'deed_date': row['deed_date'],
       'preview_deed_number': (row['deed_number'] ?? '').toString().trim(),
       'preview_deed_date': row['deed_date'],
       'preview_deed_issuer': (row['deed_issuer'] ?? '').toString().trim(),
       'preview_views': row['views'],
       'preview_image_urls': images,
       'preview_video_url': (row['video_url'] ?? '').toString().trim(),
+      'preview_virtual_tour_url':
+          (row['virtual_tour_url'] ?? '').toString().trim(),
+      'preview_tour_url': (row['virtual_tour_url'] ?? '').toString().trim(),
+      'preview_in_app_tour': row['in_app_tour'],
+      'preview_listing_guidance': row['listing_guidance'],
       'preview_cover_primary': _previewCoverPrimaryFromPropertyRow(row),
       'preview_listing_public_code':
           (row['listing_public_code'] ?? '').toString().trim(),
@@ -2252,7 +2293,7 @@ preview_property_id
     final mergedImages = _mergeImageUrlLists(
         preview['preview_image_urls'], req['request_image_urls']);
 
-    return <String, dynamic>{
+    final merged = <String, dynamic>{
       ...reqNoStatus,
       ...preview,
       ...rowWithoutPayload,
@@ -2337,6 +2378,8 @@ preview_property_id
         row['request_owner_id'],
       ),
     };
+    ListingMediaHydration.stampRow(merged);
+    return merged;
   }
 
   /// عندما يكون الدمج من listing_offers لا يحمل صور/سعر العقار، نملأ من properties.preview_property_id (نفس منطق SQL للمالك).

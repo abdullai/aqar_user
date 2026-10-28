@@ -1543,45 +1543,18 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   List<String> _effectiveImageUrlsForOwnerRequestRow(
     Map<String, dynamic> row,
   ) {
-    final payload = _mergedJsonPayloadForRow(row);
-    final payloadPaths = ListingMediaUrls.imagePathsExcludingVideo(
-      _payloadImagePaths(payload),
+    final normalized = ListingMediaHydration.resolveRow(
+      property: row,
+      request: row,
     );
+    final paths = ListingMediaUrls.imagePathsFromPropertyImages(
+      normalized['property_images'],
+    );
+    final payloadPaths = ListingMediaUrls.imagePathsExcludingVideo(paths);
     if (row['default_cover_used'] == true && payloadPaths.isEmpty) {
       return const [];
     }
-    final fromPayloadUrls = payloadPaths
-        .map((p) {
-          final s = p.toString().trim();
-          if (s.isEmpty) return '';
-          if (s.startsWith('http://') || s.startsWith('https://')) return s;
-          return _sb.storage.from('property-images').getPublicUrl(s);
-        })
-        .where((s) => s.isNotEmpty)
-        .toList();
-    final mergedDyn = _mergeImageUrlLists(
-      row['preview_image_urls'],
-      fromPayloadUrls,
-    );
-    final direct = ListingMediaUrls.imagePathsExcludingVideo(
-      mergedDyn.map((e) => e.toString().trim()).where((e) => e.isNotEmpty),
-    );
-    List<String> toPublic(Iterable<String> raw) {
-      return raw
-          .map((u) {
-            if (u.startsWith('http://') || u.startsWith('https://')) {
-              return u;
-            }
-            return _sb.storage.from('property-images').getPublicUrl(u);
-          })
-          .where((e) => e.trim().isNotEmpty)
-          .toList();
-    }
-
-    if (direct.isNotEmpty) {
-      return toPublic(direct);
-    }
-    return <String>[];
+    return ListingMediaUrls.publicUrls(_sb, payloadPaths);
   }
 
   Property? _propertyFromLocalCaches(String propertyId) {
@@ -3270,8 +3243,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   /// جوال المالك — بعد موافقة المالك، أو إن فعّل إظهاره من السوق عند الإضافة.
   bool _marketerOwnerPhoneVisibleOnCard(Map<String, dynamic> r) {
-    if (_listingRevealsOwnerPhoneFromMarket(r)) return true;
-    if (!_marketerInApprovedWorkflowSubTab) return false;
     return _marketerOwnerChatUnlocked(r);
   }
 
@@ -6083,65 +6054,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return '';
   }
 
-  /// أجزاء الموقع بدون تكرار (منطقة → محافظة → مدينة → حي).
-  List<String> _marketingLocationHierarchyParts(Map<String, dynamic> r) {
-    final m = _mergedJsonPayloadForRow(r);
-
-    String pickAny(Iterable<String> keys) {
-      for (final k in keys) {
-        final v = (r[k] ?? m[k] ?? '').toString().trim();
-        if (v.isNotEmpty) return v;
-      }
-      return '';
-    }
-
-    final region = pickAny(const [
-      'preview_region',
-      'region',
-      'region_name',
-      'preview_region_name',
-    ]);
-    final province = pickAny(const [
-      'preview_province',
-      'province',
-      'governorate',
-      'preview_governorate',
-    ]);
-    final city = pickAny(const [
-      'preview_city',
-      'request_city',
-      'city',
-    ]);
-    final districtRaw = pickAny(const [
-      'preview_district',
-      'preview_neighborhood',
-      'district',
-      'neighborhood',
-      'preview_area_name',
-    ]);
-    final district =
-        districtRaw.isNotEmpty ? districtRaw : _marketingDistrictFromPayload(r);
-
-    final seen = <String>{};
-    final out = <String>[];
-    for (final raw in [region, province, city, district]) {
-      final t = _normalizeAdministrativeLocationPart(raw);
-      if (t.isEmpty) continue;
-      final key = t.toLowerCase();
-      if (seen.add(key)) out.add(t);
-    }
-    return out;
-  }
-
-  String _orderedLocationTriplet(String a, String b, String c) {
-    final parts = <String>[
-      if (a.trim().isNotEmpty) a.trim(),
-      if (b.trim().isNotEmpty) b.trim(),
-      if (c.trim().isNotEmpty) c.trim(),
-    ];
-    return parts.join(' — ');
-  }
-
   /// يزيل بادئات «محافظة/منطقة/مدينة/حي» لتفادي «صامطة — محافظة صامطة».
   String _normalizeAdministrativeLocationPart(String? raw) {
     var t = (raw ?? '').trim();
@@ -6154,24 +6066,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       }
     }
     return t;
-  }
-
-  /// منطقة → محافظة → مدينة → حي (بدون تكرار نفس الاسم).
-  String _orderedLocationParts({
-    String? region,
-    String? province,
-    String? city,
-    String? district,
-  }) {
-    final seen = <String>{};
-    final parts = <String>[];
-    for (final raw in [region, province, city, district]) {
-      final t = _normalizeAdministrativeLocationPart(raw);
-      if (t.isEmpty) continue;
-      final key = t.toLowerCase();
-      if (seen.add(key)) parts.add(t);
-    }
-    return parts.join(' — ');
   }
 
   /// منطقة - مدينة - حي (حسب المتوفر).
@@ -6346,12 +6240,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   bool _marketerMaySeeOwnerPhone(Map<String, dynamic> r) {
-    if (_listingRevealsOwnerPhoneFromMarket(r)) return true;
     final uid = _uid.trim();
     if (uid.isEmpty) return false;
-    final selected = (r['selected_marketer_id'] ?? '').toString().trim();
-    if (selected == uid) return true;
-    return _marketerWasPrevSelectedOnRow(r);
+    return _marketerOwnerChatUnlocked(r);
   }
 
   /// هل أُتيحت فرصة محلية لهذا الطلب (تمييز الشارة عن «إعادة للسوق» فقط)؟
@@ -8432,14 +8323,24 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
   }
 
   Future<void> _openMarketerMarketOfferHub(Map<String, dynamic> row) async {
-    final urls = _effectiveImageUrlsForOwnerRequestRow(row);
-    final videoPath = ListingMediaUrls.videoPathFromPayload(row);
-    final videoUrl = videoPath == null
-        ? null
-        : ListingMediaUrls.videoPlayableUrl(_sb, videoPath);
-    final tourPath = ListingMediaUrls.virtualTourFromPayload(row);
-    final tourUrl =
-        ListingMediaUrls.looksLikePlayableTourUrl(tourPath) ? tourPath : null;
+    final mediaRow = ListingMediaHydration.resolveRow(
+      property: row,
+      request: row,
+    );
+    final urls = ListingMediaUrls.publicUrls(
+      _sb,
+      ListingMediaUrls.imagePathsFromPropertyImages(
+        mediaRow['property_images'],
+      ),
+    );
+    final videoUrl = ListingMediaUrls.videoPlayableUrl(
+      _sb,
+      mediaRow['video_url'],
+    );
+    final tourUrl = ListingMediaUrls.storagePublicUrl(
+      _sb,
+      mediaRow['virtual_tour_url'],
+    );
     final title = _mkRowTitle(row);
     final loc = _marketingLocationText(row);
     final owner = _marketingOwnerName(row);
@@ -8490,7 +8391,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           heroImageUrls: urls,
           heroVideoUrl: videoUrl,
           heroTourUrl: tourUrl,
-          heroInAppTour: ListingMediaUrls.inAppTourFromPayload(row),
+          heroInAppTour: ListingMediaUrls.inAppTourFromPayload(mediaRow),
           mediaOwnerKey: mediaOwnerKey,
           preferVideoFirst: ListingMediaUrls.payloadPrefersVideoCover(row) ||
               (urls.isEmpty && videoUrl != null),
@@ -10182,8 +10083,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           if (_hubCardsShowOwnerContact &&
               _isMarketerRole &&
               !relistReoffer &&
-              (_listingRevealsOwnerPhoneFromMarket(r) ||
-                  !marketerInvitesTabLayout) &&
               _marketerOwnerPhoneVisibleOnCard(r) &&
               (ownerDispPhone.isNotEmpty ||
                   _canShowMarketerChatIconForRow(r))) ...[

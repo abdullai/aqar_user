@@ -1,8 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-/// يغلف التطبيق: ضغطة خارج حقل الإدخال تُغلق الكيبورد وتفكّ التركيز.
-/// سحب زائد للأسفل عند رأس التمرير يفعل الشيء نفسه دون اعتراض التمرير العادي.
+/// يغلق التركيز خارج حقول الإدخال، أو عند السحب الزائد عند رأس التمرير.
 class AppOutsideUnfocus extends StatelessWidget {
   const AppOutsideUnfocus({super.key, required this.child});
 
@@ -28,6 +27,33 @@ class AppOutsideUnfocus extends StatelessWidget {
     }
   }
 
+  static bool _isInsideFocusedEditable(Offset globalPosition) {
+    final focus = FocusManager.instance.primaryFocus;
+    final context = focus?.context;
+    if (context == null || !context.mounted) return false;
+    final editable = context.findAncestorStateOfType<EditableTextState>();
+    if (editable == null) return false;
+
+    final editableRenderObject = editable.context.findRenderObject();
+    if (editableRenderObject is! RenderBox || !editableRenderObject.attached) {
+      return false;
+    }
+    var fieldBox = editableRenderObject;
+    RenderObject? ancestor = editableRenderObject.parent;
+    while (ancestor != null) {
+      if (ancestor is RenderBox &&
+          (ancestor.size.height >= editableRenderObject.size.height + 16 ||
+              ancestor.size.width >= editableRenderObject.size.width + 24)) {
+        fieldBox = ancestor;
+        break;
+      }
+      ancestor = ancestor.parent;
+    }
+
+    final localPosition = fieldBox.globalToLocal(globalPosition);
+    return (Offset.zero & fieldBox.size).contains(localPosition);
+  }
+
   @override
   Widget build(BuildContext context) {
     return NotificationListener<OverscrollNotification>(
@@ -42,7 +68,11 @@ class AppOutsideUnfocus extends StatelessWidget {
       },
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onTap: unfocusEditable,
+        onTapUp: (details) {
+          if (!_isInsideFocusedEditable(details.globalPosition)) {
+            unfocusEditable();
+          }
+        },
         child: child,
       ),
     );

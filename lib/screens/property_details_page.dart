@@ -1802,7 +1802,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         '${widget.isAr ? 'صورة' : 'Photo'}: $imageUrl',
       if (_hasVideo)
         '${widget.isAr ? 'الفيديو' : 'Video'}: '
-            '${_resolveVideoPlayableUrl(_property.videoUrl!)}',
+            '${_resolveVideoPlayableUrl(_property.displayVideoUrl!)}',
       if (_property.hasInAppVirtualTour)
         widget.isAr
             ? 'جولة تفاعلية داخل التطبيق: افتح رابط الإعلان'
@@ -3512,7 +3512,7 @@ $licLine
   }
 
   bool get _hasVideo {
-    final raw = (_property.videoUrl ?? '').trim();
+    final raw = (_property.displayVideoUrl ?? '').trim();
     if (!ListingMediaUrls.looksLikePlayableVideoRef(raw)) return false;
     return ListingMediaUrls.isPlayableHttpUrl(_resolveVideoPlayableUrl(raw));
   }
@@ -3526,7 +3526,7 @@ $licLine
 
     setState(() => _openingVideo = true);
     try {
-      final raw = _property.videoUrl!.trim();
+      final raw = _property.displayVideoUrl!.trim();
       final url = _resolveVideoPlayableUrl(raw);
       if (!ListingMediaUrls.isPlayableHttpUrl(url)) return;
 
@@ -4199,7 +4199,7 @@ $licLine
     final wmTrace =
         idShort.length <= 8 ? idShort : idShort.substring(idShort.length - 8);
     final activeMediaSource = isVideoSlide(safeIndex)
-        ? (_property.videoUrl ?? '')
+        ? (_property.displayVideoUrl ?? '')
         : isTourSlide(safeIndex)
             ? ''
             : imgs[imageIndexForSlide(safeIndex)];
@@ -4252,7 +4252,7 @@ $licLine
                       );
                     }
                     if (isVideoSlide(i)) {
-                      final raw = _property.videoUrl!.trim();
+                      final raw = _property.displayVideoUrl!.trim();
                       final url = _resolveVideoPlayableUrl(raw);
                       return ClipRect(
                         child: InlinePropertyVideoPlayer(

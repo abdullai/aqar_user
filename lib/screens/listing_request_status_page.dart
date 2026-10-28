@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/listing/property_listing_display.dart';
 import '../core/listing/listing_media_urls.dart';
+import '../core/listing/deed_row_meta.dart';
 import '../core/branding/branding_logo_image.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/workflow/listing_workflow_copy.dart';
@@ -1612,28 +1613,28 @@ class _ListingRequestStatusPageState extends State<ListingRequestStatusPage> {
   }
 
   String _pickDeedNumber(Map<String, dynamic> syn) {
-    for (final src in <dynamic>[
-      _propPreview?['deed_number'],
-      syn['deed_number'],
-      _payloadDetail['deed_number'],
-      _payloadDetail['preview_deed_number'],
-      _row?['deed_number'],
+    for (final src in <Map<String, dynamic>?>[
+      _propPreview,
+      syn,
+      _payloadDetail,
+      _row,
     ]) {
-      final v = normalizeAsciiDigits((src ?? '').toString().trim());
+      if (src == null) continue;
+      final v = normalizeAsciiDigits(DeedRowMeta.number(src));
       if (v.isNotEmpty) return v;
     }
     return '';
   }
 
   DateTime? _pickDeedDateTime(Map<String, dynamic> syn) {
-    for (final src in <dynamic>[
-      _propPreview?['deed_date'],
-      syn['deed_date'],
-      _payloadDetail['deed_date'],
-      _payloadDetail['preview_deed_date'],
-      _row?['deed_date'],
+    for (final src in <Map<String, dynamic>?>[
+      _propPreview,
+      syn,
+      _payloadDetail,
+      _row,
     ]) {
-      final dt = _tryDeedDateTime(src);
+      if (src == null) continue;
+      final dt = _tryDeedDateTime(DeedRowMeta.date(src));
       if (dt != null) return dt;
     }
     return null;

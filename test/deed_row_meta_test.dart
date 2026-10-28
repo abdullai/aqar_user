@@ -13,11 +13,14 @@ void main() {
       DeedRowMeta.date({'payload': '{"deed_date":"2024-03-05"}'}),
       '2024-03-05',
     );
-    expect(
-        DeedRowMeta.number({
-          'payload_json': {'deed_number': '9'}
-        }),
-        '9');
+    final requestRow = {
+      'payload_json': {
+        'deed_number': '9',
+        'deed_date': '2024-03-05',
+      },
+    };
+    expect(DeedRowMeta.number(requestRow), '9');
+    expect(DeedRowMeta.date(requestRow), '2024-03-05');
   });
 
   test('property value wins and literal null is ignored', () {

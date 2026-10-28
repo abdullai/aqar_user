@@ -257,7 +257,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
   String? _videoUrl(HomeShortsItem item) {
     final p = item.property;
     if (p == null) return null;
-    final v = (p.videoUrl ?? '').trim();
+    final v = (p.displayVideoUrl ?? '').trim();
     if (v.isEmpty) return null;
     final resolved = ListingMediaUrls.videoPlayableUrl(
       Supabase.instance.client,
@@ -399,7 +399,7 @@ class _HomeShortsFeedPageState extends State<HomeShortsFeedPage> {
                           ? const <String>[]
                           : ListingMediaUrls.propertyCardImagePaths(property);
                       final visiblePhotographerMediaPath = showVideo
-                          ? (property?.videoUrl ?? '')
+                          ? (property?.displayVideoUrl ?? '')
                           : showTour && inAppTour != null
                               ? (inAppTour.scenes.isEmpty
                                   ? ''

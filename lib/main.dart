@@ -1587,6 +1587,7 @@ class _StartRouterState extends State<StartRouter> {
   bool _loading = true;
   Widget? _target;
   int _resolveGeneration = 0;
+  int _resolvesInFlight = 0;
 
   bool _retryingNet = false;
   StreamSubscription<AuthState>? _authSub;
@@ -1620,7 +1621,12 @@ class _StartRouterState extends State<StartRouter> {
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (!mounted) return;
       if (data.event == AuthChangeEvent.signedIn) {
-        _resolveGeneration++;
+        // إلغاء الحل الجاري بلا إعادة تشغيله كان يترك شاشة التحميل عالقة بعد OTP.
+        if (_loading || _resolvesInFlight > 0) {
+          unawaited(_resolve());
+        } else {
+          _resolveGeneration++;
+        }
         return;
       }
       if (data.event == AuthChangeEvent.signedOut) {
@@ -1687,6 +1693,23 @@ class _StartRouterState extends State<StartRouter> {
   }
 
   Future<void> _resolve() async {
+    _resolvesInFlight++;
+    final startedGeneration = _resolveGeneration + 1;
+    final watchdog = Timer(const Duration(seconds: 15), () {
+      // شبكة بطيئة/حل مُلغى: لا نترك شاشة التحميل بلا نهاية.
+      if (mounted && _loading && _resolveGeneration == startedGeneration) {
+        unawaited(_resolve());
+      }
+    });
+    try {
+      await _resolveImpl();
+    } finally {
+      watchdog.cancel();
+      _resolvesInFlight--;
+    }
+  }
+
+  Future<void> _resolveImpl() async {
     final generation = ++_resolveGeneration;
     if (_isRecoveryUrlOrCode()) {
       if (!_isCurrentResolve(generation)) return;

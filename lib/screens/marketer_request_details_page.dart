@@ -16,6 +16,7 @@ import '../core/workflow/listing_workflow_ui_context.dart';
 import '../core/workflow/workflow_display_texts.dart';
 import '../services/marketing_flow_service.dart';
 import '../core/listing/property_listing_display.dart';
+import '../core/listing/listing_media_hydration.dart';
 import '../core/listing/property_type_catalog.dart';
 import '../core/utils/date_helper.dart';
 import '../core/utils/display_ids.dart';
@@ -27,7 +28,7 @@ import '../widgets/listing/request_summary_table.dart';
 import '../widgets/listing_marketing_tracking_sheet.dart';
 import '../widgets/listing_workflow_progress_strip.dart';
 import '../widgets/marketing_offer_submit_sheet.dart';
-import '../widgets/my_page_cover_gallery.dart';
+import '../widgets/listing_media_preview.dart';
 import '../core/listing/listing_media_urls.dart';
 import 'chat_page.dart';
 
@@ -274,6 +275,11 @@ class _MarketerRequestDetailsPageState
       fallback: '',
     );
     final priceAmt = effectivePropertyPriceSarForMarketingFee(r, p);
+    final deedNumber =
+        (p?['deed_number'] ?? r['deed_number'] ?? '').toString().trim();
+    final deedDate = DateTime.tryParse(
+      (p?['deed_date'] ?? r['deed_date'] ?? '').toString(),
+    );
 
     final rows = <RequestSummaryRow>[
       if (listingNo.isNotEmpty)
@@ -314,6 +320,16 @@ class _MarketerRequestDetailsPageState
         RequestSummaryRow(
           label: _t('المساحة', 'Area'),
           value: '${area.toStringAsFixed(0)} ${_t('م²', 'm²')}',
+        ),
+      if (deedNumber.isNotEmpty)
+        RequestSummaryRow(
+          label: _t('رقم الصك', 'Deed number'),
+          value: deedNumber,
+        ),
+      if (deedDate != null)
+        RequestSummaryRow(
+          label: _t('تاريخ الصك', 'Deed date'),
+          value: DateHelper.fmtCivilDate(deedDate.toLocal(), isAr: la),
         ),
       RequestSummaryRow(
         label: _t('حالة الطلب', 'Request status'),
@@ -415,70 +431,32 @@ class _MarketerRequestDetailsPageState
       _safeText(_invite?['status'], fallback: 'pending').toLowerCase();
 
   List<String> _heroUrlsForBanner() {
-    final p = _previewProperty;
-    if (p != null) {
-      final imgs = ((p['property_images'] as List?) ?? const <dynamic>[])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList()
-        ..sort((a, b) => ((a['sort_order'] as num?)?.toInt() ?? 0)
-            .compareTo((b['sort_order'] as num?)?.toInt() ?? 0));
-      final out = <String>[];
-      for (final im in imgs) {
-        final path = (im['path'] ?? im['file_name'] ?? '').toString().trim();
-        if (path.isEmpty) continue;
-        out.add(
-          Supabase.instance.client.storage
-              .from('property-images')
-              .getPublicUrl(path),
-        );
-      }
-      if (out.isNotEmpty) return out;
-    }
-    final req = _request;
-    if (req == null) return [];
-    final dyn = req['preview_image_urls'];
-    if (dyn is! List) return [];
-    final out = <String>[];
-    for (final e in dyn) {
-      final s = e.toString().trim();
-      if (s.isEmpty) continue;
-      if (s.startsWith('http://') || s.startsWith('https://')) {
-        out.add(s);
-      } else {
-        out.add(
-          Supabase.instance.client.storage
-              .from('property-images')
-              .getPublicUrl(s),
-        );
-      }
-    }
-    return out;
+    final row = _resolvedMediaRow();
+    return ListingMediaUrls.publicUrls(
+      Supabase.instance.client,
+      ListingMediaUrls.imagePathsFromPropertyImages(row['property_images']),
+    );
   }
 
+  Map<String, dynamic> _resolvedMediaRow() => ListingMediaHydration.resolveRow(
+        property: _previewProperty,
+        request: _request,
+      );
+
   String _heroVideoUrl() {
-    final p = _previewProperty;
-    final raw = (p?['video_url'] ??
-            p?['videoUrl'] ??
-            _request?['request_video_path'] ??
-            _request?['video_url'] ??
-            '')
-        .toString()
-        .trim();
-    if (raw.isEmpty) return '';
     return ListingMediaUrls.videoPlayableUrl(
           Supabase.instance.client,
-          raw,
+          _resolvedMediaRow()['video_url'],
         ) ??
         '';
   }
 
-  bool _coverPrefersVideo() {
-    final p = _previewProperty;
-    final g = p?['listing_guidance'] ?? _request?['listing_guidance'];
-    if (g is Map) {
-      return (g['cover_primary'] ?? '').toString().toLowerCase() == 'video';
-    }
-    return _heroUrlsForBanner().isEmpty && _heroVideoUrl().isNotEmpty;
+  String _heroTourUrl() {
+    return ListingMediaUrls.storagePublicUrl(
+          Supabase.instance.client,
+          _resolvedMediaRow()['virtual_tour_url'],
+        ) ??
+        '';
   }
 
   String get _resolvedInviteId {
@@ -656,39 +634,11 @@ class _MarketerRequestDetailsPageState
 
   Future<void> _loadPreviewProperty() async {
     try {
-      final previewId =
-          (_request?['preview_property_id'] ?? '').toString().trim();
-      const propSelect =
-          'id,title,city,location,address_line,area,price,created_at,status,'
-          'default_cover_used,latitude,longitude,property_images(path,file_name,sort_order)';
-      dynamic rows;
-      if (previewId.isNotEmpty) {
-        final one = await Supabase.instance.client
-            .from('properties')
-            .select(propSelect)
-            .eq('id', previewId)
-            .maybeSingle();
-        if (one != null) {
-          if (!mounted) return;
-          setState(
-            () => _previewProperty = Map<String, dynamic>.from(one as Map),
-          );
-          return;
-        }
-      }
-      rows = await Supabase.instance.client
-          .from('properties')
-          .select(propSelect)
-          .eq('request_id', widget.requestId)
-          .order('created_at', ascending: false)
-          .limit(1);
+      final property = await _svc.linkedPropertyForListingRequest(
+        widget.requestId,
+      );
       if (!mounted) return;
-      final list = rows as List;
-      if (list.isNotEmpty) {
-        setState(
-          () => _previewProperty = Map<String, dynamic>.from(list.first as Map),
-        );
-      }
+      setState(() => _previewProperty = property);
     } catch (_) {}
   }
 
@@ -936,6 +886,8 @@ class _MarketerRequestDetailsPageState
         AppKeyboardInset.bottomOf(context);
 
     final heroUrls = _heroUrlsForBanner();
+    final heroTourUrl = _heroTourUrl();
+    final heroVideoUrl = _heroVideoUrl();
 
     return PrimaryScrollController(
       controller: _detailsScrollCtrl,
@@ -968,13 +920,14 @@ class _MarketerRequestDetailsPageState
                     ),
                   ),
                 ),
-              if (heroUrls.isNotEmpty || _heroVideoUrl().isNotEmpty) ...[
+              if (heroUrls.isNotEmpty ||
+                  heroVideoUrl.isNotEmpty ||
+                  heroTourUrl.isNotEmpty) ...[
                 RepaintBoundary(
-                  child: MyPageCoverGallery(
-                    imageUrls: heroUrls,
-                    videoUrl: _heroVideoUrl(),
-                    coverPrefersVideo: _coverPrefersVideo(),
+                  child: ListingMediaPreview(
+                    mediaRow: _resolvedMediaRow(),
                     isAr: _isAr,
+                    mediaOwnerKey: widget.requestId,
                     borderRadius: 14,
                   ),
                 ),

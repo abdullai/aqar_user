@@ -147,7 +147,7 @@ abstract final class ListingMediaUrls {
 
   static bool propertyHasRealMedia(Property p) =>
       imagePathsExcludingVideo(p.images).isNotEmpty ||
-      looksLikePlayableVideoRef(p.videoUrl) ||
+      looksLikePlayableVideoRef(p.displayVideoUrl) ||
       looksLikePlayableTourUrl(p.virtualTourUrl);
 
   /// غلاف ذكي فقط إن لم توجد صورة ولا فيديو حقيقي — لا يُخفى الإعلام عند العلم وحده.
@@ -166,7 +166,7 @@ abstract final class ListingMediaUrls {
     if (v == 'video') return true;
     if (v == 'image') return false;
     return imagePathsExcludingVideo(p.images).isEmpty &&
-        (p.videoUrl ?? '').trim().isNotEmpty;
+        (p.displayVideoUrl ?? '').trim().isNotEmpty;
   }
 
   /// مسارات الصور للبطاقات — لا تُفرَّغ بسبب علم الغلاف الذكي إن وُجدت صور.
@@ -360,11 +360,20 @@ abstract final class ListingMediaUrls {
       'property_images',
       'preview_images',
       'preview_image_urls',
+      'photographer_media_paths',
     ];
     final out = <String>[];
     for (final source in sources) {
       for (final key in imageKeys) {
         out.addAll(_pathsFromDynamic(source[key]));
+      }
+      final deliveries = source['photographer_media_deliveries'];
+      if (deliveries is List) {
+        for (final delivery in deliveries) {
+          if (delivery is Map) {
+            out.addAll(_pathsFromDynamic(delivery['image_paths']));
+          }
+        }
       }
     }
     const singleImageKeys = [
@@ -427,6 +436,7 @@ abstract final class ListingMediaUrls {
     for (final source in sources) {
       for (final key in const [
         'preview_tour_url',
+        'preview_virtual_tour_url',
         'virtual_tour_url',
         'tour_url',
         'virtualTourUrl',

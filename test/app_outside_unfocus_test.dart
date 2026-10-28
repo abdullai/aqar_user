@@ -33,6 +33,11 @@ void main() {
     await tester.pump();
     expect(focusNode.hasFocus, isTrue);
 
+    final fieldRect = tester.getRect(find.byType(TextField));
+    await tester.tapAt(fieldRect.topLeft + const Offset(4, 4));
+    await tester.pump();
+    expect(focusNode.hasFocus, isTrue);
+
     await tester.dragFrom(const Offset(180, 500), const Offset(0, -120));
     await tester.pumpAndSettle();
     expect(focusNode.hasFocus, isTrue);

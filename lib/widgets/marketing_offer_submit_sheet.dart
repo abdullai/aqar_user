@@ -3,12 +3,12 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/branding/branding_logo_image.dart';
+import '../core/listing/listing_media_hydration.dart';
 import '../core/gestures/app_keyboard_inset.dart';
 import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/marketing_subscription_access.dart';
@@ -17,6 +17,7 @@ import '../core/marketing/listing_request_marketing_price.dart';
 import '../core/listing/offer_identity_tag.dart';
 import '../core/profile/publisher_identity_prefs.dart';
 import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
 import '../core/marketing/marketing_offer_fee.dart';
 import '../core/subscription/marketing_subscription_resume_intent.dart';
 import '../core/workflow/listing_workflow_copy.dart';
@@ -35,6 +36,7 @@ import '../screens/settings_page.dart';
 import '../screens/subscriptions/subscriptions_root_screen.dart';
 import 'app_shimmer.dart';
 import 'listing_pricing_breakdown.dart';
+import 'listing_media_preview.dart';
 import 'aqar_text_field.dart';
 import 'app_page_close_button.dart';
 
@@ -456,56 +458,6 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
     return base > 0 ? MarketingOfferFee.totalDue(base) : 0.0;
   }
 
-  String? _coverUrl() {
-    final sb = Supabase.instance.client;
-    String? fromPath(String path) {
-      final p = path.trim();
-      if (p.isEmpty) return null;
-      if (p.startsWith('http')) return p;
-      return sb.storage.from('property-images').getPublicUrl(p);
-    }
-
-    final prop = _linkedProperty;
-    if (prop != null && prop['default_cover_used'] != true) {
-      final imgs = prop['property_images'];
-      if (imgs is List && imgs.isNotEmpty) {
-        final rows =
-            imgs.map((e) => Map<String, dynamic>.from(e as Map)).toList()
-              ..sort((a, b) {
-                final sa = (a['sort_order'] as num?)?.toInt() ?? 0;
-                final sb = (b['sort_order'] as num?)?.toInt() ?? 0;
-                return sa.compareTo(sb);
-              });
-        final path =
-            (rows.first['path'] ?? rows.first['file_name'] ?? '').toString();
-        final u = fromPath(path);
-        if (u != null) return u;
-      }
-    }
-
-    final r = _request;
-    if (r != null && r['default_cover_used'] != true) {
-      final previewUrls = r['preview_image_urls'];
-      if (previewUrls is List && previewUrls.isNotEmpty) {
-        final u = fromPath(previewUrls.first.toString());
-        if (u != null) return u;
-      }
-      final payload = r['payload_json'] is Map
-          ? Map<String, dynamic>.from(r['payload_json'] as Map)
-          : r['payload'] is Map
-              ? Map<String, dynamic>.from(r['payload'] as Map)
-              : null;
-      if (payload != null) {
-        final imgs = payload['images'] ?? payload['image_urls'];
-        if (imgs is List && imgs.isNotEmpty) {
-          final u = fromPath(imgs.first.toString());
-          if (u != null) return u;
-        }
-      }
-    }
-    return null;
-  }
-
   String? _blockedExplanation() {
     return ListingWorkflowCopy.marketerSubmitBlockedExplanation(
       widget.isAr,
@@ -797,6 +749,14 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
       (r['district'] ?? '').toString().trim(),
     ].where((s) => s.isNotEmpty).join(' · ');
     final code = (lp?['listing_public_code'] ?? '').toString().trim();
+    final mediaRow = ListingMediaHydration.resolveRow(
+      property: lp,
+      request: r,
+    );
+    final deedNumber = (mediaRow['deed_number'] ?? '').toString().trim();
+    final deedDate = DateTime.tryParse(
+      (mediaRow['deed_date'] ?? '').toString(),
+    );
     final payload = r['payload_json'] is Map
         ? Map<String, dynamic>.from(r['payload_json'] as Map)
         : r['payload'] is Map
@@ -817,8 +777,6 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
             '')
         .toString()
         .trim();
-    final url = _coverUrl();
-
     // عناصر العمودين: نُرتّب البيانات يمين/يسار بدل التكديس فوق بعض.
     final entries = <_SnapshotEntry>[];
     if (title.isNotEmpty) {
@@ -857,6 +815,20 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
         value: code,
       ));
     }
+    if (deedNumber.isNotEmpty) {
+      entries.add(_SnapshotEntry(
+        icon: Icons.verified_outlined,
+        label: ListingWorkflowCopy.t(widget.isAr, 'رقم الصك', 'Deed number'),
+        value: deedNumber,
+      ));
+    }
+    if (deedDate != null) {
+      entries.add(_SnapshotEntry(
+        icon: Icons.event_outlined,
+        label: ListingWorkflowCopy.t(widget.isAr, 'تاريخ الصك', 'Deed date'),
+        value: DateHelper.fmtCivilDate(deedDate.toLocal(), isAr: widget.isAr),
+      ));
+    }
     // لا نُكرّر «قيمة العقار» هنا — تظهر في تفصيل الفاتورة أسفل اللوحة.
 
     return RepaintBoundary(
@@ -868,31 +840,22 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // الصورة المرتبطة فعلاً بالعقار (من جدول property_images عبر
-            // linkedPropertyForListingRequest). بدون نصوص فوق الصورة.
-            AspectRatio(
+            ListingMediaPreview(
+              mediaRow: ListingMediaHydration.resolveRow(
+                property: lp,
+                request: r,
+              ),
+              isAr: widget.isAr,
+              mediaOwnerKey: widget.requestId,
               aspectRatio: 16 / 9,
-              child: url != null
-                  ? CachedNetworkImage(
-                      imageUrl: url,
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(
-                        color: _brandTeal.withValues(alpha: 0.12),
-                        alignment: Alignment.center,
-                        child: const BrandingLogoImage(
-                          fit: BoxFit.cover,
-                          errorIcon: Icons.apartment_rounded,
-                        ),
-                      ),
-                    )
-                  : Container(
-                      color: _brandTeal.withValues(alpha: 0.12),
-                      alignment: Alignment.center,
-                      child: const BrandingLogoImage(
-                        fit: BoxFit.cover,
-                        errorIcon: Icons.apartment_rounded,
-                      ),
-                    ),
+              maxHeight: 280,
+              emptyChild: ColoredBox(
+                color: _brandTeal.withValues(alpha: 0.12),
+                child: const BrandingLogoImage(
+                  fit: BoxFit.cover,
+                  errorIcon: Icons.apartment_rounded,
+                ),
+              ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),

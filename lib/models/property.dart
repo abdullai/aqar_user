@@ -225,9 +225,18 @@ class Property {
     return v == 'video';
   }
 
+  String? get displayVideoUrl {
+    final photographerVideos = photographerVideoPaths;
+    if (photographerVideos.isNotEmpty) return photographerVideos.last;
+    final guidanceVideo =
+        (listingGuidance?['photographer_video_path'] ?? '').toString().trim();
+    if (guidanceVideo.isNotEmpty) return guidanceVideo;
+    return videoUrl;
+  }
+
   /// عرض الفيديو كغلاف البطاقة عندما لا توجد صور أو عند تفضيل الفيديو.
   bool get showVideoAsListingCover =>
-      (videoUrl ?? '').trim().isNotEmpty &&
+      (displayVideoUrl ?? '').trim().isNotEmpty &&
       (images.isEmpty || coverPrimaryPrefersVideo);
 
   bool get hasInAppVirtualTour =>

@@ -4203,21 +4203,46 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     String requestId,
     Map<String, dynamic> patch,
   ) async {
-    Map<String, dynamic> merged = {};
-    try {
-      final row = await _sb
-          .from('listing_requests')
-          .select('payload_json')
-          .eq('id', requestId)
-          .maybeSingle();
-      final raw = row?['payload_json'];
-      if (raw is String && raw.trim().isNotEmpty) {
-        final dec = jsonDecode(raw);
-        if (dec is Map) merged = Map<String, dynamic>.from(dec);
-      } else if (raw is Map) {
-        merged = Map<String, dynamic>.from(raw);
+    Map<String, dynamic> decodePayload(dynamic value) {
+      if (value is Map) return Map<String, dynamic>.from(value);
+      if (value == null || value.toString().trim().isEmpty) return {};
+      if (value is String) {
+        final decoded = jsonDecode(value);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+        throw const FormatException(
+          'Listing request payload must be an object',
+        );
       }
-    } catch (_) {}
+      throw const FormatException('Listing request payload must be an object');
+    }
+
+    bool sameJsonValue(dynamic a, dynamic b) {
+      if (a is Map && b is Map) {
+        return a.length == b.length &&
+            a.keys.every(
+              (key) => b.containsKey(key) && sameJsonValue(a[key], b[key]),
+            );
+      }
+      if (a is List && b is List) {
+        if (a.length != b.length) return false;
+        for (var i = 0; i < a.length; i++) {
+          if (!sameJsonValue(a[i], b[i])) return false;
+        }
+        return true;
+      }
+      return a == b;
+    }
+
+    final row = await _sb
+        .from('listing_requests')
+        .select('payload_json')
+        .eq('id', requestId)
+        .maybeSingle();
+    if (row == null) {
+      throw StateError('Listing request $requestId was not found');
+    }
+
+    final merged = decodePayload(row['payload_json']);
     merged.addAll(patch);
     if (patch['request_image_paths'] is List &&
         (patch['request_image_paths'] as List).isNotEmpty) {
@@ -4227,20 +4252,53 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       await _sb.from('listing_requests').update({
         'payload_json': jsonEncode(merged),
       }).eq('id', requestId);
-    } catch (_) {
+    } catch (stringEncodingError, stringEncodingStack) {
       try {
         await _sb.from('listing_requests').update({
           'payload_json': merged,
         }).eq('id', requestId);
-      } catch (_) {}
+      } catch (_) {
+        Error.throwWithStackTrace(
+          stringEncodingError,
+          stringEncodingStack,
+        );
+      }
     }
+
+    final savedRow = await _sb
+        .from('listing_requests')
+        .select('payload_json')
+        .eq('id', requestId)
+        .maybeSingle();
+    if (savedRow == null) {
+      throw StateError('Listing request $requestId was not found after update');
+    }
+    final savedPayload = decodePayload(savedRow['payload_json']);
+    for (final entry in patch.entries) {
+      if (!sameJsonValue(savedPayload[entry.key], entry.value)) {
+        throw StateError(
+          'Listing request metadata was not persisted: ${entry.key}',
+        );
+      }
+    }
+
     if ((patch['request_image_paths'] as List?)?.isNotEmpty == true ||
         patch['default_cover_used'] == false) {
       try {
-        await _sb.from('listing_requests').update({
-          'default_cover_used': false,
-        }).eq('id', requestId);
-      } catch (_) {}
+        final result = await _sb
+            .from('listing_requests')
+            .update({'default_cover_used': false})
+            .eq('id', requestId)
+            .select('id')
+            .maybeSingle();
+        if (result == null) {
+          throw StateError(
+            'Listing request default cover flag was not persisted',
+          );
+        }
+      } catch (e) {
+        if (_postgrestUnknownColumn(e) != 'default_cover_used') rethrow;
+      }
     }
   }
 
@@ -4446,9 +4504,25 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           ]
         : const <String>['photos'];
     final service = PhotographerService(_sb);
+    var linkedPropertyId = propertyId;
+    final requestId = listingRequestId?.trim() ?? '';
+    if ((linkedPropertyId ?? '').trim().isEmpty && requestId.isNotEmpty) {
+      final request = await _sb
+          .from('listing_requests')
+          .select('preview_property_id')
+          .eq('id', requestId)
+          .maybeSingle();
+      linkedPropertyId =
+          (request?['preview_property_id'] ?? '').toString().trim();
+      if (linkedPropertyId.trim().isEmpty) {
+        throw StateError(
+          'Listing request $requestId has no linked preview property',
+        );
+      }
+    }
     if (pending['marketplace'] == true) {
       await service.createMarketShoot(
-        propertyId: propertyId,
+        propertyId: linkedPropertyId,
         listingRequestId: listingRequestId,
         fulfillmentMode:
             (pending['fulfillment_mode'] ?? 'independent_market').toString(),
@@ -4470,7 +4544,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
     await service.createShoot(
       photographerId: (pending['photographer_id'] ?? '').toString(),
-      propertyId: propertyId,
+      propertyId: linkedPropertyId,
       listingRequestId: listingRequestId,
       kinds: kinds,
       locationText: (pending['location_text'] ?? '').toString(),
@@ -4741,21 +4815,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           }
         }
         final tour = _virtualTourUrl.text.trim();
-        try {
-          await _mergeRequestPayloadJson(requestId, {
-            if (media != null && media.imagePaths.isNotEmpty)
-              'request_image_paths': media.imagePaths,
-            if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
-              'request_video_path': media.videoPath,
-            if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
-              'video_url': media.videoPath,
-            if (tour.isNotEmpty) 'virtual_tour_url': tour,
-            'listing_guidance': _listingGuidanceWithBoundMedia(media),
-            if (media != null) 'media_integrity': media.integrity,
-            if (media != null && media.hasRealMedia)
-              'default_cover_used': false,
-          });
-        } catch (_) {}
+        await _mergeRequestPayloadJson(requestId, {
+          if (media != null && media.imagePaths.isNotEmpty)
+            'request_image_paths': media.imagePaths,
+          if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
+            'request_video_path': media.videoPath,
+          if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
+            'video_url': media.videoPath,
+          if (tour.isNotEmpty) 'virtual_tour_url': tour,
+          'listing_guidance': _listingGuidanceWithBoundMedia(media),
+          if (media != null) 'media_integrity': media.integrity,
+          if (media != null && media.hasRealMedia) 'default_cover_used': false,
+        });
         Object? photoRequestError;
         if (_pendingPhotoShoot != null) {
           try {
