@@ -1313,9 +1313,10 @@ class _LoginScreenState extends State<LoginScreen>
       args['code'] = code.substring(0, InAppOtpHandoff.otpLen);
     }
 
-    // Keep the busy overlay visible until the replacement route is pushed.
-    dismissLoginOverlay();
-    Navigator.of(context).pushReplacement(
+    // Replace the login and dialog together so there's no interactive gap
+    // between the blocking overlay and the verification screen.
+    final navigator = Navigator.of(context);
+    navigator.pushAndRemoveUntil(
       PageRouteBuilder<void>(
         settings: RouteSettings(
           name: '/verify',
@@ -1335,6 +1336,7 @@ class _LoginScreenState extends State<LoginScreen>
           return FadeTransition(opacity: animation, child: child);
         },
       ),
+      (route) => route.isFirst,
     );
     // لا تُفرّغ isBusy قبل الانتقال — كانت تُظهر وميض تحميل أبيض.
   }

@@ -26,7 +26,6 @@ abstract final class WebInAppNav {
   static int _holdBack = 0;
   static int _sealDepth = 0;
   static int _programmaticPopDepth = 0;
-  static DateTime? _flutterPopAt;
 
   static bool get _sealing => _sealDepth > 0;
 
@@ -46,6 +45,9 @@ abstract final class WebInAppNav {
     disposeWebInAppHistory();
     nestedNavigatorKey = null;
     popNested = null;
+    _fromHistory = false;
+    _holdBack = 0;
+    _programmaticPopDepth = 0;
     _forward.clear();
   }
 
@@ -84,6 +86,7 @@ abstract final class WebInAppNav {
     if (!kIsWeb || _fromHistory || _sealing) return;
     if (route is! PageRoute) return;
     if (SensitiveNavPolicy.isSensitiveReplayName(route.settings.name)) return;
+    _forward.clear();
     webInAppHistoryPushEntry();
   }
 
@@ -116,7 +119,6 @@ abstract final class WebInAppNav {
     _remember(route, nested: nested);
     if (_fromHistory) return;
     if (route is! PageRoute) return;
-    _flutterPopAt = DateTime.now();
     webInAppHistoryGoBack();
   }
 
@@ -176,12 +178,6 @@ abstract final class WebInAppNav {
 
   static Future<void> handleBack() async {
     if (_holdBack > 0) {
-      webInAppHistoryTrapLeaving();
-      return;
-    }
-    final recent = _flutterPopAt;
-    if (recent != null &&
-        DateTime.now().difference(recent) < const Duration(milliseconds: 480)) {
       webInAppHistoryTrapLeaving();
       return;
     }
@@ -254,12 +250,12 @@ abstract final class WebInAppNav {
         if (snap.nested) {
           final n = nestedNavigatorKey?.currentState;
           if (n != null) {
-            await n.push(route);
+            unawaited(n.push(route));
             return;
           }
         }
         if (root != null) {
-          await root.push(route);
+          unawaited(root.push(route));
           return;
         }
       }
