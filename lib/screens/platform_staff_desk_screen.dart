@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
@@ -1591,7 +1592,7 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
     required List<List<String>> rows,
     void Function(int index)? onTap,
   }) {
-    return Scrollbar(
+    return AqarScrollbarShell(
       child: SingleChildScrollView(
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,

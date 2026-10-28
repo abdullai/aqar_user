@@ -77,7 +77,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
         children: [
           if (topChrome != null) ...[
             Padding(
-              padding: const EdgeInsetsDirectional.fromSTEB(4, 2, 4, 6),
+              padding: const EdgeInsetsDirectional.fromSTEB(4, 0, 4, 4),
               child: topChrome!,
             ),
           ],
@@ -93,7 +93,7 @@ class UnifiedRealEstateCard extends StatelessWidget {
             const SizedBox(height: 6),
             underImage!,
           ],
-          SizedBox(height: compactContent ? 4 : 8),
+          SizedBox(height: compactContent ? 3 : 6),
           dataColumn,
         ],
       ),

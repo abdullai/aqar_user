@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/gestures/app_keyboard_inset.dart';
@@ -891,7 +892,7 @@ class _MarketerRequestDetailsPageState
 
     return PrimaryScrollController(
       controller: _detailsScrollCtrl,
-      child: Scrollbar(
+      child: AqarScrollbarShell(
         controller: _detailsScrollCtrl,
         child: SingleChildScrollView(
           controller: _detailsScrollCtrl,

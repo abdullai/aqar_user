@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -188,7 +189,7 @@ class _SubscriptionStaffReportsPanelState
             ),
             SizedBox(
               height: 200,
-              child: Scrollbar(
+              child: AqarScrollbarShell(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: SingleChildScrollView(

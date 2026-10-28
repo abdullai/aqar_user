@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/org/org_team_capacity.dart';
@@ -524,7 +525,7 @@ class _TeamDashboardBodyState extends State<_TeamDashboardBody> {
       return sb.compareTo(sa);
     });
 
-    return Scrollbar(
+    return AqarScrollbarShell(
       thumbVisibility: MediaQuery.sizeOf(context).width >= 700,
       child: RefreshIndicator(
         onRefresh: _load,
@@ -771,7 +772,7 @@ class _OrganizationRolesTabState extends State<_OrganizationRolesTab> {
     if (rows.isEmpty) {
       return Center(child: Text(t.orgRolesPickMember));
     }
-    return Scrollbar(
+    return AqarScrollbarShell(
       thumbVisibility: MediaQuery.sizeOf(context).width >= 700,
       child: RefreshIndicator(
         onRefresh: _load,

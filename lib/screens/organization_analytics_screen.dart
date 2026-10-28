@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import '../widgets/aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../l10n/app_localizations.dart';
@@ -191,7 +192,7 @@ class _OrganizationAnalyticsScreenState
 
     final body = RefreshIndicator(
       onRefresh: _load,
-      child: Scrollbar(
+      child: AqarScrollbarShell(
         thumbVisibility: true,
         child: ListView(
           padding: const EdgeInsets.all(16),

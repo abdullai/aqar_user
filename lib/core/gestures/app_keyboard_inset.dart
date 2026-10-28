@@ -272,12 +272,13 @@ class AppKeyboardPad extends StatelessWidget {
   Widget build(BuildContext context) {
     if (AppKeyboardPadScope.maybeOf(context)) return child;
     final bottom = AppKeyboardInset.layoutPadBottomOf(context) + extra;
-    final padded = bottom <= 0
-        ? child
-        : Padding(
-            padding: EdgeInsets.only(bottom: bottom),
-            child: child,
-          );
-    return AppKeyboardPadScope(child: padded);
+    // بنية ثابتة دائماً: تبديل child ⇄ Padding كان يعيد بناء النموذج كله
+    // (الحقل المركّز يُهدم) فيُغلق الكيبورد فور ظهوره.
+    return AppKeyboardPadScope(
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottom > 0 ? bottom : 0),
+        child: child,
+      ),
+    );
   }
 }

@@ -3860,7 +3860,7 @@ class _RealEstateCard extends StatelessWidget {
             );
           },
         ),
-        if (ownerHubListingCard || showMyPageCardMetrics) ...[
+        if (ownerHubListingCard) ...[
           const SizedBox(height: 4),
           _propertyCardMetricRow(
             context,

@@ -2510,13 +2510,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           topChrome: UnifiedCardTitleChrome(
             isAr: widget.isAr,
             title: title,
-            leading: [
-              UnifiedCardKindPill(
-                label: widget.isAr ? 'طلبك' : 'Your request',
-                background: const Color(0xFFEA580C),
-                foreground: Colors.white,
-              ),
-            ],
           ),
           belowMainRow: belowMainRow,
           cardRadius: _kHomeCardRadius,
@@ -9985,11 +9978,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                 surface: PresenceDisplaySurface.requestCards,
               )
             : null;
-    final deedAccessAllowed =
-        type == 'published' || _marketerOwnerChatUnlocked(r);
-    final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
-    final deedDate = deedAccessAllowed ? _hubDeedDateFromRow(r) : '';
-    final deedMissingLabel = deedAccessAllowed ? _hubDeedAbsentLabel : '—';
+    final deedNo = _hubDeedNumberFromRow(r);
+    final deedDate = _hubDeedDateFromRow(r);
+    final deedMissingLabel = _hubDeedAbsentLabel;
     final purposeAccent = PropertyListingDisplay.accentForRequestRow(r);
     final typeKey = (r['preview_type'] ?? r['request_property_type'] ?? '')
         .toString()
@@ -10215,13 +10206,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           topChrome: UnifiedCardTitleChrome(
             isAr: widget.isAr,
             title: title,
-            leading: [
-              UnifiedCardKindPill.forKind(
-                kind: UnifiedCardKind.request,
-                isAr: widget.isAr,
-                cs: cs,
-              ),
-            ],
           ),
           belowMainRow: belowContract,
           cardRadius: _kHomeCardRadius,
@@ -10468,13 +10452,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
               child: UnifiedCardTitleChrome(
                 isAr: widget.isAr,
                 title: title,
-                leading: [
-                  UnifiedCardKindPill.forKind(
-                    kind: UnifiedCardKind.request,
-                    isAr: widget.isAr,
-                    cs: cs,
-                  ),
-                ],
               ),
             ),
             Card(
@@ -10741,11 +10718,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       Map<String, dynamic>.from(r),
     );
     final permitWorkflowChrome = _marketerRowShowsPermitWorkflowChrome(type, r);
-    final deedAccessAllowed =
-        type == 'published' || _marketerOwnerChatUnlocked(r);
-    final deedNo = deedAccessAllowed ? _hubDeedNumberFromRow(r) : '';
-    final deedDate = deedAccessAllowed ? _hubDeedDateFromRow(r) : '';
-    final deedMissingLabel = deedAccessAllowed ? _hubDeedAbsentLabel : '—';
+    final deedNo = _hubDeedNumberFromRow(r);
+    final deedDate = _hubDeedDateFromRow(r);
+    final deedMissingLabel = _hubDeedAbsentLabel;
 
     final descNorm = description.trim();
     final titleNorm = title.trim();

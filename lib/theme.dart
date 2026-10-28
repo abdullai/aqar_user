@@ -7,6 +7,23 @@ import 'core/platform/app_surface.dart';
 import 'core/platform/viewport_scroll_policy.dart';
 import 'widgets/aqar_desktop_scrollbar.dart';
 
+/// نقطة البناء الوحيدة لشريط التمرير في كل المشروع.
+Widget _buildAqarScrollbar(
+  BuildContext context,
+  Widget child,
+  ScrollableDetails details,
+) {
+  if (!ViewportScrollPolicy.showPersistentScrollbar(context)) return child;
+  final controller = details.controller;
+  if (controller == null) return child;
+  if (AqarDesktopScrollbar.hasAncestorScrollbar(context)) return child;
+  return AqarDesktopScrollbar(
+    controller: controller,
+    axis: axisDirectionToAxis(details.direction),
+    child: child,
+  );
+}
+
 /// سلوك تمرير موحّد وذكي:
 /// - الشاشات الصغيرة/اللمسية والجوال (تطبيق أو ويب جوال): لا شريط ظاهر.
 ///   التمرير باللمس مدعوم دائماً (touch + stylus) ولا يلتفّ بـ `Scrollbar` كي لا
@@ -34,26 +51,13 @@ class AqarScrollBehavior extends MaterialScrollBehavior {
     Widget child,
     ScrollableDetails details,
   ) {
-    // لمس فقط (جوال/متصفح هاتف): بلا شريط. ماوس/ويندوز: شريط ظاهر.
-    if (!ViewportScrollPolicy.showPersistentScrollbar(context)) {
-      return child;
-    }
-    final controller = details.controller;
-    if (controller == null) {
-      return child;
-    }
-    // يمين المستخدم (حافة يمين الشاشة) على سطح المكتب وويندوز.
-    return AqarDesktopScrollbar(
-      controller: controller,
-      scrollbarOnRight: true,
-      child: child,
-    );
+    return _buildAqarScrollbar(context, child, details);
   }
 
+  // بدون mouse: سحب المحتوى بالماوس يتعارض مع سحب مقبض الشريط. العجلة والشريط يكفيان.
   @override
   Set<PointerDeviceKind> get dragDevices => {
         PointerDeviceKind.touch,
-        PointerDeviceKind.mouse,
         PointerDeviceKind.trackpad,
         PointerDeviceKind.stylus,
         PointerDeviceKind.invertedStylus,
@@ -83,24 +87,12 @@ class AqarAuthScrollBehavior extends MaterialScrollBehavior {
     Widget child,
     ScrollableDetails details,
   ) {
-    if (!ViewportScrollPolicy.showPersistentScrollbar(context)) {
-      return child;
-    }
-    final controller = details.controller;
-    if (controller == null) {
-      return child;
-    }
-    return AqarDesktopScrollbar(
-      controller: controller,
-      scrollbarOnRight: true,
-      child: child,
-    );
+    return _buildAqarScrollbar(context, child, details);
   }
 
   @override
   Set<PointerDeviceKind> get dragDevices => const {
         PointerDeviceKind.touch,
-        PointerDeviceKind.mouse,
         PointerDeviceKind.trackpad,
         PointerDeviceKind.stylus,
         PointerDeviceKind.invertedStylus,

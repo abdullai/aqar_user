@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../widgets/aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import '../core/utils/date_helper.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -166,7 +167,7 @@ class _OrgMemberActivityDeskPageState extends State<OrgMemberActivityDeskPage> {
     }
     return RefreshIndicator(
       onRefresh: _load,
-      child: Scrollbar(
+      child: AqarScrollbarShell(
         thumbVisibility: true,
         child: ListView.separated(
           padding: const EdgeInsets.all(12),

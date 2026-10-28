@@ -2020,7 +2020,6 @@ class _UserDashboardState extends State<UserDashboard>
                     Expanded(
                       child: AqarDesktopScrollbar(
                         controller: sheetScrollCtrl,
-                        scrollbarOnRight: true,
                         alwaysShowThumb: true,
                         child: SingleChildScrollView(
                           controller: sheetScrollCtrl,
@@ -5064,20 +5063,32 @@ class _UserDashboardState extends State<UserDashboard>
                                   ?.copyWith(fontWeight: FontWeight.w900),
                             ),
                           ),
-                          IconButton(
-                            tooltip: _isArabic
-                                ? 'إغلاق والعودة للرئيسية'
-                                : 'Close and return home',
-                            onPressed: () {
-                              _inlineSearchCtrl.text = _searchQuery;
-                              _ss(() {
-                                _tabIndex = 0;
-                                _bottomNavTransientIndex = null;
-                              });
-                            },
-                            icon: const Icon(Icons.close_rounded),
-                            visualDensity: VisualDensity.compact,
-                          ),
+                          if (AqarScrollBehavior.isCompactTouchLike(context)) ...[
+                            // الجوال: شريط التطبيق العلوي مخفي في «صفحتي»،
+                            // فتنتقل أدواته هنا لتأخذ الصفحة كامل الشاشة.
+                            _dashboardMapButton(
+                                Theme.of(context).colorScheme),
+                            _dashboardLiveAudienceButton(
+                                Theme.of(context).colorScheme),
+                            _dashboardNotificationsButton(
+                                l10n, Theme.of(context).colorScheme),
+                            _dashboardActionsMenu(
+                                l10n, Theme.of(context).colorScheme),
+                          ] else
+                            IconButton(
+                              tooltip: _isArabic
+                                  ? 'إغلاق والعودة للرئيسية'
+                                  : 'Close and return home',
+                              onPressed: () {
+                                _inlineSearchCtrl.text = _searchQuery;
+                                _ss(() {
+                                  _tabIndex = 0;
+                                  _bottomNavTransientIndex = null;
+                                });
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                              visualDensity: VisualDensity.compact,
+                            ),
                         ],
                       ),
                     ),
@@ -5817,7 +5828,8 @@ class _UserDashboardState extends State<UserDashboard>
       backgroundColor: cs.surface,
       // صفحة فوق التبويب: شريط الترحيب يُخفى حتى لا يتكرر X بجانب الاسم.
       // الصفحة الداخلية تعرض إغلاقاً واحداً بجانب عنوانها.
-      appBar: bodyNavCanPop
+      appBar: (bodyNavCanPop ||
+              (isMyPageRoot && AqarScrollBehavior.isCompactTouchLike(context)))
           ? null
           : AppBar(
               elevation: 0,
