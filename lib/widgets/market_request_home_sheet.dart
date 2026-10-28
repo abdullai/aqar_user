@@ -517,6 +517,13 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     if (!allowed || !mounted) return;
     final msgCtrl = TextEditingController();
     final priceCtrl = TextEditingController();
+    final requested = widget.row.budgetMax ?? widget.row.budgetMin;
+    final priceLocked = requested != null && requested > 0;
+    if (priceLocked) {
+      priceCtrl.text = requested.toStringAsFixed(
+        requested.truncateToDouble() == requested ? 0 : 2,
+      );
+    }
     final ok = await showAppDialog<bool>(
       context: context,
       builder: (dCtx) {
@@ -543,6 +550,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                 const SizedBox(height: 10),
                 AqarTextField(
                   controller: priceCtrl,
+                  readOnly: priceLocked,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
@@ -552,8 +560,12 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   ],
                   decoration: InputDecoration(
                     labelText: widget.isAr
-                        ? 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})'
-                        : 'Suggested price (SAR)',
+                        ? (priceLocked
+                            ? 'المبلغ المطلوب (${AppMoney.sarUiSuffix(isAr: true)})'
+                            : 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})')
+                        : (priceLocked
+                            ? 'Requested amount (SAR)'
+                            : 'Suggested price (SAR)'),
                   ),
                 ),
               ],
@@ -578,6 +590,23 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
     final price = double.tryParse(
       arabicAndPersianDigitsToLatin(priceCtrl.text.trim()).replaceAll(',', ''),
     );
+    final minRequired = (widget.row.budgetMin != null && widget.row.budgetMin! > 0)
+        ? widget.row.budgetMin!
+        : ((widget.row.budgetMax != null && widget.row.budgetMax! > 0)
+            ? widget.row.budgetMax!
+            : 0);
+    if (price != null && minRequired > 0 && price + 0.009 < minRequired) {
+      if (mounted) {
+        _toast(
+          widget.isAr
+              ? 'المبلغ أقل من المطلوب في الطلب.'
+              : 'The amount is below the requested price.',
+        );
+      }
+      msgCtrl.dispose();
+      priceCtrl.dispose();
+      return;
+    }
     final message = msgCtrl.text.trim();
     msgCtrl.dispose();
     priceCtrl.dispose();

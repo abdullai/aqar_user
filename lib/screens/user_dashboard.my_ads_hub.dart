@@ -2519,7 +2519,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           // صورة بعرض كامل أعلى البيانات — نسبة أقصر لتفادي فراغ رأسي.
           fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
           heroAspectRatio: _homeListingHeroAspectRatio(context),
-          belowCard: selectedMarketerPresence,
+          underImage: selectedMarketerPresence,
           footer: fa.isEmpty ? null : _buildSmartMarketerActionBar(fa),
         ),
       ),
@@ -10212,7 +10212,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           dataColumn: dataColumn,
           imageColumn: imageColumn,
           footer: footer,
-          belowCard: requestOwnerPresence,
+          underImage: requestOwnerPresence,
           compactContent: true,
           fullWidthHeroImage: !_homeListingCardsUseSideBySideLayout(context),
           heroAspectRatio: _homeListingHeroAspectRatio(context),

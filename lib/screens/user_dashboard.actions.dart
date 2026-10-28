@@ -2133,6 +2133,21 @@ extension _UserDashboardStateActions on _UserDashboardState {
       if (ok != true) return null;
       final parsedOfferPrice =
           p.isAuction ? NumberHelper.toDouble(priceCtrl.text.trim()) : null;
+      if (p.isAuction &&
+          parsedOfferPrice != null &&
+          currentPrice > 0 &&
+          parsedOfferPrice + 0.009 < currentPrice) {
+        if (mounted) {
+          _showNotification(
+            widget.isAr ? 'سعر غير صالح' : 'Invalid price',
+            widget.isAr
+                ? 'لا يمكن أن يكون العرض أقل من سعر الإعلان الحالي.'
+                : 'The offer cannot be lower than the current listing price.',
+            isError: true,
+          );
+        }
+        return null;
+      }
       return (
         message: msgCtrl.text.trim(),
         offerPrice: (parsedOfferPrice == null || parsedOfferPrice <= 0)

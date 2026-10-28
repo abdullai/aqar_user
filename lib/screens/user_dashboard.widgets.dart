@@ -2258,10 +2258,7 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
       ),
       dataColumn: dataColumn,
       imageColumn: imageStack,
-      belowCard: SizedBox(
-        height: 28,
-        child: presenceUnderImage ?? const SizedBox.shrink(),
-      ),
+      underImage: presenceUnderImage,
       belowMainRow: null,
       footer: requestFooter,
     );
@@ -4051,7 +4048,7 @@ class _RealEstateCard extends StatelessWidget {
         canAddToCart: canAddToCart,
         canBidFromCard: canBidFromCard,
       ),
-      belowCard: listingPresenceUnderImage(),
+      underImage: listingPresenceUnderImage(),
       belowMainRow: dateBelow,
       footer: footer,
     );

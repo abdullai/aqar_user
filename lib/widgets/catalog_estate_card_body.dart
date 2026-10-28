@@ -212,25 +212,10 @@ class CatalogEstateCardBody extends StatelessWidget {
               if (amount == null) {
                 return Row(children: [Expanded(child: idText), copyButton]);
               }
-              if (constraints.maxWidth >= 380) {
-                return Row(
-                  children: [
-                    Expanded(child: idText),
-                    copyButton,
-                    const SizedBox(width: 6),
-                    Flexible(
-                        child: Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: amount!,
-                    )),
-                  ],
-                );
-              }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(children: [Expanded(child: idText), copyButton]),
-                  const SizedBox(height: 3),
                   amount!,
                 ],
               );
