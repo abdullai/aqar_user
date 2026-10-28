@@ -190,6 +190,23 @@ void main() {
     expect(src.contains('AuthChallengeService.start'), isTrue);
   });
 
+  test('verified web login refreshes idle activity before dashboard routing',
+      () {
+    final src = File('lib/screens/verify_screen.dart').readAsStringSync();
+    final verifiedFlag =
+        src.indexOf('await prefs.setBool(_otpVerifiedKey(uid), true);');
+    final refreshedActivity = src.indexOf(
+      'await touchWebSessionActivity();',
+      verifiedFlag,
+    );
+    final dashboardRouting = src.indexOf(
+        'PostAuthNavigation.openRouteReplacingStack(', verifiedFlag);
+
+    expect(verifiedFlag, isNonNegative);
+    expect(refreshedActivity, greaterThan(verifiedFlag));
+    expect(dashboardRouting, greaterThan(refreshedActivity));
+  });
+
   test('SQL migration defines hashed challenges and denies client table access',
       () {
     final sql = File(

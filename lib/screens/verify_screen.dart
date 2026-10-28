@@ -24,6 +24,7 @@ import '../core/navigation/sensitive_nav_policy.dart';
 import '../core/session/app_session.dart';
 import '../core/auth/auth_signed_out_navigation_guard.dart';
 import '../core/auth/auth_local_sign_out.dart';
+import '../core/session/web_session_ttl.dart';
 import '../core/theme/app_appearance_bridge.dart';
 import '../core/session/return_after_auth.dart';
 import '../core/session/web_auth_tab_guard.dart';
@@ -1721,6 +1722,8 @@ class _VerifyScreenState extends State<VerifyScreen>
       await prefs.setBool(AppConfig.prefGuestModeKey, false);
       await prefs.setString(AppConfig.prefEntryModeKey, 'user');
       await prefs.setBool(_otpVerifiedKey(uid), true);
+      // A stale pre-login idle timestamp must not expire this newly verified session.
+      await touchWebSessionActivity();
       if (kIsWeb) {
         await WebAuthTabGuard.establishBinding(uid);
       }
