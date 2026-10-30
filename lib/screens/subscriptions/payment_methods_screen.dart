@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 
@@ -27,8 +27,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
-  bool get _canAddCard =>
-      _cards.length < PaymentService.maxSavedCards;
+  bool get _canAddCard => _cards.length < PaymentService.maxSavedCards;
 
   @override
   void initState() {
@@ -65,7 +64,19 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       name: '/subscriptions/add-card',
       page: AddPaymentCardScreen(lang: widget.lang),
     );
-    if (ok == true) await _load();
+    if (ok == true) {
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isAr
+                ? 'تمت إضافة البطاقة وحفظها بنجاح.'
+                : 'Card added successfully.',
+          ),
+        ),
+      );
+    }
   }
 
   static const _replaceCardMarker = '\u0000replace';
@@ -84,7 +95,17 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
     final beforeIds = before.map((c) => '${c['id']}').toSet();
     final added = after.any((c) => !beforeIds.contains('${c['id']}'));
     if (added) await _cardManager.deleteCard(oldId);
-    if (mounted) await _load();
+    if (mounted) {
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isAr ? 'تم تحديث البطاقة بنجاح.' : 'Card updated successfully.',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _editLabel(String id, String? current) async {
@@ -354,7 +375,8 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                           if (!isDefault && !expired)
                             IconButton(
                               icon: const Icon(Icons.star_outline, size: 20),
-                              tooltip: _isAr ? 'تعيين كمفضّلة' : 'Set preferred',
+                              tooltip:
+                                  _isAr ? 'تعيين كمفضّلة' : 'Set preferred',
                               onPressed: () => _setDefault(id),
                             ),
                           IconButton(
@@ -378,7 +400,9 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
               onPressed: _canAddCard ? _openAddCard : null,
               icon: const Icon(Icons.add_card_outlined),
               label: Text(
-                _isAr ? 'إضافة بطاقة أو طريقة دفع' : 'Add card or payment method',
+                _isAr
+                    ? 'إضافة بطاقة أو طريقة دفع'
+                    : 'Add card or payment method',
               ),
             ),
             if (!_canAddCard)

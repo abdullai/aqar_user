@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../widgets/aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
 import 'package:flutter/services.dart';
-import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,6 +34,7 @@ import '../services/photographer_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/aqar_text_field.dart';
 import '../widgets/subscription_staff_reports_panel.dart';
+import '../widgets/pdf_print_preview_overlay.dart';
 import '../widgets/staff_listing_integrity_panel.dart';
 import '../widgets/support/support_labeled_table.dart';
 
@@ -374,7 +374,12 @@ class _PlatformStaffDeskScreenState extends State<PlatformStaffDeskScreen> {
     final bytes = await ReportService(
       Supabase.instance.client,
     ).exportToPdf(cfg, isAr: _isAr);
-    await Printing.layoutPdf(onLayout: (_) async => bytes);
+    await PdfPrintPreviewOverlay.show(
+      context,
+      title: _isAr ? 'معاينة التقرير' : 'Report preview',
+      fileName: '${cfg.id}.pdf',
+      onLayout: (_) async => bytes,
+    );
   }
 
   Future<void> _exportTable({

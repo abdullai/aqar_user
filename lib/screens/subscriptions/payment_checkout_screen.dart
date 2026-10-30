@@ -1014,9 +1014,12 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
       billingTransactionId: bid,
       purpose: _moyasarPurpose(),
     );
+    final periodText = widget.period == 'yearly'
+        ? (_isAr ? 'سنوي' : 'yearly')
+        : (_isAr ? 'شهري' : 'monthly');
     final desc = _isAr
-        ? 'اشتراك ${AppBranding.shortNameAr} — $titleAr'
-        : '${AppBranding.brandNameEn} subscription — $titleEn';
+        ? 'اشتراك ${AppBranding.shortNameAr} — $titleAr — $periodText'
+        : '${AppBranding.brandNameEn} subscription — $titleEn — $periodText';
 
     ApplePayConfig? applePay;
     SamsungPayConfig? samsungPay;
@@ -1343,6 +1346,15 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
         _mode = 'saved';
         _selectedCardId = '${_cards.first['id']}';
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isAr
+                ? 'تم حفظ البطاقة. يمكنك الآن إتمام الدفع.'
+                : 'Card saved. You can now complete the payment.',
+          ),
+        ),
+      );
     }
     if (!await _maybeBiometric()) {
       if (!mounted) return;
@@ -2148,7 +2160,19 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
                             name: '/subscriptions/add-card',
                             page: AddPaymentCardScreen(lang: widget.lang),
                           );
-                          if (ok == true) await _loadCards();
+                          if (ok == true) {
+                            await _loadCards();
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  _isAr
+                                      ? 'تم حفظ البطاقة. يمكنك اختيارها من طرق الدفع.'
+                                      : 'Card saved. You can select it from payment methods.',
+                                ),
+                              ),
+                            );
+                          }
                         },
                         icon: const Icon(Icons.add_card_outlined),
                         label: Text(t.subscriptionsAddCard),

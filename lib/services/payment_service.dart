@@ -1339,10 +1339,12 @@ class PaymentService {
           'account_type': AccountRoleCache.snapshot?.accountType ?? 'user',
           'title_ar': titleAr ?? 'تم تأكيد الدفع',
           'title_en': titleEn ?? 'Payment confirmed',
-          'body_ar':
-              'المبلغ ${amount.toStringAsFixed(2)} $currency — راجع سجل المدفوعات.',
-          'body_en':
-              'Amount ${amount.toStringAsFixed(2)} $currency — see payment history.',
+          'body_ar': titleAr == 'تم تفعيل الطلب العقاري الفوري'
+              ? 'تم تفعيل رصيد الطلب الفوري بمبلغ ${amount.toStringAsFixed(2)} $currency ويمكنك استخدامه الآن.'
+              : 'المبلغ ${amount.toStringAsFixed(2)} $currency — راجع سجل المدفوعات.',
+          'body_en': titleEn == 'Instant property request activated'
+              ? 'Your ${amount.toStringAsFixed(2)} $currency instant-request credit is ready to use.'
+              : 'Amount ${amount.toStringAsFixed(2)} $currency — see payment history.',
           'gateway_transaction_id': gatewayId,
           'billing_tx_id': txRowId,
         },
@@ -1377,21 +1379,24 @@ class PaymentService {
   }) async {
     final uid = _user?.id;
     if (uid == null) return;
-    final gid = await _sb
+    final billing = await _sb
         .from(_tx)
-        .select('gateway_transaction_id')
+        .select('gateway_transaction_id,purpose')
         .eq('id', billingTransactionId)
         .eq('user_id', uid)
         .maybeSingle();
-    final g = gid?['gateway_transaction_id']?.toString();
+    final g = billing?['gateway_transaction_id']?.toString();
+    final purpose = billing?['purpose']?.toString().trim().toLowerCase();
+    final isInstantRequest = purpose == 'instant_market_request';
     await _notifyBillingSuccess(
       sb: _sb,
       userId: uid,
       amount: amount,
       currency: currency,
       gatewayId: g,
-      titleAr: titleAr,
-      titleEn: titleEn,
+      titleAr: isInstantRequest ? 'تم تفعيل الطلب العقاري الفوري' : titleAr,
+      titleEn:
+          isInstantRequest ? 'Instant property request activated' : titleEn,
       txRowId: billingTransactionId,
     );
   }

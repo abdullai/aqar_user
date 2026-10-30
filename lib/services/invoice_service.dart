@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:excel/excel.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' hide Border, BorderStyle;
 import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
@@ -15,6 +16,7 @@ import '../core/payment/invoice_document.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/profile_greeting_from_row.dart';
 import '../core/utils/users_profiles_safe_select.dart';
+import '../widgets/pdf_print_preview_overlay.dart';
 import 'billing_transaction_repository.dart';
 import 'payment_service.dart';
 
@@ -64,7 +66,8 @@ class InvoiceService {
     );
   }
 
-  Future<Map<String, dynamic>?> _subscriptionFor(Map<String, dynamic> row) async {
+  Future<Map<String, dynamic>?> _subscriptionFor(
+      Map<String, dynamic> row) async {
     final id = '${row['subscription_id'] ?? ''}'.trim();
     if (id.isEmpty) return null;
     try {
@@ -151,7 +154,8 @@ class InvoiceService {
           : doc.latinDateLine,
       isAr: isAr,
       subtotalLine: doc.showSubtotal
-          ? AppMoney.formatForPdf(doc.subtotal, isAr: isAr, currencyCode: doc.currency)
+          ? AppMoney.formatForPdf(doc.subtotal,
+              isAr: isAr, currencyCode: doc.currency)
           : null,
       autoPayDiscountLine: doc.showAutoPayDiscount
           ? AppMoney.formatForPdf(
@@ -172,18 +176,22 @@ class InvoiceService {
       promoDiscountLabel:
           doc.showPromoDiscount ? doc.promoDiscountLabel(isAr: isAr) : null,
       discountLine: doc.showCombinedDiscount
-          ? AppMoney.formatForPdf(doc.discount, isAr: isAr, currencyCode: doc.currency)
+          ? AppMoney.formatForPdf(doc.discount,
+              isAr: isAr, currencyCode: doc.currency)
           : null,
       discountLabel:
           doc.showCombinedDiscount ? doc.discountLabel(isAr: isAr) : null,
       vatLine: doc.showVat
-          ? AppMoney.formatForPdf(doc.vat, isAr: isAr, currencyCode: doc.currency)
+          ? AppMoney.formatForPdf(doc.vat,
+              isAr: isAr, currencyCode: doc.currency)
           : null,
       feesLine: doc.showFees
-          ? AppMoney.formatForPdf(doc.fees, isAr: isAr, currencyCode: doc.currency)
+          ? AppMoney.formatForPdf(doc.fees,
+              isAr: isAr, currencyCode: doc.currency)
           : null,
       refundLine: doc.showRefund
-          ? AppMoney.formatForPdf(doc.refundAmount, isAr: isAr, currencyCode: doc.currency)
+          ? AppMoney.formatForPdf(doc.refundAmount,
+              isAr: isAr, currencyCode: doc.currency)
           : null,
       vatNote: null,
       paymentReference: doc.paymentReference,
@@ -213,10 +221,23 @@ class InvoiceService {
     }
   }
 
-  Future<void> printInvoice(Map<String, dynamic> row) async {
+  Future<void> printInvoice(
+    Map<String, dynamic> row, {
+    BuildContext? context,
+  }) async {
+    final fileName = safeFileName(row);
+    if (context != null) {
+      await PdfPrintPreviewOverlay.show(
+        context,
+        title: isAr ? 'معاينة الفاتورة' : 'Invoice preview',
+        fileName: fileName,
+        onLayout: (_) => buildPdf(row),
+      );
+      return;
+    }
     try {
       await Printing.layoutPdf(
-        name: safeFileName(row),
+        name: fileName,
         onLayout: (_) => buildPdf(row),
       );
     } catch (_) {
@@ -228,16 +249,30 @@ class InvoiceService {
     List<Map<String, dynamic>> rows, {
     String? tabTitleAr,
     String? tabTitleEn,
+    BuildContext? context,
   }) async {
     if (rows.isEmpty) {
-      await Printing.layoutPdf(
-        name: 'no_invoices.pdf',
-        onLayout: (_) => PaymentService.buildNoInvoicesPdf(
-          isAr: isAr,
-          titleAr: tabTitleAr,
-          titleEn: tabTitleEn,
-        ),
-      );
+      if (context != null) {
+        await PdfPrintPreviewOverlay.show(
+          context,
+          title: isAr ? 'معاينة الفواتير' : 'Invoice preview',
+          fileName: 'no_invoices.pdf',
+          onLayout: (_) => PaymentService.buildNoInvoicesPdf(
+            isAr: isAr,
+            titleAr: tabTitleAr,
+            titleEn: tabTitleEn,
+          ),
+        );
+      } else {
+        await Printing.layoutPdf(
+          name: 'no_invoices.pdf',
+          onLayout: (_) => PaymentService.buildNoInvoicesPdf(
+            isAr: isAr,
+            titleAr: tabTitleAr,
+            titleEn: tabTitleEn,
+          ),
+        );
+      }
       return;
     }
     final payer = await loadPayerInfo();
@@ -277,9 +312,8 @@ class InvoiceService {
                 currencyCode: doc.currency,
               )
             : null,
-        'discountLabel': doc.showCombinedDiscount
-            ? doc.discountLabel(isAr: isAr)
-            : null,
+        'discountLabel':
+            doc.showCombinedDiscount ? doc.discountLabel(isAr: isAr) : null,
         'autoPayDiscountLine': doc.showAutoPayDiscount
             ? AppMoney.formatForPdf(
                 doc.autoPayDiscountSar,
@@ -297,11 +331,11 @@ class InvoiceService {
                 currencyCode: doc.currency,
               )
             : null,
-        'promoDiscountLabel': doc.showPromoDiscount
-            ? doc.promoDiscountLabel(isAr: isAr)
-            : null,
+        'promoDiscountLabel':
+            doc.showPromoDiscount ? doc.promoDiscountLabel(isAr: isAr) : null,
         'vatLine': doc.showVat
-            ? AppMoney.formatForPdf(doc.vat, isAr: isAr, currencyCode: doc.currency)
+            ? AppMoney.formatForPdf(doc.vat,
+                isAr: isAr, currencyCode: doc.currency)
             : null,
         'feesLine': doc.showFees
             ? AppMoney.formatForPdf(
@@ -328,13 +362,25 @@ class InvoiceService {
     final stamp = DateTime.now().toUtc();
     final name =
         'Invoices_${stamp.year}-${stamp.month.toString().padLeft(2, '0')}.pdf';
-    await Printing.layoutPdf(
-      name: name,
-      onLayout: (_) => PaymentService.buildInvoiceBookPdf(
-        invoices: invoices,
-        isAr: isAr,
-      ),
-    );
+    if (context != null) {
+      await PdfPrintPreviewOverlay.show(
+        context,
+        title: isAr ? 'معاينة الفواتير' : 'Invoice preview',
+        fileName: name,
+        onLayout: (_) => PaymentService.buildInvoiceBookPdf(
+          invoices: invoices,
+          isAr: isAr,
+        ),
+      );
+    } else {
+      await Printing.layoutPdf(
+        name: name,
+        onLayout: (_) => PaymentService.buildInvoiceBookPdf(
+          invoices: invoices,
+          isAr: isAr,
+        ),
+      );
+    }
   }
 
   static Uint8List csvUtf8BomBytes(String csv) =>
@@ -366,8 +412,8 @@ class InvoiceService {
       fontColorHex: header ? ExcelColor.white : ExcelColor.black,
       backgroundColorHex: background ??
           (header ? ExcelColor.fromHexString('FF0F766E') : ExcelColor.white),
-      horizontalAlign: align ??
-          (isAr ? HorizontalAlign.Right : HorizontalAlign.Left),
+      horizontalAlign:
+          align ?? (isAr ? HorizontalAlign.Right : HorizontalAlign.Left),
       verticalAlign: VerticalAlign.Center,
       leftBorder: thin,
       rightBorder: thin,
@@ -432,11 +478,14 @@ class InvoiceService {
 
     String t(String ar, String en) => isAr ? ar : en;
     var r = 0;
-    _excelText(sheet, 0, r, t('بسم الله الرحمن الرحيم', 'In the name of Allah'), metaStyle);
+    _excelText(sheet, 0, r, t('بسم الله الرحمن الرحيم', 'In the name of Allah'),
+        metaStyle);
     r++;
-    _excelText(sheet, 0, r, t('المملكة العربية السعودية', 'Kingdom of Saudi Arabia'), metaStyle);
+    _excelText(sheet, 0, r,
+        t('المملكة العربية السعودية', 'Kingdom of Saudi Arabia'), metaStyle);
     r++;
-    _excelText(sheet, 0, r, AppBranding.invoiceLetterheadBrandName(isAr: isAr), metaStyle);
+    _excelText(sheet, 0, r, AppBranding.invoiceLetterheadBrandName(isAr: isAr),
+        metaStyle);
     r++;
     _excelText(
       sheet,
@@ -471,7 +520,12 @@ class InvoiceService {
     final refunded = docs.where((d) => d.isRefundedTab()).toList();
     if (eligible.isNotEmpty) {
       final sum = eligible.fold<double>(0, (a, d) => a + d.amount);
-      _excelText(sheet, 0, r, t('إجمالي العمليات المؤهلة (مدفوعة)', 'Eligible paid total'), totalStyle);
+      _excelText(
+          sheet,
+          0,
+          r,
+          t('إجمالي العمليات المؤهلة (مدفوعة)', 'Eligible paid total'),
+          totalStyle);
       _excelNumber(sheet, 1, r, sum, totalStyle);
       _excelText(sheet, 2, r, isAr ? 'ريال' : 'Riyal', totalStyle);
       r++;
@@ -481,7 +535,12 @@ class InvoiceService {
         0,
         (a, d) => a + (d.showRefund ? d.refundAmount : d.amount),
       );
-      _excelText(sheet, 0, r, t('إجمالي المسترجع (ليس إيراداً)', 'Refunded total (not revenue)'), totalStyle);
+      _excelText(
+          sheet,
+          0,
+          r,
+          t('إجمالي المسترجع (ليس إيراداً)', 'Refunded total (not revenue)'),
+          totalStyle);
       _excelNumber(sheet, 1, r, sum, totalStyle);
       _excelText(sheet, 2, r, isAr ? 'ريال' : 'Riyal', totalStyle);
       r++;
@@ -492,7 +551,8 @@ class InvoiceService {
     if (payer.fullName != null ||
         payer.email != null ||
         (payer.phone ?? '').trim().isNotEmpty) {
-      _excelText(sheet, 0, r, AppBranding.invoicePartnerLabel(isAr: isAr), headerStyle);
+      _excelText(sheet, 0, r, AppBranding.invoicePartnerLabel(isAr: isAr),
+          headerStyle);
       _excelText(sheet, 1, r, payer.fullName ?? '', bodyStyle);
       _excelText(sheet, 2, r, payer.email ?? '', bodyStyle);
       _excelText(sheet, 3, r, payer.phone ?? '', bodyStyle);
@@ -555,12 +615,14 @@ class InvoiceService {
     r++;
 
     for (final doc in docs) {
-      _excelText(sheet, 0, r, doc.hasInvoiceNumber ? doc.invoiceNumber : '', bodyStyle);
+      _excelText(sheet, 0, r, doc.hasInvoiceNumber ? doc.invoiceNumber : '',
+          bodyStyle);
       _excelText(sheet, 1, r, doc.latinDateLine, bodyStyle);
       _excelText(sheet, 2, r, doc.title, bodyStyle);
       _excelText(sheet, 3, r, doc.purposeLabel, bodyStyle);
       _excelText(sheet, 4, r, doc.periodLabel, bodyStyle);
-      _excelNumber(sheet, 5, r, doc.showSubtotal ? doc.subtotal : null, moneyStyle);
+      _excelNumber(
+          sheet, 5, r, doc.showSubtotal ? doc.subtotal : null, moneyStyle);
       _excelNumber(
         sheet,
         6,
@@ -583,7 +645,8 @@ class InvoiceService {
         doc.promoDiscountSar > 0.009 ? doc.promoDiscountSar : null,
         moneyStyle,
       );
-      _excelNumber(sheet, 10, r, doc.showDiscount ? doc.discount : null, moneyStyle);
+      _excelNumber(
+          sheet, 10, r, doc.showDiscount ? doc.discount : null, moneyStyle);
       _excelText(
         sheet,
         11,
@@ -600,7 +663,8 @@ class InvoiceService {
       _excelText(sheet, 18, r, doc.paymentReference ?? '', bodyStyle);
       _excelText(sheet, 19, r, doc.subscriptionStart ?? '', bodyStyle);
       _excelText(sheet, 20, r, doc.subscriptionEnd ?? '', bodyStyle);
-      _excelNumber(sheet, 21, r, doc.showRefund ? doc.refundAmount : null, moneyStyle);
+      _excelNumber(
+          sheet, 21, r, doc.showRefund ? doc.refundAmount : null, moneyStyle);
       r++;
     }
 
@@ -643,7 +707,8 @@ class InvoiceService {
   }) async {
     final buf = StringBuffer();
     final now = formatLatinDateTime(DateTime.now());
-    buf.writeln('"${isAr ? 'بسم الله الرحمن الرحيم' : 'In the name of Allah'}"');
+    buf.writeln(
+        '"${isAr ? 'بسم الله الرحمن الرحيم' : 'In the name of Allah'}"');
     for (final line in excelLetterheadLines(
       isAr: isAr,
       title: sectionTitle ?? (isAr ? 'سجل الفواتير' : 'Invoice ledger'),

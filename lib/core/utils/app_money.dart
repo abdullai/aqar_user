@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../widgets/saudi_riyal_symbol_icon.dart';
 
-/// تنسيق موحد للمبالغ: رمز الريال قبل الرقم بالعربية، وSAR بعد الرقم بالإنجليزية.
+/// تنسيق موحد للمبالغ: رمز الريال بعد الرقم بالعربية، وSAR بعد الرقم بالإنجليزية.
 class AppMoney {
   AppMoney._();
 
@@ -21,11 +21,11 @@ class AppMoney {
     return isAr ? saudiRiyalSignCompat : 'SAR';
   }
 
-  /// العملة حسب اتجاه اللغة: `﷼1234` بالعربية و`1234 SAR` بالإنجليزية.
+  /// العملة حسب اتجاه اللغة: `1234 ﷼` بالعربية و`1234 SAR` بالإنجليزية.
   static String sarPhrase(String amountText, {required bool isAr}) {
     final t = amountText.trim();
     final suffix = sarUiSuffix(isAr: isAr);
-    return isAr ? '\u202A$suffix$t\u202C' : '$t $suffix';
+    return '$t $suffix';
   }
 
   /// يزيل رموز/اختصارات الريال من حقل إدخال قبل التحليل.
@@ -91,7 +91,7 @@ class AppMoney {
     return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$code $fmt';
   }
 
-  /// PDF — رمز الريال قبل الرقم بالعربية وبعد الرقم بالإنجليزية.
+  /// PDF — رمز الريال بعد الرقم في اللغتين، بصيغة مناسبة للطباعة.
   static String formatForPdf(
     double amount, {
     required bool isAr,
@@ -105,7 +105,7 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '$saudiRiyalSignCompat$fmt' : '$fmt SAR';
+      return isAr ? '$fmt $saudiRiyalSignCompat' : '$fmt SAR';
     }
     return '$fmt $code';
   }
@@ -130,7 +130,7 @@ class AppMoney {
   }
 }
 
-/// اتجاه رمز الريال حسب اللغة: قبل الرقم بالعربية وبعده SAR بالإنجليزية.
+/// اتجاه رمز الريال حسب اللغة: بعد الرقم في العربية، وبعده SAR بالإنجليزية.
 class AppMoneyInline extends StatelessWidget {
   final String amountText;
   final bool isAr;
@@ -192,11 +192,9 @@ class AppMoneyInline extends StatelessWidget {
         textDirection: ui.TextDirection.ltr,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          if (isAr) currency,
-          if (isAr) gap,
           amount,
-          if (!isAr) gap,
-          if (!isAr) currency
+          gap,
+          currency,
         ],
       ),
     );

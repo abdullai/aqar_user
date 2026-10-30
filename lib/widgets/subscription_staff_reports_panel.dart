@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'aqar_desktop_scrollbar.dart' show AqarScrollbarShell;
-import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/payment/invoice_copy.dart';
@@ -9,6 +8,7 @@ import '../core/utils/date_helper.dart';
 import '../services/report_service.dart';
 import '../services/subscription_admin_report_service.dart';
 import 'app_logo_loading.dart';
+import 'pdf_print_preview_overlay.dart';
 
 /// تقارير اشتراكات/مدفوعات لموظفي المنصة — تبويب «إدارتي» / التقارير.
 class SubscriptionStaffReportsPanel extends StatefulWidget {
@@ -65,7 +65,8 @@ class _SubscriptionStaffReportsPanelState
   }
 
   String _amountLabel(Map<String, dynamic> r) =>
-      AppMoney.formatForExport(_amt(r), isAr: widget.isAr, maxFractionDigits: 2);
+      AppMoney.formatForExport(_amt(r),
+          isAr: widget.isAr, maxFractionDigits: 2);
 
   Future<void> _printBillingPdf() async {
     final isAr = widget.isAr;
@@ -100,9 +101,14 @@ class _SubscriptionStaffReportsPanelState
           ? 'يشمل المكتمل والمسترد والمعلّق'
           : 'Includes success, refunded, and pending',
     );
-    final bytes =
-        await ReportService(Supabase.instance.client).exportToPdf(cfg, isAr: isAr);
-    await Printing.layoutPdf(onLayout: (_) async => bytes);
+    final bytes = await ReportService(Supabase.instance.client)
+        .exportToPdf(cfg, isAr: isAr);
+    await PdfPrintPreviewOverlay.show(
+      context,
+      title: isAr ? 'معاينة مدفوعات المنصة' : 'Platform billing preview',
+      fileName: 'staff_billing.pdf',
+      onLayout: (_) async => bytes,
+    );
   }
 
   @override
@@ -157,7 +163,9 @@ class _SubscriptionStaffReportsPanelState
                           ),
                   icon: const Icon(Icons.table_chart_outlined),
                   label: Text(
-                    widget.isAr ? 'تصدير مدفوعات Excel' : 'Export billing Excel',
+                    widget.isAr
+                        ? 'تصدير مدفوعات Excel'
+                        : 'Export billing Excel',
                   ),
                 ),
                 FilledButton.tonalIcon(
@@ -169,7 +177,9 @@ class _SubscriptionStaffReportsPanelState
                           ),
                   icon: const Icon(Icons.history_edu_outlined),
                   label: Text(
-                    widget.isAr ? 'تصدير أحداث Excel' : 'Export lifecycle Excel',
+                    widget.isAr
+                        ? 'تصدير أحداث Excel'
+                        : 'Export lifecycle Excel',
                   ),
                 ),
                 OutlinedButton.icon(
@@ -181,7 +191,9 @@ class _SubscriptionStaffReportsPanelState
             ),
             const SizedBox(height: 12),
             Text(
-              widget.isAr ? 'آخر العمليات (كل الحالات)' : 'Latest billing (all statuses)',
+              widget.isAr
+                  ? 'آخر العمليات (كل الحالات)'
+                  : 'Latest billing (all statuses)',
               style: TextStyle(
                 fontWeight: FontWeight.w700,
                 color: cs.primary,

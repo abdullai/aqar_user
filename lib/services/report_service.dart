@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:excel/excel.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -13,6 +14,7 @@ import '../core/branding/app_branding.dart';
 import '../core/branding/branding_pdf.dart';
 import '../core/payment/invoice_copy.dart';
 import '../core/pdf/pdf_readable_qr.dart';
+import '../widgets/pdf_print_preview_overlay.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/date_helper.dart';
 import 'billing_transaction_repository.dart';
@@ -45,11 +47,13 @@ class ReportService {
     final org = OrgTeamService(_client);
     final ctx = await org.myOrgContext();
     final orgId = '${ctx?['org_id'] ?? ''}'.trim();
-    final none = isAr ? 'لا توجد بيانات في هذا الحساب حالياً' : 'No data on this account yet';
+    final none = isAr
+        ? 'لا توجد بيانات في هذا الحساب حالياً'
+        : 'No data on this account yet';
 
     String memberName(Map<String, dynamic> m) {
-      final prof =
-          (m['profile'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+      final prof = (m['profile'] as Map?)?.cast<String, dynamic>() ??
+          <String, dynamic>{};
       final n = isAr
           ? '${prof['full_name_ar'] ?? prof['username'] ?? ''}'
           : '${prof['full_name_en'] ?? prof['username'] ?? ''}';
@@ -64,7 +68,8 @@ class ReportService {
       ];
     }
 
-    final members = orgId.isEmpty ? <Map<String, dynamic>>[] : await org.listMembers(orgId);
+    final members =
+        orgId.isEmpty ? <Map<String, dynamic>>[] : await org.listMembers(orgId);
     final contrib = orgId.isEmpty
         ? <String, Map<String, int>>{}
         : await org.fetchOrgMemberContribution(orgId);
@@ -96,7 +101,8 @@ class ReportService {
           ],
         )
         .toList()
-      ..sort((a, b) => (int.tryParse(b[1]) ?? 0).compareTo(int.tryParse(a[1]) ?? 0));
+      ..sort((a, b) =>
+          (int.tryParse(b[1]) ?? 0).compareTo(int.tryParse(a[1]) ?? 0));
 
     final propRows = <List<String>>[];
     final adsRows = <List<String>>[];
@@ -113,16 +119,15 @@ class ReportService {
       if (st.isEmpty) st = 'pending';
       joinByStatus[st] = (joinByStatus[st] ?? 0) + 1;
     }
-    final joinRows = joinByStatus.entries
-        .map((e) => [e.key, '${e.value}'])
-        .toList();
+    final joinRows =
+        joinByStatus.entries.map((e) => [e.key, '${e.value}']).toList();
 
-    final billing = await BillingTransactionRepository(_client).list(limit: 200);
+    final billing =
+        await BillingTransactionRepository(_client).list(limit: 200);
     final payRows = billing.map((r) {
       final raw = r['amount'];
-      final v = raw is num
-          ? raw.toDouble()
-          : double.tryParse('${raw ?? ''}') ?? 0.0;
+      final v =
+          raw is num ? raw.toDouble() : double.tryParse('${raw ?? ''}') ?? 0.0;
       final dt = DateTime.tryParse('${r['completed_at'] ?? r['created_at']}');
       return [
         '${r['invoice_number'] ?? ''}'.trim(),
@@ -172,11 +177,12 @@ class ReportService {
       ReportConfig(
         id: 'team_activity_30d',
         title: isAr ? 'نشاط الفريق (30 يوماً)' : 'Team activity (30d)',
-        columns: isAr
-            ? const ['العضو', 'الإجراءات']
-            : const ['Member', 'Actions'],
+        columns:
+            isAr ? const ['العضو', 'الإجراءات'] : const ['Member', 'Actions'],
         rows: orEmpty(activityRows, 2),
-        filtersDescription: isAr ? 'آخر 30 يوماً — من سجل المنشأة' : 'Last 30 days — org activity log',
+        filtersDescription: isAr
+            ? 'آخر 30 يوماً — من سجل المنشأة'
+            : 'Last 30 days — org activity log',
       ),
       ReportConfig(
         id: 'properties_by_member',
@@ -186,7 +192,8 @@ class ReportService {
       ),
       ReportConfig(
         id: 'ads_by_member',
-        title: isAr ? 'الإعلانات المنشورة حسب العضو' : 'Published ads by member',
+        title:
+            isAr ? 'الإعلانات المنشورة حسب العضو' : 'Published ads by member',
         columns: isAr ? const ['العضو', 'العدد'] : const ['Member', 'Count'],
         rows: orEmpty(adsRows, 2),
       ),
@@ -201,9 +208,17 @@ class ReportService {
         title: isAr ? 'المدفوعات والاشتراكات' : 'Payments & subscriptions',
         columns: isAr
             ? const ['رقم', 'التاريخ', 'البيان', 'المبلغ', 'الحالة', 'الطريقة']
-            : const ['Ref', 'Date', 'Description', 'Amount', 'Status', 'Method'],
+            : const [
+                'Ref',
+                'Date',
+                'Description',
+                'Amount',
+                'Status',
+                'Method'
+              ],
         rows: orEmpty(payRows, 6),
-        filtersDescription: isAr ? 'فواتيرك الحقيقية' : 'Your live billing rows',
+        filtersDescription:
+            isAr ? 'فواتيرك الحقيقية' : 'Your live billing rows',
       ),
       ReportConfig(
         id: 'sessions',
@@ -266,7 +281,8 @@ class ReportService {
       baseFont = ttf;
       fontBold = ttf;
     } catch (_) {}
-    final doc = pw.Document(theme: pw.ThemeData.withFont(base: baseFont, bold: fontBold));
+    final doc = pw.Document(
+        theme: pw.ThemeData.withFont(base: baseFont, bold: fontBold));
     final logo = await loadBrandingPdfLogo();
     final brandColor = tableHeaderColor ?? kDocumentBrandPdfColor;
     final filtersMeta = cfg.filtersDescription.trim().isNotEmpty
@@ -355,8 +371,9 @@ class ReportService {
     return doc.save();
   }
 
-  String _spreadsheetExporterLine(bool isAr) =>
-      isAr ? 'الوَسم: ${_exporterWatermarkLabel()}' : 'Watermark: ${_exporterWatermarkLabel()}';
+  String _spreadsheetExporterLine(bool isAr) => isAr
+      ? 'الوَسم: ${_exporterWatermarkLabel()}'
+      : 'Watermark: ${_exporterWatermarkLabel()}';
 
   Future<void> exportToExcel(
     ReportConfig cfg,
@@ -429,8 +446,21 @@ class ReportService {
   }) =>
       exportToCsv(cfg, '${fileBaseName}_as_csv', isAr: isAr);
 
-  Future<void> printReport(ReportConfig cfg, {bool isAr = false}) async {
+  Future<void> printReport(
+    ReportConfig cfg, {
+    bool isAr = false,
+    BuildContext? context,
+  }) async {
     final bytes = await exportToPdf(cfg, isAr: isAr);
+    if (context != null) {
+      await PdfPrintPreviewOverlay.show(
+        context,
+        title: isAr ? 'معاينة التقرير' : 'Report preview',
+        fileName: '${cfg.id}.pdf',
+        onLayout: (_) async => bytes,
+      );
+      return;
+    }
     await Printing.layoutPdf(onLayout: (_) async => bytes);
   }
 

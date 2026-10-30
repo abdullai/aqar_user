@@ -118,9 +118,9 @@ void addOfficialInvoicePage({
       child: pw.Row(
         mainAxisSize: pw.MainAxisSize.min,
         children: [
-          icon,
-          pw.SizedBox(width: 2),
           pw.Text(n, style: style),
+          pw.SizedBox(width: 2),
+          icon,
         ],
       ),
     );

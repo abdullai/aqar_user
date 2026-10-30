@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
@@ -169,8 +169,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
 
   String _tabExportTitle(PaymentTab tab) => switch (tab) {
         PaymentTab.success => _isAr ? 'فواتير مكتملة' : 'Completed invoices',
-        PaymentTab.oneTime =>
-          _isAr ? 'عمليات لمرة واحدة' : 'One-time payments',
+        PaymentTab.oneTime => _isAr ? 'عمليات لمرة واحدة' : 'One-time payments',
         PaymentTab.refunded => _isAr ? 'عمليات مستردة' : 'Refunded payments',
         PaymentTab.pending => _isAr ? 'عمليات معلقة' : 'Pending payments',
         PaymentTab.failed => _isAr ? 'عمليات فاشلة' : 'Failed payments',
@@ -188,7 +187,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isAr ? 'لا توجد بيانات للتصدير' : 'No data to export'),
+            content:
+                Text(_isAr ? 'لا توجد بيانات للتصدير' : 'No data to export'),
           ),
         );
         return;
@@ -226,7 +226,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isAr ? 'لا توجد بيانات للتصدير' : 'No data to export'),
+            content:
+                Text(_isAr ? 'لا توجد بيانات للتصدير' : 'No data to export'),
           ),
         );
         return;
@@ -235,6 +236,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
         rows,
         tabTitleAr: _tabExportTitle(_currentTab),
         tabTitleEn: _tabExportTitle(_currentTab),
+        context: context,
       );
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -253,7 +255,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isAr ? 'لا توجد بيانات للتصدير' : 'No data to export'),
+            content:
+                Text(_isAr ? 'لا توجد بيانات للتصدير' : 'No data to export'),
           ),
         );
         return;
@@ -288,6 +291,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
       _currentTabRows,
       tabTitleAr: _tabExportTitle(_currentTab),
       tabTitleEn: _tabExportTitle(_currentTab),
+      context: context,
     );
   }
 

@@ -7,7 +7,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/branding/app_branding.dart';
@@ -21,6 +20,7 @@ import '../../l10n/app_localizations.dart';
 import '../../services/payment_service.dart';
 import '../../widgets/app_page_close_button.dart';
 import '../../widgets/app_readable_qr.dart';
+import '../../widgets/pdf_print_preview_overlay.dart';
 
 /// إيصال الدفع الناجح — يظهر تلقائياً بعد العملية الناجحة.
 ///
@@ -417,7 +417,7 @@ class PaymentReceiptScreen extends StatelessWidget {
                           child: OutlinedButton.icon(
                             icon: const Icon(Icons.print_outlined),
                             label: Text(printLabel),
-                            onPressed: () => unawaited(_printPdf()),
+                            onPressed: () => unawaited(_printPdf(context)),
                           ),
                         ),
                         SizedBox(
@@ -627,15 +627,12 @@ Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentRef
     }
   }
 
-  Future<void> _printPdf() async {
-    try {
-      await Printing.layoutPdf(
-        name: _safeFileName(),
-        onLayout: (_) async => _buildInvoiceBytes(),
-      );
-    } catch (_) {
-      // فشل فتح حوار الطباعة (مثلاً ويب بدون دعم): نرجع للمشاركة.
-      await _sharePdf();
-    }
+  Future<void> _printPdf(BuildContext context) async {
+    await PdfPrintPreviewOverlay.show(
+      context,
+      title: _isAr ? 'معاينة الفاتورة' : 'Invoice preview',
+      fileName: _safeFileName(),
+      onLayout: (_) => _buildInvoiceBytes(),
+    );
   }
 }

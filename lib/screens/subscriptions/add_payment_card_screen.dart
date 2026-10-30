@@ -295,16 +295,13 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
     );
     if (!mounted) return;
     setState(() => _saving = false);
+    if (res['ok'] == true) {
+      Navigator.pop(context, true);
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          res['ok'] == true
-              ? t.subscriptionsCardSaved
-              : _errorLabel(res['error'], t),
-        ),
-      ),
+      SnackBar(content: Text(_errorLabel(res['error'], t))),
     );
-    if (res['ok'] == true) Navigator.pop(context, true);
   }
 
   AppBar _closeAppBar(AppLocalizations t) {

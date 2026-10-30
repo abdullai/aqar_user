@@ -211,7 +211,10 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   onPressed: _busy
                       ? null
                       : () => _run(
-                            () => widget.invoices.printInvoice(_row),
+                            () => widget.invoices.printInvoice(
+                              _row,
+                              context: context,
+                            ),
                             _isAr ? 'تم فتح الطباعة' : 'Print opened',
                             _isAr ? 'تعذرت الطباعة' : 'Print failed',
                           ),

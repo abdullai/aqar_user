@@ -248,6 +248,16 @@ class _OneTimePaymentCheckoutScreenState
     );
     if (added == true) {
       await _loadCards();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.isAr
+                ? 'تم حفظ البطاقة. يمكنك الآن إتمام الدفع.'
+                : 'Card saved. You can now complete the payment.',
+          ),
+        ),
+      );
     }
   }
 
@@ -320,9 +330,12 @@ class _OneTimePaymentCheckoutScreenState
     try {
       config = _pay.buildMoyasarPaymentConfig(
         amountHalalas: PaymentService.amountToHalalas(_chargeSar),
-        description: widget.titleEn.length > 128
-            ? widget.titleEn.substring(0, 128)
-            : widget.titleEn,
+        description: () {
+          final value = widget.isAr
+              ? '${widget.titleAr} — دفعة واحدة — تفعيل رصيد الطلب العقاري'
+              : '${widget.titleEn} — one-time payment — instant property-request credit';
+          return value.length > 128 ? value.substring(0, 128) : value;
+        }(),
         metadata: metadata,
         madaPreferredNetworksOnly: false,
         applePay: applePay,
@@ -658,6 +671,8 @@ class _OneTimePaymentCheckoutScreenState
       final fulfillment = await _sub.fulfillPaidBilling(
         billingTransactionId: bid,
         expectedAmountSar: _chargeSar,
+        titleAr: widget.titleAr,
+        titleEn: widget.titleEn,
       );
       if (fulfillment['ok'] != true) {
         if (!mounted) return;

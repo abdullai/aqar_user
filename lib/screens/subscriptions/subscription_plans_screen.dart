@@ -1255,29 +1255,24 @@ class _SubscriptionPlansScreenState extends State<SubscriptionPlansScreen> {
                       const SizedBox(height: 6),
                       Text(
                         _subscriptionPolicyLine(p),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: true,
                       ),
                       Text(
                         _propertyListingsLine(p, t),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: true,
                       ),
                       Text(
                         _listingRequestsLine(p),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: true,
                       ),
                       Text(
                         _marketOffersLine(p),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: true,
                       ),
                       if (_comprehensivePlanNote(p) != null)
                         Text(
                           _comprehensivePlanNote(p)!,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                          softWrap: true,
                         ),
                       if (_planShowsFalSupport(p) &&
                           p['has_fal_license'] != true &&
