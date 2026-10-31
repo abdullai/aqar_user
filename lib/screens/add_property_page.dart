@@ -364,7 +364,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   String? _error;
 
   /// 0: رخصة — 1: تصنيف/غرض — 2: خريطة+موقع — 3: صك/تسعير — 4: تفاصيل — 5: وسائط
-  int _wizardStep = 2;
+  int _wizardStep = 0;
 
   /// «بيع / إيجار / شراء» في مسار المسوّق المرخّص.
   String _primaryPurposeGroup = 'sale';
@@ -834,7 +834,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   void _applyListingDraft(Map<String, dynamic> d) {
-    _wizardStep = (d['wizard_step'] as num?)?.toInt() ?? 2;
+    _wizardStep =
+        ((d['wizard_step'] as num?)?.toInt() ?? 0).clamp(0, _kWizardLastStep);
     _title.text = '${d['title'] ?? ''}';
     _desc.text = '${d['desc'] ?? ''}';
     _region.text = '${d['region'] ?? ''}';
@@ -1016,7 +1017,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _addressLine.clear();
     _price.clear();
     _area.clear();
-    _wizardStep = 2;
+    _wizardStep = 0;
     _termsAccepted = false;
     _images.clear();
     if (mounted) setState(() {});
@@ -2568,43 +2569,35 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       }
     }
     if (!mounted) return;
-    final res = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        settings: const RouteSettings(name: '/map-picker'),
-        builder: (_) => MapPickerPage(
-          initial: initial,
-          isAr: _isAr,
-          kingdomOverview: kingdomOverview && initial == null,
-          pinTitle: _title.text.trim().isEmpty
-              ? (_isAr ? 'إعلان عقاري جديد' : 'New property listing')
-              : _title.text.trim(),
-          pinSubtitle: (_selectedCity ?? _city.text).trim(),
-          pinKindLabel: _isAr ? 'إعلان عقاري' : 'Property listing',
-          pinAmountLabel: _price.text.trim().isEmpty
-              ? null
-              : (_currency.toUpperCase() == 'SAR'
-                  ? AppMoney.sarPhrase(_price.text.trim(), isAr: _isAr)
-                  : '${_price.text.trim()} $_currency'),
-        ),
-      ),
+    final res = await MapPickerPage.pick(
+      context,
+      initial: initial,
+      initialApproximate: _locationIsApproximate,
+      isAr: _isAr,
+      kingdomOverview: kingdomOverview && initial == null,
+      pinTitle: _title.text.trim().isEmpty
+          ? (_isAr ? 'إعلان عقاري جديد' : 'New property listing')
+          : _title.text.trim(),
+      pinSubtitle: (_selectedCity ?? _city.text).trim(),
+      pinKindLabel: _isAr ? 'إعلان عقاري' : 'Property listing',
+      pinAmountLabel: _price.text.trim().isEmpty
+          ? null
+          : (_currency.toUpperCase() == 'SAR'
+              ? AppMoney.sarPhrase(_price.text.trim(), isAr: _isAr)
+              : '${_price.text.trim()} $_currency'),
     );
     if (!mounted || res == null) return;
-    final lat = res['lat'];
-    final lng = res['lng'];
-    final approx = res['approximate'] == true;
-    final metaCity = (res['city'] ?? '').toString().trim();
-    final metaRegion = (res['region'] ?? '').toString().trim();
-    final metaGov = (res['governorate'] ?? '').toString().trim();
-    final metaDistrict = (res['district'] ?? '').toString().trim();
+    final lat = res.position.latitude;
+    final lng = res.position.longitude;
+    final approx = res.approximate;
+    final metaCity = (res.city ?? '').trim();
+    final metaRegion = (res.region ?? '').trim();
+    final metaGov = (res.governorate ?? '').trim();
+    final metaDistrict = (res.district ?? '').trim();
     setState(() {
       _locationIsApproximate = approx;
-      _lat = (lat is num)
-          ? lat.toDouble()
-          : double.tryParse(lat?.toString() ?? '');
-      _lng = (lng is num)
-          ? lng.toDouble()
-          : double.tryParse(lng?.toString() ?? '');
+      _lat = lat;
+      _lng = lng;
       _latCtrl.text = _lat?.toStringAsFixed(6) ?? '';
       _lngCtrl.text = _lng?.toStringAsFixed(6) ?? '';
       _error = null;

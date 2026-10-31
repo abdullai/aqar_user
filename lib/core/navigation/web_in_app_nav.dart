@@ -114,6 +114,7 @@ abstract final class WebInAppNav {
       return;
     }
     if (_programmaticPopDepth > 0) {
+      if (route is PageRoute) webInAppHistoryGoBack();
       return;
     }
     _remember(route, nested: nested);

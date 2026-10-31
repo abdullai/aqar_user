@@ -18,8 +18,30 @@ import '../services/saudi_districts_service.dart';
 import '../services/saudi_locations_service.dart';
 import '../widgets/app_logo_loading.dart';
 
+@immutable
+class PickedMapLocation {
+  const PickedMapLocation({
+    required this.position,
+    required this.approximate,
+    this.city,
+    this.region,
+    this.governorate,
+    this.district,
+  });
+
+  final LatLng position;
+  final bool approximate;
+  final String? city;
+  final String? region;
+  final String? governorate;
+  final String? district;
+}
+
 class MapPickerPage extends StatefulWidget {
+  static const routeName = '/map-picker';
+
   final LatLng? initial;
+  final bool initialApproximate;
   final bool isAr;
   final String? pinTitle;
   final String? pinSubtitle;
@@ -32,6 +54,7 @@ class MapPickerPage extends StatefulWidget {
   const MapPickerPage({
     super.key,
     this.initial,
+    this.initialApproximate = false,
     this.isAr = true,
     this.kingdomOverview = false,
     this.pinTitle,
@@ -39,6 +62,35 @@ class MapPickerPage extends StatefulWidget {
     this.pinAmountLabel,
     this.pinKindLabel,
   });
+
+  static Future<PickedMapLocation?> pick(
+    BuildContext context, {
+    required bool isAr,
+    LatLng? initial,
+    bool initialApproximate = false,
+    bool kingdomOverview = false,
+    String? pinTitle,
+    String? pinSubtitle,
+    String? pinAmountLabel,
+    String? pinKindLabel,
+  }) {
+    return Navigator.of(context).push<PickedMapLocation>(
+      MaterialPageRoute<PickedMapLocation>(
+        fullscreenDialog: true,
+        settings: const RouteSettings(name: routeName),
+        builder: (_) => MapPickerPage(
+          initial: initial,
+          initialApproximate: initialApproximate,
+          isAr: isAr,
+          kingdomOverview: kingdomOverview,
+          pinTitle: pinTitle,
+          pinSubtitle: pinSubtitle,
+          pinAmountLabel: pinAmountLabel,
+          pinKindLabel: pinKindLabel,
+        ),
+      ),
+    );
+  }
 
   @override
   State<MapPickerPage> createState() => _MapPickerPageState();
@@ -120,6 +172,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
     _mapZoom = useKingdom ? 5.85 : 13.0;
     _selected = widget.initial ?? (useKingdom ? _saudiCenter : _riyadh);
     _bootCamera = CameraPosition(target: _selected, zoom: _mapZoom);
+    _approximateLocation = widget.initialApproximate;
     _latCtrl = TextEditingController(
       text: _selected.latitude.toStringAsFixed(6),
     );
@@ -418,24 +471,22 @@ class _MapPickerPageState extends State<MapPickerPage> {
   void _submitPickedLocation({required bool approximate}) {
     if (_submitted || !mounted) return;
     _submitted = true;
-    final result = <String, dynamic>{
-      'lat': _selected.latitude,
-      'lng': _selected.longitude,
-      'approximate': approximate,
-      if ((_pickedCity ?? '').trim().isNotEmpty) 'city': _pickedCity!.trim(),
-      if ((_pickedRegion ?? '').trim().isNotEmpty)
-        'region': _pickedRegion!.trim(),
-      if ((_pickedGovernorate ?? '').trim().isNotEmpty)
-        'governorate': _pickedGovernorate!.trim(),
-      if ((_pickedDistrict ?? '').trim().isNotEmpty)
-        'district': _pickedDistrict!.trim(),
-    };
     final route = ModalRoute.of(context);
     if (route == null || !route.isCurrent) {
       _submitted = false;
       return;
     }
-    Navigator.of(context).pop(result);
+    final result = PickedMapLocation(
+      position: _selected,
+      approximate: approximate,
+      city: _pickedCity,
+      region: _pickedRegion,
+      governorate: _pickedGovernorate,
+      district: _pickedDistrict,
+    );
+    WebInAppNav.runProgrammaticPop(
+      () => Navigator.of(context).pop(result),
+    );
   }
 
   /// بديل عند فشل الخريطة المضمّنة (هواوي/هونر بدون GMS أو تعطيل WebGL).

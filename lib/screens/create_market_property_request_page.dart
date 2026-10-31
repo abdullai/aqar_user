@@ -169,7 +169,7 @@ class _CreateMarketPropertyRequestPageState
   Uint8List? _coverBytes;
   String? _coverFileName;
 
-  int _step = 2;
+  int _step = 0;
   static const int _stepCount = 4;
   bool _pickingCover = false;
   String? _instantCreditId;
@@ -199,6 +199,70 @@ class _CreateMarketPropertyRequestPageState
 
   bool get _isAr => widget.isAr;
   bool get _isEditing => widget.initialRequest != null;
+
+  Widget _buildMapPointSummary(ColorScheme cs) {
+    if (_selectedLat == null || _selectedLng == null) {
+      return const SizedBox.shrink();
+    }
+    final exact = !_locationIsApproximate;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsetsDirectional.fromSTEB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: cs.primaryContainer.withValues(alpha: 0.28),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            exact ? Icons.location_on_outlined : Icons.location_searching,
+            color: cs.primary,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _isAr
+                      ? (exact ? 'موقع دقيق محدد' : 'موقع تقريبي محدد')
+                      : (exact
+                          ? 'Exact location selected'
+                          : 'Approximate location selected'),
+                  style: TextStyle(
+                    color: cs.onSurface,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Directionality(
+                  textDirection: TextDirection.ltr,
+                  child: Text(
+                    _coordsCombined,
+                    style: TextStyle(
+                      color: cs.primary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: _isAr ? 'نسخ الإحداثيات' : 'Copy coordinates',
+            visualDensity: VisualDensity.compact,
+            onPressed: _copyCoords,
+            icon: const Icon(Icons.copy_outlined),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -346,7 +410,7 @@ class _CreateMarketPropertyRequestPageState
   }
 
   void _applyDraft(Map<String, dynamic> d) {
-    _step = (d['step'] as num?)?.toInt().clamp(0, _stepCount - 1) ?? 2;
+    _step = (d['step'] as num?)?.toInt().clamp(0, _stepCount - 1) ?? 0;
     _titleCtrl.text = '${d['title'] ?? ''}';
     _descCtrl.text = '${d['desc'] ?? ''}';
     _budgetMinCtrl.text = '${d['budget_min'] ?? ''}';
@@ -444,7 +508,7 @@ class _CreateMarketPropertyRequestPageState
     _districtsCtrl.clear();
     _coverBytes = null;
     _coverFileName = null;
-    _step = 2;
+    _step = 0;
     _purchase = true;
     _requestPriority = MarketPropertyRequestPriority.standard;
     _typeKey = 'villa';
@@ -1048,6 +1112,10 @@ class _CreateMarketPropertyRequestPageState
     final svc = LocationHierarchyService.instance;
     var list = await svc.districtsIn(city: ar);
     if (list.isEmpty && en != ar) list = await svc.districtsIn(city: en);
+    final selectedDistrict = _districtsCtrl.text.trim();
+    if (selectedDistrict.isNotEmpty && !list.contains(selectedDistrict)) {
+      list = [...list, selectedDistrict];
+    }
     if (!mounted) return;
     setState(() => _districtOptions = list);
   }
@@ -1256,6 +1324,61 @@ class _CreateMarketPropertyRequestPageState
     if (c.isNotEmpty) _cityKey = c;
   }
 
+  void _toggleManualLocation() {
+    if (!_manualLocation) {
+      _manualRegionCtrl.text = _selectedRegion ?? '';
+      _manualGovCtrl.text = _selectedGovernorate ?? '';
+      _manualCityCtrl.text = _selectedCityLabelInList ?? _cityKey;
+      setState(() => _manualLocation = true);
+      return;
+    }
+
+    final region = _manualRegionCtrl.text.trim();
+    final governorate = _manualGovCtrl.text.trim();
+    final city = _manualCityCtrl.text.trim();
+    SaudiLocation? match;
+    for (final location in _locations) {
+      final locationRegion =
+          _isAr ? location.regionAr.trim() : location.regionEn.trim();
+      final locationGovernorate = _isAr
+          ? (location.governorateAr ?? '').trim()
+          : (location.governorateEn ?? '').trim();
+      final locationCity =
+          _isAr ? location.cityAr.trim() : location.cityEn.trim();
+      final matches = locationRegion == region &&
+          (locationGovernorate.isEmpty
+              ? locationRegion == governorate
+              : locationGovernorate == governorate) &&
+          locationCity == city;
+      if (matches) {
+        match = location;
+        break;
+      }
+    }
+
+    setState(() {
+      _manualLocation = false;
+      if (match == null) {
+        _selectedRegion = null;
+        _selectedGovernorate = null;
+        _cityKey = '';
+        _selectedLat = null;
+        _selectedLng = null;
+        _locationIsApproximate = false;
+        _districtsCtrl.clear();
+      } else {
+        _selectedRegion = _isAr ? match.regionAr.trim() : match.regionEn.trim();
+        final governorateValue = _isAr
+            ? (match.governorateAr ?? '').trim()
+            : (match.governorateEn ?? '').trim();
+        _selectedGovernorate =
+            governorateValue.isEmpty ? _selectedRegion : governorateValue;
+        _cityKey = match.cityEn;
+      }
+    });
+    if (match != null) unawaited(_refreshDistricts());
+  }
+
   void _onCitySelected(String? cityLabel) {
     if (cityLabel == null || _selectedRegion == null) return;
     final reg = _selectedRegion!;
@@ -1354,68 +1477,76 @@ class _CreateMarketPropertyRequestPageState
 
   Future<void> _openMapForCity() async {
     LatLng? initial;
-    final cur = _locationForCityKey(_cityKey);
-    if (cur != null && cur.lat != 0 && cur.lng != 0) {
-      initial = LatLng(cur.lat, cur.lng);
+    if (_selectedLat != null && _selectedLng != null) {
+      initial = LatLng(_selectedLat!, _selectedLng!);
+    } else {
+      final cur = _locationForCityKey(_cityKey);
+      if (cur != null && cur.lat != 0 && cur.lng != 0) {
+        initial = LatLng(cur.lat, cur.lng);
+      }
     }
-    final res = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        settings: const RouteSettings(name: '/map-picker'),
-        builder: (_) => MapPickerPage(
-          initial: initial,
-          isAr: _isAr,
-          kingdomOverview: initial == null,
-          pinTitle: _titleCtrl.text.trim().isEmpty
-              ? (_isAr ? 'طلب عقاري جديد' : 'New property request')
-              : _titleCtrl.text.trim(),
-          pinSubtitle: _cityForSubmit(),
-          pinKindLabel: _purchase
-              ? (_isAr ? 'طلب شراء' : 'Purchase request')
-              : (_isAr ? 'طلب إيجار' : 'Rent request'),
-          pinAmountLabel: _requestBudgetLabel(),
-        ),
-      ),
+    final res = await MapPickerPage.pick(
+      context,
+      initial: initial,
+      initialApproximate: _locationIsApproximate,
+      isAr: _isAr,
+      kingdomOverview: initial == null,
+      pinTitle: _titleCtrl.text.trim().isEmpty
+          ? (_isAr ? 'طلب عقاري جديد' : 'New property request')
+          : _titleCtrl.text.trim(),
+      pinSubtitle: _cityForSubmit(),
+      pinKindLabel: _purchase
+          ? (_isAr ? 'طلب شراء' : 'Purchase request')
+          : (_isAr ? 'طلب إيجار' : 'Rent request'),
+      pinAmountLabel: _requestBudgetLabel(),
     );
     if (!mounted || res == null) return;
-    final lat = (res['lat'] as num?)?.toDouble();
-    final lng = (res['lng'] as num?)?.toDouble();
-    if (lat == null || lng == null) return;
-    final approx = res['approximate'] == true;
+    final lat = res.position.latitude;
+    final lng = res.position.longitude;
+    final approx = res.approximate;
     final hit = await SaudiLocationsService.instance.findNearest(lat, lng);
     if (!mounted) return;
-    if (hit == null) {
-      setState(() {
-        _selectedLat = lat;
-        _selectedLng = lng;
-        _locationIsApproximate = approx;
-        _manualLocation = true;
-      });
-      return;
-    }
-    final reg = _isAr ? hit.regionAr.trim() : hit.regionEn.trim();
-    final rawG = _isAr ? hit.governorateAr?.trim() : hit.governorateEn?.trim();
-    final gov = (rawG != null && rawG.isNotEmpty) ? rawG : reg;
+
+    final region = (res.region ?? '').trim().isNotEmpty
+        ? res.region!.trim()
+        : hit == null
+            ? ''
+            : (_isAr ? hit.regionAr : hit.regionEn).trim();
+    final hitGovernorate = hit == null
+        ? ''
+        : (_isAr ? hit.governorateAr : hit.governorateEn)?.trim() ?? '';
+    final governorate = (res.governorate ?? '').trim().isNotEmpty
+        ? res.governorate!.trim()
+        : hitGovernorate.isNotEmpty
+            ? hitGovernorate
+            : region;
+    final city = hit == null
+        ? (res.city ?? '').trim()
+        : (_isAr ? hit.cityAr : hit.cityEn).trim();
+    final district = (res.district ?? '').trim();
+    final cityKey = hit?.cityEn ?? city;
+
     setState(() {
-      _cityKey = hit.cityEn;
-      _selectedRegion = reg.isEmpty ? null : reg;
-      _selectedGovernorate = gov.isEmpty ? null : gov;
       _selectedLat = lat;
       _selectedLng = lng;
       _locationIsApproximate = approx;
+      _selectedRegion = region.isEmpty ? null : region;
+      _selectedGovernorate = governorate.isEmpty ? null : governorate;
+      _cityKey = cityKey;
+      _districtsCtrl.text = district;
+      _manualRegionCtrl.text = region;
+      _manualGovCtrl.text = governorate;
+      _manualCityCtrl.text = city;
+      if (hit == null) _manualLocation = true;
       _maybeSuggestSmartTitle();
     });
-    unawaited(_refreshDistricts());
+    if (cityKey.isNotEmpty) unawaited(_refreshDistricts());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        behavior: SnackBarBehavior.floating,
-        content: Text(
-          _isAr
-              ? 'تم اختيار: ${hit.cityAr}${approx ? ' (موقع تقريبي)' : ''}'
-              : 'Selected: ${hit.cityEn}${approx ? ' (approximate)' : ''}',
-        ),
-      ),
+    final selectedCity = city.isNotEmpty ? city : _coordsCombined;
+    _showSnack(
+      _isAr
+          ? 'تم اختيار: $selectedCity${approx ? ' (موقع تقريبي)' : ''}'
+          : 'Selected: $selectedCity${approx ? ' (approximate)' : ''}',
     );
   }
 
@@ -2425,13 +2556,25 @@ class _CreateMarketPropertyRequestPageState
           ),
         ),
         const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            onPressed: busy ? null : _openMapForCity,
+            icon: const Icon(Icons.map_outlined),
+            label: Text(
+              _selectedLat != null && _selectedLng != null
+                  ? (_isAr ? 'تعديل الموقع على الخريطة' : 'Edit map location')
+                  : (_isAr
+                      ? 'تحديد الموقع على الخريطة'
+                      : 'Pick location on map'),
+            ),
+          ),
+        ),
         if (_locations.isNotEmpty)
           Align(
             alignment: AlignmentDirectional.centerStart,
             child: TextButton.icon(
-              onPressed: busy
-                  ? null
-                  : () => setState(() => _manualLocation = !_manualLocation),
+              onPressed: busy ? null : _toggleManualLocation,
               icon: const Icon(Icons.edit_outlined, size: 18),
               label: Text(
                 _manualLocation
@@ -2467,52 +2610,12 @@ class _CreateMarketPropertyRequestPageState
             onChanged: (v) => _selectedGovernorate = v.trim(),
           ),
           const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: AqarTextField(
-                  controller: _manualCityCtrl,
-                  enabled: !busy,
-                  decoration: deco(_isAr ? 'المدينة *' : 'City *'),
-                  onChanged: (v) => _cityKey = v.trim(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: IconButton.filledTonal(
-                  tooltip: _isAr ? 'تحديد على الخريطة' : 'Pick on map',
-                  onPressed: busy ? null : _openMapForCity,
-                  icon: const Icon(Icons.map_outlined),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
           AqarTextField(
-            controller: _districtsCtrl,
+            controller: _manualCityCtrl,
             enabled: !busy,
-            decoration: deco(_isAr ? 'الحي' : 'District'),
+            decoration: deco(_isAr ? 'المدينة *' : 'City *'),
+            onChanged: (v) => _cityKey = v.trim(),
           ),
-          if (_selectedLat != null && _selectedLng != null) ...[
-            const SizedBox(height: 10),
-            AqarTextField(
-              controller: TextEditingController(
-                text: _selectedLat!.toStringAsFixed(6),
-              ),
-              readOnly: true,
-              decoration: deco(_isAr ? 'خط العرض' : 'Latitude'),
-            ),
-            const SizedBox(height: 8),
-            AqarTextField(
-              controller: TextEditingController(
-                text: _selectedLng!.toStringAsFixed(6),
-              ),
-              readOnly: true,
-              decoration: deco(_isAr ? 'خط الطول' : 'Longitude'),
-            ),
-          ],
         ] else if (!_locationsLoading && _locations.isNotEmpty) ...[
           if (regions.length > kTh)
             SearchableSelectField(
@@ -2576,109 +2679,62 @@ class _CreateMarketPropertyRequestPageState
           ],
           if (_selectedGovernorate != null && cityList.isNotEmpty) ...[
             const SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: cityList.length > kTh
-                      ? SearchableSelectField(
-                          label: _isAr ? 'المدينة *' : 'City *',
-                          items: cityList,
-                          selected: _selectedCityLabelInList,
-                          isAr: _isAr,
-                          enabled: !busy,
-                          allowClear: false,
-                          onSelected: (v) => _onCitySelected(v),
+            cityList.length > kTh
+                ? SearchableSelectField(
+                    label: _isAr ? 'المدينة *' : 'City *',
+                    items: cityList,
+                    selected: _selectedCityLabelInList,
+                    isAr: _isAr,
+                    enabled: !busy,
+                    allowClear: false,
+                    onSelected: (v) => _onCitySelected(v),
+                  )
+                : DropdownButtonFormField<String>(
+                    initialValue: _selectedCityLabelInList,
+                    decoration: deco(_isAr ? 'المدينة *' : 'City *'),
+                    hint: Text(_isAr ? 'اختر' : 'Choose'),
+                    isExpanded: true,
+                    items: cityList
+                        .map(
+                          (e) => DropdownMenuItem(
+                            value: e,
+                            child: Text(e),
+                          ),
                         )
-                      : DropdownButtonFormField<String>(
-                          initialValue: _selectedCityLabelInList,
-                          decoration: deco(_isAr ? 'المدينة *' : 'City *'),
-                          hint: Text(_isAr ? 'اختر' : 'Choose'),
-                          isExpanded: true,
-                          items: cityList
-                              .map(
-                                (e) => DropdownMenuItem(
-                                  value: e,
-                                  child: Text(e),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: busy ? null : (v) => _onCitySelected(v),
-                        ),
-                ),
-                const SizedBox(width: 8),
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: IconButton.filledTonal(
-                    tooltip: _isAr ? 'تحديد على الخريطة' : 'Pick on map',
-                    onPressed: busy ? null : _openMapForCity,
-                    icon: const Icon(Icons.map_outlined),
+                        .toList(),
+                    onChanged: busy ? null : (v) => _onCitySelected(v),
                   ),
-                ),
-              ],
-            ),
           ],
-          if (_selectedLat != null && _selectedLng != null) ...[
-            const SizedBox(height: 8),
-            AqarTextField(
-              controller: TextEditingController(
-                text: _selectedLat!.toStringAsFixed(6),
-              ),
-              readOnly: true,
-              decoration: deco(_isAr ? 'خط العرض' : 'Latitude'),
-            ),
-            const SizedBox(height: 8),
-            AqarTextField(
-              controller: TextEditingController(
-                text: _selectedLng!.toStringAsFixed(6),
-              ),
-              readOnly: true,
-              decoration: deco(_isAr ? 'خط الطول' : 'Longitude'),
-            ),
-            const SizedBox(height: 8),
-            AqarTextField(
-              controller: TextEditingController(text: _coordsCombined),
-              readOnly: true,
-              decoration: InputDecoration(
-                labelText: _isAr ? 'الإحداثي' : 'Coordinates',
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  tooltip: _isAr ? 'نسخ' : 'Copy',
-                  onPressed: _copyCoords,
-                  icon: const Icon(Icons.copy_outlined),
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 10),
-          if (_districtOptions.isNotEmpty)
-            DropdownButtonFormField<String>(
-              initialValue: _districtsCtrl.text.trim().isNotEmpty &&
-                      _districtOptions.contains(_districtsCtrl.text.trim())
-                  ? _districtsCtrl.text.trim()
-                  : null,
-              decoration: deco(_isAr ? 'الحي' : 'District'),
-              isExpanded: true,
-              items: _districtOptions
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: busy
-                  ? null
-                  : (v) {
-                      if (v == null) return;
-                      setState(() {
-                        _districtsCtrl.text = v;
-                        _syncComposedTitle();
-                      });
-                    },
-            )
-          else
-            AqarTextField(
-              controller: _districtsCtrl,
-              enabled: !busy,
-              decoration: deco(_isAr ? 'الحي' : 'District'),
-            ),
         ],
+        _buildMapPointSummary(cs),
+        const SizedBox(height: 10),
+        if (!_manualLocation && _districtOptions.isNotEmpty)
+          DropdownButtonFormField<String>(
+            initialValue: _districtsCtrl.text.trim().isNotEmpty &&
+                    _districtOptions.contains(_districtsCtrl.text.trim())
+                ? _districtsCtrl.text.trim()
+                : null,
+            decoration: deco(_isAr ? 'الحي' : 'District'),
+            isExpanded: true,
+            items: _districtOptions
+                .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                .toList(),
+            onChanged: busy
+                ? null
+                : (v) {
+                    if (v == null) return;
+                    setState(() {
+                      _districtsCtrl.text = v;
+                      _syncComposedTitle();
+                    });
+                  },
+          )
+        else
+          AqarTextField(
+            controller: _districtsCtrl,
+            enabled: !busy,
+            decoration: deco(_isAr ? 'الحي' : 'District'),
+          ),
       ],
       if (_step == 3) ...[
         Text(
