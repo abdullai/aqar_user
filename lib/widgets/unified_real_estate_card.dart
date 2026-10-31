@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/branding/aqar_brand_colors.dart';
 import '../core/l10n/locale_content.dart';
@@ -148,7 +151,6 @@ class UnifiedRealEstateCard extends StatelessWidget {
                   onDoubleTap: onCardDoubleTap,
                   child: inkContent,
                 ),
-                if (fillHeight) const Spacer(),
                 if (hasTail)
                   Material(
                     type: MaterialType.transparency,
@@ -390,19 +392,14 @@ class UnifiedCardSpecRow extends StatelessWidget {
         .join(isAr ? '، ' : ', ');
 
     return LayoutBuilder(
-      builder: (context, constraints) {
+      builder: (context, _) {
         final chips = <({IconData icon, String text})>[
-          (
-            icon: Icons.square_foot_outlined,
-            text: LocaleContent.forUi(
-              areaText.trim().isEmpty ? '—' : areaText.trim(),
-              isAr: isAr,
+          if (areaText.trim().isNotEmpty)
+            (
+              icon: Icons.square_foot_outlined,
+              text: LocaleContent.forUi(areaText.trim(), isAr: isAr),
             ),
-          ),
-          (
-            icon: Icons.place_outlined,
-            text: location.isEmpty ? '—' : location,
-          ),
+          if (location.isNotEmpty) (icon: Icons.place_outlined, text: location),
           if (roomsText.trim().isNotEmpty)
             (
               icon: Icons.bed_outlined,
@@ -415,40 +412,67 @@ class UnifiedCardSpecRow extends StatelessWidget {
                 text: LocaleContent.forUi(extra.trim(), isAr: isAr),
               ),
         ];
-        return FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: AlignmentDirectional.centerStart,
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth:
-                  constraints.maxWidth.isFinite && constraints.maxWidth > 0
-                      ? constraints.maxWidth
-                      : 9999,
+        if (chips.isEmpty && onCopyLocation == null) {
+          return const SizedBox.shrink();
+        }
+        return Row(
+          children: [
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerStart,
+                child: _chipsRow(chips, iconFg: iconFg, style: style),
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _chipsRow(chips, iconFg: iconFg, style: style),
-                if (onCopyLocation != null)
-                  IconButton(
-                    tooltip: isAr ? 'نسخ الموقع' : 'Copy location',
-                    visualDensity: VisualDensity.compact,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 28,
-                      height: 28,
-                    ),
-                    padding: EdgeInsets.zero,
-                    iconSize: 15,
-                    onPressed: onCopyLocation,
-                    icon: Icon(Icons.copy_rounded, color: iconFg),
-                  )
-                else
-                  const SizedBox(width: 28, height: 28),
-              ],
-            ),
-          ),
+            if (onCopyLocation != null)
+              GestureDetector(
+                onLongPress: () => unawaited(
+                  _copySpecifications(context, chips, isAr),
+                ),
+                child: IconButton(
+                  tooltip: isAr
+                      ? 'نسخ الموقع (اضغط مطولًا لنسخ المواصفات)'
+                      : 'Copy location (long-press to copy specs)',
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints.tightFor(
+                    width: 28,
+                    height: 28,
+                  ),
+                  padding: EdgeInsets.zero,
+                  iconSize: 15,
+                  onPressed: onCopyLocation,
+                  icon: Icon(Icons.copy_rounded, color: iconFg),
+                ),
+              ),
+          ],
         );
       },
+    );
+  }
+
+  Future<void> _copySpecifications(
+    BuildContext context,
+    List<({IconData icon, String text})> chips,
+    bool isAr,
+  ) async {
+    final summary = chips.map((chip) {
+      final label = switch (chip.icon) {
+        Icons.square_foot_outlined => isAr ? 'المساحة' : 'Area',
+        Icons.place_outlined => isAr ? 'الموقع' : 'Location',
+        Icons.bed_outlined => isAr ? 'الغرف' : 'Rooms',
+        _ => '',
+      };
+      return label.isEmpty ? chip.text : '$label: ${chip.text}';
+    }).join('\n');
+    if (summary.trim().isEmpty) return;
+
+    await Clipboard.setData(ClipboardData(text: summary));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(isAr ? 'تم نسخ مواصفات العقار' : 'Property specs copied'),
+      ),
     );
   }
 

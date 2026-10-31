@@ -2002,44 +2002,40 @@ class _MarketRequestListingStyleCard extends StatelessWidget {
         if (InstantMarketRequestBadge.showsFor(r.requestPriority)) ...[
           InstantMarketRequestFeatureStrip(isAr: isAr),
         ],
-        SizedBox(
-          height: 28,
-          child: Align(
+        if (deletionRequested || requestCompleted)
+          Align(
             alignment: AlignmentDirectional.centerStart,
-            child: (deletionRequested || requestCompleted)
-                ? FittedBox(
-                    fit: BoxFit.scaleDown,
-                    alignment: AlignmentDirectional.centerStart,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: requestCompleted
-                            ? Colors.green.withValues(alpha: 0.12)
-                            : cs.errorContainer.withValues(alpha: 0.72),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        child: Text(
-                          requestCompleted
-                              ? (isAr ? 'تمت الصفقة' : 'Deal completed')
-                              : (isAr ? 'مرفوع طلب حذف' : 'Deletion requested'),
-                          maxLines: 1,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: requestCompleted
-                                ? Colors.green.shade800
-                                : cs.onErrorContainer,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                      ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: AlignmentDirectional.centerStart,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: requestCompleted
+                      ? Colors.green.withValues(alpha: 0.12)
+                      : cs.errorContainer.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  child: Text(
+                    requestCompleted
+                        ? (isAr ? 'تمت الصفقة' : 'Deal completed')
+                        : (isAr ? 'مرفوع طلب حذف' : 'Deletion requested'),
+                    maxLines: 1,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: requestCompleted
+                          ? Colors.green.shade800
+                          : cs.onErrorContainer,
+                      fontWeight: FontWeight.w900,
                     ),
-                  )
-                : const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
       ],
     );
 
@@ -3606,40 +3602,33 @@ class _RealEstateCard extends StatelessWidget {
                     ),
                   ),
                 Expanded(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${publishedByCaptionFor(property, isAr)} ${marketerLine.trim()}',
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.start,
-                          style: TextStyle(
-                            color: CatalogReadableInk.title(cs),
-                            fontWeight: FontWeight.w900,
-                            fontFamily: 'Cairo',
-                            fontSize: 12.5,
-                            height: 1.25,
-                            letterSpacing: -0.1,
-                          ),
-                        ),
-                      ),
-                      if (PropertyListingDisplay.showMarketerVerifiedBadge(
-                        property,
-                      ))
-                        const Padding(
-                          padding: EdgeInsetsDirectional.only(start: 4),
-                          child: Icon(
-                            Icons.verified_rounded,
-                            size: 17,
-                            color: Color(0xFF10B981),
-                          ),
-                        ),
-                    ],
+                  child: Text(
+                    '${publishedByCaptionFor(property, isAr)} ${marketerLine.trim()}',
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.start,
+                    style: TextStyle(
+                      color: CatalogReadableInk.title(cs),
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Cairo',
+                      fontSize: 12.5,
+                      height: 1.25,
+                      letterSpacing: -0.1,
+                    ),
                   ),
                 ),
+                if (PropertyListingDisplay.showMarketerVerifiedBadge(
+                  property,
+                ))
+                  const Padding(
+                    padding: EdgeInsetsDirectional.only(start: 4),
+                    child: Icon(
+                      Icons.verified_rounded,
+                      size: 17,
+                      color: Color(0xFF10B981),
+                    ),
+                  ),
               ],
             ),
           ),

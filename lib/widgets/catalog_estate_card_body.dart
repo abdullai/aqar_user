@@ -102,7 +102,8 @@ class CatalogEstateCardBody extends StatelessWidget {
             ),
           ),
         ...leadingExtras,
-        const SizedBox(height: _gap),
+        if (title.trim().isNotEmpty || leadingExtras.isNotEmpty)
+          const SizedBox(height: _gap),
         SizedBox(
           width: double.infinity,
           child: _specChipsLine(context, cs: cs, muted: muted),
@@ -111,7 +112,7 @@ class CatalogEstateCardBody extends StatelessWidget {
             publisherName.trim().isNotEmpty) ...[
           const SizedBox(height: _gap),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (publisherLeading != null)
                 Padding(
@@ -128,47 +129,40 @@ class CatalogEstateCardBody extends StatelessWidget {
                   ),
                 ),
               Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        () {
-                          final cap = publisherCaption.trim();
-                          final name = publisherName.trim();
-                          if (cap.isNotEmpty && name.isNotEmpty) {
-                            final head = cap.endsWith(':') ? cap : '$cap:';
-                            return LocaleContent.forUi('$head $name',
-                                isAr: isAr);
-                          }
-                          if (name.isNotEmpty) {
-                            return LocaleContent.forUi(name, isAr: isAr);
-                          }
-                          return cap;
-                        }(),
-                        maxLines: 1,
-                        softWrap: false,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelLarge?.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: titleColor,
-                          fontFamily: 'Cairo',
-                          fontSize: 12.5,
-                          height: 1.22,
-                        ),
-                      ),
-                    ),
-                    if (publisherVerified)
-                      const Padding(
-                        padding: EdgeInsetsDirectional.only(start: 4),
-                        child: Icon(
-                          Icons.verified_rounded,
-                          size: 16,
-                          color: Color(0xFF10B981),
-                        ),
-                      ),
-                  ],
+                child: Text(
+                  () {
+                    final cap = publisherCaption.trim();
+                    final name = publisherName.trim();
+                    if (cap.isNotEmpty && name.isNotEmpty) {
+                      final head = cap.endsWith(':') ? cap : '$cap:';
+                      return LocaleContent.forUi('$head $name', isAr: isAr);
+                    }
+                    if (name.isNotEmpty) {
+                      return LocaleContent.forUi(name, isAr: isAr);
+                    }
+                    return cap;
+                  }(),
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                    color: titleColor,
+                    fontFamily: 'Cairo',
+                    fontSize: 12.5,
+                    height: 1.22,
+                  ),
                 ),
               ),
+              if (publisherVerified)
+                const Padding(
+                  padding: EdgeInsetsDirectional.only(start: 4),
+                  child: Icon(
+                    Icons.verified_rounded,
+                    size: 16,
+                    color: Color(0xFF10B981),
+                  ),
+                ),
             ],
           ),
         ],
@@ -274,7 +268,7 @@ class CatalogEstateCardBody extends StatelessWidget {
       chips.add((icon: icon, text: t));
     }
 
-    add(Icons.square_foot_outlined, areaText.trim().isEmpty ? '—' : areaText);
+    add(Icons.square_foot_outlined, areaText);
     final locations = <String>[
       regionText,
       governorateText,
@@ -289,63 +283,63 @@ class CatalogEstateCardBody extends StatelessWidget {
     final locationLine = locations
         .where((part) => seenLocations.add(part.toLowerCase()))
         .join(isAr ? '، ' : ', ');
-    add(Icons.place_outlined, locationLine.isEmpty ? '—' : locationLine);
+    add(Icons.place_outlined, locationLine);
     add(Icons.bed_outlined, roomsText);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return FittedBox(
-          fit: BoxFit.scaleDown,
-          alignment: AlignmentDirectional.centerStart,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < chips.length; i++) ...[
-                if (i > 0)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    child: Text(
-                      '·',
-                      style: TextStyle(
-                        color: muted.withValues(alpha: 0.55),
-                        fontWeight: FontWeight.w800,
+    return Row(
+      children: [
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: AlignmentDirectional.centerStart,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var i = 0; i < chips.length; i++) ...[
+                  if (i > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      child: Text(
+                        '·',
+                        style: TextStyle(
+                          color: muted.withValues(alpha: 0.55),
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
+                  Icon(chips[i].icon, size: 15, color: cs.primary),
+                  const SizedBox(width: 3),
+                  Text(
+                    chips[i].text,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: muted,
+                      fontFamily: 'Cairo',
+                      fontSize: 12,
+                      height: 1.15,
+                    ),
                   ),
-                Icon(chips[i].icon, size: 15, color: cs.primary),
-                const SizedBox(width: 3),
-                Text(
-                  chips[i].text,
-                  maxLines: 1,
-                  softWrap: false,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: muted,
-                    fontFamily: 'Cairo',
-                    fontSize: 12,
-                    height: 1.15,
-                  ),
-                ),
+                ],
               ],
-              if (onCopyLocation != null)
-                IconButton(
-                  tooltip: isAr ? 'نسخ الموقع' : 'Copy location',
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 28,
-                    height: 28,
-                  ),
-                  padding: EdgeInsets.zero,
-                  iconSize: 15,
-                  onPressed: onCopyLocation,
-                  icon: Icon(Icons.copy_rounded, color: cs.primary),
-                )
-              else
-                const SizedBox(width: 28, height: 28),
-            ],
+            ),
           ),
-        );
-      },
+        ),
+        if (onCopyLocation != null)
+          IconButton(
+            tooltip: isAr ? 'نسخ الموقع' : 'Copy location',
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints.tightFor(
+              width: 28,
+              height: 28,
+            ),
+            padding: EdgeInsets.zero,
+            iconSize: 15,
+            onPressed: onCopyLocation,
+            icon: Icon(Icons.copy_rounded, color: cs.primary),
+          ),
+      ],
     );
   }
 
