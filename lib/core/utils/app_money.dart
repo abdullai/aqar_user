@@ -88,7 +88,7 @@ class AppMoney {
       isAr: isAr,
       maxFractionDigits: maxFractionDigits,
     );
-    return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$code $fmt';
+    return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$fmt $code';
   }
 
   /// PDF — رمز الريال بعد الرقم في اللغتين، بصيغة مناسبة للطباعة.
@@ -124,7 +124,7 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '$saudiRiyalSignCompat$fmt' : '$fmt SAR';
+      return isAr ? '$fmt $saudiRiyalSignCompat' : '$fmt SAR';
     }
     return '$fmt $code';
   }

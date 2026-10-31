@@ -75,7 +75,8 @@ class InstantMarketRequestPaymentService {
     }
   }
 
-  Future<Map<String, dynamic>> activateCredit(String billingTransactionId) async {
+  Future<Map<String, dynamic>> activateCredit(
+      String billingTransactionId) async {
     try {
       final res = await _sb.rpc(
         'activate_instant_market_request_credit',
@@ -125,6 +126,23 @@ class InstantMarketRequestPaymentService {
       if (data is Map) {
         return Map<String, dynamic>.from(
           data.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      }
+      return {'ok': false, 'error': 'unexpected_response'};
+    } catch (e) {
+      return {'ok': false, 'error': e.toString()};
+    }
+  }
+
+  Future<Map<String, dynamic>> hideCredit(String creditId) async {
+    try {
+      final res = await _sb.rpc(
+        'billing_hide_own_instant_credit',
+        params: {'p_id': creditId},
+      );
+      if (res is Map) {
+        return Map<String, dynamic>.from(
+          res.map((k, v) => MapEntry(k.toString(), v)),
         );
       }
       return {'ok': false, 'error': 'unexpected_response'};

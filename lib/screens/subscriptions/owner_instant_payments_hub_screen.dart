@@ -35,6 +35,8 @@ class _OwnerInstantPaymentsHubScreenState
   List<Map<String, dynamic>> _history = const [];
   bool _busy = false;
   double _catalogPrice = 0;
+  final Set<String> _selectedHistoryIds = <String>{};
+  bool _selectionMode = false;
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
@@ -177,6 +179,82 @@ class _OwnerInstantPaymentsHubScreenState
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _toggleHistorySelection(String id) {
+    setState(() {
+      if (!_selectedHistoryIds.add(id)) {
+        _selectedHistoryIds.remove(id);
+      }
+      _selectionMode = _selectedHistoryIds.isNotEmpty;
+    });
+  }
+
+  Future<void> _hideSelectedHistory() async {
+    if (_busy || _selectedHistoryIds.isEmpty) return;
+    final selected = Set<String>.from(_selectedHistoryIds);
+    final ok = await showAppDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_isAr ? 'حذف من السجل' : 'Remove from history'),
+        content: Text(
+          _isAr
+              ? 'سيتم إخفاء العمليات المحددة من السجل فقط. لن تُحذف الفاتورة أو بيانات الدفع.'
+              : 'Selected entries will be hidden from this history only. Invoices and payment data remain محفوظًا.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(_isAr ? 'حذف من السجل' : 'Remove'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      for (final id in selected) {
+        final result = await _svc.hideCredit(id);
+        if (result['ok'] != true) {
+          throw StateError('${result['error'] ?? 'hide_failed'}');
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _selectedHistoryIds.clear();
+        _selectionMode = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _isAr
+                ? 'تم حذف العمليات من السجل.'
+                : 'Entries removed from history.',
+          ),
+        ),
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${_isAr ? 'تعذر التنفيذ' : 'Action failed'}: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _hideHistoryEntry(String id) async {
+    if (!_selectedHistoryIds.contains(id)) {
+      _selectedHistoryIds.add(id);
+    }
+    await _hideSelectedHistory();
   }
 
   Widget _infoCard(BuildContext context) {
@@ -350,11 +428,12 @@ class _OwnerInstantPaymentsHubScreenState
                 child: ListTile(
                   leading:
                       const Icon(Icons.bolt_rounded, color: Color(0xFFDC2626)),
-                  title: Text(
-                    AppMoney.formatWithCurrencyCode(
-                      (r['amount_sar'] as num?)?.toDouble() ?? _catalogPrice,
-                      isAr: _isAr,
-                    ),
+                  title: AppMoneyLine(
+                    amount:
+                        (r['amount_sar'] as num?)?.toDouble() ?? _catalogPrice,
+                    currencyCode: 'SAR',
+                    isAr: _isAr,
+                    maxFractionDigits: 2,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   subtitle: Text(
@@ -373,6 +452,25 @@ class _OwnerInstantPaymentsHubScreenState
             _isAr ? 'سجل الطلبات الفورية' : 'Instant request history',
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
+          if (_selectionMode) ...[
+            const SizedBox(height: 8),
+            Card(
+              color: Theme.of(context).colorScheme.secondaryContainer,
+              child: ListTile(
+                leading: const Icon(Icons.select_all),
+                title: Text(
+                  _isAr
+                      ? 'تم تحديد ${_selectedHistoryIds.length} عملية'
+                      : '${_selectedHistoryIds.length} entries selected',
+                ),
+                trailing: IconButton(
+                  tooltip: _isAr ? 'حذف من السجل' : 'Remove from history',
+                  onPressed: _busy ? null : _hideSelectedHistory,
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           if (_history.isEmpty)
             Text(
@@ -384,24 +482,62 @@ class _OwnerInstantPaymentsHubScreenState
           else
             ..._history.map((r) {
               final status = '${r['status'] ?? ''}';
+              final id = '${r['id'] ?? ''}';
+              final selected = _selectedHistoryIds.contains(id);
+              final amount = (r['amount_sar'] as num?)?.toDouble();
+              final show =
+                  (amount != null && amount > 0) ? amount : _catalogPrice;
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
+                  leading: _selectionMode
+                      ? Checkbox(
+                          value: selected,
+                          onChanged:
+                              _busy ? null : (_) => _toggleHistorySelection(id),
+                        )
+                      : Icon(
+                          status == 'pending_payment'
+                              ? Icons.hourglass_top_outlined
+                              : Icons.bolt_rounded,
+                        ),
                   title: Text(
                     _statusLabel(status),
                     style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                   subtitle: Text(_fmtDate(r['created_at'])),
-                  trailing: Text(
-                    () {
-                      final amt = (r['amount_sar'] as num?)?.toDouble();
-                      final show =
-                          (amt != null && amt > 0) ? amt : _catalogPrice;
-                      if (show <= 0) return '—';
-                      return AppMoney.formatWithCurrencyCode(show, isAr: _isAr);
-                    }(),
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (show > 0)
+                        AppMoneyLine(
+                          amount: show,
+                          currencyCode: 'SAR',
+                          isAr: _isAr,
+                          maxFractionDigits: 2,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        )
+                      else
+                        const Text('—'),
+                      PopupMenuButton<String>(
+                        enabled: !_busy,
+                        onSelected: (_) => unawaited(_hideHistoryEntry(id)),
+                        itemBuilder: (_) => [
+                          PopupMenuItem(
+                            value: 'archive',
+                            child: Text(_isAr ? 'أرشفة' : 'Archive'),
+                          ),
+                          PopupMenuItem(
+                            value: 'remove',
+                            child: Text(_isAr ? 'حذف من السجل' : 'Remove'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
+                  onLongPress: () => _toggleHistorySelection(id),
+                  onTap:
+                      _selectionMode ? () => _toggleHistorySelection(id) : null,
                 ),
               );
             }),

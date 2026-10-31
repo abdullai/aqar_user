@@ -39,6 +39,7 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
   bool _exporting = false;
   String _dateFilter = 'all';
   final Map<PaymentTab, List<Map<String, dynamic>>> _rowsByTab = {};
+  final Set<String> _selectedIds = <String>{};
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
@@ -50,7 +51,9 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
     _invoices = InvoiceService(repository: _repo, isAr: _isAr, supabase: sb);
     _tabs = TabController(length: PaymentTab.values.length, vsync: this);
     _tabs.addListener(() {
-      if (mounted && !_tabs.indexIsChanging) setState(() {});
+      if (mounted && !_tabs.indexIsChanging) {
+        setState(() => _selectedIds.clear());
+      }
     });
     _loadAll();
     unawaited(_invoices.loadPayerInfo());
@@ -295,6 +298,87 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
     );
   }
 
+  void _toggleSelection(String id) {
+    setState(() {
+      if (!_selectedIds.add(id)) {
+        _selectedIds.remove(id);
+      }
+    });
+  }
+
+  Future<void> _hideSelected({required bool archive}) async {
+    if (_selectedIds.isEmpty) return;
+    final selected = Set<String>.from(_selectedIds);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          archive
+              ? (_isAr ? 'أرشفة العمليات' : 'Archive payments')
+              : (_isAr ? 'حذف من السجل' : 'Remove from history'),
+        ),
+        content: Text(
+          _isAr
+              ? 'سيتم إخفاء العمليات المحددة من السجل فقط. لن تتأثر الفواتير أو عمليات الدفع.'
+              : 'Selected payments will be hidden from this history only. Invoices and payment processing are not changed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(archive
+                ? (_isAr ? 'أرشفة' : 'Archive')
+                : (_isAr ? 'حذف' : 'Remove')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _exporting = true);
+    try {
+      for (final id in selected) {
+        final result = await _repo.hideFromLedger(id);
+        if (result['ok'] != true) {
+          throw StateError('${result['error'] ?? 'hide_failed'}');
+        }
+      }
+      if (!mounted) return;
+      setState(() => _selectedIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            archive
+                ? (_isAr ? 'تمت الأرشفة.' : 'Payments archived.')
+                : (_isAr
+                    ? 'تم حذفها من السجل.'
+                    : 'Payments removed from history.'),
+          ),
+        ),
+      );
+      await _loadAll();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content:
+              Text('${_isAr ? 'تعذر تنفيذ العملية' : 'Action failed'}: $e'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _hideSingle(String id, {required bool archive}) async {
+    if (!_selectedIds.contains(id)) {
+      _selectedIds.add(id);
+    }
+    await _hideSelected(archive: archive);
+  }
+
   void _openInvoice(Map<String, dynamic> row) {
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -339,6 +423,8 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
                 itemBuilder: (_, i) {
                   final row = rows[i];
                   final doc = InvoiceDocument.fromRow(row, isAr: _isAr);
+                  final id = '${row['id'] ?? ''}';
+                  final selected = _selectedIds.contains(id);
                   final date = DateTime.tryParse(
                     '${row['paid_at'] ?? row['completed_at'] ?? row['created_at']}',
                   );
@@ -354,7 +440,17 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
                         horizontal: 16,
                         vertical: 10,
                       ),
-                      leading: Icon(_tabIcon(tab), color: color),
+                      leading: selected
+                          ? Checkbox(
+                              value: true,
+                              onChanged: _exporting
+                                  ? null
+                                  : (_) => _toggleSelection(id),
+                            )
+                          : GestureDetector(
+                              onLongPress: () => _toggleSelection(id),
+                              child: Icon(_tabIcon(tab), color: color),
+                            ),
                       title: Text(
                         doc.title,
                         maxLines: 2,
@@ -378,20 +474,47 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
                           height: 1.35,
                         ),
                       ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          _amountWidget(row),
-                          Text(
-                            doc.statusLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 11, color: color),
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              _amountWidget(row),
+                              Text(
+                                doc.statusLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 11, color: color),
+                              ),
+                            ],
+                          ),
+                          PopupMenuButton<String>(
+                            enabled: !_exporting,
+                            onSelected: (action) => unawaited(
+                              _hideSingle(
+                                id,
+                                archive: action == 'archive',
+                              ),
+                            ),
+                            itemBuilder: (_) => [
+                              PopupMenuItem(
+                                value: 'archive',
+                                child: Text(_isAr ? 'أرشفة' : 'Archive'),
+                              ),
+                              PopupMenuItem(
+                                value: 'remove',
+                                child: Text(_isAr ? 'حذف من السجل' : 'Remove'),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      onTap: () => _openInvoice(row),
+                      onLongPress: () => _toggleSelection(id),
+                      onTap: _selectedIds.isNotEmpty
+                          ? () => _toggleSelection(id)
+                          : () => _openInvoice(row),
                     ),
                   );
                 },
@@ -430,6 +553,38 @@ class _PaymentHistoryScreenState extends State<PaymentHistoryScreen>
                 ),
                 onSubmitted: (_) => unawaited(_loadAll()),
               ),
+              const SizedBox(height: 8),
+              if (_selectedIds.isNotEmpty)
+                Card(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  child: ListTile(
+                    leading: const Icon(Icons.select_all),
+                    title: Text(
+                      _isAr
+                          ? 'تم تحديد ${_selectedIds.length} عملية'
+                          : '${_selectedIds.length} payments selected',
+                    ),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        IconButton(
+                          tooltip: _isAr ? 'أرشفة' : 'Archive',
+                          onPressed: _exporting
+                              ? null
+                              : () => _hideSelected(archive: true),
+                          icon: const Icon(Icons.archive_outlined),
+                        ),
+                        IconButton(
+                          tooltip: _isAr ? 'حذف من السجل' : 'Remove',
+                          onPressed: _exporting
+                              ? null
+                              : () => _hideSelected(archive: false),
+                          icon: const Icon(Icons.delete_outline),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               const SizedBox(height: 8),
               Row(
                 children: [
