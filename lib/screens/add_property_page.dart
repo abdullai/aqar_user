@@ -4,86 +4,88 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
+import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
-import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
-import '../core/permissions/runtime_permission_helper.dart';
-import '../l10n/app_localizations.dart';
-import '../main.dart' show suspendAutoLock;
-import '../services/marketing_flow_service.dart';
-import '../services/listing_image_similarity_service.dart';
-import '../services/org_activity_service.dart';
-import '../services/saudi_districts_service.dart';
-import '../services/saudi_locations_service.dart';
-import '../services/location_hierarchy_service.dart';
-import '../utils/video_duration_check.dart';
-import '../core/forms/wizard_form_draft.dart';
-import '../core/utils/date_helper.dart';
-import '../core/forms/wizard_step_navigation.dart';
 import '../core/forms/active_form_guard.dart';
 import '../core/forms/publish_content_fingerprint_store.dart';
-import '../core/session/app_session.dart';
-import '../widgets/app_logo_loading.dart';
-import '../widgets/app_page_close_button.dart';
-import '../widgets/form_exit_confirm_dialog.dart';
-import '../widgets/budget_text_field.dart';
-import '../widgets/terms_acceptance_checkbox.dart';
-import 'platform_policies_screen.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../widgets/field_group_frame.dart';
-import '../widgets/deed_civil_hijri_date_text.dart';
-import '../widgets/deed_date_calendar_dialog.dart';
-import '../widgets/listing_pricing_breakdown.dart';
-import '../widgets/adaptive_post_publish_dialog.dart';
-import '../widgets/publisher_identity_options_card.dart';
-import '../core/profile/publisher_identity_prefs.dart';
-import '../widgets/equal_option_tile_grid.dart';
-import '../widgets/rent_term_schedule_fields.dart';
-import '../core/market/market_request_rent_schedule.dart';
-import '../widgets/stable_select_chip.dart';
-import '../widgets/property_type_hierarchy_picker.dart';
-import '../widgets/year_built_picker_field.dart';
-import '../widgets/smart_count_field.dart';
-import '../widgets/searchable_select_field.dart';
+import '../core/forms/wizard_form_draft.dart';
+import '../core/forms/wizard_step_navigation.dart';
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_outside_unfocus.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/deed_number_integrity.dart';
+import '../core/listing/in_app_tour.dart';
 import '../core/listing/listing_area_unit.dart';
-import '../core/listing/marketing_add_property_flow_config.dart';
 import '../core/listing/listing_media_seal.dart';
+import '../core/listing/listing_media_urls.dart';
 import '../core/listing/listing_storage_paths.dart';
+import '../core/listing/marketing_add_property_flow_config.dart';
 import '../core/listing/post_publish_nav_result.dart';
-import '../core/subscription/app_subscription_gate.dart';
-import '../core/subscription/subscription_gate_helper.dart';
-import '../services/subscription_service.dart';
-import '../core/workflow/app_role_helper.dart';
-import '../core/session/account_role_cache.dart';
-import '../core/listing/property_type_catalog.dart';
 import '../core/listing/property_listing_display.dart';
-import '../core/utils/app_money.dart';
-import '../core/utils/display_ids.dart';
+import '../core/listing/property_type_catalog.dart';
+import '../core/market/market_request_rent_schedule.dart';
 import '../core/navigation/post_auth_navigation.dart';
 import '../core/navigation/safe_overlay_pop.dart';
-import '../core/gestures/app_keyboard_inset.dart';
-import '../widgets/composer_step_constellation.dart';
-import '../widgets/rega_official_bench_card.dart';
+import '../core/permissions/runtime_permission_helper.dart';
+import '../core/profile/publisher_identity_prefs.dart';
+import '../core/session/account_role_cache.dart';
+import '../core/session/app_session.dart';
+import '../core/subscription/app_subscription_gate.dart';
+import '../core/subscription/subscription_gate_helper.dart';
+import '../core/utils/app_money.dart';
+import '../core/utils/date_helper.dart';
+import '../core/utils/display_ids.dart';
+import '../core/workflow/app_role_helper.dart';
+import '../l10n/app_localizations.dart';
+import '../main.dart' show suspendAutoLock;
 import '../services/fal_license_service.dart';
+import '../services/listing_image_similarity_service.dart';
+import '../services/location_hierarchy_service.dart';
+import '../services/marketing_flow_service.dart';
+import '../services/org_activity_service.dart';
+import '../services/photographer_service.dart';
 import '../services/rega_open_indicators_service.dart';
+import '../services/saudi_districts_service.dart';
+import '../services/saudi_locations_service.dart';
+import '../services/subscription_service.dart';
+import '../utils/video_duration_check.dart';
+import '../widgets/adaptive_post_publish_dialog.dart';
+import '../widgets/app_logo_loading.dart';
+import '../widgets/app_page_close_button.dart';
+import '../widgets/budget_text_field.dart';
+import '../widgets/composer_step_constellation.dart';
+import '../widgets/deed_civil_hijri_date_text.dart';
+import '../widgets/deed_date_calendar_dialog.dart';
+import '../widgets/equal_option_tile_grid.dart';
+import '../widgets/field_group_frame.dart';
+import '../widgets/form_exit_confirm_dialog.dart';
+import '../widgets/in_app_tour_builder_sheet.dart';
+import '../widgets/listing_pricing_breakdown.dart';
+import '../widgets/property_type_hierarchy_picker.dart';
+import '../widgets/publisher_identity_options_card.dart';
+import '../widgets/rega_official_bench_card.dart';
+import '../widgets/rent_term_schedule_fields.dart';
+import '../widgets/searchable_select_field.dart';
+import '../widgets/smart_count_field.dart';
+import '../widgets/stable_select_chip.dart';
+import '../widgets/terms_acceptance_checkbox.dart';
+import '../widgets/year_built_picker_field.dart';
 import 'listing_request_status_page.dart';
 import 'map_picker_page.dart';
-import 'rega_ad_license_import_page.dart';
-import '../core/listing/in_app_tour.dart';
-import '../widgets/in_app_tour_builder_sheet.dart';
 import 'photo_shoot_book_page.dart';
-import '../services/photographer_service.dart';
+import 'platform_policies_screen.dart';
+import 'rega_ad_license_import_page.dart';
 import 'subscriptions/subscriptions_root_screen.dart';
 
 /// مصدر رخصة الإعلان (الخطوة الأولى من المعالج).
@@ -289,6 +291,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   DateTime? _availabilityDate;
   DateTime? _deedDate;
   bool _uploadingVideo = false;
+  bool _videoUploadFailed = false;
 
   // حقول خاصة بالشقة
   int? _livingRooms;
@@ -635,6 +638,23 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     );
   }
 
+  AddPropertyFormSlice _sliceForPane(int pane) {
+    switch (pane) {
+      case 1:
+        return AddPropertyFormSlice.classification;
+      case 2:
+      case 3:
+      case 23:
+        return AddPropertyFormSlice.location;
+      case 4:
+        return AddPropertyFormSlice.pricing;
+      case 5:
+        return AddPropertyFormSlice.details;
+      default:
+        return AddPropertyFormSlice.classification;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -691,6 +711,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         ),
       );
       unawaited(_restoreListingDraftIfAny());
+      // Monitor keyboard visibility to ensure focused field stays visible
+      _setupKeyboardVisibilityMonitor();
     });
   }
 
@@ -757,6 +779,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'building_number': _buildingNumber.text,
       'deed_number': _deedNumber.text,
       'deed_issuer': _deedIssuer.text,
+      'deed_date': _deedDate?.toIso8601String(),
       'price': _price.text,
       'area': _area.text,
       'current_bid': _currentBid.text,
@@ -846,6 +869,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _buildingNumber.text = '${d['building_number'] ?? ''}';
     _deedNumber.text = '${d['deed_number'] ?? ''}';
     _deedIssuer.text = '${d['deed_issuer'] ?? ''}';
+    _deedDate = DateTime.tryParse('${d['deed_date'] ?? ''}');
     _price.text = '${d['price'] ?? ''}';
     _area.text = '${d['area'] ?? ''}';
     _currentBid.text = '${d['current_bid'] ?? ''}';
@@ -1015,6 +1039,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _city.clear();
     _location.clear();
     _addressLine.clear();
+    _buildingNumber.clear();
+    _deedNumber.clear();
+    _deedIssuer.clear();
+    _deedDate = null;
     _price.clear();
     _area.clear();
     _wizardStep = 0;
@@ -1452,6 +1480,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             selection: TextSelection.collapsed(offset: n.length),
           );
         }
+        // Ensure field stays visible when typing
+        _ensureFocusedFieldVisible();
       });
     }
 
@@ -1471,6 +1501,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             selection: TextSelection.collapsed(offset: t.length),
           );
         }
+        // Ensure field stays visible when typing
+        _ensureFocusedFieldVisible();
       });
     }
 
@@ -1489,6 +1521,18 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     wireDigits(_parcelNumber);
     wireDecimal(_latCtrl);
     wireDecimal(_lngCtrl);
+    
+    // Add visibility monitoring for main text fields
+    _addFieldVisibilityListener(_title);
+    _addFieldVisibilityListener(_desc);
+  }
+
+  void _addFieldVisibilityListener(TextEditingController controller) {
+    controller.addListener(() {
+      if (FocusScope.of(context).hasPrimaryFocus) {
+        _ensureFocusedFieldVisible();
+      }
+    });
   }
 
   @override
@@ -1812,7 +1856,75 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   void _scrollWizardStepToTop() {
-    WizardStepNavigation.scrollToTop(_scrollCtrl);
+    WizardStepNavigation.scrollToTop(_scrollCtrl, animate: true);
+    // Focus on the first input field of the current step
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final pane = _wizardPaneKind(_wizardStep);
+      GlobalKey<FormState>? targetForm;
+      
+      switch (pane) {
+        case 0:
+          return; // License step doesn't need focus
+        case 1:
+          targetForm = _formKeyClassification;
+          break;
+        case 23:
+        case 2:
+        case 3:
+          targetForm = _formKeyLocation;
+          break;
+        case 4:
+          targetForm = _formKeyPricing;
+          break;
+        case 5:
+          targetForm = _formKeyDetails;
+          break;
+        case 6:
+          return; // Media step
+        default:
+          return;
+      }
+      
+      if (targetForm != null && targetForm.currentContext != null) {
+        FocusScope.of(context).unfocus();
+        Future.delayed(const Duration(milliseconds: 100), () {
+          if (mounted && targetForm.currentContext != null) {
+            FocusScope.of(targetForm.currentContext!).requestFocus();
+            // Ensure the focused field is visible above keyboard
+            _ensureFocusedFieldVisible();
+          }
+        });
+      }
+    });
+  }
+
+  void _ensureFocusedFieldVisible() {
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (!mounted) return;
+      final FocusScopeNode currentFocus = FocusScope.of(context);
+      if (currentFocus.hasPrimaryFocus && currentFocus.focusedChild != null) {
+        // Get the render object of the focused field
+        final focusedContext = currentFocus.focusedChild?.context;
+        if (focusedContext != null) {
+          final RenderObject? renderObject = focusedContext.findRenderObject();
+          if (renderObject is RenderBox && renderObject.attached) {
+            renderObject.showOnScreen(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        }
+      }
+    });
+  }
+
+  void _setupKeyboardVisibilityMonitor() {
+    // Monitor keyboard visibility and scroll focused field into view
+    WidgetsBinding.instance.window.onSemanticsEnabledChanged = () {
+      if (!mounted) return;
+      _ensureFocusedFieldVisible();
+    };
   }
 
   void _wizardPrev() {
@@ -2453,7 +2565,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     );
   }
 
-  void _clearUploadedVideo() => setState(() => _videoUrl.clear());
+  void _clearUploadedVideo() => setState(() {
+        _videoUrl.clear();
+        _videoUploadFailed = false;
+      });
 
   Future<void> _pickImages({required _PickSource source}) async {
     if (_saving || _picking) return;
@@ -2572,7 +2687,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final res = await MapPickerPage.pick(
       context,
       initial: initial,
-      initialApproximate: _locationIsApproximate,
       isAr: _isAr,
       kingdomOverview: kingdomOverview && initial == null,
       pinTitle: _title.text.trim().isEmpty
@@ -2589,13 +2703,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     if (!mounted || res == null) return;
     final lat = res.position.latitude;
     final lng = res.position.longitude;
-    final approx = res.approximate;
     final metaCity = (res.city ?? '').trim();
     final metaRegion = (res.region ?? '').trim();
     final metaGov = (res.governorate ?? '').trim();
     final metaDistrict = (res.district ?? '').trim();
     setState(() {
-      _locationIsApproximate = approx;
+      _useMapCoords = true;
+      _locationIsApproximate = false;
       _lat = lat;
       _lng = lng;
       _latCtrl.text = _lat?.toStringAsFixed(6) ?? '';
@@ -2629,8 +2743,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           behavior: SnackBarBehavior.floating,
           content: Text(
             _isAr
-                ? 'تم تحديد الموقع${_locationIsApproximate ? ' (تقريبي)' : ''}'
-                : 'Location selected${_locationIsApproximate ? ' (approximate)' : ''}',
+                ? 'تم اعتماد الموقع ونقل الإحداثيات إلى حقول الإعلان.'
+                : 'Location confirmed and coordinates copied to the listing form.',
           ),
         ),
       );
@@ -3329,6 +3443,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _floor = null;
       _totalFloors = null;
       _videoUrl.clear();
+      _videoUploadFailed = false;
       _virtualTourUrl.clear();
       _availabilityDate = null;
       _livingRooms = null;
@@ -3657,6 +3772,37 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     );
   }
 
+  Future<void> _publishDirectListingAfterMedia(String propertyId) async {
+    final publishedAt = DateTime.now().toUtc().toIso8601String();
+    final row = await _sb
+        .from('properties')
+        .update({
+          'status': 'published',
+          'workflow_stage': 'published',
+          'published_at': publishedAt,
+          'home_feed_suppressed': false,
+        })
+        .eq('id', propertyId)
+        .select('id,status,workflow_stage,home_feed_suppressed')
+        .single();
+    if (row['status'] != 'published' ||
+        row['workflow_stage'] != 'published' ||
+        row['home_feed_suppressed'] != false) {
+      throw StateError('Listing could not be released after media binding');
+    }
+  }
+
+  Future<void> _removeUploadedListingImages(
+    _PreparedListingMedia media,
+  ) async {
+    if (media.imagePaths.isEmpty) return;
+    try {
+      await _sb.storage.from('property-images').remove(media.imagePaths);
+    } catch (e) {
+      throw StateError('Could not clean up uploaded listing images: $e');
+    }
+  }
+
   Future<void> _insertPropertyMediaRows({
     required String propertyId,
     required _PreparedListingMedia media,
@@ -3715,18 +3861,55 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }) async {
     final property = (propertyId ?? '').trim();
     final request = (requestId ?? '').trim();
-    if (property.isNotEmpty) {
+    Object? rollbackError;
+    StackTrace? rollbackStack;
+    void recordRollbackError(Object error, StackTrace stack) {
+      rollbackError ??= error;
+      rollbackStack ??= stack;
+    }
+
+    final propertiesToRemove = <String>{if (property.isNotEmpty) property};
+    if (request.isNotEmpty) {
       try {
-        await _sb.from('property_images').delete().eq('property_id', property);
-      } catch (_) {}
+        final row = await _sb
+            .from('listing_requests')
+            .select('preview_property_id')
+            .eq('id', request)
+            .maybeSingle();
+        final previewProperty =
+            (row?['preview_property_id'] ?? '').toString().trim();
+        if (previewProperty.isNotEmpty) {
+          propertiesToRemove.add(previewProperty);
+        }
+      } catch (e, stack) {
+        recordRollbackError(e, stack);
+      }
+    }
+
+    for (final id in propertiesToRemove) {
       try {
-        await _sb.from('properties').delete().eq('id', property);
-      } catch (_) {}
+        await _sb.from('property_images').delete().eq('property_id', id);
+      } catch (e, stack) {
+        recordRollbackError(e, stack);
+      }
+      try {
+        await _sb.from('properties').delete().eq('id', id);
+      } catch (e, stack) {
+        recordRollbackError(e, stack);
+      }
     }
     if (request.isNotEmpty) {
       try {
         await _sb.from('listing_requests').delete().eq('id', request);
-      } catch (_) {}
+      } catch (e, stack) {
+        recordRollbackError(e, stack);
+      }
+    }
+    if (rollbackError != null) {
+      Error.throwWithStackTrace(
+        StateError('Could not roll back listing: $rollbackError'),
+        rollbackStack!,
+      );
     }
   }
 
@@ -3738,7 +3921,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final lat = _useMapCoords ? _parseNullableDouble(_latCtrl.text) : _lat;
     final lng = _useMapCoords ? _parseNullableDouble(_lngCtrl.text) : _lng;
     final areaStoredM2 = _areaValueInSquareMeters() ?? _parseDouble(_area.text);
-    final publishedIso = DateTime.now().toUtc().toIso8601String();
     final payload = <String, dynamic>{
       'owner_id': ownerId,
       'title': _title.text.trim(),
@@ -3762,11 +3944,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'current_bid': _isAuction ? _parseDouble(_currentBid.text) : null,
       'views': 0,
       if (marketerDirectPublish) ...<String, dynamic>{
-        'status': 'published',
-        'workflow_stage': 'published',
+        'status': 'draft',
+        'workflow_stage': 'draft',
         'published_by_marketer_id': ownerId,
-        'published_at': publishedIso,
-        'home_feed_suppressed': false,
+        'home_feed_suppressed': true,
       } else ...<String, dynamic>{
         'status': 'waiting_mediator',
         'workflow_stage': 'waiting_marketers',
@@ -4477,11 +4658,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   bool _usedDefaultCover = false;
 
   void _markSmartDefaultCoverIfNoMedia() {
-    if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) {
-      _usedDefaultCover = false;
-      return;
-    }
-    _usedDefaultCover = true;
+    _usedDefaultCover = _images.isEmpty &&
+        _videoUrl.text.trim().isEmpty &&
+        _virtualTourUrl.text.trim().isEmpty &&
+        !(_inAppTour?.isNotEmpty ?? false);
   }
 
   Future<void> _persistPendingPhotoShoot({
@@ -4555,6 +4735,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   Future<void> _submit() async {
+    if (_saving || _publishLock) return;
+    if (_picking || _uploadingVideo || _uploadingLicensePdf) {
+      setState(() => _error = _isAr
+          ? 'انتظر حتى يكتمل رفع الملف قبل نشر الإعلان.'
+          : 'Wait for the file upload to finish before publishing.');
+      return;
+    }
     setState(() => _error = null);
     if (_needsPhotographer && _pendingPhotoShoot == null) {
       setState(() => _error = _isAr
@@ -4587,16 +4774,36 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       setState(() => _error = _isAr ? 'غير مصرح' : 'Not allowed');
       return;
     }
-    setState(() => _markSmartDefaultCoverIfNoMedia());
-    if (!_usedDefaultCover &&
-        _images.isEmpty &&
-        _videoUrl.text.trim().isEmpty) {
+    final tourUrl = _virtualTourUrl.text.trim();
+    if (tourUrl.isNotEmpty &&
+        !ListingMediaUrls.looksLikePlayableTourUrl(tourUrl)) {
       setState(() => _error = _isAr
-          ? 'أضف صورة أو فيديو، أو سيُستخدم الغلاف الذكي تلقائياً.'
-          : 'Add a photo or video, or the smart cover will be used.');
+          ? 'رابط الجولة التعريفية غير صالح. أدخل رابط جولة يمكن فتحه.'
+          : 'The tour link is invalid. Enter a playable virtual-tour URL.');
       _scrollToKey(_listingMediaKey);
       return;
     }
+    if ((_inAppTour?.isNotEmpty ?? false) && _images.isEmpty) {
+      setState(() => _error = _isAr
+          ? 'الجولة الداخلية تحتاج صورة واحدة على الأقل لتثبيت نقاطها.'
+          : 'An in-app tour needs at least one photo for its tour points.');
+      _scrollToKey(_listingMediaKey);
+      return;
+    }
+    final hasCoverMedia = _images.isNotEmpty ||
+        _videoUrl.text.trim().isNotEmpty ||
+        tourUrl.isNotEmpty;
+    if (_videoUploadFailed && !hasCoverMedia) {
+      setState(() => _error = _listingMediaUploadError(
+            StateError('A previously selected video did not finish uploading'),
+          ));
+      _scrollToKey(_listingMediaKey);
+      return;
+    }
+    setState(() {
+      _markSmartDefaultCoverIfNoMedia();
+      _error = null;
+    });
     if (!_usageResidential && !_usageCommercial) {
       setState(() => _error = _isAr
           ? 'حدد ما إذا كان العقار مناسبًا للسكني أو التجاري أو كليهما'
@@ -4706,8 +4913,20 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final verified = await _isVerifiedMarketer(ownerId);
       if (!verified || _forceListingRequestPath) {
         // فرد أو مسوّق بدون ترخيص REGA: طلب تسويق — لا يظهر في الرئيسية.
+        final _PreparedListingMedia media;
+        try {
+          media = await _prepareAndUploadListingMedia(ownerId: ownerId);
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _saving = false;
+            _publishLock = false;
+            _error = _listingMediaUploadError(e);
+          });
+          return;
+        }
         final requestPayload =
-            _buildRequestPayload(ownerId: ownerId, media: null);
+            _buildRequestPayload(ownerId: ownerId, media: media);
         Map<String, dynamic> insertedReq;
         Future<Map<String, dynamic>> insertListingRequest(
           Map<String, dynamic> payload,
@@ -4770,6 +4989,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             Map<String, dynamic>.from(requestPayload),
           );
         } catch (e) {
+          await _removeUploadedListingImages(media);
           if (!mounted) return;
           setState(() {
             _saving = false;
@@ -4782,6 +5002,37 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         final reqPub = (insertedReq['listing_request_public_code'] ?? '')
             .toString()
             .trim();
+        final tour = _virtualTourUrl.text.trim();
+        try {
+          await _mergeRequestPayloadJson(requestId, {
+            if (media.imagePaths.isNotEmpty)
+              'request_image_paths': media.imagePaths,
+            if ((media.videoPath ?? '').trim().isNotEmpty)
+              'request_video_path': media.videoPath,
+            if ((media.videoPath ?? '').trim().isNotEmpty)
+              'video_url': media.videoPath,
+            if (tour.isNotEmpty) 'virtual_tour_url': tour,
+            'listing_guidance': _listingGuidanceWithBoundMedia(media),
+            'media_integrity': media.integrity,
+            if (media.hasRealMedia || tour.isNotEmpty)
+              'default_cover_used': false,
+          });
+          if (_pendingPhotoShoot != null) {
+            await _persistPendingPhotoShoot(listingRequestId: requestId);
+          }
+        } catch (e) {
+          await _rollbackCreatedListing(requestId: requestId);
+          await _removeUploadedListingImages(media);
+          if (!mounted) return;
+          setState(() {
+            _saving = false;
+            _publishLock = false;
+            _error = _friendlyListingRequestSaveError(e);
+          });
+          _scrollToKey(_listingMediaKey);
+          return;
+        }
+        if (!mounted) return;
         OrgActivityService.logListingRequestCreated(requestId);
         try {
           await MarketingFlowService(_sb).notifyOwnerListingRequestSubmitted(
@@ -4790,45 +5041,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             titleHint: _title.text.trim(),
           );
         } catch (_) {}
-        _PreparedListingMedia? media;
-        if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) {
-          try {
-            media = await _prepareAndUploadListingMedia(
-              ownerId: ownerId,
-              requestId: requestId,
-            );
-          } catch (e) {
-            if (!mounted) return;
-            setState(() {
-              _saving = false;
-              _publishLock = false;
-              _error = _listingMediaUploadError(e);
-            });
-            return;
-          }
-        }
-        final tour = _virtualTourUrl.text.trim();
-        await _mergeRequestPayloadJson(requestId, {
-          if (media != null && media.imagePaths.isNotEmpty)
-            'request_image_paths': media.imagePaths,
-          if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
-            'request_video_path': media.videoPath,
-          if (media != null && (media.videoPath ?? '').trim().isNotEmpty)
-            'video_url': media.videoPath,
-          if (tour.isNotEmpty) 'virtual_tour_url': tour,
-          'listing_guidance': _listingGuidanceWithBoundMedia(media),
-          if (media != null) 'media_integrity': media.integrity,
-          if (media != null && media.hasRealMedia) 'default_cover_used': false,
-        });
-        Object? photoRequestError;
-        if (_pendingPhotoShoot != null) {
-          try {
-            await _persistPendingPhotoShoot(listingRequestId: requestId);
-          } catch (e) {
-            photoRequestError = e;
-          }
-        }
-        if (!mounted) return;
         // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
         final fp = _currentPublishFingerprint();
         _lastSuccessfulPublishFingerprint = fp;
@@ -4837,15 +5049,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           requestId: requestId,
           listingRequestPublicCode: reqPub.isEmpty ? null : reqPub,
         );
-        if (photoRequestError != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(_isAr
-                  ? 'حُفظ طلب التسويق، لكن تعذّر إنشاء طلب التصوير. افتح الإعلان من صفحتي وأعد المحاولة.'
-                  : 'The marketing request was saved, but the photo request could not be created. Reopen it from My Page and retry.'),
-            ),
-          );
-        }
         return;
       }
       if (widget.marketingFlow?.publishToHomeFeed == true &&
@@ -4933,14 +5136,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             .single();
       }
       final propertyId = inserted['id'] as String;
-      OrgActivityService.logListingCreated(propertyId);
-      try {
-        await MarketingFlowService(_sb).notifyOwnerPropertyListed(
-          ownerId: ownerId,
-          propertyId: propertyId,
-          titleHint: _title.text.trim(),
-        );
-      } catch (_) {}
       _PreparedListingMedia media;
       if (_images.isNotEmpty || _videoUrl.text.trim().isNotEmpty) {
         try {
@@ -4972,6 +5167,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           media: media,
         );
       } catch (e) {
+        await _removeUploadedListingImages(media);
         await _rollbackCreatedListing(propertyId: propertyId);
         rethrow;
       }
@@ -4981,18 +5177,37 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           media: media,
         );
       } catch (e) {
+        await _removeUploadedListingImages(media);
         await _rollbackCreatedListing(propertyId: propertyId);
         rethrow;
       }
-      Object? photoRequestError;
       if (_pendingPhotoShoot != null) {
         try {
           await _persistPendingPhotoShoot(propertyId: propertyId);
         } catch (e) {
-          photoRequestError = e;
+          await _removeUploadedListingImages(media);
+          await _rollbackCreatedListing(propertyId: propertyId);
+          rethrow;
+        }
+      }
+      if (marketerDirectPublish) {
+        try {
+          await _publishDirectListingAfterMedia(propertyId);
+        } catch (e) {
+          await _removeUploadedListingImages(media);
+          await _rollbackCreatedListing(propertyId: propertyId);
+          rethrow;
         }
       }
       if (!mounted) return;
+      OrgActivityService.logListingCreated(propertyId);
+      try {
+        await MarketingFlowService(_sb).notifyOwnerPropertyListed(
+          ownerId: ownerId,
+          propertyId: propertyId,
+          titleHint: _title.text.trim(),
+        );
+      } catch (_) {}
       // احفظ بصمة المحتوى فوراً بعد النجاح (قبل الحوار) لمنع إعادة النشر المطابق.
       final fp = _currentPublishFingerprint();
       _lastSuccessfulPublishFingerprint = fp;
@@ -5002,15 +5217,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         listingPublicCode: pub.isEmpty ? null : pub,
         propertyId: propertyId,
       );
-      if (photoRequestError != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_isAr
-                ? 'نُشر الإعلان، لكن تعذّر إنشاء طلب التصوير. افتح الإعلان من صفحتي وأعد المحاولة.'
-                : 'The listing was published, but the photo request could not be created. Reopen it from My Page and retry.'),
-          ),
-        );
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -5211,7 +5417,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             ),
           );
       if (!mounted) return;
-      setState(() => _videoUrl.text = path);
+      setState(() {
+        _videoUrl.text = path;
+        _videoUploadFailed = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
@@ -5220,10 +5429,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       );
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _videoUrl.clear();
+        _videoUploadFailed = true;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          content: Text(_isAr ? 'فشل رفع الفيديو: $e' : 'Upload failed: $e'),
+          content: Text(_listingMediaUploadError(e)),
         ),
       );
     } finally {
@@ -5464,677 +5677,714 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           ),
           body: AppKeyboardPad(
             extra: 8,
-            child: Stack(
-              children: [
-                SafeArea(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          controller: _scrollCtrl,
-                          keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 12),
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 980),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  _HeaderCard(
-                                    isAr: _isAr,
-                                    marketerPublishName: _marketerPublishName,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    _isAr
-                                        ? 'الخطوة $displayStep من $stepCount · ${_wizardScreenTitle(_isAr)}'
-                                        : 'Step $displayStep of $stepCount · ${_wizardScreenTitle(_isAr)}',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  ComposerStepConstellation(
-                                    step: displayStep,
-                                    total: stepCount,
-                                    accent:
-                                        Theme.of(context).colorScheme.primary,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  KeyedSubtree(
-                                    key: _formCardKey,
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Visibility(
-                                          visible: pane == 0,
-                                          maintainState: true,
-                                          child: KeyedSubtree(
-                                            key: _regaCardKey,
-                                            child: _AdLicenseStepCard(
-                                              isAr: _isAr,
-                                              hasRegaAdLicense:
-                                                  _hasRegaAdLicense,
-                                              onHasRegaAdLicenseChanged: (v) =>
-                                                  setState(() {
-                                                _hasRegaAdLicense = v;
-                                                _licenseStepError = null;
-                                                _error = null;
-                                                if (v == true) {
-                                                  _adLicenseSource =
-                                                      _AdLicenseSource.inApp;
-                                                  _consentMarketNoLicense =
-                                                      false;
-                                                } else if (v == false) {
-                                                  _adLicenseSource =
-                                                      _AdLicenseSource.none;
-                                                  _regaVerifyOk = null;
-                                                  _regaVerifyBanner = null;
-                                                } else {
-                                                  _adLicenseSource =
-                                                      _AdLicenseSource.unset;
-                                                }
-                                              }),
-                                              licenseController:
-                                                  _regaAdLicenseNo,
-                                              consentMarket:
-                                                  _consentMarketNoLicense,
-                                              onConsentMarketChanged: (v) =>
-                                                  setState(() {
-                                                _consentMarketNoLicense = v;
-                                                _licenseStepError = null;
-                                              }),
-                                              showPhoneOnMarket:
-                                                  _showPhoneOnMarket,
-                                              onShowPhoneOnMarketChanged: (v) =>
-                                                  setState(() =>
-                                                      _showPhoneOnMarket = v),
-                                              fieldError: _licenseStepError,
-                                              regaChecking: _regaChecking,
-                                              regaVerifyBanner:
-                                                  _regaVerifyBanner,
-                                              regaVerifyOk: _regaVerifyOk,
-                                              onVerify:
-                                                  _scheduleRegaLicenseVerify,
-                                              onOpenRegaImport:
-                                                  _openRegaImportPage,
-                                            ),
-                                          ),
-                                        ),
-                                        Visibility(
-                                          visible: pane == 1,
-                                          maintainState: true,
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              _buildPropertyFormSlice(
-                                                AddPropertyFormSlice
-                                                    .classification,
-                                                _formKeyClassification,
-                                              ),
-                                              const SizedBox(height: 8),
-                                              OutlinedButton.icon(
-                                                onPressed: _saving
-                                                    ? null
-                                                    : _showExtendedUsesDialog,
-                                                icon: const Icon(
-                                                    Icons.open_in_new,
-                                                    size: 20),
-                                                label: Text(
-                                                  _isAr
-                                                      ? 'استخدامات موسّعة وتفاصيل إضافية'
-                                                      : 'Extended uses & extra detail',
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Visibility(
-                                          visible: pane == 2 || pane == 23,
-                                          maintainState: true,
-                                          child: KeyedSubtree(
-                                            key: _coordsKey,
-                                            child: _CoordsCard(
-                                              isAr: _isAr,
-                                              saving: _saving,
-                                              enabled: _useMapCoords,
-                                              locationIsApproximate:
-                                                  _locationIsApproximate,
-                                              latController: _latCtrl,
-                                              lngController: _lngCtrl,
-                                              lat: _lat,
-                                              lng: _lng,
-                                              formKey: _formKeyCoords,
-                                              onToggle: (v) {
-                                                if (!v) {
-                                                  setState(() {
-                                                    _useMapCoords = false;
-                                                    _lat = null;
-                                                    _lng = null;
-                                                    _latCtrl.clear();
-                                                    _lngCtrl.clear();
-                                                  });
-                                                  return;
-                                                }
-                                                setState(() {
-                                                  _useMapCoords = true;
-                                                  _lat = null;
-                                                  _lng = null;
-                                                  _latCtrl.clear();
-                                                  _lngCtrl.clear();
-                                                  _error = null;
-                                                });
-                                                WidgetsBinding.instance
-                                                    .addPostFrameCallback((_) {
-                                                  if (mounted) {
-                                                    _openMapPicker(
-                                                        kingdomOverview: true);
-                                                  }
-                                                });
-                                              },
-                                              onPick: () => _openMapPicker(
-                                                kingdomOverview: _lat == null &&
-                                                    _lng == null &&
-                                                    _useMapCoords,
-                                              ),
-                                              onLatChanged: _onLatChanged,
-                                              onLngChanged: _onLngChanged,
-                                            ),
-                                          ),
-                                        ),
-                                        Visibility(
-                                          visible: pane == 3 || pane == 23,
-                                          maintainState: true,
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              _buildPropertyFormSlice(
-                                                AddPropertyFormSlice.location,
-                                                _formKeyLocation,
-                                              ),
-                                              const SizedBox(height: 12),
-                                              _EjarOptionalFieldsCard(
-                                                isAr: _isAr,
-                                                saving: _saving,
-                                                contractCtrl: _ejarContractNo,
-                                                unitCtrl: _ejarUnitNo,
-                                                floorCtrl: _ejarFloorNo,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Visibility(
-                                          visible: pane == 4,
-                                          maintainState: true,
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
-                                            children: [
-                                              _buildPropertyFormSlice(
-                                                AddPropertyFormSlice.pricing,
-                                                _formKeyPricing,
-                                              ),
-                                              RegaOfficialBenchCard(
-                                                isAr: _isAr,
-                                                city: (_selectedCity ??
-                                                        _city.text)
-                                                    .trim(),
-                                                typeCode: _type,
-                                                isRent: _purposeIsRent,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        Visibility(
-                                          visible: pane == 5,
-                                          maintainState: true,
-                                          child: _buildPropertyFormSlice(
-                                            AddPropertyFormSlice.details,
-                                            _formKeyDetails,
-                                          ),
-                                        ),
-                                        Visibility(
-                                          visible: pane == 6,
-                                          maintainState: true,
-                                          child: KeyedSubtree(
-                                            key: _listingMediaKey,
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.stretch,
-                                              children: [
-                                                if (_requiresExternalLicenseBundle) ...[
-                                                  _ExternalLicenseMediaBanner(
-                                                      isAr: _isAr),
-                                                  const SizedBox(height: 12),
-                                                ],
-                                                _ListingMediaCard(
-                                                  isAr: _isAr,
-                                                  images: _images,
-                                                  saving: _saving,
-                                                  picking: _picking,
-                                                  uploadingVideo:
-                                                      _uploadingVideo,
-                                                  hasVideo: _hasUploadedVideo,
-                                                  showCoverHeroPicker:
-                                                      _images.isNotEmpty &&
-                                                          _videoUrl.text
-                                                              .trim()
-                                                              .isNotEmpty,
-                                                  coverHeroIsVideo:
-                                                      _coverHeroIsVideo,
-                                                  onCoverHeroIsVideoChanged:
-                                                      (v) => setState(() =>
-                                                          _coverHeroIsVideo =
-                                                              v),
-                                                  onPickImages:
-                                                      _showPickImagesMenu,
-                                                  onPickVideo:
-                                                      _showVideoPickMenu,
-                                                  onClearVideo:
-                                                      _clearUploadedVideo,
-                                                  onRemoveImage: _removeImageAt,
-                                                  onMoveImage: _moveImage,
-                                                ),
-                                                const SizedBox(height: 10),
-                                                OutlinedButton.icon(
-                                                  onPressed: _saving
-                                                      ? null
-                                                      : () async {
-                                                          final refs = [
-                                                            for (var i = 0;
-                                                                i <
-                                                                    _images
-                                                                        .length;
-                                                                i++)
-                                                              '$i',
-                                                          ];
-                                                          final bytes = <String,
-                                                              Uint8List>{
-                                                            for (var i = 0;
-                                                                i <
-                                                                    _images
-                                                                        .length;
-                                                                i++)
-                                                              '$i': _images[i]
-                                                                  .bytes,
-                                                          };
-                                                          final tour =
-                                                              await showInAppTourBuilderSheet(
-                                                            context: context,
-                                                            isAr: _isAr,
-                                                            imageRefs: refs,
-                                                            initial: _inAppTour,
-                                                            previewBytes: bytes,
-                                                          );
-                                                          if (tour != null &&
-                                                              mounted) {
-                                                            setState(() =>
-                                                                _inAppTour =
-                                                                    tour);
-                                                          }
-                                                        },
-                                                  icon: const Icon(Icons
-                                                      .threed_rotation_outlined),
-                                                  label: Text(
-                                                    AppLocalizations.of(
-                                                            context)!
-                                                        .inAppTourBuild,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 6),
-                                                Text(
-                                                  AppLocalizations.of(context)!
-                                                      .inAppTourEngineHint,
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Theme.of(context)
-                                                        .colorScheme
-                                                        .onSurfaceVariant,
-                                                    height: 1.35,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 8),
-                                                CheckboxListTile(
-                                                  contentPadding:
-                                                      EdgeInsets.zero,
-                                                  value: _needsPhotographer,
-                                                  title: Text(_isAr
-                                                      ? 'بحاجة إلى مصوّر عقاري'
-                                                      : 'I need a property photographer'),
-                                                  subtitle: Text(_isAr
-                                                      ? 'اطلب عروض تصوير مرتبطة بهذا الإعلان واختر العرض المناسب.'
-                                                      : 'Request photo offers linked to this listing and choose the best one.'),
-                                                  onChanged: _saving
-                                                      ? null
-                                                      : (value) => setState(() {
-                                                            _needsPhotographer =
-                                                                value ?? false;
-                                                            if (!_needsPhotographer) {
-                                                              _pendingPhotoShoot =
-                                                                  null;
-                                                            }
-                                                          }),
-                                                ),
-                                                FilledButton.tonalIcon(
-                                                  onPressed: _saving ||
-                                                          !_needsPhotographer
-                                                      ? null
-                                                      : () async {
-                                                          final loc = [
-                                                            _city.text.trim(),
-                                                            _location.text
-                                                                .trim(),
-                                                          ]
-                                                              .where((s) =>
-                                                                  s.isNotEmpty)
-                                                              .join(' · ');
-                                                          await Navigator.of(
-                                                                  context)
-                                                              .push<Object?>(
-                                                            MaterialPageRoute<
-                                                                Object?>(
-                                                              builder: (_) =>
-                                                                  PhotoShootBookPage(
-                                                                lang:
-                                                                    widget.lang,
-                                                                marketplaceMode:
-                                                                    true,
-                                                                allowMarketerBundle:
-                                                                    _forceListingRequestPath,
-                                                                locationText:
-                                                                    loc,
-                                                                latitude: double
-                                                                    .tryParse(
-                                                                        _latCtrl
-                                                                            .text
-                                                                            .trim()),
-                                                                longitude: double
-                                                                    .tryParse(
-                                                                        _lngCtrl
-                                                                            .text
-                                                                            .trim()),
-                                                                onQueued: (d) =>
-                                                                    setState(
-                                                                        () {
-                                                                  _pendingPhotoShoot =
-                                                                      d;
-                                                                  _needsPhotographer =
-                                                                      true;
-                                                                }),
-                                                              ),
-                                                            ),
-                                                          );
-                                                        },
-                                                  icon: const Icon(Icons
-                                                      .photo_camera_outlined),
-                                                  label: Text(
-                                                    AppLocalizations.of(
-                                                            context)!
-                                                        .photographerRequestFromMedia,
-                                                  ),
-                                                ),
-                                                if (_requiresExternalLicenseBundle) ...[
-                                                  const SizedBox(height: 14),
-                                                  _LicensePdfUploadRow(
-                                                    isAr: _isAr,
-                                                    storagePath:
-                                                        _licensePdfStoragePath,
-                                                    uploading:
-                                                        _uploadingLicensePdf,
-                                                    busy: _saving ||
-                                                        _picking ||
-                                                        _uploadingVideo ||
-                                                        _uploadingLicensePdf,
-                                                    onPick:
-                                                        _pickAndUploadLicensePdf,
-                                                    onClear: _clearLicensePdf,
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  if (_error != null)
-                                    _ErrorBox(text: _error!, isAr: _isAr),
-                                  if (_wizardStep >= _kWizardLastStep) ...[
-                                    const SizedBox(height: 12),
-                                    _DealPublishExtrasCard(
+            child: AppOutsideUnfocus(
+              child: Stack(
+                children: [
+                  SafeArea(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: SingleChildScrollView(
+                            controller: _scrollCtrl,
+                            keyboardDismissBehavior:
+                                ScrollViewKeyboardDismissBehavior.onDrag,
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 12),
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              child: ConstrainedBox(
+                                constraints:
+                                    const BoxConstraints(maxWidth: 980),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    _HeaderCard(
                                       isAr: _isAr,
-                                      saving: _saving || _publishLock,
-                                      noLegalObstacles: _noLegalObstacles,
-                                      onNoLegalObstaclesChanged: (v) =>
-                                          setState(() => _noLegalObstacles = v),
-                                      advertiserRoleLabel: _advertiserRoleLabel,
+                                      marketerPublishName: _marketerPublishName,
                                     ),
-                                    const SizedBox(height: 12),
-                                    SwitchListTile.adaptive(
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(
-                                        _isAr
-                                            ? 'إظهار اسمي في السوق العقاري وتفاصيل الإعلان'
-                                            : 'Show my name on the market and listing details',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          height: 1.25,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        _isAr
-                                            ? 'اختياري. الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو المستعار. الجوال لا يظهر للعامة.'
-                                            : 'Optional. Official name or alias. Phone stays hidden from the public.',
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.w600),
-                                      ),
-                                      value: _showOwnerNameOnCards,
-                                      onChanged: (_saving || _publishLock)
-                                          ? null
-                                          : (v) => setState(
-                                              () => _showOwnerNameOnCards = v),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    PublisherIdentityOptionsCard(
-                                      isAr: _isAr,
-                                      compact: true,
-                                      enabled: !(_saving || _publishLock),
-                                      hidePhoneOptions: true,
-                                      marketContactLocked: true,
-                                      nameSource: _pubNameSource,
-                                      phoneSource: _pubPhoneSource,
-                                      publishPresence: _publishPresenceOnCards,
-                                      officialName: _officialNameCached,
-                                      displayAlias: _displayAliasCached,
-                                      primaryPhone: _primaryPhoneCached,
-                                      secondaryPhone: _secondaryPhoneCached,
-                                      onNameSourceChanged: (v) async {
-                                        await PublisherIdentityPrefs.instance
-                                            .setNameSource(v);
-                                        if (!mounted) return;
-                                        setState(() => _pubNameSource = v);
-                                      },
-                                      onPublishPresenceChanged: (v) async {
-                                        await PublisherIdentityPrefs.instance
-                                            .setPublishPresenceOnCards(v);
-                                        if (!mounted) return;
-                                        setState(
-                                            () => _publishPresenceOnCards = v);
-                                      },
-                                    ),
-                                    const SizedBox(height: 12),
-                                    TermsAcceptanceCheckbox(
-                                      isAr: _isAr,
-                                      value: _termsAccepted,
-                                      onChanged: (_saving || _publishLock)
-                                          ? null
-                                          : (v) => setState(
-                                              () => _termsAccepted = v == true),
-                                      onOpenTerms: () {
-                                        Navigator.of(context).push<void>(
-                                          MaterialPageRoute<void>(
-                                            builder: (_) =>
-                                                PlatformPoliciesScreen(
-                                                    isAr: _isAr),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                  if (kIsWeb && pane == 6) ...[
                                     const SizedBox(height: 12),
                                     Text(
                                       _isAr
-                                          ? 'على الويب: اختر الملفات من جهازك للرفع.'
-                                          : 'On web: pick files from your device to upload.',
+                                          ? 'الخطوة $displayStep من $stepCount · ${_wizardScreenTitle(_isAr)}'
+                                          : 'Step $displayStep of $stepCount · ${_wizardScreenTitle(_isAr)}',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w800,
+                                          ),
                                       textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _isAr
+                                          ? _formSliceHint(_sliceForPane(pane), true)
+                                          : _formSliceHint(_sliceForPane(pane), false),
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
                                           ?.copyWith(
-                                              color: cs.onSurfaceVariant),
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                      textAlign: TextAlign.center,
                                     ),
+                                    const SizedBox(height: 12),
+                                    ComposerStepConstellation(
+                                      step: displayStep,
+                                      total: stepCount,
+                                      accent:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    KeyedSubtree(
+                                      key: _formCardKey,
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          Visibility(
+                                            visible: pane == 0,
+                                            maintainState: true,
+                                            child: KeyedSubtree(
+                                              key: _regaCardKey,
+                                              child: _AdLicenseStepCard(
+                                                isAr: _isAr,
+                                                hasRegaAdLicense:
+                                                    _hasRegaAdLicense,
+                                                onHasRegaAdLicenseChanged:
+                                                    (v) => setState(() {
+                                                  _hasRegaAdLicense = v;
+                                                  _licenseStepError = null;
+                                                  _error = null;
+                                                  if (v == true) {
+                                                    _adLicenseSource =
+                                                        _AdLicenseSource.inApp;
+                                                    _consentMarketNoLicense =
+                                                        false;
+                                                  } else if (v == false) {
+                                                    _adLicenseSource =
+                                                        _AdLicenseSource.none;
+                                                    _regaVerifyOk = null;
+                                                    _regaVerifyBanner = null;
+                                                  } else {
+                                                    _adLicenseSource =
+                                                        _AdLicenseSource.unset;
+                                                  }
+                                                }),
+                                                licenseController:
+                                                    _regaAdLicenseNo,
+                                                consentMarket:
+                                                    _consentMarketNoLicense,
+                                                onConsentMarketChanged: (v) =>
+                                                    setState(() {
+                                                  _consentMarketNoLicense = v;
+                                                  _licenseStepError = null;
+                                                }),
+                                                showPhoneOnMarket:
+                                                    _showPhoneOnMarket,
+                                                onShowPhoneOnMarketChanged:
+                                                    (v) => setState(() =>
+                                                        _showPhoneOnMarket = v),
+                                                fieldError: _licenseStepError,
+                                                regaChecking: _regaChecking,
+                                                regaVerifyBanner:
+                                                    _regaVerifyBanner,
+                                                regaVerifyOk: _regaVerifyOk,
+                                                onVerify:
+                                                    _scheduleRegaLicenseVerify,
+                                                onOpenRegaImport:
+                                                    _openRegaImportPage,
+                                              ),
+                                            ),
+                                          ),
+                                          Visibility(
+                                            visible: pane == 1,
+                                            maintainState: true,
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                _buildPropertyFormSlice(
+                                                  AddPropertyFormSlice
+                                                      .classification,
+                                                  _formKeyClassification,
+                                                ),
+                                                const SizedBox(height: 8),
+                                                OutlinedButton.icon(
+                                                  onPressed: _saving
+                                                      ? null
+                                                      : _showExtendedUsesDialog,
+                                                  icon: const Icon(
+                                                      Icons.open_in_new,
+                                                      size: 20),
+                                                  label: Text(
+                                                    _isAr
+                                                        ? 'استخدامات موسّعة وتفاصيل إضافية'
+                                                        : 'Extended uses & extra detail',
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Visibility(
+                                            visible: pane == 2 || pane == 23,
+                                            maintainState: true,
+                                            child: KeyedSubtree(
+                                              key: _coordsKey,
+                                              child: _CoordsCard(
+                                                isAr: _isAr,
+                                                saving: _saving,
+                                                enabled: _useMapCoords,
+                                                latController: _latCtrl,
+                                                lngController: _lngCtrl,
+                                                lat: _lat,
+                                                lng: _lng,
+                                                formKey: _formKeyCoords,
+                                                onToggle: (v) {
+                                                  if (!v) {
+                                                    setState(() {
+                                                      _useMapCoords = false;
+                                                      _lat = null;
+                                                      _lng = null;
+                                                      _latCtrl.clear();
+                                                      _lngCtrl.clear();
+                                                    });
+                                                    return;
+                                                  }
+                                                  setState(() {
+                                                    _useMapCoords = true;
+                                                    _lat = null;
+                                                    _lng = null;
+                                                    _latCtrl.clear();
+                                                    _lngCtrl.clear();
+                                                    _error = null;
+                                                  });
+                                                  WidgetsBinding.instance
+                                                      .addPostFrameCallback(
+                                                          (_) {
+                                                    if (mounted) {
+                                                      _openMapPicker(
+                                                          kingdomOverview:
+                                                              true);
+                                                    }
+                                                  });
+                                                },
+                                                onPick: () => _openMapPicker(
+                                                  kingdomOverview:
+                                                      _lat == null &&
+                                                          _lng == null &&
+                                                          _useMapCoords,
+                                                ),
+                                                onLatChanged: _onLatChanged,
+                                                onLngChanged: _onLngChanged,
+                                              ),
+                                            ),
+                                          ),
+                                          Visibility(
+                                            visible: pane == 3 || pane == 23,
+                                            maintainState: true,
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                _buildPropertyFormSlice(
+                                                  AddPropertyFormSlice.location,
+                                                  _formKeyLocation,
+                                                ),
+                                                const SizedBox(height: 12),
+                                                _EjarOptionalFieldsCard(
+                                                  isAr: _isAr,
+                                                  saving: _saving,
+                                                  contractCtrl: _ejarContractNo,
+                                                  unitCtrl: _ejarUnitNo,
+                                                  floorCtrl: _ejarFloorNo,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Visibility(
+                                            visible: pane == 4,
+                                            maintainState: true,
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                _buildPropertyFormSlice(
+                                                  AddPropertyFormSlice.pricing,
+                                                  _formKeyPricing,
+                                                ),
+                                                RegaOfficialBenchCard(
+                                                  isAr: _isAr,
+                                                  city: (_selectedCity ??
+                                                          _city.text)
+                                                      .trim(),
+                                                  typeCode: _type,
+                                                  isRent: _purposeIsRent,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Visibility(
+                                            visible: pane == 5,
+                                            maintainState: true,
+                                            child: _buildPropertyFormSlice(
+                                              AddPropertyFormSlice.details,
+                                              _formKeyDetails,
+                                            ),
+                                          ),
+                                          Visibility(
+                                            visible: pane == 6,
+                                            maintainState: true,
+                                            child: KeyedSubtree(
+                                              key: _listingMediaKey,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.stretch,
+                                                children: [
+                                                  if (_requiresExternalLicenseBundle) ...[
+                                                    _ExternalLicenseMediaBanner(
+                                                        isAr: _isAr),
+                                                    const SizedBox(height: 12),
+                                                  ],
+                                                  _ListingMediaCard(
+                                                    isAr: _isAr,
+                                                    images: _images,
+                                                    saving: _saving,
+                                                    picking: _picking,
+                                                    uploadingVideo:
+                                                        _uploadingVideo,
+                                                    hasVideo: _hasUploadedVideo,
+                                                    showCoverHeroPicker:
+                                                        _images.isNotEmpty &&
+                                                            _videoUrl.text
+                                                                .trim()
+                                                                .isNotEmpty,
+                                                    coverHeroIsVideo:
+                                                        _coverHeroIsVideo,
+                                                    onCoverHeroIsVideoChanged:
+                                                        (v) => setState(() =>
+                                                            _coverHeroIsVideo =
+                                                                v),
+                                                    onPickImages:
+                                                        _showPickImagesMenu,
+                                                    onPickVideo:
+                                                        _showVideoPickMenu,
+                                                    onClearVideo:
+                                                        _clearUploadedVideo,
+                                                    onRemoveImage:
+                                                        _removeImageAt,
+                                                    onMoveImage: _moveImage,
+                                                  ),
+                                                  const SizedBox(height: 10),
+                                                  OutlinedButton.icon(
+                                                    onPressed: _saving
+                                                        ? null
+                                                        : () async {
+                                                            final refs = [
+                                                              for (var i = 0;
+                                                                  i <
+                                                                      _images
+                                                                          .length;
+                                                                  i++)
+                                                                '$i',
+                                                            ];
+                                                            final bytes =
+                                                                <String,
+                                                                    Uint8List>{
+                                                              for (var i = 0;
+                                                                  i <
+                                                                      _images
+                                                                          .length;
+                                                                  i++)
+                                                                '$i': _images[i]
+                                                                    .bytes,
+                                                            };
+                                                            final tour =
+                                                                await showInAppTourBuilderSheet(
+                                                              context: context,
+                                                              isAr: _isAr,
+                                                              imageRefs: refs,
+                                                              initial:
+                                                                  _inAppTour,
+                                                              previewBytes:
+                                                                  bytes,
+                                                            );
+                                                            if (tour != null &&
+                                                                mounted) {
+                                                              setState(() =>
+                                                                  _inAppTour =
+                                                                      tour);
+                                                            }
+                                                          },
+                                                    icon: const Icon(Icons
+                                                        .threed_rotation_outlined),
+                                                    label: Text(
+                                                      AppLocalizations.of(
+                                                              context)!
+                                                          .inAppTourBuild,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 6),
+                                                  Text(
+                                                    AppLocalizations.of(
+                                                            context)!
+                                                        .inAppTourEngineHint,
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .onSurfaceVariant,
+                                                      height: 1.35,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  CheckboxListTile(
+                                                    contentPadding:
+                                                        EdgeInsets.zero,
+                                                    value: _needsPhotographer,
+                                                    title: Text(_isAr
+                                                        ? 'بحاجة إلى مصوّر عقاري'
+                                                        : 'I need a property photographer'),
+                                                    subtitle: Text(_isAr
+                                                        ? 'اطلب عروض تصوير مرتبطة بهذا الإعلان واختر العرض المناسب.'
+                                                        : 'Request photo offers linked to this listing and choose the best one.'),
+                                                    onChanged: _saving
+                                                        ? null
+                                                        : (value) =>
+                                                            setState(() {
+                                                              _needsPhotographer =
+                                                                  value ??
+                                                                      false;
+                                                              if (!_needsPhotographer) {
+                                                                _pendingPhotoShoot =
+                                                                    null;
+                                                              }
+                                                            }),
+                                                  ),
+                                                  FilledButton.tonalIcon(
+                                                    onPressed: _saving ||
+                                                            !_needsPhotographer
+                                                        ? null
+                                                        : () async {
+                                                            final loc = [
+                                                              _city.text.trim(),
+                                                              _location.text
+                                                                  .trim(),
+                                                            ]
+                                                                .where((s) => s
+                                                                    .isNotEmpty)
+                                                                .join(' · ');
+                                                            await Navigator.of(
+                                                                    context)
+                                                                .push<Object?>(
+                                                              MaterialPageRoute<
+                                                                  Object?>(
+                                                                builder: (_) =>
+                                                                    PhotoShootBookPage(
+                                                                  lang: widget
+                                                                      .lang,
+                                                                  marketplaceMode:
+                                                                      true,
+                                                                  allowMarketerBundle:
+                                                                      _forceListingRequestPath,
+                                                                  locationText:
+                                                                      loc,
+                                                                  latitude: double
+                                                                      .tryParse(_latCtrl
+                                                                          .text
+                                                                          .trim()),
+                                                                  longitude: double
+                                                                      .tryParse(_lngCtrl
+                                                                          .text
+                                                                          .trim()),
+                                                                  onQueued: (d) =>
+                                                                      setState(
+                                                                          () {
+                                                                    _pendingPhotoShoot =
+                                                                        d;
+                                                                    _needsPhotographer =
+                                                                        true;
+                                                                  }),
+                                                                ),
+                                                              ),
+                                                            );
+                                                          },
+                                                    icon: const Icon(Icons
+                                                        .photo_camera_outlined),
+                                                    label: Text(
+                                                      AppLocalizations.of(
+                                                              context)!
+                                                          .photographerRequestFromMedia,
+                                                    ),
+                                                  ),
+                                                  if (_requiresExternalLicenseBundle) ...[
+                                                    const SizedBox(height: 14),
+                                                    _LicensePdfUploadRow(
+                                                      isAr: _isAr,
+                                                      storagePath:
+                                                          _licensePdfStoragePath,
+                                                      uploading:
+                                                          _uploadingLicensePdf,
+                                                      busy: _saving ||
+                                                          _picking ||
+                                                          _uploadingVideo ||
+                                                          _uploadingLicensePdf,
+                                                      onPick:
+                                                          _pickAndUploadLicensePdf,
+                                                      onClear: _clearLicensePdf,
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(height: 12),
+                                    if (_error != null)
+                                      _ErrorBox(text: _error!, isAr: _isAr),
+                                    if (_wizardStep >= _kWizardLastStep) ...[
+                                      const SizedBox(height: 12),
+                                      _DealPublishExtrasCard(
+                                        isAr: _isAr,
+                                        saving: _saving || _publishLock,
+                                        noLegalObstacles: _noLegalObstacles,
+                                        onNoLegalObstaclesChanged: (v) =>
+                                            setState(
+                                                () => _noLegalObstacles = v),
+                                        advertiserRoleLabel:
+                                            _advertiserRoleLabel,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      SwitchListTile.adaptive(
+                                        contentPadding: EdgeInsets.zero,
+                                        title: Text(
+                                          _isAr
+                                              ? 'إظهار اسمي في السوق العقاري وتفاصيل الإعلان'
+                                              : 'Show my name on the market and listing details',
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                            height: 1.25,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          _isAr
+                                              ? 'اختياري. الاسم الرباعي أو اسم المكتب/المؤسسة/الشركة أو المستعار. الجوال لا يظهر للعامة.'
+                                              : 'Optional. Official name or alias. Phone stays hidden from the public.',
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.w600),
+                                        ),
+                                        value: _showOwnerNameOnCards,
+                                        onChanged: (_saving || _publishLock)
+                                            ? null
+                                            : (v) => setState(() =>
+                                                _showOwnerNameOnCards = v),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      PublisherIdentityOptionsCard(
+                                        isAr: _isAr,
+                                        compact: true,
+                                        enabled: !(_saving || _publishLock),
+                                        hidePhoneOptions: true,
+                                        marketContactLocked: true,
+                                        nameSource: _pubNameSource,
+                                        phoneSource: _pubPhoneSource,
+                                        publishPresence:
+                                            _publishPresenceOnCards,
+                                        officialName: _officialNameCached,
+                                        displayAlias: _displayAliasCached,
+                                        primaryPhone: _primaryPhoneCached,
+                                        secondaryPhone: _secondaryPhoneCached,
+                                        onNameSourceChanged: (v) async {
+                                          await PublisherIdentityPrefs.instance
+                                              .setNameSource(v);
+                                          if (!mounted) return;
+                                          setState(() => _pubNameSource = v);
+                                        },
+                                        onPublishPresenceChanged: (v) async {
+                                          await PublisherIdentityPrefs.instance
+                                              .setPublishPresenceOnCards(v);
+                                          if (!mounted) return;
+                                          setState(() =>
+                                              _publishPresenceOnCards = v);
+                                        },
+                                      ),
+                                      const SizedBox(height: 12),
+                                      TermsAcceptanceCheckbox(
+                                        isAr: _isAr,
+                                        value: _termsAccepted,
+                                        onChanged: (_saving || _publishLock)
+                                            ? null
+                                            : (v) => setState(() =>
+                                                _termsAccepted = v == true),
+                                        onOpenTerms: () {
+                                          Navigator.of(context).push<void>(
+                                            MaterialPageRoute<void>(
+                                              builder: (_) =>
+                                                  PlatformPoliciesScreen(
+                                                      isAr: _isAr),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                    if (kIsWeb && pane == 6) ...[
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        _isAr
+                                            ? 'على الويب: اختر الملفات من جهازك للرفع.'
+                                            : 'On web: pick files from your device to upload.',
+                                        textAlign: TextAlign.center,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                                color: cs.onSurfaceVariant),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 8),
                                   ],
-                                  const SizedBox(height: 8),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Material(
+                          elevation: 8,
+                          color: cs.surface,
+                          shadowColor: Colors.black26,
+                          child: Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              12,
+                              10,
+                              12,
+                              10 + AppKeyboardInset.bottomOf(context),
+                            ),
+                            child: LayoutBuilder(
+                              builder: (context, c) {
+                                final narrow = c.maxWidth < 600;
+                                final nextBtn = _wizardStep < _kWizardLastStep
+                                    ? FilledButton(
+                                        onPressed: (_saving ||
+                                                _publishLock ||
+                                                _picking ||
+                                                _uploadingVideo ||
+                                                _uploadingLicensePdf)
+                                            ? null
+                                            : _wizardNext,
+                                        child: Text(_isAr ? 'التالي' : 'Next'),
+                                      )
+                                    : FilledButton(
+                                        onPressed: (_saving ||
+                                                _publishLock ||
+                                                _picking ||
+                                                _uploadingVideo ||
+                                                _uploadingLicensePdf ||
+                                                !_canSubmit)
+                                            ? null
+                                            : _submit,
+                                        child: (_saving || _publishLock)
+                                            ? Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const SizedBox(
+                                                    width: 22,
+                                                    height: 22,
+                                                    child: AppLogoLoading(
+                                                        compact: true,
+                                                        size: 20),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Flexible(
+                                                    child: Text(
+                                                      _isAr
+                                                          ? 'جاري مراجعة التفاصيل والنشر…'
+                                                          : 'Reviewing details & publishing…',
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              )
+                                            : Text(_isAr
+                                                ? 'نشر الإعلان'
+                                                : 'Publish listing'),
+                                      );
+                                final backBtn = OutlinedButton(
+                                  onPressed: (_wizardStep > 0 && !_saving)
+                                      ? _wizardPrev
+                                      : null,
+                                  child: Text(_isAr ? 'السابق' : 'Back'),
+                                );
+                                if (narrow) {
+                                  return Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      nextBtn,
+                                      const SizedBox(height: 8),
+                                      backBtn,
+                                    ],
+                                  );
+                                }
+                                return Row(
+                                  children: [
+                                    Expanded(child: backBtn),
+                                    const SizedBox(width: 12),
+                                    Expanded(flex: 2, child: nextBtn),
+                                  ],
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_saving)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        child: Center(
+                          child: Material(
+                            elevation: 8,
+                            borderRadius: BorderRadius.circular(16),
+                            color: cs.surface,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(28, 22, 28, 22),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const AppLogoLoading(compact: true, size: 44),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    _isAr
+                                        ? 'جاري مراجعة التفاصيل والنشر'
+                                        : 'Reviewing details & publishing',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 15,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
                         ),
                       ),
-                      Material(
-                        elevation: 8,
-                        color: cs.surface,
-                        shadowColor: Colors.black26,
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                          child: LayoutBuilder(
-                            builder: (context, c) {
-                              final narrow = c.maxWidth < 520;
-                              final nextBtn = _wizardStep < _kWizardLastStep
-                                  ? FilledButton(
-                                      onPressed: (_saving ||
-                                              _publishLock ||
-                                              _picking ||
-                                              _uploadingVideo ||
-                                              _uploadingLicensePdf)
-                                          ? null
-                                          : _wizardNext,
-                                      child: Text(_isAr ? 'التالي' : 'Next'),
-                                    )
-                                  : FilledButton(
-                                      onPressed: (_saving ||
-                                              _publishLock ||
-                                              _picking ||
-                                              _uploadingVideo ||
-                                              _uploadingLicensePdf ||
-                                              !_canSubmit)
-                                          ? null
-                                          : _submit,
-                                      child: (_saving || _publishLock)
-                                          ? Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                const SizedBox(
-                                                  width: 22,
-                                                  height: 22,
-                                                  child: AppLogoLoading(
-                                                      compact: true, size: 20),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Flexible(
-                                                  child: Text(
-                                                    _isAr
-                                                        ? 'جاري مراجعة التفاصيل والنشر…'
-                                                        : 'Reviewing details & publishing…',
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                  ),
-                                                ),
-                                              ],
-                                            )
-                                          : Text(_isAr
-                                              ? 'نشر الإعلان'
-                                              : 'Publish listing'),
-                                    );
-                              final backBtn = OutlinedButton(
-                                onPressed: (_wizardStep > 0 && !_saving)
-                                    ? _wizardPrev
-                                    : null,
-                                child: Text(_isAr ? 'السابق' : 'Back'),
-                              );
-                              if (narrow) {
-                                return Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    nextBtn,
-                                    const SizedBox(height: 8),
-                                    backBtn,
-                                  ],
-                                );
-                              }
-                              return Row(
-                                children: [
-                                  Expanded(child: backBtn),
-                                  const SizedBox(width: 12),
-                                  Expanded(flex: 2, child: nextBtn),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_saving)
-                  Positioned.fill(
-                    child: ColoredBox(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      child: Center(
-                        child: Material(
-                          elevation: 8,
-                          borderRadius: BorderRadius.circular(16),
-                          color: cs.surface,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const AppLogoLoading(compact: true, size: 44),
-                                const SizedBox(height: 14),
-                                Text(
-                                  _isAr
-                                      ? 'جاري مراجعة التفاصيل والنشر'
-                                      : 'Reviewing details & publishing',
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -7038,7 +7288,6 @@ class _CoordsCard extends StatelessWidget {
   final bool isAr;
   final bool saving;
   final bool enabled;
-  final bool locationIsApproximate;
   final TextEditingController latController;
   final TextEditingController lngController;
   final double? lat;
@@ -7053,7 +7302,6 @@ class _CoordsCard extends StatelessWidget {
     required this.isAr,
     required this.saving,
     required this.enabled,
-    this.locationIsApproximate = false,
     required this.latController,
     required this.lngController,
     required this.lat,
@@ -7099,36 +7347,6 @@ class _CoordsCard extends StatelessWidget {
               fontWeight: FontWeight.w600,
               color: cs.onSurfaceVariant,
               height: 1.25,
-            ),
-          ),
-        ],
-        if (enabled && has) ...[
-          const SizedBox(height: 10),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: Chip(
-              avatar: Icon(
-                locationIsApproximate
-                    ? Icons.my_location_outlined
-                    : Icons.location_on_outlined,
-                size: 18,
-                color: locationIsApproximate
-                    ? cs.tertiary
-                    : const Color(0xFF0F766E),
-              ),
-              label: Text(
-                locationIsApproximate
-                    ? (isAr ? 'موقع تقريبي' : 'Approximate location')
-                    : (isAr ? 'موقع محدد' : 'Exact location'),
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              backgroundColor: (locationIsApproximate
-                      ? cs.tertiaryContainer
-                      : const Color(0xFFCCFBF1))
-                  .withValues(alpha: 0.65),
-              side: BorderSide.none,
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
         ],
