@@ -80,7 +80,7 @@ pw.Widget brandingPdfHeader({
       pw.Directionality(
         textDirection: pw.TextDirection.ltr,
         child: pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
           children: [
             pw.Expanded(
               child: pw.Container(
@@ -103,7 +103,6 @@ pw.Widget brandingPdfHeader({
                   padding: const pw.EdgeInsets.fromLTRB(12, 6, 12, 6),
                   decoration: pw.BoxDecoration(
                     color: const PdfColor.fromInt(0xFFF0FDFA),
-                    borderRadius: pw.BorderRadius.circular(8),
                     border: pw.Border(
                       right: isAr
                           ? pw.BorderSide(color: brandColor, width: 3)

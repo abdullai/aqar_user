@@ -136,7 +136,7 @@ String _formSliceTitle(AddPropertyFormSlice s, bool isAr) {
     case AddPropertyFormSlice.location:
       return isAr ? 'الموقع' : 'Location';
     case AddPropertyFormSlice.pricing:
-      return isAr ? 'الصك والتسعير' : 'Deed & pricing';
+      return isAr ? 'السعر والصك' : 'Price & deed';
     case AddPropertyFormSlice.details:
       return isAr ? 'تفاصيل العقار' : 'Property details';
   }
@@ -146,20 +146,20 @@ String _formSliceHint(AddPropertyFormSlice s, bool isAr) {
   switch (s) {
     case AddPropertyFormSlice.classification:
       return isAr
-          ? 'الغرض (بيع أو إيجار)، النوع، والاستخدام.'
-          : 'Purpose (sale or rent), type, and usage.';
+          ? 'اختر بيع أو إيجار ثم نوع العقار؛ تظهر الحقول المناسبة تلقائياً.'
+          : 'Pick sale or rent, then the type; matching fields appear automatically.';
     case AddPropertyFormSlice.location:
       return isAr
-          ? 'منطقة، محافظة، مدينة، حي (يُكمَل تلقائياً بعد الخريطة إن وُجدت).'
-          : 'Region, governorate, city, district (prefilled after map if used).';
+          ? 'تُعبّأ المنطقة والمدينة والحي تلقائياً بعد تحديد الموقع على الخريطة.'
+          : 'Region, city and district are filled automatically from the map pin.';
     case AddPropertyFormSlice.pricing:
       return isAr
-          ? 'حسب الغرض: صك/عنوان/وصف/مساحة/سعر.'
-          : 'Per purpose: deed, title, description, area, price.';
+          ? 'السعر والمساحة والوصف، والصك للبيع فقط.'
+          : 'Price, area and description; deed details for sales only.';
     case AddPropertyFormSlice.details:
       return isAr
-          ? 'غرف، مرافق، … حسب النوع.'
-          : 'Rooms, amenities, … as needed.';
+          ? 'الغرف والمرافق تظهر حسب نوع العقار فقط.'
+          : 'Rooms and amenities show only when relevant to the type.';
   }
 }
 
@@ -3604,7 +3604,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _regaVerifyOk = null;
       _error = null;
       _termsAccepted = false;
-      _wizardStep = 2;
+      _wizardStep = 0;
       _hasRegaAdLicense = null;
       _consentMarketNoLicense = false;
       _showPhoneOnMarket = false;
@@ -5999,14 +5999,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                   AddPropertyFormSlice.location,
                                                   _formKeyLocation,
                                                 ),
-                                                const SizedBox(height: 12),
-                                                _EjarOptionalFieldsCard(
-                                                  isAr: _isAr,
-                                                  saving: _saving,
-                                                  contractCtrl: _ejarContractNo,
-                                                  unitCtrl: _ejarUnitNo,
-                                                  floorCtrl: _ejarFloorNo,
-                                                ),
+                                                if (_purposeIsRent) ...[
+                                                  const SizedBox(height: 12),
+                                                  _EjarOptionalFieldsCard(
+                                                    isAr: _isAr,
+                                                    saving: _saving,
+                                                    contractCtrl: _ejarContractNo,
+                                                    unitCtrl: _ejarUnitNo,
+                                                    floorCtrl: _ejarFloorNo,
+                                                  ),
+                                                ],
                                               ],
                                             ),
                                           ),
