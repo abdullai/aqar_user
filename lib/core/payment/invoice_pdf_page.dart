@@ -193,13 +193,7 @@ void addOfficialInvoicePage({
                     : t('فاتورة', 'Invoice'),
                 brandColor: kDocumentBrandPdfColor,
                 invoiceLayout: true,
-                leftMeta: [
-                  '${t('التاريخ', 'Date')}: $issuedAt',
-                  '${t('الإيميل', 'Email')}: ${AppBranding.supportEmail}',
-                  '${t('رقم التواصل', 'Contact')}: ${AppBranding.invoiceLetterheadPhone}',
-                ].join('\n'),
-                rightMeta:
-                    '${t('المملكة العربية السعودية', 'Kingdom of Saudi Arabia')}\n${AppBranding.invoiceLetterheadBrandName(isAr: isAr)}',
+                subtitle: '${t('التاريخ', 'Date')}: $issuedAt',
                 fontFallback: fontFallback,
               ),
               pw.Row(

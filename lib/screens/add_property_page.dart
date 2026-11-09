@@ -378,7 +378,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   /// غرض فرعي: إيجار (يومي/شهري/سنوي) أو بيع (مزاد/استثمار).
   String? _subPurposeCode;
 
-  int get _kWizardLastStep => 5;
+  int get _kWizardLastStep => 4;
 
   bool get _marketingFlowActive => widget.marketingFlow != null;
 
@@ -520,9 +520,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   bool get _isProject => _type == 'project';
   bool get _isOther => _type == 'other';
 
-  /// بيع / مزاد / استثمار يتطلب بيانات الصك
-  bool get _requiresDeed =>
-      const {'sale', 'auction', 'investment'}.contains(_purpose);
+  /// البيع يتطلب بيانات الصك
+  bool get _requiresDeed => _purpose == 'sale';
 
   bool get _showBuildingNumber =>
       PropertyTypeCatalog.showsBuildingNumber(_type);
@@ -554,8 +553,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   final List<Map<String, String>> _purposeTypes = [
     {'code': 'sale', 'ar': 'بيع', 'en': 'Sale'},
     {'code': 'rent', 'ar': 'إيجار', 'en': 'Rent'},
-    {'code': 'auction', 'ar': 'مزاد', 'en': 'Auction'},
-    {'code': 'investment', 'ar': 'استثمار', 'en': 'Investment'},
   ];
 
   bool get _purposeIsRent => _purpose == 'rent' || _purpose.contains('rent');
@@ -647,6 +644,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       case 23:
         return AddPropertyFormSlice.location;
       case 4:
+        return AddPropertyFormSlice.pricing;
+      case 45:
         return AddPropertyFormSlice.pricing;
       case 5:
         return AddPropertyFormSlice.details;
@@ -769,6 +768,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   Map<String, dynamic> _snapshotListingDraft() {
     return {
       'wizard_step': _wizardStep,
+      'wizard_v': 2,
       'title': _title.text,
       'desc': _desc.text,
       'region': _region.text,
@@ -857,8 +857,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   void _applyListingDraft(Map<String, dynamic> d) {
-    _wizardStep =
-        ((d['wizard_step'] as num?)?.toInt() ?? 0).clamp(0, _kWizardLastStep);
+    final savedStep = (d['wizard_step'] as num?)?.toInt() ?? 0;
+    // مسودات المعالج القديم (6 خطوات): التسعير والتفاصيل صارا خطوة واحدة.
+    final migratedStep = d['wizard_v'] == 2
+        ? savedStep
+        : (savedStep >= 5 ? 4 : (savedStep >= 4 ? 3 : savedStep));
+    _wizardStep = migratedStep.clamp(0, _kWizardLastStep);
     _title.text = '${d['title'] ?? ''}';
     _desc.text = '${d['desc'] ?? ''}';
     _region.text = '${d['region'] ?? ''}';
@@ -889,13 +893,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _extendedUsageNotes.text = '${d['extended_usage_notes'] ?? ''}';
     _regaFalLicenseNo.text = '${d['rega_fal_license_no'] ?? ''}';
     _purpose = '${d['purpose'] ?? _purpose}';
+    // لا مزاد ولا استثمار في المنصة: أي مسودة قديمة تُحوَّل إلى بيع.
+    if (_purpose == 'auction' || _purpose == 'investment') _purpose = 'sale';
     if (_purpose.contains('rent')) {
       _primaryPurposeGroup = 'rent';
     } else {
       _primaryPurposeGroup = 'sale';
-      if (_purpose == 'auction' || _purpose == 'investment') {
-        _subPurposeCode = _purpose;
-      }
+      _subPurposeCode = null;
     }
     _rentTerm = '${d['rent_term'] ?? _rentTerm}';
     if (_purpose.contains('rent') && _rentTerm.isEmpty) {
@@ -935,7 +939,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _advertiserRole = _advertiserRoleCode;
     _locationIsApproximate = d['location_is_approximate'] == true;
     _propertyAgeBucket = d['property_age_bucket']?.toString();
-    _isAuction = d['is_auction'] == true;
+    _isAuction = false;
     _furnished = d['furnished'] == true;
     _useMapCoords = d['use_map_coords'] == true;
     _priceIncludesVat = d['price_includes_vat'] as bool?;
@@ -1157,7 +1161,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
-  /// 0 رخصة · 1 تصنيف · 23 خريطة+موقع · 4 صك · 5 تفاصيل · 6 وسائط
+  /// 0 رخصة · 1 أساسيات · 23 خريطة+موقع · 45 سعر+صك+تفاصيل · 6 وسائط ومراجعة
   int _wizardPaneKind(int step) {
     switch (step) {
       case 0:
@@ -1167,10 +1171,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       case 2:
         return 23;
       case 3:
-        return 4;
+        return 45;
       case 4:
-        return 5;
-      case 5:
         return 6;
       default:
         return step;
@@ -1184,8 +1186,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         break;
       case 'sale':
       default:
-        _isAuction = _subPurposeCode == 'auction';
-        _purpose = _subPurposeCode ?? 'sale';
+        _isAuction = false;
+        _purpose = 'sale';
         break;
     }
   }
@@ -1674,6 +1676,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         return isAr ? 'المعلومات الأساسية' : 'Basics';
       case 23:
         return isAr ? 'الموقع والخريطة' : 'Location & map';
+      case 45:
+        return isAr ? 'السعر والتفاصيل' : 'Price & details';
       case 4:
         return isAr ? 'الصك والتسعير' : 'Deed & pricing';
       case 5:
@@ -1796,10 +1800,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           }
         }
         return _formKeyLocation.currentState?.validate() ?? false;
-      case 4:
+      case 45:
         _refreshAutoTitle();
-        return _formKeyPricing.currentState?.validate() ?? false;
-      case 5:
+        if (!(_formKeyPricing.currentState?.validate() ?? false)) return false;
         if (_isLand && _streetCount != null && _streetCount! > 0) {
           final widths = _buildStreetWidths();
           if (widths.length < _streetCount!) {
@@ -1875,6 +1878,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           targetForm = _formKeyLocation;
           break;
         case 4:
+        case 45:
           targetForm = _formKeyPricing;
           break;
         case 5:
@@ -1927,6 +1931,103 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       if (!mounted) return;
       _ensureFocusedFieldVisible();
     };
+  }
+
+  /// بطاقة جاهزية الإعلان: تتحدّث مباشرة وتُظهر ما ينقص لرفع جودة الإعلان.
+  Widget _buildReadinessCard() {
+    final cs = Theme.of(context).colorScheme;
+    final isAr = _isAr;
+    final items = <(bool, String)>[
+      (
+        _type.trim().isNotEmpty,
+        isAr ? 'نوع العقار والغرض' : 'Property type & purpose'
+      ),
+      (
+        (_selectedCity ?? _city.text).trim().isNotEmpty,
+        isAr ? 'المدينة والحي' : 'City & district'
+      ),
+      (_lat != null && _lng != null, isAr ? 'موقع الخريطة' : 'Map location'),
+      (
+        _parseDouble(_price.text) > 0,
+        isAr ? 'السعر' : 'Price',
+      ),
+      (
+        _parseDouble(_area.text) > 0,
+        isAr ? 'المساحة' : 'Area',
+      ),
+      (
+        _desc.text.trim().length >= 40,
+        isAr ? 'وصف واضح (40 حرفاً فأكثر)' : 'Clear description (40+ chars)'
+      ),
+      if (_requiresDeed)
+        (
+          normalizeDeedNumber(_deedNumber.text).isNotEmpty,
+          isAr ? 'بيانات الصك' : 'Deed details'
+        ),
+      (_images.length >= 3, isAr ? '3 صور على الأقل' : 'At least 3 photos'),
+    ];
+    final done = items.where((e) => e.$1).length;
+    final ratio = done / items.length;
+    final missing = items.where((e) => !e.$1).toList();
+    return Card(
+      elevation: 0,
+      color: cs.primaryContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded, color: cs.primary, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    isAr
+                        ? 'جاهزية الإعلان ${(ratio * 100).round()}%'
+                        : 'Listing readiness ${(ratio * 100).round()}%',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 14.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(value: ratio, minHeight: 8),
+            ),
+            if (missing.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                isAr
+                    ? 'لرفع جودة إعلانك أضف: ${missing.map((e) => e.$2).join('، ')}'
+                    : 'To improve your listing add: ${missing.map((e) => e.$2).join(', ')}',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 10),
+              Text(
+                isAr
+                    ? 'إعلانك مكتمل وجاهز للنشر.'
+                    : 'Your listing is complete and ready to publish.',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: cs.primary,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   void _wizardPrev() {
@@ -4521,7 +4622,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final l10n = mounted ? AppLocalizations.of(context) : null;
     final base = l10n?.deedDuplicateActive ??
         (_isAr
-            ? 'رقم الصك هذا مستخدم في إعلان بيع أو مزاد أو استثمار ما زال قائماً ولم تُنهَ صفقته. لا يُسمح بإعلان ثانٍ بنفس الصك حتى إغلاق الصفقة السابقة.'
+            ? 'رقم الصك هذا مستخدم في إعلان بيع ما زال قائماً ولم تُنهَ صفقته. لا يُسمح بإعلان ثانٍ بنفس الصك حتى إغلاق الصفقة السابقة.'
             : 'This deed number is already on an active sale, auction, or investment listing whose deal is not finished. A second listing with the same deed is not allowed until that deal is closed.');
     final t = hit.title;
     if (t.isEmpty) return base;
@@ -5910,7 +6011,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                             ),
                                           ),
                                           Visibility(
-                                            visible: pane == 4,
+                                            visible: pane == 4 || pane == 45,
                                             maintainState: true,
                                             child: Column(
                                               crossAxisAlignment:
@@ -5932,7 +6033,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                             ),
                                           ),
                                           Visibility(
-                                            visible: pane == 5,
+                                            visible: pane == 5 || pane == 45,
                                             maintainState: true,
                                             child: _buildPropertyFormSlice(
                                               AddPropertyFormSlice.details,
@@ -5953,6 +6054,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                         isAr: _isAr),
                                                     const SizedBox(height: 12),
                                                   ],
+                                                  _buildReadinessCard(),
+                                                  const SizedBox(height: 12),
                                                   _ListingMediaCard(
                                                     isAr: _isAr,
                                                     images: _images,
@@ -8104,42 +8207,6 @@ class _FormCard extends StatelessWidget {
               ),
               if (primaryPurposeGroup == 'rent' && rentSchedule != null)
                 rentSchedule!,
-              if (primaryPurposeGroup != 'rent') ...[
-                const SizedBox(height: 10),
-                Text(
-                  isAr
-                      ? 'اختياري تحت البيع: مزاد أو استثمار'
-                      : 'Optional under sale: auction or investment',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    StableSelectChip(
-                      label: isAr ? 'مزاد' : 'Auction',
-                      selected: subPurposeCode == 'auction',
-                      enabled: !saving,
-                      onSelected: (on) => onSubPurposeCodeChanged(
-                        on ? 'auction' : 'sale',
-                      ),
-                    ),
-                    StableSelectChip(
-                      label: isAr ? 'استثمار' : 'Investment',
-                      selected: subPurposeCode == 'investment',
-                      enabled: !saving,
-                      onSelected: (on) => onSubPurposeCodeChanged(
-                        on ? 'investment' : 'sale',
-                      ),
-                    ),
-                  ],
-                ),
-              ],
               const SizedBox(height: 14),
               PropertyTypeHierarchyPicker(
                 value: type,
@@ -8835,7 +8902,7 @@ class _FormCard extends StatelessWidget {
               Text(
                 requiresDeed
                     ? (isAr
-                        ? 'إلزامي للبيع والمزاد والاستثمار'
+                        ? 'إلزامي للبيع'
                         : 'Required for sale, auction, and investment')
                     : (isAr
                         ? 'اختياري لعقود الإيجار'
@@ -9261,38 +9328,6 @@ class _FormCard extends StatelessWidget {
                 },
               ),
               const SizedBox(height: 12),
-
-              // 12. المزاد
-              SwitchListTile(
-                value: isAuction,
-                onChanged: saving ? null : onAuctionChanged,
-                title: Text(
-                    isAr ? 'هذا الإعلان مزاد' : 'This listing is an auction'),
-                contentPadding: EdgeInsets.zero,
-              ),
-
-              if (isAuction) ...[
-                const SizedBox(height: 12),
-                AqarTextFormField(
-                  controller: currentBid,
-                  enabled: !saving,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: latinDecimalNumberFormatters(),
-                  decoration:
-                      deco(isAr ? 'السعر الحالي للمزاد' : 'Current bid'),
-                  validator: (v) {
-                    if (!isAuction) return null;
-                    final s =
-                        _AddPropertyPageState.normalizeNumbers(v ?? '').trim();
-                    if (s.isEmpty) return isAr ? 'مطلوب' : 'Required';
-                    if (double.tryParse(s) == null) {
-                      return isAr ? 'رقم غير صحيح' : 'Invalid number';
-                    }
-                    return null;
-                  },
-                ),
-              ],
 
               const SizedBox(height: 12),
             ],

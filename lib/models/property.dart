@@ -330,26 +330,22 @@ class Property {
   bool get showsVirtualTourBadge =>
       hasInAppVirtualTour || (virtualTourUrl ?? '').trim().isNotEmpty;
 
-  bool get needsPhotographerShoot {
-    final st = (listingGuidance?['photo_shoot_status'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-    return st == 'pending' ||
-        st == 'accepted' ||
-        st == 'in_progress' ||
-        st == 'pending_review';
-  }
+  String get photoShootStatus => (listingGuidance?['photo_shoot_status'] ?? '')
+      .toString()
+      .trim()
+      .toLowerCase();
+
+  bool get needsPhotographerShoot =>
+      const {'open', 'pending', 'accepted', 'in_progress', 'pending_review'}
+          .contains(photoShootStatus);
 
   String photographerShootBadge({required bool isAr}) {
-    final st = (listingGuidance?['photo_shoot_status'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
+    final st = photoShootStatus;
+    if (st == 'open') {
+      return isAr ? 'يحتاج مصوّراً' : 'Needs photographer';
+    }
     if (st == 'pending_review') {
-      return isAr
-          ? 'بانتظار موافقة الناشر على الوسائط'
-          : 'Awaiting publisher media approval';
+      return isAr ? 'وسائط بانتظار الاعتماد' : 'Media awaiting approval';
     }
     if (st == 'accepted' || st == 'in_progress') {
       return isAr ? 'جاري التصوير' : 'Shoot in progress';

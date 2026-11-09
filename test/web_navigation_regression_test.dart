@@ -23,6 +23,14 @@ void main() {
         src.contains('_idx = 1;\n      webInAppHistoryTrapLeaving();'), isTrue);
   });
 
+  test('map picker route is excluded from browser history syncing', () {
+    final src =
+        File('lib/core/navigation/web_in_app_nav.dart').readAsStringSync();
+
+    expect(src.contains("route.settings.name == '/map-picker'"), isTrue);
+    expect(src.split('_bypassesHistory(route)').length - 1, 2);
+  });
+
   test('mobile viewport restoration does not freeze stale pixel heights', () {
     final src = File('web/index.html').readAsStringSync();
 

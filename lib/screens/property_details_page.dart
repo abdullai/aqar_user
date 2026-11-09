@@ -3692,6 +3692,51 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     }
   }
 
+  /// شريط ذكي يظهر فقط ما دام طلب التصوير قائماً، ويختفي تلقائياً بعد التسليم.
+  Widget _buildPhotographerStatusStrip() {
+    if (!_property.needsPhotographerShoot) return const SizedBox.shrink();
+    final st = _property.photoShootStatus;
+    final text = switch (st) {
+      'open' => widget.isAr
+          ? 'يحتاج مصوّراً — بانتظار عروض المصوّرين، وستُضاف الصور بعد الاتفاق'
+          : 'Needs a photographer — awaiting offers; media will be added after agreement',
+      'pending' => widget.isAr
+          ? 'بانتظار ردّ المصوّر على طلب التصوير'
+          : 'Waiting for the photographer to respond',
+      'pending_review' => widget.isAr
+          ? 'وصلت وسائط جديدة وبانتظار اعتماد الناشر'
+          : 'New media delivered, awaiting publisher approval',
+      _ => widget.isAr
+          ? 'جاري التصوير — ستظهر الصور والفيديو هنا قريباً'
+          : 'Shoot in progress — photos and video will appear here soon',
+    };
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF0F766E).withValues(alpha: 0.10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.photo_camera_outlined,
+            size: 20,
+            color: Color(0xFF0F766E),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 12.5,
+                color: Color(0xFF0F766E),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildOwnerManageCard() {
     final cs = Theme.of(context).colorScheme;
     final busy = _runningOwnerAction || _loadingDeleteMeta;
@@ -5373,6 +5418,7 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         body: ListView(
           children: [
             _buildGallery(),
+            _buildPhotographerStatusStrip(),
             _buildDeedMapTrustBanner(context),
             LayoutBuilder(
               builder: (context, _) {

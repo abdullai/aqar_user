@@ -3,12 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aqar_user/core/utils/app_money.dart';
 
 void main() {
-  test('Arabic money text places the riyal mark before the number', () {
+  test('Arabic money text places the riyal mark after the number', () {
     final s = AppMoney.sarPhrase('3,876', isAr: true);
     expect(s.contains('3,876'), isTrue);
     expect(s.contains(AppMoney.saudiRiyalSignCompat), isTrue);
     expect(s.contains('ر.س'), isFalse);
-    expect(s, contains('${AppMoney.saudiRiyalSignCompat}3,876'));
+    expect(s, '3,876 ${AppMoney.saudiRiyalSignCompat}');
   });
 
   test('English money text is the number then SAR', () {

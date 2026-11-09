@@ -41,8 +41,6 @@ pw.Widget brandingPdfHeader({
   final platformName = AppBranding.invoiceLetterheadBrandName(isAr: isAr);
   final shortBrand = AppBranding.brandName(isAr: isAr);
   final ksa = isAr ? 'المملكة العربية السعودية' : 'Kingdom of Saudi Arabia';
-  const contact =
-      '${AppBranding.supportEmail}\n${AppBranding.invoiceLetterheadPhone}';
   pw.TextStyle st(pw.Font f, double size, {PdfColor? color}) => pw.TextStyle(
         font: f,
         fontSize: size,
@@ -51,15 +49,7 @@ pw.Widget brandingPdfHeader({
         height: 1.25,
       );
 
-  final metaLines = _pdfText((leftMeta ?? contact).trim())
-      .split('\n')
-      .where((e) => e.trim().isNotEmpty)
-      .toList();
-  final invoiceLeftMeta = metaLines.take(2).join('\n');
-  final invoiceRightMeta = metaLines.skip(2).join('\n');
   final logoBox = pw.Container(
-    width: invoiceLayout ? 174 : 62,
-    height: invoiceLayout ? 58 : 62,
     child: logo != null
         ? pw.Image(logo, fit: pw.BoxFit.contain)
         : pw.Center(
@@ -71,11 +61,6 @@ pw.Widget brandingPdfHeader({
           ),
   );
 
-  final leftText = _pdfText(
-    (leftMeta ?? '').trim().isNotEmpty
-        ? leftMeta!.trim()
-        : '$ksa\n$platformName',
-  );
   final rightText = _pdfText((rightMeta ?? metaLine ?? '').trim());
   final title = _pdfText(docTitle);
 
@@ -92,117 +77,81 @@ pw.Widget brandingPdfHeader({
         ),
       ),
       pw.SizedBox(height: 8),
-      if (invoiceLayout) ...[
-        pw.Center(
-          child: pw.Column(
-            children: [
-              pw.Text(
-                ksa,
-                style: st(base, 9, color: PdfColors.grey700),
-                textAlign: pw.TextAlign.center,
-                maxLines: 1,
-              ),
-              pw.Text(
-                platformName,
-                style: st(bold, 12, color: brandColor),
-                textAlign: pw.TextAlign.center,
-                maxLines: 1,
-              ),
-            ],
-          ),
-        ),
-        pw.SizedBox(height: 5),
-        pw.Directionality(
-          textDirection: pw.TextDirection.ltr,
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Expanded(
-                child: pw.Directionality(
-                  textDirection:
-                      isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-                  child: pw.Text(
-                    invoiceLeftMeta,
-                    style: st(base, 7.5, color: PdfColors.grey800),
-                    textAlign: pw.TextAlign.center,
-                    maxLines: 3,
-                  ),
+      pw.Directionality(
+        textDirection: pw.TextDirection.ltr,
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            pw.Expanded(
+              child: pw.Container(
+                height: 92,
+                padding: const pw.EdgeInsets.all(6),
+                decoration: pw.BoxDecoration(
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: brandColor, width: 0.8),
                 ),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(horizontal: 6),
                 child: logoBox,
               ),
-              pw.Expanded(
-                child: pw.Directionality(
-                  textDirection:
-                      isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-                  child: pw.Text(
-                    invoiceRightMeta,
-                    style: st(base, 7.5, color: PdfColors.grey800),
-                    textAlign: pw.TextAlign.center,
-                    maxLines: 2,
+            ),
+            pw.SizedBox(width: 12),
+            pw.Expanded(
+              child: pw.Directionality(
+                textDirection:
+                    isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
+                child: pw.Container(
+                  height: 92,
+                  padding: const pw.EdgeInsets.fromLTRB(12, 6, 12, 6),
+                  decoration: pw.BoxDecoration(
+                    color: const PdfColor.fromInt(0xFFF0FDFA),
+                    borderRadius: pw.BorderRadius.circular(8),
+                    border: pw.Border(
+                      right: isAr
+                          ? pw.BorderSide(color: brandColor, width: 3)
+                          : pw.BorderSide.none,
+                      left: isAr
+                          ? pw.BorderSide.none
+                          : pw.BorderSide(color: brandColor, width: 3),
+                    ),
                   ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ] else
-        pw.Directionality(
-          textDirection: pw.TextDirection.ltr,
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Expanded(
-                child: pw.Directionality(
-                  textDirection:
-                      isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
-                  child: pw.Text(
-                    leftText,
-                    style: st(base, 8, color: PdfColors.grey800),
-                    textAlign: pw.TextAlign.start,
-                    maxLines: 4,
-                  ),
-                ),
-              ),
-              pw.Padding(
-                padding: const pw.EdgeInsets.symmetric(horizontal: 10),
-                child: logoBox,
-              ),
-              pw.Expanded(
-                child: pw.Directionality(
-                  textDirection:
-                      isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
                   child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    mainAxisAlignment: pw.MainAxisAlignment.center,
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                        title,
-                        style: st(bold, 11, color: brandColor),
-                        textAlign: pw.TextAlign.end,
-                        maxLines: 2,
+                        ksa,
+                        style: st(base, 9, color: PdfColors.grey700),
+                        maxLines: 1,
                       ),
-                      if (rightText.isNotEmpty)
-                        pw.Text(
-                          rightText,
-                          style: st(base, 8, color: PdfColors.grey800),
-                          textAlign: pw.TextAlign.end,
-                          maxLines: 3,
-                        ),
                       pw.Text(
-                        _pdfText(contact),
-                        style: st(base, 7.5, color: PdfColors.grey700),
-                        textAlign: pw.TextAlign.end,
-                        maxLines: 2,
+                        platformName,
+                        style: st(bold, 12.5, color: brandColor),
+                        maxLines: 1,
+                      ),
+                      pw.SizedBox(height: 3),
+                      pw.Directionality(
+                        textDirection: pw.TextDirection.ltr,
+                        child: pw.Text(
+                          AppBranding.invoiceLetterheadPhone,
+                          style: st(base, 8.5, color: PdfColors.grey800),
+                          maxLines: 1,
+                        ),
+                      ),
+                      pw.Directionality(
+                        textDirection: pw.TextDirection.ltr,
+                        child: pw.Text(
+                          AppBranding.supportEmail,
+                          style: st(base, 8.5, color: PdfColors.grey800),
+                          maxLines: 1,
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
+      ),
       if (subtitle != null && subtitle.trim().isNotEmpty) ...[
         pw.SizedBox(height: 4),
         pw.Text(
@@ -213,15 +162,22 @@ pw.Widget brandingPdfHeader({
       ],
       pw.SizedBox(height: 8),
       pw.Container(height: 1.4, color: brandColor),
-      if (invoiceLayout) ...[
-        pw.SizedBox(height: 7),
-        pw.Center(
-          child: pw.Text(
-            title,
-            style: st(bold, 13, color: brandColor),
-            textAlign: pw.TextAlign.center,
-            maxLines: 1,
-          ),
+      pw.SizedBox(height: 7),
+      pw.Center(
+        child: pw.Text(
+          title,
+          style: st(bold, 13, color: brandColor),
+          textAlign: pw.TextAlign.center,
+          maxLines: 2,
+        ),
+      ),
+      if (!invoiceLayout && rightText.isNotEmpty) ...[
+        pw.SizedBox(height: 3),
+        pw.Text(
+          rightText,
+          style: st(base, 8, color: PdfColors.grey800),
+          textAlign: pw.TextAlign.center,
+          maxLines: 3,
         ),
       ],
       pw.SizedBox(height: 8),

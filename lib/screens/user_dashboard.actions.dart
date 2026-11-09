@@ -1589,9 +1589,15 @@ extension _UserDashboardStateActions on _UserDashboardState {
         _sb,
         ListingMediaUrls.propertyCardImagePaths(p),
       );
-      final videoUrl = ListingMediaUrls.looksLikePlayableVideoRef(p.videoUrl)
-          ? ListingMediaUrls.videoPlayableUrl(_sb, p.videoUrl)
-          : null;
+      final videoUrls = <String>{};
+      for (final v in [
+        ...p.photographerVideoPaths,
+        if ((p.videoUrl ?? '').trim().isNotEmpty) p.videoUrl!,
+      ]) {
+        if (!ListingMediaUrls.looksLikePlayableVideoRef(v)) continue;
+        final u = ListingMediaUrls.videoPlayableUrl(_sb, v);
+        if (u != null && u.isNotEmpty) videoUrls.add(u);
+      }
       final tourUrl =
           ListingMediaUrls.looksLikePlayableTourUrl(p.virtualTourUrl)
               ? p.virtualTourUrl!.trim()
@@ -1600,12 +1606,17 @@ extension _UserDashboardStateActions on _UserDashboardState {
       final mediaLines = <String>[
         for (final imageUrl in imageUrls)
           '${widget.isAr ? 'صورة' : 'Photo'}: $imageUrl',
-        if (videoUrl != null) '${widget.isAr ? 'الفيديو' : 'Video'}: $videoUrl',
+        for (final videoUrl in videoUrls)
+          '${widget.isAr ? 'الفيديو' : 'Video'}: $videoUrl',
         if (tourUrl != null) '${widget.isAr ? 'الجولة' : 'Tour'}: $tourUrl',
         if (hasInAppTour)
           widget.isAr
               ? 'جولة تفاعلية داخل التطبيق: افتح رابط الإعلان'
               : 'Interactive in-app tour: open the listing link',
+        if (p.needsPhotographerShoot)
+          widget.isAr
+              ? 'ملاحظة: الإعلان قيد التصوير الاحترافي وستُضاف الصور قريباً'
+              : 'Note: professional shoot in progress, media coming soon',
       ];
       await shareListingRich(
         text: [title, uri.toString(), ...mediaLines].join('\n'),

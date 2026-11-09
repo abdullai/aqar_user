@@ -152,9 +152,14 @@ abstract final class InvoiceCopy {
       case 'topup':
       case 'addon':
         return isAr ? 'إضافة باقة' : 'Plan add-on';
+      case 'save_card_verify':
+        return isAr ? 'توثيق بطاقة الدفع' : 'Payment card verification';
       default:
         final s = raw.trim();
-        return s.isEmpty ? (isAr ? 'عملية دفع' : 'Payment') : s;
+        if (s.isEmpty || (isAr && RegExp(r'^[A-Za-z0-9_\- ]+$').hasMatch(s))) {
+          return isAr ? 'عملية دفع' : 'Payment';
+        }
+        return s;
     }
   }
 

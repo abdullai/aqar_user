@@ -82,9 +82,15 @@ abstract final class WebInAppNav {
     webInAppHistorySealAuth();
   }
 
+  /// صفحة اختيار الموقع تُدار بالتاريخ المحجوز ([holdBack]) — إضافة/إزالة قيد
+  /// المتصفح لها كانت تُنتج popstate يُغلق صفحة الإعلان ويعيد للرئيسية.
+  static bool _bypassesHistory(Route<dynamic> route) =>
+      route.settings.name == '/map-picker';
+
   static void notePush(Route<dynamic> route, {required bool nested}) {
     if (!kIsWeb || _fromHistory || _sealing) return;
     if (route is! PageRoute) return;
+    if (_bypassesHistory(route)) return;
     if (SensitiveNavPolicy.isSensitiveReplayName(route.settings.name)) return;
     _forward.clear();
     webInAppHistoryPushEntry();
@@ -113,6 +119,7 @@ abstract final class WebInAppNav {
     if (route is PopupRoute) {
       return;
     }
+    if (_bypassesHistory(route)) return;
     if (_programmaticPopDepth > 0) {
       if (route is PageRoute) webInAppHistoryGoBack();
       return;

@@ -8123,25 +8123,7 @@ class _UserDashboardState extends State<UserDashboard>
           )
         : const SizedBox.shrink();
 
-    final homeIdentityBanner = _homeShowHiddenOnly
-        ? const SizedBox.shrink()
-        : AqarSignatureHomeBanner(
-            isArabic: _isArabic,
-            listingCount: showListings ? homeItems.length : 0,
-            requestCount: showRequests ? homeRequestsFiltered.length : 0,
-            onExploreMap: () => unawaited(_openMapDiscovery()),
-            onCompareProperties: () {
-              showModalBottomSheet<void>(
-                context: context,
-                isScrollControlled: true,
-                backgroundColor: Colors.transparent,
-                builder: (_) => PropertyComparisonSheet(
-                  properties: homeItems,
-                  isArabic: _isArabic,
-                ),
-              );
-            },
-          );
+    const homeIdentityBanner = SizedBox.shrink();
 
     final mainColumn = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
