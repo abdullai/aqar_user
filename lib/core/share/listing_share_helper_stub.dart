@@ -9,9 +9,8 @@ Future<void> shareListingRich({
 }) async {
   final primary = imageHttpUrl?.trim();
   final fallback = ListingMediaUrls.fallbackSharePreviewImageUrl();
-  final imgLine =
-      (primary != null && primary.isNotEmpty) ? primary : fallback;
-  final full = '$text\n$imgLine';
+  final imgLine = (primary != null && primary.isNotEmpty) ? primary : fallback;
+  final full = text.contains(imgLine) ? text : '$text\n$imgLine';
   await Share.share(
     full,
     subject: subject,

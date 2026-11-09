@@ -1488,7 +1488,6 @@ class _CreateMarketPropertyRequestPageState
     final res = await MapPickerPage.pick(
       context,
       initial: initial,
-      initialApproximate: _locationIsApproximate,
       isAr: _isAr,
       kingdomOverview: initial == null,
       pinTitle: _titleCtrl.text.trim().isEmpty

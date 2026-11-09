@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../widgets/saudi_riyal_symbol_icon.dart';
 
-/// تنسيق موحد للمبالغ: رمز الريال بعد الرقم بالعربية، وSAR بعد الرقم بالإنجليزية.
+/// تنسيق المبالغ في واجهات التطبيق: رمز الريال بعد الرقم بالعربية وSAR بالإنجليزية.
 class AppMoney {
   AppMoney._();
 
@@ -91,7 +91,7 @@ class AppMoney {
     return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$fmt $code';
   }
 
-  /// PDF — رمز الريال بعد الرقم في اللغتين، بصيغة مناسبة للطباعة.
+  /// PDF — رمز الريال قبل الرقم بالعربية وSAR بعد الرقم بالإنجليزية.
   static String formatForPdf(
     double amount, {
     required bool isAr,
@@ -105,7 +105,7 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '$fmt $saudiRiyalSignCompat' : '$fmt SAR';
+      return isAr ? '$saudiRiyalSignCompat$fmt' : '$fmt SAR';
     }
     return '$fmt $code';
   }

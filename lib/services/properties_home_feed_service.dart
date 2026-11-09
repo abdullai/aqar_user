@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/listing/listing_media_hydration.dart';
+
 import '../core/network/supabase_public_read_guard.dart';
 import '../core/network/supabase_publishable_http_layer.dart';
 import '../shared/core/supabase_config.dart';
@@ -16,9 +18,11 @@ import '../shared/core/supabase_schema_selects.dart';
 abstract final class PropertiesHomeFeedService {
   static Future<List<dynamic>>? _inFlight;
 
-  static bool get isCircuitOpen => SupabasePublicReadGuard.isInAuthFailureCooldown;
+  static bool get isCircuitOpen =>
+      SupabasePublicReadGuard.isInAuthFailureCooldown;
 
-  static void resetCircuit() => SupabasePublicReadGuard.clearAuthFailureCooldown();
+  static void resetCircuit() =>
+      SupabasePublicReadGuard.clearAuthFailureCooldown();
 
   static Future<List<dynamic>> fetch({
     required SupabaseClient client,
@@ -142,6 +146,10 @@ abstract final class PropertiesHomeFeedService {
           filterSuppressed: filterSuppressed,
           limit: limit,
         );
+        for (final row in fallback) {
+          ListingMediaHydration.stampRow(row);
+        }
+
         if (kDebugMode) {
           debugPrint(
             '[PropertiesHomeFeedService] fallback without images rows=${fallback.length}',

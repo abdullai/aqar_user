@@ -4,10 +4,11 @@ import 'dart:typed_data';
 
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/branding/app_branding.dart';
 import '../../core/branding/branding_pdf.dart';
@@ -81,6 +82,12 @@ class PaymentReceiptScreen extends StatelessWidget {
     final passed = (invoiceNumber ?? '').trim();
     if (InvoiceDocument.isOfficialInvoiceNumber(passed)) return passed;
     return '';
+  }
+
+  String? get _providerReference {
+    final reference = (_doc?.paymentReference ?? paymentReference ?? '').trim();
+    if (reference.isEmpty || reference == _officialInvoiceNo) return null;
+    return reference;
   }
 
   double get _amount {
@@ -351,17 +358,12 @@ class PaymentReceiptScreen extends StatelessWidget {
                                 _officialInvoiceNo,
                                 valueSelectable: true,
                               ),
-                            if ((_doc?.paymentReference ??
-                                        paymentReference ??
-                                        '')
-                                    .trim()
-                                    .isNotEmpty &&
-                                (_doc?.paymentReference ?? paymentReference)
-                                        ?.trim() !=
-                                    _officialInvoiceNo)
+                            if (_providerReference != null)
                               _row(
-                                _isAr ? 'مرجع الدفع' : 'Payment reference',
-                                (_doc?.paymentReference ?? paymentReference)!,
+                                _isAr
+                                    ? 'مرجع الدفع لدى مزود الدفع'
+                                    : 'Payment provider reference',
+                                _providerReference!,
                                 valueSelectable: true,
                               ),
                             _row(
@@ -532,7 +534,7 @@ class PaymentReceiptScreen extends StatelessWidget {
 المبلغ: $amt
 طريقة الدفع: $paymentMethodLabel
 تاريخ الدفع: $_formattedDate
-رقم الفاتورة: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentReference ?? _doc?.paymentReference ?? '').toString().trim().isNotEmpty ? '\nمرجع الدفع: ${_doc?.paymentReference ?? paymentReference}' : ''}
+رقم الفاتورة: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${_providerReference == null ? '' : '\nمرجع الدفع لدى مزود الدفع: $_providerReference'}
 ''';
     }
     return '''
@@ -542,16 +544,48 @@ Period: ${_periodLabel()}$auto$promo
 Amount: $amt
 Method: $paymentMethodLabel
 Paid at: $_formattedDate
-Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentReference ?? _doc?.paymentReference ?? '').toString().trim().isNotEmpty ? '\nPayment reference: ${_doc?.paymentReference ?? paymentReference}' : ''}
+Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${_providerReference == null ? '' : '\nPayment provider reference: $_providerReference'}
 ''';
   }
 
   /// يبني PDF عربي/إنجليزي عبر [PaymentService.buildInvoicePdf].
-  Future<Uint8List> _buildInvoiceBytes() {
-    final d = _doc;
-    final period = d?.periodLabel ?? _periodLabel();
+  Future<Uint8List> _buildInvoiceBytes() async {
+    var d = _doc;
+    final row = billingRow;
+    final subscriptionKey =
+        (subscriptionId ?? '${row?['subscription_id'] ?? ''}').trim();
+    if (subscriptionKey.isNotEmpty &&
+        d?.subscriptionStart == null &&
+        d?.subscriptionEnd == null) {
+      final subscription = await Supabase.instance.client
+          .from('user_subscriptions')
+          .select('starts_at, ends_at, start_date, end_date')
+          .eq('id', subscriptionKey)
+          .maybeSingle();
+      if (subscription != null && row != null) {
+        d = InvoiceDocument.fromRow(
+          row,
+          isAr: _isAr,
+          subscription: Map<String, dynamic>.from(subscription),
+        );
+      }
+    }
+    final period = d?.periodKindLabel ?? _periodLabel();
     final statement = d?.statementLabel ??
         InvoiceCopy.statementForPlan(planName, isAr: _isAr);
+    final qrPayload = (verifyUrl ?? '').trim().isNotEmpty
+        ? verifyUrl!.trim()
+        : documentQrPlainText(
+            isAr: _isAr,
+            kind: d?.documentTitle ?? (_isAr ? 'إيصال دفع' : 'Payment receipt'),
+            invoiceNo: _officialInvoiceNo,
+            description: statement,
+            period: d?.periodLabel ?? period,
+            amountLine: AppMoney.formatForPdf(_amount, isAr: _isAr),
+            status: d?.statusLabel ?? (_isAr ? 'مدفوعة' : 'Paid'),
+            paidAt: InvoiceCopy.latinDateTime(completedAt),
+            method: d?.methodLabel ?? paymentMethodLabel,
+          );
     return PaymentService.buildInvoicePdf(
       title: d?.documentTitle ?? (_isAr ? 'إيصال دفع' : 'Payment receipt'),
       txnId: _officialInvoiceNo,
@@ -564,11 +598,15 @@ Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentRef
       paymentMethod: d?.methodLabel ?? paymentMethodLabel,
       paidAtFormatted: InvoiceCopy.latinDateTime(completedAt),
       calendarLine: InvoiceCopy.latinDateTime(completedAt),
+      invoiceDateFormatted: InvoiceCopy.slashDate(completedAt),
       payerName: payerName,
+      userFullName: payerName,
       purposeLabel:
           d?.purposeLabel ?? ((purpose ?? '').isEmpty ? null : _purposeLabel()),
-      paymentReference: _doc?.paymentReference ?? paymentReference,
-      qrPayload: _qrPayload,
+      paymentReference: _providerReference,
+      periodStart: d?.subscriptionStart,
+      periodEnd: d?.subscriptionEnd,
+      qrPayload: qrPayload,
       isAr: _isAr,
       subtotalLine: d != null && d.showSubtotal
           ? AppMoney.formatForPdf(d.subtotal, isAr: _isAr)
@@ -606,7 +644,7 @@ Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentRef
     try {
       bytes = await _buildInvoiceBytes();
     } catch (e) {
-      // لو فشل بناء الـ PDF لأي سبب نرجع لنص فقط (تحويلة آمنة).
+      debugPrint('Invoice PDF generation failed: $e');
       await Share.share(_buildShareText());
       return;
     }
@@ -622,7 +660,8 @@ Invoice: ${_officialInvoiceNo.isEmpty ? '—' : _officialInvoiceNo}${(paymentRef
       final f = File('${dir.path}/$fileName');
       await f.writeAsBytes(bytes, flush: true);
       await Share.shareXFiles([XFile(f.path)]);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Invoice PDF sharing failed: $e');
       await Share.share(_buildShareText());
     }
   }

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 import 'package:aqar_user/l10n/app_localizations.dart';
 
 import '../core/location/map_picker_geolocation.dart';
@@ -41,7 +40,6 @@ class MapPickerPage extends StatefulWidget {
   static const routeName = '/map-picker';
 
   final LatLng? initial;
-  final bool initialApproximate;
   final bool isAr;
   final String? pinTitle;
   final String? pinSubtitle;
@@ -54,7 +52,6 @@ class MapPickerPage extends StatefulWidget {
   const MapPickerPage({
     super.key,
     this.initial,
-    this.initialApproximate = false,
     this.isAr = true,
     this.kingdomOverview = false,
     this.pinTitle,
@@ -67,20 +64,18 @@ class MapPickerPage extends StatefulWidget {
     BuildContext context, {
     required bool isAr,
     LatLng? initial,
-    bool initialApproximate = false,
     bool kingdomOverview = false,
     String? pinTitle,
     String? pinSubtitle,
     String? pinAmountLabel,
     String? pinKindLabel,
   }) {
-    return Navigator.of(context).push<PickedMapLocation>(
+    return Navigator.of(context, rootNavigator: false).push<PickedMapLocation>(
       MaterialPageRoute<PickedMapLocation>(
         fullscreenDialog: true,
         settings: const RouteSettings(name: routeName),
         builder: (_) => MapPickerPage(
           initial: initial,
-          initialApproximate: initialApproximate,
           isAr: isAr,
           kingdomOverview: kingdomOverview,
           pinTitle: pinTitle,
@@ -172,7 +167,6 @@ class _MapPickerPageState extends State<MapPickerPage> {
     _mapZoom = useKingdom ? 5.85 : 13.0;
     _selected = widget.initial ?? (useKingdom ? _saudiCenter : _riyadh);
     _bootCamera = CameraPosition(target: _selected, zoom: _mapZoom);
-    _approximateLocation = widget.initialApproximate;
     _latCtrl = TextEditingController(
       text: _selected.latitude.toStringAsFixed(6),
     );
@@ -189,24 +183,6 @@ class _MapPickerPageState extends State<MapPickerPage> {
       if (!mounted) return;
       setState(() => _mapEngineHint = h);
     } catch (_) {}
-  }
-
-  Future<void> _openExternalMapsAtSelection() async {
-    final lat = _selected.latitude;
-    final lng = _selected.longitude;
-    final candidates = <Uri>[
-      Uri.parse('petalmaps://map?lat=$lat&lng=$lng'),
-      Uri.parse('https://www.petalmaps.com/place/$lat,$lng'),
-      Uri.parse('geo:$lat,$lng?q=$lat,$lng'),
-    ];
-    for (final u in candidates) {
-      try {
-        if (await canLaunchUrl(u)) {
-          await launchUrl(u, mode: LaunchMode.externalApplication);
-          return;
-        }
-      } catch (_) {}
-    }
   }
 
   Future<void> _init() async {
@@ -307,8 +283,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
     }
   }
 
-  Future<void> _detectLocation({bool useFallbackIfFail = false}) async {
-    if (_locatingNow) return;
+  Future<bool> _detectLocation({bool useFallbackIfFail = false}) async {
+    if (_locatingNow) return false;
 
     _locatingNow = true;
 
@@ -340,7 +316,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   : 'Location service is disabled. You can select the location manually on the map.';
             });
           }
-          return;
+          return false;
         case MapPickerLocateStatus.permissionDenied:
           if (useFallbackIfFail) {
             await _moveToLocation(
@@ -356,11 +332,10 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   : 'Location permission was not granted. You can pick the location manually.';
             });
           }
-          return;
+          return false;
         case MapPickerLocateStatus.ok:
           final latlng = outcome.position;
-          if (latlng == null) return;
-          if (!mounted) return;
+          if (latlng == null || !mounted) return false;
           setState(() {
             _setSelected(latlng);
             _pickedCity = null;
@@ -369,14 +344,26 @@ class _MapPickerPageState extends State<MapPickerPage> {
             _pickedDistrict = null;
             _loading = false;
             _locationHint = widget.isAr
-                ? 'تم جلب الموقع الحالي بدقة. على الويب قد تكون تقريبية — عدّل الدبوس إن لزم.'
-                : 'Current location set. On web it may be approximate — adjust the pin if needed.';
+                ? 'تم تحديد موقعك الحالي.'
+                : 'Your current location has been selected.';
           });
           await _moveToLocation(latlng, zoom: 17);
-          return;
+          return true;
         case MapPickerLocateStatus.failed:
           break;
       }
+      if (useFallbackIfFail) {
+        await _moveToLocation(widget.initial ?? _riyadh, zoom: _mapZoom);
+      }
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _locationHint = widget.isAr
+              ? 'تعذر تحديد الموقع بدقة. اختر الموقع يدويًا من الخريطة أو ابحث باسم المدينة.'
+              : 'Could not determine the exact location. Select it manually on the map or search by city.';
+        });
+      }
+      return false;
     } catch (e) {
       if (kDebugMode) {
         print('[DBG][MAP] detect location failed: $e');
@@ -394,6 +381,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
               : 'Could not determine the exact location. Select it manually on the map or search by city.';
         });
       }
+      return false;
     } finally {
       _locatingNow = false;
     }
@@ -433,6 +421,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
   }
 
   void _onTap(LatLng pos) {
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _setSelected(pos);
       _lastMoveTarget = pos;
@@ -460,15 +449,13 @@ class _MapPickerPageState extends State<MapPickerPage> {
     _mapZoom = pos.zoom;
   }
 
-  bool _approximateLocation = false;
-
   bool _submitted = false;
 
   void _confirm() {
-    _submitPickedLocation(approximate: _approximateLocation);
+    _submitPickedLocation();
   }
 
-  void _submitPickedLocation({required bool approximate}) {
+  void _submitPickedLocation() {
     if (_submitted || !mounted) return;
     _submitted = true;
     final route = ModalRoute.of(context);
@@ -478,7 +465,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
     }
     final result = PickedMapLocation(
       position: _selected,
-      approximate: approximate,
+      approximate: false,
       city: _pickedCity,
       region: _pickedRegion,
       governorate: _pickedGovernorate,
@@ -489,18 +476,22 @@ class _MapPickerPageState extends State<MapPickerPage> {
     );
   }
 
-  /// بديل عند فشل الخريطة المضمّنة (هواوي/هونر بدون GMS أو تعطيل WebGL).
-  Future<void> _openInExternalMaps() async {
-    final q =
-        '${_selected.latitude.toStringAsFixed(6)},${_selected.longitude.toStringAsFixed(6)}';
-    final uri = Uri.parse(
-      'https://www.google.com/maps/search/?api=1&query=${Uri.encodeComponent(q)}',
-    );
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {}
+  Future<void> _openExternalMapsAtSelection() async {
+    final lat = _selected.latitude;
+    final lng = _selected.longitude;
+    final candidates = <Uri>[
+      Uri.parse('petalmaps://map?lat=$lat&lng=$lng'),
+      Uri.parse('https://www.petalmaps.com/place/$lat,$lng'),
+      Uri.parse('geo:$lat,$lng?q=$lat,$lng'),
+    ];
+    for (final uri in candidates) {
+      try {
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      } catch (_) {}
+    }
   }
 
   void _search(String q) {
@@ -635,6 +626,9 @@ class _MapPickerPageState extends State<MapPickerPage> {
           title: Text(isAr ? 'تحديد الموقع' : 'Select location'),
           actions: [
             IconButton(
+              tooltip: isAr
+                  ? 'استخدام موقعي الحالي واعتماده'
+                  : 'Use and confirm my current location',
               icon: const Icon(Icons.my_location),
               onPressed: () async {
                 if (!kIsWeb &&
@@ -650,7 +644,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
                     if (!ok) return;
                   }
                 }
-                await _detectLocation(useFallbackIfFail: true);
+                if (await _detectLocation()) _confirm();
               },
             ),
             IconButton(
@@ -965,36 +959,6 @@ class _MapPickerPageState extends State<MapPickerPage> {
                           Row(
                             children: [
                               Expanded(
-                                child: _PrecisionCard(
-                                  selected: !_approximateLocation,
-                                  title: isAr ? 'موقع محدد' : 'Exact',
-                                  subtitle: isAr
-                                      ? 'يظهر على خريطة الإعلانات'
-                                      : 'Shown on the ads map',
-                                  onTap: () => setState(
-                                    () => _approximateLocation = false,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _PrecisionCard(
-                                  selected: _approximateLocation,
-                                  title: isAr ? 'موقع تقريبي' : 'Approximate',
-                                  subtitle: isAr
-                                      ? 'لا يظهر بدقة على الخريطة'
-                                      : 'Not shown precisely on the map',
-                                  onTap: () => setState(
-                                    () => _approximateLocation = true,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
                                 flex: 2,
                                 child: FilledButton.icon(
                                   icon: const Icon(Icons.check),
@@ -1004,17 +968,6 @@ class _MapPickerPageState extends State<MapPickerPage> {
                                   onPressed: _confirm,
                                 ),
                               ),
-                              if (t != null) ...[
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    icon: const Icon(Icons.map_outlined),
-                                    label: Text(isAr ? 'خرائط' : 'Maps'),
-                                    onPressed: () =>
-                                        unawaited(_openInExternalMaps()),
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
                         ],
@@ -1025,66 +978,6 @@ class _MapPickerPageState extends State<MapPickerPage> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PrecisionCard extends StatelessWidget {
-  const _PrecisionCard({
-    required this.selected,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  final bool selected;
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final border = selected ? cs.primary : cs.outlineVariant;
-    final bg = selected
-        ? cs.primary.withValues(alpha: 0.12)
-        : cs.surfaceContainerHighest.withValues(alpha: 0.35);
-    return Material(
-      color: bg,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: border, width: selected ? 1.6 : 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  color: selected ? cs.primary : cs.onSurface,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: cs.onSurfaceVariant,
-                  height: 1.25,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

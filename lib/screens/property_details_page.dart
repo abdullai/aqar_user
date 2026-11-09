@@ -14,7 +14,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../core/branding/app_branding.dart';
 import '../core/branding/aqar_brand_colors.dart';
 import '../l10n/app_localizations.dart';
 import '../core/branding/branding_logo_image.dart';
@@ -31,6 +30,7 @@ import '../core/utils/date_helper.dart';
 import '../core/utils/display_ids.dart';
 import '../core/share/app_listing_links.dart';
 import '../core/share/listing_share_helper.dart';
+import '../core/share/property_share_content.dart';
 import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../models/property.dart';
@@ -603,64 +603,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
     final i = (_property.deedIssuer ?? '').trim();
     if (i.isNotEmpty) return i;
     return _licenseField('deed_issuer');
-  }
-
-  String get _deedCombinedValue {
-    final lines = <String>[];
-    if (_deedNumberDisplay.isNotEmpty) {
-      lines.add(
-        widget.isAr
-            ? 'رقم الصك: $_deedNumberDisplay'
-            : 'Deed no.: $_deedNumberDisplay',
-      );
-    }
-    final g = _property.listingGuidance ?? const <String, dynamic>{};
-    String pick(dynamic v) => (v ?? '').toString().trim();
-    final plan = pick(g['plan_number']);
-    final parcel = pick(g['parcel_number']);
-    if (plan.isNotEmpty || parcel.isNotEmpty) {
-      lines.add(
-        widget.isAr
-            ? 'المخطط / القطعة: ${[
-                if (plan.isNotEmpty) plan,
-                if (parcel.isNotEmpty) parcel,
-              ].join(' — ')}'
-            : 'Plan / parcel: ${[
-                if (plan.isNotEmpty) plan,
-                if (parcel.isNotEmpty) parcel,
-              ].join(' — ')}',
-      );
-    }
-    final b = g['parcel_boundaries'];
-    if (b is Map) {
-      final n = pick(b['north']);
-      final s = pick(b['south']);
-      final e = pick(b['east']);
-      final w = pick(b['west']);
-      final split = [
-        if (n.isNotEmpty) (widget.isAr ? 'شمال $n' : 'N $n'),
-        if (s.isNotEmpty) (widget.isAr ? 'جنوب $s' : 'S $s'),
-        if (e.isNotEmpty) (widget.isAr ? 'شرق $e' : 'E $e'),
-        if (w.isNotEmpty) (widget.isAr ? 'غرب $w' : 'W $w'),
-      ];
-      if (split.isNotEmpty) {
-        lines.add(
-          widget.isAr
-              ? 'الإحداثي المقسم: ${split.join(' · ')}'
-              : 'Split coordinates: ${split.join(' · ')}',
-        );
-      }
-    }
-    final la = lat ?? _property.latitude;
-    final lo = lng ?? _property.longitude;
-    if (la != null && lo != null) {
-      lines.add(
-        widget.isAr
-            ? 'المجموع: ${la.toStringAsFixed(6)}, ${lo.toStringAsFixed(6)}'
-            : 'Total: ${la.toStringAsFixed(6)}, ${lo.toStringAsFixed(6)}',
-      );
-    }
-    return lines.join('\n');
   }
 
   bool get _includeOwnerInChat {
@@ -1785,40 +1727,98 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
         lang: widget.isAr ? 'ar' : 'en',
       );
 
-  String get _shareImageUrlForRichShare => _galleryUrls.isNotEmpty
-      ? _galleryUrls.first
+  List<String> get _shareImageUrls {
+    final rawPaths = <String>[
+      ..._property.images,
+      ..._property.photographerMediaPaths.where(
+        (path) => !ListingMediaUrls.looksLikeVideoPath(path),
+      ),
+      for (final tour in _property.photographerTours)
+        for (final scene in tour.scenes)
+          if (int.tryParse(scene.imageRef.trim()) == null) scene.imageRef,
+    ];
+    final urls = <String>[];
+    final seen = <String>{};
+    final imagePaths = ListingMediaUrls.imagePathsExcludingVideo(rawPaths);
+    for (final url in ListingMediaUrls.publicUrls(_sb, imagePaths)) {
+      final uri = Uri.tryParse(url);
+      final key = uri == null
+          ? url.trim().toLowerCase()
+          : '${uri.host.toLowerCase()}${uri.path}'.toLowerCase();
+      if (seen.add(key)) urls.add(url);
+    }
+    return urls;
+  }
+
+  List<String> get _shareVideoUrls {
+    final paths = <String>[
+      ..._property.photographerVideoPaths,
+      if ((_property.videoUrl ?? '').trim().isNotEmpty) _property.videoUrl!,
+      if ((_property.displayVideoUrl ?? '').trim().isNotEmpty)
+        _property.displayVideoUrl!,
+    ];
+    final urls = <String>[];
+    final seen = <String>{};
+    for (final path in paths) {
+      if (!ListingMediaUrls.looksLikePlayableVideoRef(path)) continue;
+      final url = _resolveVideoPlayableUrl(path);
+      final uri = Uri.tryParse(url);
+      final key = uri == null
+          ? url.trim().toLowerCase()
+          : '${uri.host.toLowerCase()}${uri.path}'.toLowerCase();
+      if (seen.add(key)) urls.add(url);
+    }
+    return urls;
+  }
+
+  List<String> get _shareTourUrls {
+    final url = (_property.virtualTourUrl ?? '').trim();
+    return ListingMediaUrls.looksLikePlayableTourUrl(url) ? [url] : const [];
+  }
+
+  String get _shareImageUrlForRichShare => _shareImageUrls.isNotEmpty
+      ? _shareImageUrls.first
       : PropertyListingDisplay.propertySharePreviewUrl(_property, _sb);
 
-  String get _shareBodyWithLinkAndBrand {
-    final brand = AppBranding.shareBrandLine(isAr: widget.isAr);
-    final more = widget.isAr
-        ? 'لمزيد من معلومات العقار والصور، قم بزيارة  الرابط:'
-        : 'More photos and full details at:';
-    final mediaLinks = <String>[
-      for (final imageUrl in ListingMediaUrls.publicUrls(
-        _sb,
-        ListingMediaUrls.propertyCardImagePaths(_property),
-      ))
-        '${widget.isAr ? 'صورة' : 'Photo'}: $imageUrl',
-      if (_hasVideo)
-        '${widget.isAr ? 'الفيديو' : 'Video'}: '
-            '${_resolveVideoPlayableUrl(_property.displayVideoUrl!)}',
-      if (_property.hasInAppVirtualTour)
-        widget.isAr
-            ? 'جولة تفاعلية داخل التطبيق: افتح رابط الإعلان'
-            : 'Interactive in-app tour: open the listing link',
-    ];
-    final tourUrl = (_property.virtualTourUrl ?? '').trim();
-    if (ListingMediaUrls.looksLikePlayableTourUrl(tourUrl)) {
-      mediaLinks.add('${widget.isAr ? 'الجولة' : 'Tour'}: $tourUrl');
+  Map<String, String> get _shareMediaAttributions {
+    final attributions = <String, String>{};
+    for (final path in _property.photographerMediaPaths) {
+      final name = _property.photographerAttributionForMedia(path);
+      if (name.isEmpty || ListingMediaUrls.looksLikeVideoPath(path)) continue;
+      final url = ListingMediaUrls.storagePublicUrl(_sb, path);
+      if (url != null && url.isNotEmpty) attributions[url] = name;
     }
-    final mediaText = mediaLinks.isEmpty
-        ? ''
-        : '\n${widget.isAr ? 'روابط الوسائط:' : 'Media links:'}\n'
-            '${mediaLinks.join('\n')}';
-    return '${_shareText.trimRight()}\n$more\n'
-        '$_listingShareUri$mediaText\n\n— $brand';
+    for (final path in _property.photographerVideoPaths) {
+      final name = _property.photographerAttributionForMedia(path);
+      if (name.isEmpty) continue;
+      final url = ListingMediaUrls.videoPlayableUrl(_sb, path);
+      if (url != null && url.isNotEmpty) attributions[url] = name;
+    }
+    for (final tour in _property.photographerTours) {
+      for (final scene in tour.scenes) {
+        final path = scene.imageRef.trim();
+        final name = _property.photographerAttributionForMedia(path);
+        if (path.isEmpty || int.tryParse(path) != null || name.isEmpty) {
+          continue;
+        }
+        final url = ListingMediaUrls.storagePublicUrl(_sb, path);
+        if (url != null && url.isNotEmpty) attributions[url] = name;
+      }
+    }
+    return attributions;
   }
+
+  String get _shareBodyWithLinkAndBrand => PropertyShareContent.build(
+        property: _property,
+        isArabic: widget.isAr,
+        listingUrl: _listingShareUri.toString(),
+        imageUrls: _shareImageUrls,
+        videoUrls: _shareVideoUrls,
+        tourUrls: _shareTourUrls,
+        hasInAppTour: _property.hasInAppVirtualTour,
+        description: _cleanDescription,
+        mediaAttributions: _shareMediaAttributions,
+      );
 
   Future<void> _loadDeleteMeta() async {
     if (!_isOwnerManager) return;
@@ -2312,34 +2312,6 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
 
   String get _licensedMarketerPhone =>
       _licenseField('rega_ad_responsible_mobile');
-
-  String get _shareText {
-    final coordsText = (lat != null && lng != null)
-        ? '\n📍 ${widget.isAr ? 'الإحداثيات:' : 'Coordinates:'} ${lat!.toStringAsFixed(6)}, ${lng!.toStringAsFixed(6)}'
-        : '';
-    final licPh = _marketerCanSeeOwnerContact ? _licensedMarketerPhone : '';
-    final licLine = licPh.isNotEmpty
-        ? '\n📞 ${widget.isAr ? 'تواصل المسوّق (بيانات ترخيص الهيئة):' : 'Marketer (REGA license):'} $licPh'
-        : '';
-
-    final vatNote = _property.priceIncludesVat
-        ? (widget.isAr ? 'محتسبة ضمن المبلغ' : 'included in total')
-        : (widget.isAr ? 'مضافة على المبلغ' : 'added on top');
-    final commissionLine = _platformFee > 0
-        ? '\n🌐 ${widget.isAr ? 'عمولة التسويق:' : 'Marketing commission:'} ${_moneyLabel(_platformFee)}'
-        : '';
-    return '''
-🏡 ${_property.title}
-📍 ${widget.isAr ? 'الموقع:' : 'Location:'} ${PropertyListingDisplay.addressLine(_property, isAr: widget.isAr)}
-$licLine
-💰 ${widget.isAr ? 'السعر الأساسي:' : 'Base price:'} ${_moneyLabel(_basePrice)}
-🧾 ${widget.isAr ? 'الضريبة (5%) — $vatNote:' : 'VAT (5%) — $vatNote:'} ${_moneyLabel(_vatAmount)}
-✅ ${widget.isAr ? 'الإجمالي مع الضريبة:' : 'Total with VAT:'} ${_moneyLabel(_totalAfterVat)}$commissionLine
-🏁 ${widget.isAr ? 'المجموع النهائي:' : 'Final total:'} ${_moneyLabel(_finalTotal)}$coordsText
-
-#Aqar #${widget.isAr ? 'عقار' : 'RealEstate'}
-''';
-  }
 
   Future<void> _loadAuctionSession() async {
     if (!_property.isAuction || !_isPublishedLikeListing) return;
@@ -5491,17 +5463,12 @@ $licLine
                                 ),
                               ),
                               const SizedBox(height: 8),
-                              if (_deedCombinedValue.isNotEmpty)
+                              if (_deedNumberDisplay.isNotEmpty)
                                 _InfoRow(
                                   icon: Icons.numbers_outlined,
-                                  title: widget.isAr
-                                      ? 'الصك والإحداثي'
-                                      : 'Deed & coordinates',
-                                  value: _deedCombinedValue,
-                                  copyValue: _deedCombinedValue,
-                                  copiedMessage: widget.isAr
-                                      ? 'تم نسخ الصك والإحداثيات'
-                                      : 'Deed and coordinates copied',
+                                  title:
+                                      widget.isAr ? 'رقم الصك' : 'Deed number',
+                                  value: _deedNumberDisplay,
                                 ),
                               if (_deedDateDisplay.isNotEmpty) ...[
                                 const SizedBox(height: 8),
@@ -6626,19 +6593,6 @@ $licLine
                                 widget.isAr
                                     ? 'نسخ النص والرابط'
                                     : 'Copy text & link',
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            OutlinedButton.icon(
-                              onPressed: () => _copyToClipboard(
-                                _property.description,
-                                successMessage: widget.isAr
-                                    ? 'تم نسخ الوصف'
-                                    : 'Description copied',
-                              ),
-                              icon: const Icon(Icons.description_outlined),
-                              label: Text(
-                                widget.isAr ? 'نسخ الوصف' : 'Copy description',
                               ),
                             ),
                           ],

@@ -74,9 +74,17 @@ void addOfficialInvoicePage({
     if (custom.isNotEmpty) return custom;
     return InvoiceCopy.statementForPlan(plan, isAr: isAr);
   }();
-  final linePeriod = safe(periodLabel).isEmpty
+  final rawPeriod = safe(periodLabel);
+  final linePeriod = rawPeriod.isEmpty
       ? t('حسب العملية', 'Per transaction')
-      : safe(periodLabel);
+      : rawPeriod.contains(' من ') || rawPeriod.contains(' from ')
+          ? rawPeriod
+          : InvoiceCopy.periodWithRange(
+              periodRaw: rawPeriod,
+              start: _periodDate(periodStart),
+              end: _periodDate(periodEnd),
+              isAr: isAr,
+            );
   final status = safe(statusLine);
   final method = safe(paymentMethod);
   final purpose = safe(purposeLabel);
@@ -118,9 +126,9 @@ void addOfficialInvoicePage({
       child: pw.Row(
         mainAxisSize: pw.MainAxisSize.min,
         children: [
-          pw.Text(n, style: style),
-          pw.SizedBox(width: 2),
           icon,
+          pw.SizedBox(width: 2),
+          pw.Text(n, style: style),
         ],
       ),
     );
@@ -184,7 +192,14 @@ void addOfficialInvoicePage({
                     ? safe(title)
                     : t('فاتورة', 'Invoice'),
                 brandColor: kDocumentBrandPdfColor,
-                metaLine: '${t('التاريخ', 'Date')}: $issuedAt',
+                invoiceLayout: true,
+                leftMeta: [
+                  '${t('التاريخ', 'Date')}: $issuedAt',
+                  '${t('الإيميل', 'Email')}: ${AppBranding.supportEmail}',
+                  '${t('رقم التواصل', 'Contact')}: ${AppBranding.invoiceLetterheadPhone}',
+                ].join('\n'),
+                rightMeta:
+                    '${t('المملكة العربية السعودية', 'Kingdom of Saudi Arabia')}\n${AppBranding.invoiceLetterheadBrandName(isAr: isAr)}',
                 fontFallback: fontFallback,
               ),
               pw.Row(
@@ -214,9 +229,30 @@ void addOfficialInvoicePage({
                           )
                         else
                           pw.Text(
-                            t('رقم غير متوفر', 'Number unavailable'),
+                            t('رقم الفاتورة غير مسجّل',
+                                'Invoice number not recorded'),
                             style: st(bold, 11),
                           ),
+                        pw.SizedBox(height: 3),
+                        pw.Text(
+                          invoiceNo.isNotEmpty
+                              ? t(
+                                  'حالة الرقم: مسجّل في سجل العملية',
+                                  'Number status: recorded on transaction',
+                                )
+                              : t(
+                                  'لا يوجد رقم رسمي مسجّل لهذه العملية',
+                                  'No official number recorded for this transaction',
+                                ),
+                          style: st(
+                            base,
+                            8,
+                            color: invoiceNo.isNotEmpty
+                                ? kDocumentBrandPdfColor
+                                : PdfColors.deepOrange700,
+                          ),
+                          maxLines: 1,
+                        ),
                         if (purpose.isNotEmpty) ...[
                           pw.SizedBox(height: 4),
                           pw.Text(
@@ -341,11 +377,11 @@ void addOfficialInvoicePage({
                     ),
                     children: [
                       _th(t('البيان', 'Description'),
-                          st(bold, 8.5, color: PdfColors.white), isAr),
+                          st(bold, 8.5, color: PdfColors.white)),
                       _th(t('الفترة', 'Period'),
-                          st(bold, 8.5, color: PdfColors.white), isAr),
+                          st(bold, 8.5, color: PdfColors.white)),
                       _th(t('المبلغ', 'Amount'),
-                          st(bold, 8.5, color: PdfColors.white), isAr),
+                          st(bold, 8.5, color: PdfColors.white)),
                     ],
                   ),
                   pw.TableRow(
@@ -444,7 +480,7 @@ void addOfficialInvoicePage({
                 pw.Directionality(
                   textDirection: pw.TextDirection.ltr,
                   child: pw.Text(
-                    '${t('مرجع الدفع', 'Payment reference')}: ${safe(paymentReference)}',
+                    '${t('مرجع الدفع لدى مزود الدفع', 'Payment provider reference')}: ${safe(paymentReference)}',
                     style: st(base, 8, color: PdfColors.grey700),
                     maxLines: 1,
                   ),
@@ -494,13 +530,13 @@ void addOfficialInvoicePage({
   );
 }
 
-pw.Widget _th(String text, pw.TextStyle style, bool isAr) {
+pw.Widget _th(String text, pw.TextStyle style) {
   return pw.Padding(
     padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
     child: pw.Text(
       text,
       style: style,
-      textAlign: isAr ? pw.TextAlign.right : pw.TextAlign.left,
+      textAlign: pw.TextAlign.center,
       maxLines: 1,
     ),
   );
@@ -529,6 +565,29 @@ String _pdfMoneyLine(String raw) {
   final n = AppMoney.stripSarMarks(InvoiceCopy.stripBidi(raw)).trim();
   if (n.isEmpty) return raw;
   return '${AppMoney.saudiRiyalSignCompat}$n';
+}
+
+DateTime? _periodDate(String? value) {
+  final raw = (value ?? '').trim();
+  final parsed = DateTime.tryParse(raw);
+  if (parsed != null) return parsed;
+  final match = RegExp(r'^(\d{4})/(\d{2})/(\d{2})$').firstMatch(raw);
+  if (match == null) return null;
+  final year = int.tryParse(match.group(1)!);
+  final month = int.tryParse(match.group(2)!);
+  final day = int.tryParse(match.group(3)!);
+  if (year == null ||
+      month == null ||
+      day == null ||
+      month < 1 ||
+      month > 12 ||
+      day < 1 ||
+      day > 31) {
+    return null;
+  }
+  final date = DateTime(year, month, day);
+  if (date.year != year || date.month != month || date.day != day) return null;
+  return date;
 }
 
 Future<String?> loadInvoiceRiyalSvg() async {

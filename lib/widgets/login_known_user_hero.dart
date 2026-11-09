@@ -10,25 +10,33 @@ class LoginBrandHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = AppBranding.loginHeroLogoSize(context);
-    final frameH = size * 0.72;
-    return Semantics(
-      label: AppBranding.displayNameForContext(
-        context,
-        isAr: Directionality.of(context) == TextDirection.rtl,
-      ),
-      image: true,
-      child: SizedBox(
-        width: size,
-        height: frameH,
-        child: BrandingLogoImage(
-          width: size,
-          height: frameH,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.high,
-          errorIcon: Icons.home_work_outlined,
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desiredWidth = AppBranding.loginHeroLogoSize(context);
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final width = desiredWidth.clamp(1.0, availableWidth).toDouble();
+        final height = width / 3;
+        return Semantics(
+          label: AppBranding.displayNameForContext(
+            context,
+            isAr: Directionality.of(context) == TextDirection.rtl,
+          ),
+          image: true,
+          child: SizedBox(
+            width: width,
+            height: height,
+            child: BrandingLogoImage(
+              width: width,
+              height: height,
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              errorIcon: Icons.home_work_outlined,
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -89,7 +97,9 @@ class LoginKnownUserHero extends StatelessWidget {
         if (showPasswordPrompt) ...[
           const SizedBox(height: 4),
           Text(
-            isAr ? 'أدخل كلمة المرور للمتابعة' : 'Enter your password to continue',
+            isAr
+                ? 'أدخل كلمة المرور للمتابعة'
+                : 'Enter your password to continue',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: compact ? 11.5 : 12.5,

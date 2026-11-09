@@ -141,7 +141,7 @@ class InvoiceService {
       footer: null,
       planName: doc.title,
       descriptionLabel: doc.statementLabel,
-      periodLabel: doc.periodLabel,
+      periodLabel: doc.periodKindLabel,
       paymentMethod: doc.methodLabel,
       paidAtFormatted: doc.latinDateLine,
       calendarLine: doc.dateLine.isEmpty ? null : doc.latinDateLine,
@@ -195,8 +195,8 @@ class InvoiceService {
           : null,
       vatNote: null,
       paymentReference: doc.paymentReference,
-      periodStart: null,
-      periodEnd: null,
+      periodStart: doc.subscriptionStart,
+      periodEnd: doc.subscriptionEnd,
       currencyLabel: null,
       qrPayload: doc.qrPayload,
     );
@@ -227,12 +227,7 @@ class InvoiceService {
   }) async {
     final fileName = safeFileName(row);
     if (context != null) {
-      await PdfPrintPreviewOverlay.show(
-        context,
-        title: isAr ? 'معاينة الفاتورة' : 'Invoice preview',
-        fileName: fileName,
-        onLayout: (_) => buildPdf(row),
-      );
+      await previewInvoice(context, row);
       return;
     }
     try {
@@ -243,6 +238,18 @@ class InvoiceService {
     } catch (_) {
       await downloadOrShare(row);
     }
+  }
+
+  Future<void> previewInvoice(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
+    await PdfPrintPreviewOverlay.show(
+      context,
+      title: isAr ? 'معاينة الفاتورة' : 'Invoice preview',
+      fileName: safeFileName(row),
+      onLayout: (_) => buildPdf(row),
+    );
   }
 
   Future<void> printAll(
@@ -289,7 +296,7 @@ class InvoiceService {
             : 'This invoice is platform proof of the server-confirmed payment.',
         'planName': doc.title,
         'descriptionLabel': doc.statementLabel,
-        'periodLabel': doc.periodLabel,
+        'periodLabel': doc.periodKindLabel,
         'paymentMethod': doc.methodLabel,
         'paidAtFormatted': doc.latinDateLine,
         'calendarLine': doc.dateLine,
@@ -353,8 +360,8 @@ class InvoiceService {
             : null,
         'vatNote': null,
         'paymentReference': doc.paymentReference,
-        'periodStart': null,
-        'periodEnd': null,
+        'periodStart': doc.subscriptionStart,
+        'periodEnd': doc.subscriptionEnd,
         'currencyLabel': null,
         'qrPayload': doc.qrPayload,
       });
@@ -453,6 +460,21 @@ class InvoiceService {
     cell.cellStyle = style;
   }
 
+  void _excelMergedText(
+    Sheet sheet,
+    int startCol,
+    int endCol,
+    int row,
+    String value,
+    CellStyle style,
+  ) {
+    sheet.merge(
+      CellIndex.indexByColumnRow(columnIndex: startCol, rowIndex: row),
+      CellIndex.indexByColumnRow(columnIndex: endCol, rowIndex: row),
+    );
+    _excelText(sheet, startCol, row, value, style);
+  }
+
   Future<Uint8List> exportAllExcel(
     List<Map<String, dynamic>> rows, {
     String? sectionTitle,
@@ -470,6 +492,33 @@ class InvoiceService {
     );
     final metaStyle = _excelBorderedStyle(
       background: ExcelColor.fromHexString('FFCCFBF1'),
+      align: HorizontalAlign.Center,
+    );
+    final brandStyle = CellStyle(
+      bold: true,
+      fontSize: 15,
+      fontColorHex: ExcelColor.white,
+      backgroundColorHex: ExcelColor.fromHexString('FF0F766E'),
+      horizontalAlign: HorizontalAlign.Center,
+      verticalAlign: VerticalAlign.Center,
+      textWrapping: TextWrapping.WrapText,
+    );
+    final letterheadStyle = CellStyle(
+      bold: true,
+      fontSize: 11,
+      fontColorHex: ExcelColor.fromHexString('FF0F766E'),
+      backgroundColorHex: ExcelColor.fromHexString('FFF0FDFA'),
+      horizontalAlign: HorizontalAlign.Center,
+      verticalAlign: VerticalAlign.Center,
+      textWrapping: TextWrapping.WrapText,
+    );
+    final letterheadMetaStyle = CellStyle(
+      fontSize: 10,
+      fontColorHex: ExcelColor.fromHexString('FF334155'),
+      backgroundColorHex: ExcelColor.fromHexString('FFF8FAFC'),
+      horizontalAlign: HorizontalAlign.Center,
+      verticalAlign: VerticalAlign.Center,
+      textWrapping: TextWrapping.WrapText,
     );
     final totalStyle = _excelBorderedStyle(
       bold: true,
@@ -478,39 +527,47 @@ class InvoiceService {
 
     String t(String ar, String en) => isAr ? ar : en;
     var r = 0;
-    _excelText(sheet, 0, r, t('بسم الله الرحمن الرحيم', 'In the name of Allah'),
-        metaStyle);
-    r++;
-    _excelText(sheet, 0, r,
-        t('المملكة العربية السعودية', 'Kingdom of Saudi Arabia'), metaStyle);
-    r++;
-    _excelText(sheet, 0, r, AppBranding.invoiceLetterheadBrandName(isAr: isAr),
-        metaStyle);
-    r++;
-    _excelText(
+    const lastCol = 22;
+    _excelMergedText(
       sheet,
       0,
+      lastCol,
       r,
-      '${t('جوال التواصل', 'Contact mobile')} ${AppBranding.invoiceLetterheadPhone}',
-      metaStyle,
+      t('بسم الله الرحمن الرحيم', 'In the name of Allah'),
+      brandStyle,
     );
+    sheet.setRowHeight(r, 30);
     r++;
-    _excelText(sheet, 0, r, AppBranding.supportEmail, metaStyle);
-    r++;
-    if (sectionTitle != null && sectionTitle.trim().isNotEmpty) {
-      _excelText(sheet, 0, r, sectionTitle.trim(), metaStyle);
-      r++;
-    }
-    _excelText(sheet, 0, r, formatLatinDateTime(DateTime.now()), metaStyle);
-    r++;
-    _excelText(
+    _excelMergedText(
       sheet,
       0,
+      10,
       r,
-      '${t('عدد الفواتير', 'Invoice count')}: ${rows.length}',
-      metaStyle,
+      '${t('المملكة العربية السعودية', 'Kingdom of Saudi Arabia')}\n${AppBranding.invoiceLetterheadBrandName(isAr: isAr)}',
+      letterheadStyle,
     );
-    r += 2;
+    _excelMergedText(
+      sheet,
+      11,
+      lastCol,
+      r,
+      '${t('التاريخ', 'Date')}: ${formatLatinDateTime(DateTime.now())}\n${t('الإيميل', 'Email')}: ${AppBranding.supportEmail}\n${t('رقم التواصل', 'Contact')}: ${AppBranding.invoiceLetterheadPhone}',
+      letterheadMetaStyle,
+    );
+    sheet.setRowHeight(r, 58);
+    r++;
+    _excelMergedText(
+      sheet,
+      0,
+      lastCol,
+      r,
+      (sectionTitle ?? '').trim().isNotEmpty
+          ? sectionTitle!.trim()
+          : t('سجل الفواتير', 'Invoice ledger'),
+      letterheadStyle,
+    );
+    sheet.setRowHeight(r, 25);
+    r++;
 
     final docs = <InvoiceDocument>[];
     for (final row in rows) {
@@ -518,6 +575,16 @@ class InvoiceService {
     }
     final eligible = docs.where((d) => d.isEligibleRevenue()).toList();
     final refunded = docs.where((d) => d.isRefundedTab()).toList();
+    final numbered = docs.where((d) => d.hasInvoiceNumber).length;
+    _excelMergedText(
+      sheet,
+      0,
+      lastCol,
+      r,
+      '${t('عدد الفواتير', 'Invoice count')}: ${rows.length}    |    ${t('أرقام رسمية مسجّلة', 'Official numbers recorded')}: $numbered/${rows.length}',
+      metaStyle,
+    );
+    r += 2;
     if (eligible.isNotEmpty) {
       final sum = eligible.fold<double>(0, (a, d) => a + d.amount);
       _excelText(
@@ -583,6 +650,7 @@ class InvoiceService {
             'بداية الاشتراك',
             'نهاية الاشتراك',
             'المسترجع',
+            'حالة رقم الفاتورة',
           ]
         : [
             'Invoice number',
@@ -607,6 +675,7 @@ class InvoiceService {
             'Subscription start',
             'Subscription end',
             'Refunded',
+            'Invoice number status',
           ];
     for (var c = 0; c < headers.length; c++) {
       _excelText(sheet, c, r, headers[c], headerStyle);
@@ -615,8 +684,7 @@ class InvoiceService {
     r++;
 
     for (final doc in docs) {
-      _excelText(sheet, 0, r, doc.hasInvoiceNumber ? doc.invoiceNumber : '',
-          bodyStyle);
+      _excelText(sheet, 0, r, doc.displayInvoiceNumber, bodyStyle);
       _excelText(sheet, 1, r, doc.latinDateLine, bodyStyle);
       _excelText(sheet, 2, r, doc.title, bodyStyle);
       _excelText(sheet, 3, r, doc.purposeLabel, bodyStyle);
@@ -665,6 +733,7 @@ class InvoiceService {
       _excelText(sheet, 20, r, doc.subscriptionEnd ?? '', bodyStyle);
       _excelNumber(
           sheet, 21, r, doc.showRefund ? doc.refundAmount : null, moneyStyle);
+      _excelText(sheet, 22, r, doc.invoiceNumberRegistrationLabel, bodyStyle);
       r++;
     }
 
@@ -691,6 +760,7 @@ class InvoiceService {
       19: 20,
       20: 20,
       21: 12,
+      22: 34,
     };
     for (final e in widths.entries) {
       sheet.setColumnWidth(e.key, e.value);
@@ -707,35 +777,50 @@ class InvoiceService {
   }) async {
     final buf = StringBuffer();
     final now = formatLatinDateTime(DateTime.now());
-    buf.writeln(
-        '"${isAr ? 'بسم الله الرحمن الرحيم' : 'In the name of Allah'}"');
     for (final line in excelLetterheadLines(
       isAr: isAr,
       title: sectionTitle ?? (isAr ? 'سجل الفواتير' : 'Invoice ledger'),
     )) {
-      buf.writeln('"${line.replaceAll('"', '""')}"');
+      buf.writeln(_csvText(line));
     }
-    buf.writeln('"$now"');
+    final docs = <InvoiceDocument>[];
+    for (final row in rows) {
+      docs.add(await documentFor(row));
+    }
+    final numbered = docs.where((doc) => doc.hasInvoiceNumber).length;
+    buf.writeln(_csvText('${isAr ? 'التاريخ' : 'Date'}: $now'));
+    buf.writeln(_csvText(
+      '${isAr ? 'عدد الفواتير' : 'Invoice count'}: ${docs.length}',
+    ));
+    buf.writeln(_csvText(
+      '${isAr ? 'أرقام رسمية مسجّلة' : 'Official numbers recorded'}: $numbered/${docs.length}',
+    ));
     buf.writeln('');
     buf.writeln(
       isAr
-          ? 'رقم الفاتورة,التاريخ,البيان,الإجمالي,العملة,الحالة,طريقة الدفع'
-          : 'Invoice number,Date,Description,Amount,Currency,Status,Payment method',
+          ? 'رقم الفاتورة,حالة الرقم,التاريخ,البيان,الإجمالي,العملة,الحالة,طريقة الدفع'
+          : 'Invoice number,Number status,Date,Description,Amount,Currency,Status,Payment method',
     );
-    for (final row in rows) {
-      final doc = await documentFor(row);
+    for (final doc in docs) {
       buf.writeln(
         [
-          '"${doc.invoiceNumber}"',
-          '"${doc.latinDateLine}"',
-          '"${doc.title.replaceAll('"', '""')}"',
+          _csvText(doc.displayInvoiceNumber),
+          _csvText(doc.invoiceNumberRegistrationLabel),
+          _csvText(doc.latinDateLine),
+          _csvText(doc.title),
           '${doc.amount}',
-          '"${doc.currency}"',
-          '"${doc.statusLabel}"',
-          '"${doc.methodLabel}"',
+          _csvText(doc.currency),
+          _csvText(doc.statusLabel),
+          _csvText(doc.methodLabel),
         ].join(','),
       );
     }
     return buf.toString();
+  }
+
+  String _csvText(String value) {
+    final safeValue =
+        RegExp(r'^[\s]*[=+\-@]').hasMatch(value) ? "'$value" : value;
+    return '"${safeValue.replaceAll('"', '""')}"';
   }
 }

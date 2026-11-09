@@ -1861,7 +1861,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final pane = _wizardPaneKind(_wizardStep);
-      GlobalKey<FormState>? targetForm;
+      final GlobalKey<FormState> targetForm;
       
       switch (pane) {
         case 0:
@@ -1886,11 +1886,13 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           return;
       }
       
-      if (targetForm != null && targetForm.currentContext != null) {
+      final form = targetForm;
+      if (form.currentContext != null) {
         FocusScope.of(context).unfocus();
         Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted && targetForm.currentContext != null) {
-            FocusScope.of(targetForm.currentContext!).requestFocus();
+          final formContext = form.currentContext;
+          if (mounted && formContext != null) {
+            FocusScope.of(formContext).requestFocus();
             // Ensure the focused field is visible above keyboard
             _ensureFocusedFieldVisible();
           }

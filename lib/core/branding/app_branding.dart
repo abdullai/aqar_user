@@ -269,17 +269,14 @@ abstract final class AppBranding {
     return 104;
   }
 
-  /// شعار شاشة الدخول — صغير حتى لا يفصل «تسجيل دخول آمن» عن نص الترحيب.
+  /// عرض شعار شاشة الدخول نسبةً إلى الإطار العريض لشعارات التطبيق والمؤسسة.
   static double loginHeroLogoSize(BuildContext context) {
-    final mq = MediaQuery.sizeOf(context);
-    final shortest = mq.shortestSide;
-    final h = mq.height;
-    final compactH = h < 700;
-    if (shortest < 360) return compactH ? 40.0 : 48.0;
-    if (shortest < 480) return compactH ? 44.0 : 52.0;
-    if (shortest < 600) return compactH ? 48.0 : 56.0;
-    if (shortest < 800) return compactH ? 52.0 : 60.0;
-    return compactH ? 56.0 : 64.0;
+    final size = MediaQuery.sizeOf(context);
+    final availableHeight =
+        size.height - MediaQuery.viewInsetsOf(context).bottom;
+    final maxLogoHeight = (availableHeight * 0.22 - 86).clamp(36.0, 120.0);
+    final maxLogoWidth = size.width - 40;
+    return (maxLogoHeight * 3).clamp(1.0, maxLogoWidth).toDouble();
   }
 
   static double titleFontSize(BuildContext context) {

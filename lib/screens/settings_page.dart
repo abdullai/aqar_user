@@ -426,7 +426,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                       const SizedBox(height: 4),
                       valueChild,
-                      if (onEdit != null || trailing != null || copyBtn != null) ...[
+                      if (onEdit != null ||
+                          trailing != null ||
+                          copyBtn != null) ...[
                         const SizedBox(height: 6),
                         Row(
                           children: [
@@ -514,7 +516,8 @@ class _SettingsPageState extends State<SettingsPage> {
       SnackBar(
         behavior: SnackBarBehavior.floating,
         duration: duration ?? const Duration(seconds: 3),
-        content: Text(message, style: const TextStyle(fontWeight: FontWeight.w700)),
+        content:
+            Text(message, style: const TextStyle(fontWeight: FontWeight.w700)),
       ),
     );
   }
@@ -546,7 +549,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     _isAr
                         ? 'الرقم الأساسي ($_phone) ثابت ولا يُعدّل. أضف جوالاً إضافياً صالحاً (05xxxxxxxx) للظهور أو للرسائل لاحقاً.'
                         : 'Primary ($_phone) is locked. Add a valid extra mobile (05xxxxxxxx) for public display or future SMS.',
-                    style: const TextStyle(fontWeight: FontWeight.w600, height: 1.35),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, height: 1.35),
                   ),
                 ),
               AqarTextField(
@@ -629,7 +633,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _isAr
                     ? 'هذا الاسم المستعار للبطاقات والدردشة عند اختياره. الاسم/الصفة المعتمدة تبقى للمعاملات الرسمية.'
                     : 'Alias for cards/chat when selected. Official registered name stays for formal deals.',
-                style: const TextStyle(fontWeight: FontWeight.w600, height: 1.35),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, height: 1.35),
               ),
               const SizedBox(height: 10),
               AqarTextField(
@@ -856,24 +861,19 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _pickExploreCityFromMap() async {
-    final res = await Navigator.of(context).push<Map<String, dynamic>>(
-      MaterialPageRoute(
-        builder: (_) => MapPickerPage(
-          isAr: _isAr,
-          kingdomOverview: true,
-          pinTitle:
-              _isAr ? 'مدينة الاستكشاف الافتراضية' : 'Default explore city',
-          pinSubtitle: _isAr
-              ? 'سيتم استخدام أقرب مدينة لهذه النقطة في الرئيسية'
-              : 'Home will use the nearest city to this point',
-          pinKindLabel: _isAr ? 'استكشاف' : 'Explore',
-        ),
-      ),
+    final res = await MapPickerPage.pick(
+      context,
+      isAr: _isAr,
+      kingdomOverview: true,
+      pinTitle: _isAr ? 'مدينة الاستكشاف الافتراضية' : 'Default explore city',
+      pinSubtitle: _isAr
+          ? 'سيتم استخدام أقرب مدينة لهذه النقطة في الرئيسية'
+          : 'Home will use the nearest city to this point',
+      pinKindLabel: _isAr ? 'استكشاف' : 'Explore',
     );
     if (!mounted || res == null) return;
-    final lat = (res['lat'] as num?)?.toDouble();
-    final lng = (res['lng'] as num?)?.toDouble();
-    if (lat == null || lng == null) return;
+    final lat = res.position.latitude;
+    final lng = res.position.longitude;
     final info = await SaudiLocationsService.instance.findNearest(lat, lng);
     if (!mounted || info == null) return;
     await _savePreferredExploreCity(info.cityEn, info);
@@ -1093,7 +1093,9 @@ class _SettingsPageState extends State<SettingsPage> {
           _isAr
               ? 'تصفّح المكاتب والمؤسسات وطلب الانضمام'
               : 'Browse offices & institutions and request to join',
-          style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
         trailing: Text(_isAr ? 'فتح' : 'Open'),
         onTap: () {
@@ -1528,8 +1530,9 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         _bumpSettingsContent();
         _email = u.email ?? '';
-        _fullDisplayName =
-            resolvedName.isNotEmpty ? resolvedName : (_email.isNotEmpty ? _email : '—');
+        _fullDisplayName = resolvedName.isNotEmpty
+            ? resolvedName
+            : (_email.isNotEmpty ? _email : '—');
         _officialName = official;
         _displayAlias = alias;
         _phone = _pickStr(map, 'phone');
@@ -1668,7 +1671,9 @@ class _SettingsPageState extends State<SettingsPage> {
             return _isAr ? 'سارية — حتى $day' : 'Valid — until $day';
           }
         }
-        return _isAr ? 'سارية (بانتظار الربط الحكومي)' : 'Valid (gov link pending)';
+        return _isAr
+            ? 'سارية (بانتظار الربط الحكومي)'
+            : 'Valid (gov link pending)';
     }
   }
 
@@ -2588,7 +2593,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 final lang = _isAr ? 'ar' : 'en';
                 final done = await Navigator.of(context).push<bool>(
                   MaterialPageRoute<bool>(
-                    settings: const RouteSettings(name: '/profileEnrollmentCheck'),
+                    settings:
+                        const RouteSettings(name: '/profileEnrollmentCheck'),
                     builder: (_) => ProfileEnrollmentGateScreen(
                       lang: lang,
                       embeddedInSettings: true,
@@ -2735,7 +2741,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 _profileFactRow(
-                  label: _isAr ? 'الاسم / الصفة المعتمدة' : 'Official registered name',
+                  label: _isAr
+                      ? 'الاسم / الصفة المعتمدة'
+                      : 'Official registered name',
                   value: _officialName.isEmpty ? '—' : _officialName,
                 ),
                 _profileFactRow(
@@ -2760,9 +2768,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onCopy: _phoneDigitsForCopy().isEmpty
                       ? null
                       : () => _copyPlain(_phoneDigitsForCopy()),
-                  editLabel: _phone.isEmpty
-                      ? (_isAr ? 'إضافة' : 'Add')
-                      : null,
+                  editLabel: _phone.isEmpty ? (_isAr ? 'إضافة' : 'Add') : null,
                   onEdit: digitsOnly(normalizeAsciiDigits(_phone)).length >= 10
                       ? null
                       : _showEditPhoneDialog,
@@ -2772,10 +2778,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: _secondaryPhone.isEmpty
                       ? (_isAr ? '— غير مضاف —' : '— not set —')
                       : _secondaryPhone,
-                  valueDirection: _secondaryPhone.isEmpty
-                      ? null
-                      : TextDirection.ltr,
-                  onCopy: digitsOnly(normalizeAsciiDigits(_secondaryPhone)).isEmpty
+                  valueDirection:
+                      _secondaryPhone.isEmpty ? null : TextDirection.ltr,
+                  onCopy: digitsOnly(normalizeAsciiDigits(_secondaryPhone))
+                          .isEmpty
                       ? null
                       : () => _copyPlain(
                             digitsOnly(normalizeAsciiDigits(_secondaryPhone)),
@@ -2790,9 +2796,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   value: _identityUsername.isEmpty
                       ? (_isAr ? '— غير مضاف —' : '— not set —')
                       : _identityUsername,
-                  valueDirection: _identityUsername.isEmpty
-                      ? null
-                      : TextDirection.ltr,
+                  valueDirection:
+                      _identityUsername.isEmpty ? null : TextDirection.ltr,
                   onCopy: _identityUsername.length == 10
                       ? () => _copyPlain(_identityUsername)
                       : null,
@@ -2888,10 +2893,8 @@ class _SettingsPageState extends State<SettingsPage> {
               value: _licenseNo.isEmpty
                   ? (_isAr ? '— غير مضاف —' : '— not set —')
                   : _licenseNo,
-              valueDirection:
-                  _licenseNo.isEmpty ? null : TextDirection.ltr,
-              onCopy:
-                  _licenseNo.isEmpty ? null : () => _copyPlain(_licenseNo),
+              valueDirection: _licenseNo.isEmpty ? null : TextDirection.ltr,
+              onCopy: _licenseNo.isEmpty ? null : () => _copyPlain(_licenseNo),
               trailing: Padding(
                 padding: const EdgeInsetsDirectional.only(end: 4),
                 child: Text(
@@ -3067,7 +3070,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   : (_isAr
                       ? 'غير متاح على هذا الجهاز'
                       : 'Not available on this device'),
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _faceOn,
             onChanged: (!_canBio || !_faceHw)
@@ -3085,7 +3090,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   : (_isAr
                       ? 'غير متاح على هذا الجهاز'
                       : 'Not available on this device'),
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _fpOn,
             onChanged: (!_canBio || !_fpHw)
@@ -3130,7 +3137,9 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr
                   ? 'القيمة الافتراضية 15 دقيقة. تُستخدم عند إرسال التطبيق للخلفية مع تفعيل الدخول السريع أو البصمة.'
                   : 'Default is 15 minutes. Used after backgrounding when PIN or biometrics lock is enabled.',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
           ),
           Slider(
@@ -3198,7 +3207,9 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr
                   ? 'تظهر الحالة كما يراها النظام. يمكن فتح إعدادات النظام لتعديلها.'
                   : 'Status as reported by the system. Open system settings to change.',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 10),
             for (final line in _permissionLines) ...[
@@ -3260,7 +3271,8 @@ class _SettingsPageState extends State<SettingsPage> {
               padding: const EdgeInsets.all(20),
               child: Column(
                 children: [
-                  Icon(Icons.devices_other_rounded, color: cs.primary, size: 40),
+                  Icon(Icons.devices_other_rounded,
+                      color: cs.primary, size: 40),
                   const SizedBox(height: 12),
                   Text(
                     _isAr ? 'لا توجد أجهزة مسجلة' : 'No registered devices',
@@ -3273,7 +3285,8 @@ class _SettingsPageState extends State<SettingsPage> {
                         ? 'يُسجَّل هذا الجهاز تلقائياً عند الدخول. اسحب للتحديث أو افتح إدارة الأجهزة.'
                         : 'This device is registered on sign-in. Pull to refresh or open device management.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5),
+                    style:
+                        TextStyle(color: cs.onSurfaceVariant, fontSize: 12.5),
                   ),
                   const SizedBox(height: 12),
                   FilledButton(
@@ -3293,7 +3306,9 @@ class _SettingsPageState extends State<SettingsPage> {
           if (p.contains('ios') || p.contains('iphone')) {
             return Icons.phone_iphone_rounded;
           }
-          if (p.contains('windows') || p.contains('mac') || p.contains('linux')) {
+          if (p.contains('windows') ||
+              p.contains('mac') ||
+              p.contains('linux')) {
             return Icons.desktop_windows_rounded;
           }
           return Icons.smartphone_rounded;
@@ -3313,7 +3328,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                    constraints:
+                        const BoxConstraints(minWidth: 32, minHeight: 32),
                     onPressed: onCopy,
                     icon: Icon(Icons.copy_rounded, size: 18, color: cs.primary),
                     tooltip: _isAr ? 'نسخ' : 'Copy',
@@ -3381,7 +3397,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           CircleAvatar(
                             radius: 28,
                             backgroundColor: cs.primary.withValues(alpha: 0.12),
-                            child: Icon(iconFor(platform), color: cs.primary, size: 28),
+                            child: Icon(iconFor(platform),
+                                color: cs.primary, size: 28),
                           ),
                           const SizedBox(height: 10),
                           Text(
@@ -3395,7 +3412,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           if (isCurrent) ...[
                             const SizedBox(height: 4),
                             Text(
-                              DeviceDisplayLabels.currentInstallHint(isAr: _isAr),
+                              DeviceDisplayLabels.currentInstallHint(
+                                  isAr: _isAr),
                               style: TextStyle(
                                 color: cs.primary,
                                 fontWeight: FontWeight.w800,
@@ -3406,7 +3424,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         ],
                       ),
                     ),
-                    Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.35)),
+                    Divider(
+                        height: 1,
+                        color: cs.outlineVariant.withValues(alpha: 0.35)),
                     kv(
                       label: _isAr ? 'اسم الطراز' : 'Model name',
                       value: title,
@@ -3422,22 +3442,31 @@ class _SettingsPageState extends State<SettingsPage> {
                         );
                       },
                     ),
-                    Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.25)),
+                    Divider(
+                        height: 1,
+                        color: cs.outlineVariant.withValues(alpha: 0.25)),
                     kv(
                       label: _isAr ? 'المنصة' : 'Platform',
-                      value: DeviceDisplayLabels.platform(platform, isAr: _isAr),
+                      value:
+                          DeviceDisplayLabels.platform(platform, isAr: _isAr),
                     ),
-                    Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.25)),
+                    Divider(
+                        height: 1,
+                        color: cs.outlineVariant.withValues(alpha: 0.25)),
                     kv(
                       label: _isAr ? 'أول تسجيل دخول' : 'First sign-in',
                       value: first,
                     ),
-                    Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.25)),
+                    Divider(
+                        height: 1,
+                        color: cs.outlineVariant.withValues(alpha: 0.25)),
                     kv(
                       label: _isAr ? 'آخر نشاط' : 'Last activity',
                       value: last,
                     ),
-                    Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.25)),
+                    Divider(
+                        height: 1,
+                        color: cs.outlineVariant.withValues(alpha: 0.25)),
                     kv(
                       label: _isAr ? 'الموقع' : 'Location',
                       value: city.isEmpty
@@ -3451,7 +3480,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           onPressed: () => _logoutDevice('${d['id']}'),
                           child: Text(
                             _isAr ? 'إزالة الجهاز' : 'Remove device',
-                            style: TextStyle(color: cs.error, fontWeight: FontWeight.w800),
+                            style: TextStyle(
+                                color: cs.error, fontWeight: FontWeight.w800),
                           ),
                         ),
                       ),
@@ -3468,16 +3498,21 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             FilledButton.tonal(
               onPressed: () {
-                Navigator.of(context).push<void>(
+                Navigator.of(context)
+                    .push<void>(
                   MaterialPageRoute<void>(
-                    builder: (_) => const DeviceManagementPage(mandatory: false),
+                    builder: (_) =>
+                        const DeviceManagementPage(mandatory: false),
                   ),
-                ).then((_) {
+                )
+                    .then((_) {
                   if (mounted) unawaited(_loadDevices(ensureCurrent: false));
                 });
               },
               child: Text(
-                _isAr ? 'إدارة الأجهزة والحدّ الأقصى' : 'Manage devices & limit',
+                _isAr
+                    ? 'إدارة الأجهزة والحدّ الأقصى'
+                    : 'Manage devices & limit',
                 style: const TextStyle(fontWeight: FontWeight.w900),
               ),
             ),
@@ -3576,9 +3611,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text(
-                    _isAr
-                        ? 'عرض الظهور على البطاقات'
-                        : 'Presence on cards',
+                    _isAr ? 'عرض الظهور على البطاقات' : 'Presence on cards',
                     style: const TextStyle(
                       fontWeight: FontWeight.w900,
                       fontSize: 14.5,
@@ -3626,9 +3659,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           }
                         },
                   title: Text(
-                    _isAr
-                        ? 'على بطاقات الطلبات العقارية'
-                        : 'On request cards',
+                    _isAr ? 'على بطاقات الطلبات العقارية' : 'On request cards',
                   ),
                 ),
                 SwitchListTile(
@@ -3688,7 +3719,9 @@ class _SettingsPageState extends State<SettingsPage> {
             title: Text(t.settingsInAppNotificationSoundTitle),
             subtitle: Text(
               t.settingsInAppNotificationSoundSubtitle,
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _inAppSoundEnabled,
             onChanged: (v) async {
@@ -3711,7 +3744,9 @@ class _SettingsPageState extends State<SettingsPage> {
             title: Text(t.settingsChatMessageSoundTitle),
             subtitle: Text(
               t.settingsChatMessageSoundSubtitle,
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _chatMessageSoundEnabled,
             onChanged: (v) async {
@@ -3739,7 +3774,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 _isAr
                     ? 'إعداد مؤقت — سيُربط لاحقاً بالرسائل النصية/الإشعارات. عند وصول رسالة أثناء استخدام التطبيق.'
                     : 'Temporary setting — later linked to SMS/push. When a message arrives while the app is open.',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               value: _chatNotificationsEnabled,
               onChanged: (v) async {
@@ -3764,7 +3801,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 _isAr
                     ? 'تنبيهات الدردشة والرسائل النصية على الويب مؤقتة حالياً؛ راجع إعدادات المتصفح. الربط الكامل بالرسائل قادم.'
                     : 'Web chat/SMS alerts are temporary for now; check browser settings. Full SMS linking is coming.',
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
         ],
@@ -3857,7 +3896,9 @@ class _SettingsPageState extends State<SettingsPage> {
                             t.settingsAccentSubtitle,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -4002,7 +4043,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   _isAr
                       ? 'يُحفظ على الجهاز ويُستخدم تدريجياً في البطاقات والتفاصيل.'
                       : 'Saved on device; used gradually in cards and details.',
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
                 trailing: Icon(Icons.chevron_right_rounded,
                     color: Theme.of(context).colorScheme.outline),
@@ -4032,7 +4075,9 @@ class _SettingsPageState extends State<SettingsPage> {
               title: Text(t.settingsHapticsTitle),
               subtitle: Text(
                 t.settingsHapticsSubtitle,
-                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
               value: _hapticsEnabled,
               onChanged: (v) async {
@@ -4055,7 +4100,9 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr
                   ? 'تكبير أيقونة التبويب المحدد وانتقالات أسلس. يمكن إيقافها للسرعة القصوى.'
                   : 'Subtle selected-tab scale and smoother transitions. Turn off for maximum speed.',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
             ),
             value: _motionEnabled,
             onChanged: (v) async {
@@ -4227,8 +4274,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            errorLabel ??
-                (_isAr ? 'رابط غير صالح' : 'Invalid link'),
+            errorLabel ?? (_isAr ? 'رابط غير صالح' : 'Invalid link'),
           ),
         ),
       );
@@ -4284,7 +4330,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ListTile(
             leading: Icon(Icons.article_outlined, color: cs.primary),
-            title: Text(_isAr ? 'سياسات المنصة (تبويبات)' : 'Platform policies (tabs)'),
+            title: Text(
+                _isAr ? 'سياسات المنصة (تبويبات)' : 'Platform policies (tabs)'),
             subtitle: Text(
               _isAr
                   ? 'شروط الاستخدام، الخصوصية، الملكية الفكرية، الكوكيز'
@@ -4301,7 +4348,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ListTile(
             leading: Icon(Icons.tune_outlined, color: cs.primary),
-            title: Text(_isAr ? 'إدارة موافقات الكوكيز' : 'Cookie consent preferences'),
+            title: Text(
+                _isAr ? 'إدارة موافقات الكوكيز' : 'Cookie consent preferences'),
             subtitle: Text(
               _isAr
                   ? 'تحليلات / تسويق — يُزامَن مع الخادم عند توفر الترحيل'
@@ -4338,9 +4386,13 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           ListTile(
             leading: Icon(Icons.fact_check_outlined, color: cs.primary),
-            title: Text(_isAr ? 'قائمة تحضير الترخيص (682010…)' : 'Licensing prep checklist'),
+            title: Text(_isAr
+                ? 'قائمة تحضير الترخيص (682010…)'
+                : 'Licensing prep checklist'),
             subtitle: Text(
-              _isAr ? 'للمشغّل — مراجعة مع مستشار' : 'For the operator — legal review',
+              _isAr
+                  ? 'للمشغّل — مراجعة مع مستشار'
+                  : 'For the operator — legal review',
             ),
             trailing: Icon(Icons.chevron_right_rounded, color: cs.primary),
             onTap: () {
@@ -4357,7 +4409,9 @@ class _SettingsPageState extends State<SettingsPage> {
             leading: Icon(Icons.support_agent_outlined, color: cs.primary),
             title: Text(t.supportLabel),
             subtitle: Text(
-              _isAr ? 'الدعم الفني واستقبال الشكاوى' : 'Support & complaints intake',
+              _isAr
+                  ? 'الدعم الفني واستقبال الشكاوى'
+                  : 'Support & complaints intake',
             ),
             trailing: Icon(Icons.open_in_new_rounded, color: cs.primary),
             onTap: () => unawaited(_openSupportHub()),
@@ -4365,10 +4419,12 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(height: 1),
           ListTile(
             leading: Icon(Icons.account_balance_outlined, color: cs.primary),
-            title: Text(_isAr ? 'الهيئة العامة للعقار (بوابة عامة)' : 'REGA (public portal)'),
+            title: Text(_isAr
+                ? 'الهيئة العامة للعقار (بوابة عامة)'
+                : 'REGA (public portal)'),
             trailing: Icon(Icons.open_in_new_rounded, color: cs.primary),
-            onTap: () =>
-                unawaited(_openComplianceUrl(PlatformComplianceConfig.regaPublicUrl())),
+            onTap: () => unawaited(
+                _openComplianceUrl(PlatformComplianceConfig.regaPublicUrl())),
           ),
           ListTile(
             leading: Icon(Icons.verified_user_outlined, color: cs.primary),
@@ -4383,8 +4439,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _isAr ? 'المركز السعودي للأعمال' : 'Saudi Business Center',
             ),
             trailing: Icon(Icons.open_in_new_rounded, color: cs.primary),
-            onTap: () => unawaited(
-                _openComplianceUrl(PlatformComplianceConfig.mcBusinessCenterUrl())),
+            onTap: () => unawaited(_openComplianceUrl(
+                PlatformComplianceConfig.mcBusinessCenterUrl())),
           ),
         ],
       ),
@@ -4722,7 +4778,8 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     return DefaultTabController(
       length: sections.length,
-      initialIndex: initialIndex.clamp(0, sections.isEmpty ? 0 : sections.length - 1),
+      initialIndex:
+          initialIndex.clamp(0, sections.isEmpty ? 0 : sections.length - 1),
       key: ValueKey(
         '${sections.map((e) => e.name).join('|')}#$_settingsContentEpoch'
         '${widget.focusPresenceDisplay ? '#presence' : ''}'

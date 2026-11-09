@@ -1601,24 +1601,6 @@ class _LoginScreenState extends State<LoginScreen>
             _topBarUnified(),
             const SizedBox(height: 10),
           ],
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.verified_user, size: 16, color: _successColor),
-              const SizedBox(width: 6),
-              Text(
-                _isAr ? 'تسجيل دخول آمن' : 'Secure Login',
-                style: TextStyle(
-                  fontSize: _font(context, 12, 11),
-                  color: _successColor,
-                  fontWeight: FontWeight.w900,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-          const SizedBox(height: 2),
           const LoginBrandHero(),
           if (_knownUserReady) ...[
             const SizedBox(height: 2),
@@ -1688,6 +1670,24 @@ class _LoginScreenState extends State<LoginScreen>
             ],
             const SizedBox(height: 12),
           ],
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.verified_user, size: 14, color: _successColor),
+              const SizedBox(width: 5),
+              Text(
+                _isAr ? 'تسجيل دخول آمن' : 'Secure Login',
+                style: TextStyle(
+                  fontSize: _font(context, 10.5, 10),
+                  color: _successColor,
+                  fontWeight: FontWeight.w800,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
           AnimatedBuilder(
             animation: _shakeAnim,
             builder: (context, child) => Transform.translate(

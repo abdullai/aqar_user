@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:aqar_user/core/gestures/app_keyboard_popups.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -75,6 +76,18 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     }
   }
 
+  Future<void> _copyInvoiceNumber() async {
+    final d = _d;
+    if (!d.hasInvoiceNumber) return;
+    await Clipboard.setData(ClipboardData(text: d.invoiceNumber));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_isAr ? 'تم نسخ رقم الفاتورة' : 'Invoice number copied'),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
@@ -136,15 +149,55 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               ),
             ),
             const SizedBox(height: 10),
-            Text(
-              d.hasInvoiceNumber ? d.invoiceNumber : t.invoiceUnavailable,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textDirection: ui.TextDirection.ltr,
-              style: const TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 22,
-                letterSpacing: 0.2,
+            Card(
+              color: d.hasInvoiceNumber
+                  ? cs.primaryContainer.withValues(alpha: 0.45)
+                  : cs.tertiaryContainer.withValues(alpha: 0.55),
+              child: Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(14, 12, 8, 12),
+                child: Row(
+                  children: [
+                    Icon(
+                      d.hasInvoiceNumber
+                          ? Icons.verified_outlined
+                          : Icons.info_outline,
+                      color: d.hasInvoiceNumber
+                          ? cs.primary
+                          : cs.onTertiaryContainer,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            d.invoiceNumberRegistrationLabel,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            d.displayInvoiceNumber,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textDirection: ui.TextDirection.ltr,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 20,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (d.hasInvoiceNumber)
+                      IconButton(
+                        tooltip:
+                            _isAr ? 'نسخ رقم الفاتورة' : 'Copy invoice number',
+                        onPressed: _copyInvoiceNumber,
+                        icon: const Icon(Icons.copy_outlined),
+                      ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -207,14 +260,26 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
               spacing: 10,
               runSpacing: 10,
               children: [
+                FilledButton.tonalIcon(
+                  onPressed: _busy
+                      ? null
+                      : () => _run(
+                            () => widget.invoices.previewInvoice(context, _row),
+                            _isAr
+                                ? 'تم فتح معاينة الفاتورة'
+                                : 'Invoice preview opened',
+                            _isAr
+                                ? 'تعذرت معاينة الفاتورة'
+                                : 'Invoice preview failed',
+                          ),
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: Text(_isAr ? 'معاينة PDF' : 'Preview PDF'),
+                ),
                 FilledButton.icon(
                   onPressed: _busy
                       ? null
                       : () => _run(
-                            () => widget.invoices.printInvoice(
-                              _row,
-                              context: context,
-                            ),
+                            () => widget.invoices.printInvoice(_row),
                             _isAr ? 'تم فتح الطباعة' : 'Print opened',
                             _isAr ? 'تعذرت الطباعة' : 'Print failed',
                           ),

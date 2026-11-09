@@ -1,9 +1,13 @@
+import 'package:excel/excel.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:aqar_user/core/branding/app_branding.dart';
 import 'package:aqar_user/core/payment/invoice_copy.dart';
 import 'package:aqar_user/core/payment/invoice_document.dart';
 import 'package:aqar_user/core/utils/app_money.dart';
 import 'package:aqar_user/services/billing_transaction_repository.dart';
+import 'package:aqar_user/services/invoice_service.dart';
 import 'package:aqar_user/services/payment_service.dart';
 
 void main() {
@@ -48,6 +52,51 @@ void main() {
       expect(en.displayInvoiceNumber, 'Unavailable');
       expect(ar.pdfFileName, 'Invoice_pending.pdf');
       expect(ar.qrPayload.contains(uuid), isFalse);
+    });
+
+    test('uses a valid official invoice number when no sequence is available',
+        () {
+      final doc = InvoiceDocument.fromRow({
+        'invoice_number': 'INV-20260910-000123',
+        'amount': 10,
+        'status': 'success',
+      }, isAr: true);
+
+      expect(doc.invoiceNumber, 'INV-20260910-000123');
+      expect(doc.displayInvoiceNumber, 'INV-20260910-000123');
+      expect(doc.invoiceNumberRegistrationLabel, 'رقم رسمي مسجّل');
+    });
+
+    test('clearly marks when a row has no registered official number', () {
+      final doc = InvoiceDocument.fromRow({
+        'id': 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        'amount': 10,
+        'status': 'success',
+      }, isAr: true);
+
+      expect(doc.hasInvoiceNumber, isFalse);
+      expect(
+        doc.invoiceNumberRegistrationLabel,
+        'لا يوجد رقم رسمي مسجّل لهذه العملية',
+      );
+      expect(doc.displayInvoiceNumber, 'غير متوفر');
+    });
+
+    test('includes actual subscription dates in its period label', () {
+      final doc = InvoiceDocument.fromRow(
+          {
+            'billing_period': 'monthly',
+            'amount': 10,
+            'status': 'success',
+          },
+          isAr: true,
+          subscription: {
+            'starts_at': '2026-09-01',
+            'ends_at': '2026-10-01',
+          });
+
+      expect(doc.periodKindLabel, 'شهري');
+      expect(doc.periodLabel, contains('من 2026/09/01 إلى 2026/10/01'));
     });
 
     test('payment reference is numeric and never exposes gateway UUIDs', () {
@@ -198,6 +247,67 @@ void main() {
         BillingTransactionRepository.normalizedStatus({'status': 'expired'}),
         'failed',
       );
+    });
+  });
+
+  group('InvoiceService exports', () {
+    late SupabaseClient supabase;
+    late InvoiceService invoices;
+
+    setUp(() {
+      supabase = SupabaseClient('https://example.supabase.co', 'test-key');
+      invoices = InvoiceService(
+        repository: BillingTransactionRepository(supabase),
+        isAr: true,
+        supabase: supabase,
+      );
+    });
+
+    tearDown(() => supabase.dispose());
+
+    final row = <String, dynamic>{
+      'id': 'billing-id',
+      'user_invoice_seq': 25,
+      'amount': 10,
+      'currency': 'SAR',
+      'status': 'success',
+      'payment_method': 'mada',
+      'created_at': '2026-11-06T10:00:00Z',
+    };
+
+    test('Excel export has branded heading and number registration status',
+        () async {
+      final bytes = await invoices.exportAllExcel([row]);
+      final workbook = Excel.decodeBytes(bytes);
+      final sheet = workbook.tables['فواتير']!;
+
+      expect(
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0))
+            .value
+            .toString(),
+        contains('بسم الله الرحمن الرحيم'),
+      );
+      expect(
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: 22, rowIndex: 8))
+            .value
+            .toString(),
+        contains('رقم رسمي مسجّل'),
+      );
+    });
+
+    test('CSV export includes the letterhead and explicit invoice number state',
+        () async {
+      final csv = await invoices.exportAllCsv([row]);
+
+      expect(csv, contains('بسم الله الرحمن الرحيم'));
+      expect(
+        csv,
+        contains(AppBranding.invoiceLetterheadBrandName(isAr: true)),
+      );
+      expect(csv, contains('أرقام رسمية مسجّلة'));
+      expect(csv, contains('رقم رسمي مسجّل'));
     });
   });
 

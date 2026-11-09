@@ -45,7 +45,7 @@ class InvoiceDocument {
     final seq = userInvoiceSeq;
     if (seq != null && seq > 0) return '$seq';
     final official = '${row['invoice_number'] ?? ''}'.trim();
-    if (RegExp(r'^[1-9]\d{0,8}$').hasMatch(official)) return official;
+    if (isOfficialInvoiceNumber(official)) return official;
     return '';
   }
 
@@ -54,6 +54,15 @@ class InvoiceDocument {
   String get displayInvoiceNumber {
     if (hasInvoiceNumber) return invoiceNumber;
     return isAr ? 'غير متوفر' : 'Unavailable';
+  }
+
+  String get invoiceNumberRegistrationLabel {
+    if (hasInvoiceNumber) {
+      return isAr ? 'رقم رسمي مسجّل' : 'Official number recorded';
+    }
+    return isAr
+        ? 'لا يوجد رقم رسمي مسجّل لهذه العملية'
+        : 'No official number recorded for this transaction';
   }
 
   String get documentTitle =>

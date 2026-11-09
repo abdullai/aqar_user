@@ -169,6 +169,8 @@ import '../services/presence_heartbeat_service.dart';
 import '../services/guest_session_bridge.dart';
 import '../services/guest_unlock_service.dart';
 import '../widgets/guest_participation_gate.dart';
+import '../widgets/aqar_signature_home_banner.dart';
+import '../widgets/property_comparison_sheet.dart';
 import '../services/subscription_service.dart';
 import '../widgets/marketing_subscription_paywall_dialog.dart';
 import '../services/legal_terms_prompt_service.dart';
