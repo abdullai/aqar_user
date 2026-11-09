@@ -2506,6 +2506,43 @@ class _PropertyGrid extends StatelessWidget {
 // Real Estate Card
 // =========================
 
+Widget _listingCardAmountWidget({
+  required BuildContext context,
+  required num amount,
+  required bool isAr,
+  required bool isAuction,
+}) {
+  final cs = Theme.of(context).colorScheme;
+  final theme = Theme.of(context);
+  if (amount > 0) {
+    return AppMoneyLine(
+      amount: amount.toDouble(),
+      currencyCode: 'SAR',
+      isAr: isAr,
+      maxFractionDigits: 0,
+      symbolColor: isAuction ? Colors.orange.shade800 : cs.primary,
+      style: theme.textTheme.titleMedium?.copyWith(
+        fontWeight: FontWeight.w900,
+        color: isAuction ? Colors.orange.shade800 : cs.onSurface,
+        fontFamily: 'Cairo',
+        fontSize: 18,
+        height: 1.1,
+      ),
+    );
+  }
+  return Text(
+    isAr ? 'السعر عند الطلب' : 'Price on request',
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w800,
+      color: cs.onSurfaceVariant,
+      fontFamily: 'Cairo',
+      fontSize: 13.5,
+    ),
+  );
+}
+
 class _RealEstateCard extends StatelessWidget {
   final Property property;
   final bool isOwner;
@@ -3086,10 +3123,10 @@ class _RealEstateCard extends StatelessWidget {
                     : (isAr ? 'إضافة للمفضلة' : 'Add to favorites'),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(
-                  width: 36,
-                  height: 36,
+                  width: 44,
+                  height: 44,
                 ),
-                iconSize: 20,
+                iconSize: 24,
                 onPressed: onToggleFav,
                 icon: Icon(
                   favorite
@@ -3108,6 +3145,49 @@ class _RealEstateCard extends StatelessWidget {
             child: CatalogFeaturedBadge(isAr: isAr),
           ),
         // عدد الصور أسفل منتصف الصورة.
+        PositionedDirectional(
+          top: 52,
+          start: 8,
+          child: IgnorePointer(
+            child: Tooltip(
+              message: isAr
+                  ? 'عدد المشاهدات: ${property.views}'
+                  : 'Views: ${property.views}',
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.68),
+                  borderRadius: BorderRadius.circular(999),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.28)),
+                ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.visibility_outlined,
+                        size: 15,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        '${property.views}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          height: 1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
         if (PropertyListingDisplay.propertyCardImagePaths(property).length > 1)
           Positioned(
             bottom: 8,
@@ -3745,43 +3825,40 @@ class _RealEstateCard extends StatelessWidget {
         Builder(
           builder: (ctx) {
             final raw = (property.listingPublicCode ?? '').trim();
-            final amountWidget = baseAmount > 0
-                ? AppMoneyLine(
-                    amount: baseAmount,
-                    currencyCode: 'SAR',
-                    isAr: isAr,
-                    maxFractionDigits: 0,
-                    symbolColor: property.isAuction
-                        ? Colors.orange.shade800
-                        : cs.primary,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: property.isAuction
-                          ? Colors.orange.shade800
-                          : cs.onSurface,
-                      fontFamily: 'Cairo',
-                      fontSize: 18,
-                      height: 1.1,
-                    ),
-                  )
-                : Text(
-                    isAr ? 'السعر عند الطلب' : 'Price on request',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: cs.onSurfaceVariant,
-                      fontFamily: 'Cairo',
-                      fontSize: 13.5,
-                    ),
-                  );
+            final amountWidget = _listingCardAmountWidget(
+              context: ctx,
+              amount: baseAmount,
+              isAr: isAr,
+              isAuction: property.isAuction,
+            );
             if (raw.isEmpty) {
+              if (ownerHubListingCard) return const SizedBox.shrink();
               return Align(
                 alignment: AlignmentDirectional.centerStart,
                 child: amountWidget,
               );
             }
             final code = DisplayIds.tenDigit(raw);
+            if (ownerHubListingCard) {
+              return Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      isAr ? 'رقم الإعلان: $code' : 'Listing no.: $code',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: cs.primary,
+                        fontFamily: 'Cairo',
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  _copyInlineIcon(ctx, code),
+                ],
+              );
+            }
             if (layoutWidth >= 460) {
               return Row(
                 children: [
@@ -3863,6 +3940,16 @@ class _RealEstateCard extends StatelessWidget {
             value: deedDate.isEmpty
                 ? (isAr ? 'غير مُدخل' : 'Not provided')
                 : deedDate,
+          ),
+          const SizedBox(height: 2),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: _listingCardAmountWidget(
+              context: context,
+              amount: baseAmount,
+              isAr: isAr,
+              isAuction: property.isAuction,
+            ),
           ),
         ],
         const SizedBox(height: 2),

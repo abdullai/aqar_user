@@ -74,8 +74,16 @@ class _SupportHubTabsState extends State<SupportHubTabs>
       children: [
         TabBar(
           controller: _tabCtrl,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
+          isScrollable: false,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+          labelStyle: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w700,
+          ),
           tabs: [
             Tab(text: l10n.supportHubTechnicalTab),
             Tab(text: l10n.supportHubComplaintTab),
@@ -94,19 +102,24 @@ class _SupportHubTabsState extends State<SupportHubTabs>
                 hideComplaintForm: true,
                 scrollController: widget.helpScrollController,
               ),
-              ListView(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
-                keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                children: [
-                  ComplaintSubmitForm(
-                    isAr: widget.isAr,
-                    userId: widget.userId,
-                    accentColor: widget.bankColor,
-                    onSubmittedInApp: _goToTickets,
+                  Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 760),
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        children: [
+                          ComplaintSubmitForm(
+                            isAr: widget.isAr,
+                            userId: widget.userId,
+                            accentColor: widget.bankColor,
+                            onSubmittedInApp: _goToTickets,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ],
-              ),
               SupportTicketsPanel(
                 key: _ticketsKey,
                 isAr: widget.isAr,

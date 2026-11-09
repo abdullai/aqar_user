@@ -163,11 +163,14 @@ class SupportPage extends StatelessWidget {
         ? 'دعم فني — ${AppBranding.brandNameAr}'
         : 'Support — ${AppBranding.brandNameEn}';
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: ListView(
-        controller: scrollController,
-        children: [
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 880),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: ListView(
+            controller: scrollController,
+            children: [
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -221,7 +224,7 @@ class SupportPage extends StatelessWidget {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          isAr ? 'الشكاوى والامتثال' : 'Complaints & compliance',
+                          isAr ? 'الشكاوى والاقتراحات' : 'Complaints & suggestions',
                           style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.w900,
@@ -233,8 +236,9 @@ class SupportPage extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     isAr
-                        ? 'للإبلاغ عن مخالفة أو طلب امتثال: يُسجَّل الطلب عبر البريد المخصّص. تُعالَج الشكاوى وفق سياسة داخلية (تصنيف، مهلة أول رد، إحالة للجنة عند الحاجة) — يُرفق وصفها في ملف الترخيص عند الطلب.'
-                        : 'To report a violation or compliance matter: use the dedicated mailbox. Complaints follow an internal workflow (triage, first-response SLA, escalation) — document this in your licensing file when required.',
+                        ? 'اختر وسيلة التواصل المناسبة لإرسال شكوى أو اقتراح. أرفق التفاصيل اللازمة ليتمكن فريق الدعم من مساعدتك.'
+                        : 'Choose a contact method to send a complaint or suggestion. Include the relevant details so our support team can help.',
+                    style: const TextStyle(fontSize: 15, height: 1.45),
                   ),
                   const SizedBox(height: 12),
                   if (!hideComplaintForm)
@@ -323,7 +327,9 @@ class SupportPage extends StatelessWidget {
               ),
             ),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }

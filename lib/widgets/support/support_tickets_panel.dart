@@ -606,35 +606,40 @@ class SupportTicketsPanelState extends State<SupportTicketsPanel> {
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _reload,
-      child: ListView.separated(
-        padding: const EdgeInsets.all(12),
-        itemCount: _rows.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (context, i) {
-          final t = _rows[i];
-          return Card(
-            child: ListTile(
-              leading: Icon(
-                t.kind == 'suggestion'
-                    ? Icons.lightbulb_outline
-                    : Icons.report_outlined,
-                color: widget.accentColor,
-              ),
-              title: Text(
-                t.subject,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-              subtitle: Text(
-                '${_statusLabel(l10n, t)}\n${_fmtWhen(t.createdAt)}',
-              ),
-              isThreeLine: true,
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => _openTicketDetail(t),
-            ),
-          );
-        },
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 880),
+        child: RefreshIndicator(
+          onRefresh: _reload,
+          child: ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemCount: _rows.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, i) {
+              final t = _rows[i];
+              return Card(
+                child: ListTile(
+                  leading: Icon(
+                    t.kind == 'suggestion'
+                        ? Icons.lightbulb_outline
+                        : Icons.report_outlined,
+                    color: widget.accentColor,
+                  ),
+                  title: Text(
+                    t.subject,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  subtitle: Text(
+                    '${_statusLabel(l10n, t)}\n${_fmtWhen(t.createdAt)}',
+                  ),
+                  isThreeLine: true,
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _openTicketDetail(t),
+                ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }

@@ -1321,6 +1321,7 @@ class _DashboardAdvDraftHolder {
     required this.homeKind,
     required this.hidden,
     this.persistDraft = true,
+    this.photoFilter = 'all',
     this.region = '',
     this.governorate = '',
     this.district = '',
@@ -1340,6 +1341,7 @@ class _DashboardAdvDraftHolder {
       sort: s._sortBy,
       homeKind: s._homeFeedKind,
       hidden: s._homeShowHiddenOnly,
+      photoFilter: s._marketerPhotographyMarketFilter,
       region: s._regionFilter,
       governorate: s._governorateFilter,
       district: s._districtFilter,
@@ -1360,6 +1362,7 @@ class _DashboardAdvDraftHolder {
         homeKind: homeKind,
         hidden: hidden,
         persistDraft: persistDraft,
+        photoFilter: photoFilter,
         region: region,
         governorate: governorate,
         district: district,
@@ -1378,6 +1381,7 @@ class _DashboardAdvDraftHolder {
   HomeFeedKind homeKind;
   bool hidden;
   bool persistDraft;
+  String photoFilter;
 
   /// تدرّج الموقع — حقول نصّية بسيطة. عند اختيار «المدينة» يُسحب القيمة إلى
   /// [city] أيضاً ليعمل فلتر المدينة الحالي. عند ترك «الحيّ» سيُلحَق نصُّه
@@ -1399,6 +1403,7 @@ class _DashboardAdvDraftHolder {
     sort = 'latest';
     homeKind = HomeFeedKind.all;
     hidden = false;
+    photoFilter = 'all';
     region = '';
     governorate = '';
     district = '';

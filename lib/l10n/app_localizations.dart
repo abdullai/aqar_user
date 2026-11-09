@@ -3095,13 +3095,13 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingWelcomeBodyApp.
   ///
   /// In en, this message translates to:
-  /// **'We’re glad you’re here. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.'**
+  /// **'Your real-estate journey starts here. We’ll show you the key tools step by step, and you can replay this tour anytime from Settings.'**
   String get onboardingWelcomeBodyApp;
 
   /// No description provided for @onboardingWelcomeBodyWeb.
   ///
   /// In en, this message translates to:
-  /// **'We’re glad you’re here on the Mawthuq Line Real Estate Establishment platform. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.'**
+  /// **'Manage your real-estate journey from the Mawthuq Line platform. We’ll show you the key tools step by step, and you can replay this tour anytime from Settings.'**
   String get onboardingWelcomeBodyWeb;
 
   /// No description provided for @onboardingHomeTitle.
@@ -3113,8 +3113,20 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingHomeBody.
   ///
   /// In en, this message translates to:
-  /// **'Browse listings and use the filters at the top (city, type, purpose). Tap any card to open full details.'**
+  /// **'Property listings and requests appear here. Open a card to see its details and available ways to contact the advertiser.'**
   String get onboardingHomeBody;
+
+  /// No description provided for @onboardingFiltersTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Find what you need'**
+  String get onboardingFiltersTitle;
+
+  /// No description provided for @onboardingFiltersBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Type a search term, or open Advanced to filter by city, property type, and purpose. Results update to match your choices.'**
+  String get onboardingFiltersBody;
 
   /// No description provided for @onboardingMyAdsTitle.
   ///
@@ -3158,6 +3170,18 @@ abstract class AppLocalizations {
   /// **'Your property listings and market requests you submitted appear as cards, similar to Home — open them from the Requests/Listings tab.'**
   String get onboardingMySubmissionsBody;
 
+  /// No description provided for @onboardingQuickBrowseTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick browse'**
+  String get onboardingQuickBrowseTitle;
+
+  /// No description provided for @onboardingQuickBrowseBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Browse short real-estate videos. Swipe between clips and open anything that catches your eye to learn more.'**
+  String get onboardingQuickBrowseBody;
+
   /// No description provided for @onboardingCartTitle.
   ///
   /// In en, this message translates to:
@@ -3167,7 +3191,7 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingCartBody.
   ///
   /// In en, this message translates to:
-  /// **'Review properties you added to My deals before you continue.'**
+  /// **'Keep track of properties you added to My deals and revisit their details before moving forward.'**
   String get onboardingCartBody;
 
   /// No description provided for @onboardingChatTitle.
@@ -3191,7 +3215,7 @@ abstract class AppLocalizations {
   /// No description provided for @onboardingSupportBody.
   ///
   /// In en, this message translates to:
-  /// **'Help center, in-app complaint, and tickets with administration. It opens over every tab; close with X to go back. Open chats from the bell icon or from here.'**
+  /// **'Get help, send an in-app complaint, or follow up on support tickets. This page opens over your current tab; close it to return.'**
   String get onboardingSupportBody;
 
   /// No description provided for @onboardingMyDeskTitle.
@@ -3217,6 +3241,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Your organization workspace—follow tasks according to your permissions from the My desk icon in the top app bar.'**
   String get onboardingMyDeskBodyOrgMember;
+
+  /// No description provided for @onboardingMapTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Property map'**
+  String get onboardingMapTitle;
+
+  /// No description provided for @onboardingMapBody.
+  ///
+  /// In en, this message translates to:
+  /// **'See property listings and requests on a map, and explore them by location.'**
+  String get onboardingMapBody;
+
+  /// No description provided for @onboardingAudienceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Who\'s online'**
+  String get onboardingAudienceTitle;
+
+  /// No description provided for @onboardingAudienceBody.
+  ///
+  /// In en, this message translates to:
+  /// **'See an estimate of people currently online, including guests. Open it for live audience statistics.'**
+  String get onboardingAudienceBody;
+
+  /// No description provided for @onboardingCommunicationsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Alerts and chats'**
+  String get onboardingCommunicationsTitle;
+
+  /// No description provided for @onboardingCommunicationsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your notifications and unread messages are here. Open the hub to review them and jump into a conversation.'**
+  String get onboardingCommunicationsBody;
+
+  /// No description provided for @onboardingOptionsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Account options'**
+  String get onboardingOptionsTitle;
+
+  /// No description provided for @onboardingOptionsBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Open market insights, favorites, settings, and subscriptions. Reports appear when your account has access.'**
+  String get onboardingOptionsBody;
 
   /// No description provided for @onboardingStepCounter.
   ///

@@ -78,11 +78,11 @@ class _ListingPublicActionsMenuButtonState
   }
 
   double _iconSize(BuildContext context) {
-    return 20;
+    return 22;
   }
 
   double _pad(BuildContext context) {
-    return 8;
+    return 11;
   }
 
   Future<void> _openMenu() async {
@@ -212,11 +212,69 @@ class _ListingPublicActionsMenuButtonState
 
     if (items.isEmpty) return;
 
-    final choice = await showMenu<String>(
-      context: context,
-      position: rect,
-      items: items,
-    );
+    final size = MediaQuery.sizeOf(context);
+    final String? choice;
+    if (size.width < 480) {
+      choice = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        builder: (sheetContext) => ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: size.height * 0.72),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsetsDirectional.fromSTEB(20, 4, 20, 12),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    l10n.listingPublicActionsTooltip,
+                    style: Theme.of(sheetContext)
+                        .textTheme
+                        .titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) =>
+                      const Divider(height: 1, indent: 20, endIndent: 20),
+                  itemBuilder: (context, index) {
+                    final entry = items[index];
+                    if (entry is! PopupMenuItem<String>) {
+                      return const SizedBox.shrink();
+                    }
+                    return ListTile(
+                      minVerticalPadding: 12,
+                      contentPadding:
+                          const EdgeInsetsDirectional.symmetric(horizontal: 20),
+                      title: entry.child,
+                      onTap: () => Navigator.of(sheetContext).pop(entry.value),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      final menuWidth = size.width - 32;
+      choice = await showMenu<String>(
+        context: context,
+        position: rect,
+        items: items,
+        constraints: BoxConstraints(
+          minWidth: menuWidth < 240 ? menuWidth : 240,
+          maxWidth: menuWidth,
+        ),
+      );
+    }
 
     if (!mounted) return;
     switch (choice) {

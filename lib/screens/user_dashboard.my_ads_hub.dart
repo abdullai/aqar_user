@@ -418,6 +418,15 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
   bool _matchesMyPagePropertyFilters(Property property) {
     final filters = _myPageAdvancedFilters;
+    if (filters.homeKind == HomeFeedKind.requests) return false;
+    if (filters.photoFilter == 'required' &&
+        !property.needsPhotographerShoot) {
+      return false;
+    }
+    if (filters.photoFilter == 'not_required' &&
+        property.needsPhotographerShoot) {
+      return false;
+    }
     if (!_matchesSearch(property, filters.query)) return false;
     if (!_matchesCityFilter(property, filters.city)) return false;
 
@@ -484,8 +493,25 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     return true;
   }
 
-  bool _matchesMyPageRequestFilters(Map<String, dynamic> row) {
+  bool _matchesMyPageRequestFilters(
+    Map<String, dynamic> row, {
+    bool applyHomeKind = true,
+  }) {
     final filters = _myPageAdvancedFilters;
+    if (applyHomeKind && filters.homeKind == HomeFeedKind.listings) {
+      return false;
+    }
+    final shootKinds = row['shoot_kinds'];
+    final requiredPhotography = shootKinds is Iterable
+        ? shootKinds.any((kind) => '$kind'.trim().toLowerCase() == 'photos')
+        : row['photography_required'] == true ||
+            '${row['photography_required']}'.trim().toLowerCase() == 'true';
+    if (filters.photoFilter == 'required' && !requiredPhotography) {
+      return false;
+    }
+    if (filters.photoFilter == 'not_required' && requiredPhotography) {
+      return false;
+    }
     if (!_matchesHubRowSearch(row)) return false;
     if (!_matchesHubRowRanges(row)) return false;
     final hierarchy = _norm(
@@ -2336,7 +2362,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             ),
           ],
           _hubMarketerListingIdRow(merged, cs, listingIdGreen: true),
-          _hubMarketerPriceStrip(merged, cs),
           if (showMarketingRequestRow) ...[
             const SizedBox(height: 6),
             Builder(
@@ -2372,6 +2397,8 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             valueMaxLines: 1,
             inlineLabel: true,
           ),
+
+          _hubMarketerPriceStrip(merged, cs),
           _hubRequestCreatedDateTimeRow(merged, cs),
           if (wfCtx.isPublishedPublic && propPublished != null) ...[
             const SizedBox(height: 6),
@@ -2721,7 +2748,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
     final valueStyle = TextStyle(
       fontWeight: FontWeight.w900,
-      fontSize: 14,
+      fontSize: 13.5,
       height: 1.2,
       color: cs.onSurface,
     );
@@ -2744,7 +2771,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
         ? IconButton(
             tooltip: ar ? 'نسخ' : 'Copy',
             visualDensity: VisualDensity.compact,
-            constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+            constraints: const BoxConstraints.tightFor(width: 30, height: 30),
             padding: EdgeInsets.zero,
             iconSize: 18,
             icon: Icon(Icons.copy_rounded, color: cs.primary),
@@ -2783,7 +2810,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                 overflow: TextOverflow.ellipsis,
                 style: labelStyle,
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -2791,7 +2818,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
                   if (showCopy)
                     copyButton
                   else
-                    const SizedBox(width: 32, height: 32),
+                    const SizedBox(width: 30, height: 30),
                 ],
               ),
             ],
@@ -2799,7 +2826,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
 
     if (!showLeadingIcon) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 2),
+        padding: const EdgeInsets.only(bottom: 1),
         child: valueBlock,
       );
     }
@@ -4801,9 +4828,19 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
     }
 
     final filteredRows = sourceRows().where((r) {
-      if (!_matchesMyPageRequestFilters(r)) return false;
+      if (!_matchesMyPageRequestFilters(r, applyHomeKind: false)) {
+        return false;
+      }
+      if (_myPageAdvancedFilters.homeKind == HomeFeedKind.listings &&
+          tabIndex != 4) {
+        return false;
+      }
+      if (_myPageAdvancedFilters.homeKind == HomeFeedKind.requests &&
+          tabIndex == 4) {
+        return false;
+      }
       if (_marketerRowPublishedByOther(r)) return false;
-      if (tabIndex == 0 && _marketerPhotographyMarketFilter != 'all') {
+      if (_marketerPhotographyMarketFilter != 'all') {
         final requiredPhotography = r['photography_required'] == true ||
             '${r['photography_required']}'.trim().toLowerCase() == 'true';
         if (_marketerPhotographyMarketFilter == 'required' &&
@@ -5549,42 +5586,7 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
       marketerMyOffersTabLayout: marketerMyOffersTabLayout,
       marketerHubUnifiedMarketCard: true,
     );
-    if (!marketerInvitesTabLayout) return rowsList;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-          child: SegmentedButton<String>(
-            segments: [
-              ButtonSegment(
-                value: 'all',
-                label: Text(widget.isAr ? 'الكل' : 'All'),
-              ),
-              ButtonSegment(
-                value: 'required',
-                label: Text(widget.isAr ? 'بحاجة تصوير' : 'Needs photos'),
-              ),
-              ButtonSegment(
-                value: 'not_required',
-                label: Text(widget.isAr ? 'بلا تصوير' : 'No photos'),
-              ),
-            ],
-            selected: {_marketerPhotographyMarketFilter},
-            onSelectionChanged: (selection) {
-              if (selection.isEmpty) return;
-              _ss(
-                () => _marketerPhotographyMarketFilter = selection.first,
-              );
-            },
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-            ),
-          ),
-        ),
-        Expanded(child: rowsList),
-      ],
-    );
+    return rowsList;
   }
 
   Widget _buildTabLoadingState({
@@ -10047,9 +10049,6 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
           ],
           _hubUnifiedCardSpecRow(r, cs),
           _hubMarketerListingIdRow(r, cs),
-          _hubMarketerPriceStrip(r, cs),
-          if (marketerInvitesTabLayout || !_marketerOwnerChatUnlocked(r))
-            _hubRequestCreatedDateTimeRow(r, cs),
           _hubLabeledMetricRow(
             context,
             icon: Icons.description_outlined,
@@ -10067,6 +10066,9 @@ extension _UserDashboardStateMyAdsHub on _UserDashboardState {
             valueMaxLines: 1,
             inlineLabel: true,
           ),
+          _hubMarketerPriceStrip(r, cs),
+          if (marketerInvitesTabLayout || !_marketerOwnerChatUnlocked(r))
+            _hubRequestCreatedDateTimeRow(r, cs),
           if (type == 'published') ...[
             const SizedBox(height: 4),
             _hubPublishedOrReservedStatusChip(r, cs),

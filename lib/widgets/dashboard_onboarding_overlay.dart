@@ -1,4 +1,4 @@
-import 'dart:async' show Timer, unawaited;
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
@@ -25,6 +25,8 @@ class DashboardOnboardingStepData {
     required this.body,
     this.tabIndex,
     this.arrow = DashboardCoachArrow.down,
+    this.targetKey,
+
     /// موضع أفقي تقريبي للسهم (0=بداية، 1=نهاية) فوق شريط التنقل السفلي.
     this.navFraction,
   });
@@ -33,6 +35,7 @@ class DashboardOnboardingStepData {
   final String body;
   final int? tabIndex;
   final DashboardCoachArrow arrow;
+  final GlobalKey? targetKey;
 
   /// لخطوات الشريط السفلي: 0…1 من يسار الشاشة إلى يمينها (LTR).
   final double? navFraction;
@@ -46,7 +49,6 @@ class DashboardOnboardingOverlay extends StatefulWidget {
   final void Function(int tabIndex) onTabChange;
   final VoidCallback onComplete;
   final String partnerLine;
-  final Duration autoAdvance;
   final ValueChanged<double>? onBackdropPointerScroll;
 
   const DashboardOnboardingOverlay({
@@ -56,7 +58,6 @@ class DashboardOnboardingOverlay extends StatefulWidget {
     required this.onTabChange,
     required this.onComplete,
     required this.partnerLine,
-    this.autoAdvance = const Duration(seconds: 9),
     this.onBackdropPointerScroll,
   });
 
@@ -68,7 +69,7 @@ class DashboardOnboardingOverlay extends StatefulWidget {
 class _DashboardOnboardingOverlayState extends State<DashboardOnboardingOverlay>
     with SingleTickerProviderStateMixin {
   int _pageIndex = 0;
-  Timer? _autoTimer;
+  Rect? _targetRect;
   late final AnimationController _pulse;
 
   @override
@@ -82,25 +83,56 @@ class _DashboardOnboardingOverlayState extends State<DashboardOnboardingOverlay>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _applyTabForPage(0);
-      _armAutoAdvance();
+      _scheduleTargetMeasurement(0);
     });
   }
 
   @override
   void dispose() {
-    _autoTimer?.cancel();
     _pulse.dispose();
     super.dispose();
   }
 
-  void _armAutoAdvance() {
-    _autoTimer?.cancel();
-    _autoTimer = Timer(widget.autoAdvance, () {
-      if (!mounted) return;
-      if (_pageIndex >= widget.steps.length - 1) {
+  @override
+  void didUpdateWidget(covariant DashboardOnboardingOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.steps != widget.steps) {
+      _scheduleTargetMeasurement(_pageIndex);
+    }
+  }
+
+  void _scheduleTargetMeasurement(int page, {int attempt = 0}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || page != _pageIndex) return;
+      final targetKey = widget.steps[page].targetKey;
+      final targetObject = targetKey?.currentContext?.findRenderObject();
+      final overlayObject = context.findRenderObject();
+      if (targetObject is RenderBox &&
+          targetObject.attached &&
+          overlayObject is RenderBox &&
+          overlayObject.attached) {
+        final targetOrigin = targetObject.localToGlobal(Offset.zero);
+        final overlayOrigin = overlayObject.localToGlobal(Offset.zero);
+        final nextRect = Rect.fromLTWH(
+          targetOrigin.dx - overlayOrigin.dx,
+          targetOrigin.dy - overlayOrigin.dy,
+          targetObject.size.width,
+          targetObject.size.height,
+        );
+        if (_targetRect != nextRect) {
+          setState(() => _targetRect = nextRect);
+        }
         return;
       }
-      unawaited(_goNext());
+
+      if (attempt < 6 && targetKey != null) {
+        Future<void>.delayed(
+          const Duration(milliseconds: 80),
+          () => _scheduleTargetMeasurement(page, attempt: attempt + 1),
+        );
+      } else if (_targetRect != null) {
+        setState(() => _targetRect = null);
+      }
     });
   }
 
@@ -115,26 +147,26 @@ class _DashboardOnboardingOverlayState extends State<DashboardOnboardingOverlay>
       _finishAll();
       return;
     }
-    setState(() => _pageIndex += 1);
+    setState(() {
+      _pageIndex += 1;
+      _targetRect = null;
+    });
     _applyTabForPage(_pageIndex);
-    _armAutoAdvance();
+    _scheduleTargetMeasurement(_pageIndex);
   }
 
   Future<void> _goBack() async {
     if (_pageIndex == 0) return;
-    setState(() => _pageIndex -= 1);
+    setState(() {
+      _pageIndex -= 1;
+      _targetRect = null;
+    });
     _applyTabForPage(_pageIndex);
-    _armAutoAdvance();
+    _scheduleTargetMeasurement(_pageIndex);
   }
 
   void _finishAll() {
-    _autoTimer?.cancel();
     widget.onComplete();
-  }
-
-  void _onBackdropTap() {
-    _autoTimer?.cancel();
-    unawaited(_goNext());
   }
 
   Alignment _bubbleAlignment(DashboardOnboardingStepData step, bool rtl) {
@@ -161,90 +193,172 @@ class _DashboardOnboardingOverlayState extends State<DashboardOnboardingOverlay>
     final t = widget.l10n;
     final cs = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final step = widget.steps[_pageIndex];
-    final n = widget.steps.length;
-    final w = MediaQuery.sizeOf(context).width;
     final rtl = Directionality.of(context) == TextDirection.rtl;
-    // فقاعة مضغوطة شبه دائرية — لا تغطي الشاشة.
-    final maxCardW = (w * 0.78).clamp(240.0, 300.0);
 
     return ScrollConfiguration(
       behavior: const AqarScrollBehavior(),
       child: SafeArea(
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Positioned.fill(
-              child: Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerSignal: (signal) {
-                  if (signal is PointerScrollEvent) {
-                    widget.onBackdropPointerScroll
-                        ?.call(signal.scrollDelta.dy);
-                  }
-                },
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _onBackdropTap,
-                  child: ColoredBox(
-                    // خلفية خفيفة حتى تبقى التبويبات مرئية خلف الفقاعة.
-                    color: cs.scrim.withValues(alpha: 0.28),
-                  ),
-                ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final step = widget.steps[_pageIndex];
+            final n = widget.steps.length;
+            final maxCardW =
+                math.min(360.0, math.max(220.0, constraints.maxWidth - 24));
+            final maxCardH = math.min(320.0, constraints.maxHeight - 24);
+            final targetRect = _targetRect;
+            final placeBelow = targetRect == null ||
+                constraints.maxHeight - targetRect.bottom >= targetRect.top;
+            final resolvedArrow = targetRect == null
+                ? step.arrow
+                : placeBelow
+                    ? DashboardCoachArrow.up
+                    : DashboardCoachArrow.down;
+            final left = targetRect == null
+                ? null
+                : (targetRect.center.dx - maxCardW / 2)
+                    .clamp(12.0, constraints.maxWidth - maxCardW - 12);
+            final maxTop = math.max(
+              12.0,
+              constraints.maxHeight - maxCardH - 12,
+            );
+            final requestedTop = targetRect == null
+                ? 12.0
+                : placeBelow
+                    ? targetRect.bottom + 12
+                    : targetRect.top - maxCardH - 12;
+            final top = requestedTop.clamp(12.0, maxTop);
+            final bubble = ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: maxCardW,
+                maxHeight: maxCardH,
               ),
-            ),
-            Align(
-              alignment: _bubbleAlignment(step, rtl),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: AnimatedBuilder(
-                  animation: _pulse,
-                  builder: (context, child) {
-                    final lift = 1.0 + (_pulse.value * 0.014);
-                    return Transform.scale(scale: lift, child: child);
-                  },
-                  child: GestureDetector(
-                    onTap: () {},
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: maxCardW),
-                      child: _CoachBubble(
-                        arrow: step.arrow,
-                        partnerLine: widget.partnerLine,
-                        title: step.title,
-                        body: step.body,
-                        stepLabel: t.onboardingStepCounter(_pageIndex + 1, n),
-                        progress: (_pageIndex + 1) / n,
-                        onClose: _finishAll,
-                        onSkip: _finishAll,
-                        onBack: _pageIndex > 0
-                            ? () {
-                                _autoTimer?.cancel();
-                                unawaited(_goBack());
-                              }
-                            : null,
-                        onNext: () {
-                          _autoTimer?.cancel();
-                          unawaited(_goNext());
-                        },
-                        nextLabel: _pageIndex < n - 1
-                            ? t.onboardingNext
-                            : t.onboardingFinish,
-                        skipLabel: t.onboardingSkip,
-                        closeTooltip: t.onboardingClose,
-                        previousLabel: t.onboardingPrevious,
-                        colorScheme: cs,
-                        textTheme: textTheme,
+              child: _CoachBubble(
+                arrow: resolvedArrow,
+                partnerLine: widget.partnerLine,
+                title: step.title,
+                body: step.body,
+                stepLabel: t.onboardingStepCounter(_pageIndex + 1, n),
+                progress: (_pageIndex + 1) / n,
+                onClose: _finishAll,
+                onSkip: _finishAll,
+                onBack: _pageIndex > 0 ? () => unawaited(_goBack()) : null,
+                onNext: () => unawaited(_goNext()),
+                nextLabel:
+                    _pageIndex < n - 1 ? t.onboardingNext : t.onboardingFinish,
+                skipLabel: t.onboardingSkip,
+                closeTooltip: t.onboardingClose,
+                previousLabel: t.onboardingPrevious,
+                colorScheme: cs,
+                textTheme: textTheme,
+              ),
+            );
+
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: Listener(
+                    behavior: HitTestBehavior.translucent,
+                    onPointerSignal: (signal) {
+                      if (signal is PointerScrollEvent) {
+                        widget.onBackdropPointerScroll
+                            ?.call(signal.scrollDelta.dy);
+                      }
+                    },
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {},
+                      child: CustomPaint(
+                        painter: _SpotlightBackdropPainter(
+                          targetRect: targetRect,
+                          scrimColor: cs.scrim.withValues(alpha: 0.78),
+                          highlightColor: cs.primary,
+                          pulseAnimation: _pulse,
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          ],
+                if (targetRect == null)
+                  Align(
+                    alignment: _bubbleAlignment(step, rtl),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: bubble,
+                    ),
+                  )
+                else
+                  Positioned(
+                    left: left,
+                    top: top,
+                    width: maxCardW,
+                    child: bubble,
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
   }
+}
+
+class _SpotlightBackdropPainter extends CustomPainter {
+  const _SpotlightBackdropPainter({
+    required this.targetRect,
+    required this.scrimColor,
+    required this.highlightColor,
+    required this.pulseAnimation,
+  }) : super(repaint: pulseAnimation);
+
+  final Rect? targetRect;
+  final Color scrimColor;
+  final Color highlightColor;
+  final Animation<double> pulseAnimation;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final target = targetRect;
+    final pulse = pulseAnimation.value;
+    final scrim = Path()..addRect(Offset.zero & size);
+    if (target != null) {
+      final hole = RRect.fromRectAndRadius(
+        target.inflate(8 + pulse * 2),
+        const Radius.circular(20),
+      );
+      scrim
+        ..fillType = PathFillType.evenOdd
+        ..addRRect(hole);
+      canvas.drawPath(scrim, Paint()..color = scrimColor);
+      canvas.drawRRect(
+        hole,
+        Paint()
+          ..color = highlightColor.withValues(alpha: 0.24 + pulse * 0.12)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 9
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+      );
+      canvas.drawRRect(
+        hole,
+        Paint()
+          ..color = highlightColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.5,
+      );
+      return;
+    }
+    canvas.drawPath(scrim, Paint()..color = scrimColor);
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpotlightBackdropPainter oldDelegate) =>
+      oldDelegate.targetRect != targetRect ||
+      oldDelegate.scrimColor != scrimColor ||
+      oldDelegate.highlightColor != highlightColor ||
+      oldDelegate.pulseAnimation != pulseAnimation;
 }
 
 class _CoachBubble extends StatelessWidget {

@@ -201,6 +201,32 @@ class _UserDashboardState extends State<UserDashboard>
 
   /// إعادة الجولة من الإعدادات فقط — بعدها يُعرض اختيار الألوان مرة.
   bool _offerAccentAfterTourReplay = false;
+  final GlobalKey _tourHomeTargetKey =
+      GlobalKey(debugLabel: 'tour-home-destination');
+  final GlobalKey _tourMyAdsTargetKey =
+      GlobalKey(debugLabel: 'tour-my-ads-destination');
+  final GlobalKey _tourSubmissionsTargetKey =
+      GlobalKey(debugLabel: 'tour-submissions-destination');
+  final GlobalKey _tourQuickBrowseTargetKey =
+      GlobalKey(debugLabel: 'tour-quick-browse-destination');
+  final GlobalKey _tourQuickBrowseRailTargetKey =
+      GlobalKey(debugLabel: 'tour-quick-browse-rail-icon');
+  final GlobalKey _tourMyDeskTargetKey =
+      GlobalKey(debugLabel: 'tour-my-desk-destination');
+  final GlobalKey _tourDealsTargetKey =
+      GlobalKey(debugLabel: 'tour-deals-destination');
+  final GlobalKey _tourSupportTargetKey =
+      GlobalKey(debugLabel: 'tour-support-destination');
+  final GlobalKey _tourFiltersTargetKey =
+      GlobalKey(debugLabel: 'tour-home-search-filters');
+  final GlobalKey _tourMapTargetKey =
+      GlobalKey(debugLabel: 'tour-listings-map');
+  final GlobalKey _tourAudienceTargetKey =
+      GlobalKey(debugLabel: 'tour-live-audience');
+  final GlobalKey _tourNotificationsTargetKey =
+      GlobalKey(debugLabel: 'tour-communications');
+  final GlobalKey _tourActionsTargetKey =
+      GlobalKey(debugLabel: 'tour-more-options');
   String _searchQuery = '';
   String _cityFilter = 'all';
   String _regionFilter = '';
@@ -411,6 +437,8 @@ class _UserDashboardState extends State<UserDashboard>
       final filters = _myPageAdvancedFilters;
       return filters.query.trim().isNotEmpty ||
           (filters.city.trim().isNotEmpty && filters.city != 'all') ||
+          filters.homeKind != HomeFeedKind.all ||
+          filters.photoFilter != 'all' ||
           filters.type != null ||
           filters.purpose != null ||
           filters.furnished != null ||
@@ -2147,6 +2175,49 @@ class _UserDashboardState extends State<UserDashboard>
                                         _scheduleAdvSearchDraftSave(sheet);
                                       },
                                     ),
+                                    if (myPageScope) ...[
+                                      actionChip(
+                                        selected:
+                                            sheet.photoFilter == 'all',
+                                        label: _isArabic
+                                            ? 'كل حالات التصوير'
+                                            : 'All photo statuses',
+                                        icon: Icons.photo_camera_back_outlined,
+                                        onTap: () {
+                                          setModalState(() =>
+                                              sheet.photoFilter = 'all');
+                                          _scheduleAdvSearchDraftSave(sheet);
+                                        },
+                                      ),
+                                      actionChip(
+                                        selected:
+                                            sheet.photoFilter == 'required',
+                                        label: _isArabic
+                                            ? 'بحاجة تصوير'
+                                            : 'Needs photography',
+                                        icon: Icons.camera_alt_outlined,
+                                        onTap: () {
+                                          setModalState(() => sheet
+                                                  .photoFilter =
+                                              'required');
+                                          _scheduleAdvSearchDraftSave(sheet);
+                                        },
+                                      ),
+                                      actionChip(
+                                        selected: sheet.photoFilter ==
+                                            'not_required',
+                                        label: _isArabic
+                                            ? 'بلا تصوير'
+                                            : 'No photography',
+                                        icon: Icons.no_photography_outlined,
+                                        onTap: () {
+                                          setModalState(() => sheet
+                                                  .photoFilter =
+                                              'not_required');
+                                          _scheduleAdvSearchDraftSave(sheet);
+                                        },
+                                      ),
+                                    ],
                                     actionChip(
                                       selected: _paidPriorityOnlyFilter,
                                       label: _isArabic
@@ -2566,7 +2637,10 @@ class _UserDashboardState extends State<UserDashboard>
                                       ..sort = 'latest'
                                       ..region = sheet.region
                                       ..governorate = sheet.governorate
-                                      ..district = sheet.district;
+                                      ..district = sheet.district
+                                      ..homeKind = sheet.homeKind
+                                      ..photoFilter = sheet.photoFilter;
+      _marketerPhotographyMarketFilter = sheet.photoFilter;
                                     _inlineSearchCtrl.text =
                                         _myPageAdvancedFilters.query;
                                   });
@@ -3643,14 +3717,24 @@ class _UserDashboardState extends State<UserDashboard>
       ),
     );
 
-    // الرئيسية — أسفل يسار/أول تبويب
+    // تبويبات الشريط: كل تلميح يحدد العنصر الذي يصفه فعلياً.
     steps.add(
       DashboardOnboardingStepData(
         title: l10n.onboardingHomeTitle,
         body: l10n.onboardingHomeBody,
         tabIndex: 0,
+        targetKey: _tourHomeTargetKey,
         arrow: DashboardCoachArrow.down,
-        navFraction: 0.08,
+      ),
+    );
+
+    steps.add(
+      DashboardOnboardingStepData(
+        title: l10n.onboardingFiltersTitle,
+        body: l10n.onboardingFiltersBody,
+        tabIndex: 0,
+        targetKey: _tourFiltersTargetKey,
+        arrow: DashboardCoachArrow.down,
       ),
     );
 
@@ -3662,8 +3746,8 @@ class _UserDashboardState extends State<UserDashboard>
             ? l10n.onboardingMyAdsBodyMarketing
             : l10n.onboardingMyAdsBodyOwner,
         tabIndex: 1,
+        targetKey: _tourMyAdsTargetKey,
         arrow: DashboardCoachArrow.down,
-        navFraction: 0.28,
       ),
     );
 
@@ -3673,30 +3757,20 @@ class _UserDashboardState extends State<UserDashboard>
         title: l10n.onboardingMySubmissionsTitle,
         body: l10n.onboardingMySubmissionsBody,
         tabIndex: 2,
+        targetKey: _tourSubmissionsTargetKey,
         arrow: DashboardCoachArrow.down,
-        navFraction: 0.48,
       ),
     );
 
-    // رؤى السوق — أيقونة علوية
     steps.add(
       DashboardOnboardingStepData(
-        title: l10n.marketInsightsTitle,
-        body: l10n.onboardingMarketInsightsBody,
+        title: l10n.onboardingQuickBrowseTitle,
+        body: l10n.onboardingQuickBrowseBody,
         tabIndex: null,
-        arrow: DashboardCoachArrow.up,
-        navFraction: 0.72,
-      ),
-    );
-
-    // الدردشة — أيقونة علوية
-    steps.add(
-      DashboardOnboardingStepData(
-        title: l10n.onboardingChatTitle,
-        body: l10n.onboardingChatBody,
-        tabIndex: null,
-        arrow: DashboardCoachArrow.up,
-        navFraction: 0.88,
+        targetKey: AppLayout.useDashboardSideNavigation(context)
+            ? _tourQuickBrowseRailTargetKey
+            : _tourQuickBrowseTargetKey,
+        arrow: DashboardCoachArrow.down,
       ),
     );
 
@@ -3711,20 +3785,20 @@ class _UserDashboardState extends State<UserDashboard>
           title: l10n.onboardingMyDeskTitle,
           body: deskBody,
           tabIndex: 5,
+          targetKey: _tourMyDeskTargetKey,
           arrow: DashboardCoachArrow.down,
-          navFraction: 0.55,
         ),
       );
     }
 
-    if (_cartReservationFeaturesEnabled) {
+    if (!_isGuest && _cartReservationFeaturesEnabled) {
       steps.add(
         DashboardOnboardingStepData(
           title: l10n.onboardingCartTitle,
           body: l10n.onboardingCartBody,
           tabIndex: 3,
+          targetKey: _tourDealsTargetKey,
           arrow: DashboardCoachArrow.down,
-          navFraction: 0.68,
         ),
       );
     }
@@ -3733,9 +3807,50 @@ class _UserDashboardState extends State<UserDashboard>
       DashboardOnboardingStepData(
         title: l10n.onboardingSupportTitle,
         body: l10n.onboardingSupportBody,
-        tabIndex: 4,
+        tabIndex: 0,
+        targetKey: _tourSupportTargetKey,
         arrow: DashboardCoachArrow.down,
-        navFraction: 0.88,
+      ),
+    );
+
+    // أزرار الشريط العلوي — تبقى لوحة التحكم على الرئيسية حتى تظهر.
+    steps.add(
+      DashboardOnboardingStepData(
+        title: l10n.onboardingMapTitle,
+        body: l10n.onboardingMapBody,
+        tabIndex: 0,
+        targetKey: _tourMapTargetKey,
+        arrow: DashboardCoachArrow.up,
+      ),
+    );
+
+    steps.add(
+      DashboardOnboardingStepData(
+        title: l10n.onboardingAudienceTitle,
+        body: l10n.onboardingAudienceBody,
+        tabIndex: 0,
+        targetKey: _tourAudienceTargetKey,
+        arrow: DashboardCoachArrow.up,
+      ),
+    );
+
+    steps.add(
+      DashboardOnboardingStepData(
+        title: l10n.onboardingCommunicationsTitle,
+        body: l10n.onboardingCommunicationsBody,
+        tabIndex: 0,
+        targetKey: _tourNotificationsTargetKey,
+        arrow: DashboardCoachArrow.up,
+      ),
+    );
+
+    steps.add(
+      DashboardOnboardingStepData(
+        title: l10n.onboardingOptionsTitle,
+        body: l10n.onboardingOptionsBody,
+        tabIndex: 0,
+        targetKey: _tourActionsTargetKey,
+        arrow: DashboardCoachArrow.up,
       ),
     );
 
@@ -5063,17 +5178,36 @@ class _UserDashboardState extends State<UserDashboard>
                                   ?.copyWith(fontWeight: FontWeight.w900),
                             ),
                           ),
-                          if (AqarScrollBehavior.isCompactTouchLike(context)) ...[
+                          if (AqarScrollBehavior.isCompactTouchLike(
+                              context)) ...[
                             // الجوال: شريط التطبيق العلوي مخفي في «صفحتي»،
                             // فتنتقل أدواته هنا لتأخذ الصفحة كامل الشاشة.
-                            _dashboardMapButton(
-                                Theme.of(context).colorScheme),
-                            _dashboardLiveAudienceButton(
-                                Theme.of(context).colorScheme),
-                            _dashboardNotificationsButton(
-                                l10n, Theme.of(context).colorScheme),
-                            _dashboardActionsMenu(
-                                l10n, Theme.of(context).colorScheme),
+                            KeyedSubtree(
+                              key: _tourMapTargetKey,
+                              child: _dashboardMapButton(
+                                Theme.of(context).colorScheme,
+                              ),
+                            ),
+                            KeyedSubtree(
+                              key: _tourAudienceTargetKey,
+                              child: _dashboardLiveAudienceButton(
+                                Theme.of(context).colorScheme,
+                              ),
+                            ),
+                            KeyedSubtree(
+                              key: _tourNotificationsTargetKey,
+                              child: _dashboardNotificationsButton(
+                                l10n,
+                                Theme.of(context).colorScheme,
+                              ),
+                            ),
+                            KeyedSubtree(
+                              key: _tourActionsTargetKey,
+                              child: _dashboardActionsMenu(
+                                l10n,
+                                Theme.of(context).colorScheme,
+                              ),
+                            ),
                           ] else
                             IconButton(
                               tooltip: _isArabic
@@ -5095,27 +5229,31 @@ class _UserDashboardState extends State<UserDashboard>
                   ),
                 ),
               if (_tabIndex == 0 || _tabIndex == 1 || _tabIndex == 2)
-                _buildTopFilters(
-                  // الرئيسية فقط: الكل / الطلبات / الإعلانات.
-                  // صفحتي وطلباتي/إعلاناتي: بحث + تحديث + متقدم (بدون تبويبات الرئيسية).
-                  compactForMyPage: _tabIndex == 1 || _tabIndex == 2,
-                  onRefresh: () async {
-                    if (_tabIndex == 1) {
-                      await _refreshCurrentMyPageRole();
-                    } else {
-                      await _reloadAll();
-                    }
-                  },
-                  showResultCount: _tabIndex == 0,
-                  resultCount: _tabIndex == 0
-                      ? (_homeFeedKind == HomeFeedKind.listings
-                          ? homeItems.length
-                          : _homeFeedKind == HomeFeedKind.requests
-                              ? homeRequestsFiltered.length
-                              : homeItems.length + homeRequestsFiltered.length)
-                      : _tabIndex == 2
-                          ? mySubmissionsCount
-                          : 0,
+                KeyedSubtree(
+                  key: _tourFiltersTargetKey,
+                  child: _buildTopFilters(
+                    // الرئيسية فقط: الكل / الطلبات / الإعلانات.
+                    // صفحتي وطلباتي/إعلاناتي: بحث + تحديث + متقدم (بدون تبويبات الرئيسية).
+                    compactForMyPage: _tabIndex == 1 || _tabIndex == 2,
+                    onRefresh: () async {
+                      if (_tabIndex == 1) {
+                        await _refreshCurrentMyPageRole();
+                      } else {
+                        await _reloadAll();
+                      }
+                    },
+                    showResultCount: _tabIndex == 0,
+                    resultCount: _tabIndex == 0
+                        ? (_homeFeedKind == HomeFeedKind.listings
+                            ? homeItems.length
+                            : _homeFeedKind == HomeFeedKind.requests
+                                ? homeRequestsFiltered.length
+                                : homeItems.length +
+                                    homeRequestsFiltered.length)
+                        : _tabIndex == 2
+                            ? mySubmissionsCount
+                            : 0,
+                  ),
                 ),
               Expanded(
                 // ويب: IndexedStack ذكي (لا يهدم إعلاناتي مع كل home.paint).
@@ -5154,23 +5292,6 @@ class _UserDashboardState extends State<UserDashboard>
                   ),
                 ),
               ),
-            ),
-          ),
-        if (_showDashboardOnboarding)
-          Positioned.fill(
-            child: DashboardOnboardingOverlay(
-              l10n: l10n,
-              partnerLine: _partnerOnboardingLine(),
-              steps: _buildDashboardOnboardingSteps(l10n),
-              onTabChange: (i) {
-                if (mounted) setState(() => _tabIndex = i);
-              },
-              onComplete: () {
-                unawaited(
-                  _completeDashboardOnboarding(resetTabToHome: false),
-                );
-              },
-              onBackdropPointerScroll: _onOnboardingBackdropPointerScroll,
             ),
           ),
       ],
@@ -5862,10 +5983,22 @@ class _UserDashboardState extends State<UserDashboard>
                       },
                     ),
                   ),
-                _dashboardMapButton(cs),
-                _dashboardLiveAudienceButton(cs),
-                _dashboardNotificationsButton(l10n, cs),
-                _dashboardActionsMenu(l10n, cs),
+                KeyedSubtree(
+                  key: _tourMapTargetKey,
+                  child: _dashboardMapButton(cs),
+                ),
+                KeyedSubtree(
+                  key: _tourAudienceTargetKey,
+                  child: _dashboardLiveAudienceButton(cs),
+                ),
+                KeyedSubtree(
+                  key: _tourNotificationsTargetKey,
+                  child: _dashboardNotificationsButton(l10n, cs),
+                ),
+                KeyedSubtree(
+                  key: _tourActionsTargetKey,
+                  child: _dashboardActionsMenu(l10n, cs),
+                ),
               ],
             ),
       body: AppKeyboardPad(
@@ -5977,13 +6110,37 @@ class _UserDashboardState extends State<UserDashboard>
           )
         : dashboardScaffold;
 
+    final dashboardWithOnboarding = Stack(
+      fit: StackFit.expand,
+      children: [
+        mainChrome,
+        if (_showDashboardOnboarding)
+          Positioned.fill(
+            child: DashboardOnboardingOverlay(
+              l10n: l10n,
+              partnerLine: _partnerOnboardingLine(),
+              steps: _buildDashboardOnboardingSteps(l10n),
+              onTabChange: (i) {
+                if (mounted) setState(() => _tabIndex = i);
+              },
+              onComplete: () {
+                unawaited(
+                  _completeDashboardOnboarding(resetTabToHome: false),
+                );
+              },
+              onBackdropPointerScroll: _onOnboardingBackdropPointerScroll,
+            ),
+          ),
+      ],
+    );
+
     if (kIsWeb) {
       return PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, result) {
           unawaited(_onDashboardPopInvoked(didPop));
         },
-        child: mainChrome,
+        child: dashboardWithOnboarding,
       );
     }
 
@@ -6002,7 +6159,7 @@ class _UserDashboardState extends State<UserDashboard>
           child: Stack(
             fit: StackFit.expand,
             children: [
-              mainChrome,
+              dashboardWithOnboarding,
               if (!hasInternet && !kIsWeb)
                 Positioned.fill(
                   child: Stack(
@@ -6184,7 +6341,6 @@ class _UserDashboardState extends State<UserDashboard>
       DashboardBottomSlot.myAds => 1,
       DashboardBottomSlot.mySubmissions => 2,
       DashboardBottomSlot.cart => 3,
-      DashboardBottomSlot.support => 4,
       DashboardBottomSlot.myDesk => 5,
       _ => null,
     };
@@ -6348,7 +6504,7 @@ class _UserDashboardState extends State<UserDashboard>
         unawaited(_loadMyMarketSubmissions(force: true, silent: true));
         break;
       case DashboardBottomSlot.support:
-        goTab(4);
+        unawaited(_openSupportHubOverlay());
         break;
     }
   }
@@ -6368,6 +6524,7 @@ class _UserDashboardState extends State<UserDashboard>
       switch (slot) {
         case DashboardBottomSlot.home:
           return NavigationDestination(
+            key: _tourHomeTargetKey,
             icon: wrap(const Icon(Icons.home_outlined)),
             selectedIcon: wrap(const Icon(Icons.home)),
             label: lab(l10n.navHome),
@@ -6382,6 +6539,7 @@ class _UserDashboardState extends State<UserDashboard>
           );
         case DashboardBottomSlot.myAds:
           return NavigationDestination(
+            key: _tourMyAdsTargetKey,
             icon: wrap(const Icon(Icons.list_alt_outlined)),
             selectedIcon: wrap(const Icon(Icons.list_alt)),
             label: lab(l10n.navMyAds),
@@ -6389,6 +6547,7 @@ class _UserDashboardState extends State<UserDashboard>
           );
         case DashboardBottomSlot.mySubmissions:
           return NavigationDestination(
+            key: _tourSubmissionsTargetKey,
             icon: wrap(const Icon(Icons.assignment_turned_in_outlined)),
             selectedIcon: wrap(const Icon(Icons.assignment_turned_in)),
             label: lab(l10n.navMySubmissions),
@@ -6419,6 +6578,7 @@ class _UserDashboardState extends State<UserDashboard>
           }
 
           return NavigationDestination(
+            key: _tourQuickBrowseTargetKey,
             icon: wrap(addChip(filled: false)),
             selectedIcon: wrap(addChip(filled: true)),
             label: lab(_isArabic ? 'تصفح سريع' : 'Quick browse'),
@@ -6431,6 +6591,7 @@ class _UserDashboardState extends State<UserDashboard>
               _orgPendingJoinCount > 0;
           // بلا Tooltip عند المرور — الاسم تحت الرمز كافٍ (ويب ويندوز/جوال/تطبيق).
           return NavigationDestination(
+            key: _tourMyDeskTargetKey,
             icon: wrap(
               _DeskNavBottomIcon(
                 icon: Icons.dashboard_outlined,
@@ -6450,6 +6611,7 @@ class _UserDashboardState extends State<UserDashboard>
         case DashboardBottomSlot.cart:
           final cartCs = Theme.of(context).colorScheme;
           return NavigationDestination(
+            key: _tourDealsTargetKey,
             icon: wrap(
               _BadgeIcon(
                 icon: Icons.handshake_outlined,
@@ -6463,6 +6625,7 @@ class _UserDashboardState extends State<UserDashboard>
           );
         case DashboardBottomSlot.support:
           return NavigationDestination(
+            key: _tourSupportTargetKey,
             icon: wrap(const Icon(Icons.support_agent_outlined)),
             selectedIcon: wrap(const Icon(Icons.support_agent)),
             label: lab(_isArabic ? 'الدعم الفني' : l10n.navSupport),
@@ -6482,20 +6645,31 @@ class _UserDashboardState extends State<UserDashboard>
       slots,
       selectedIndex: selected,
     );
-    return nav
-        .map(
-          (d) => NavigationRailDestination(
-            icon: d.icon,
-            selectedIcon: d.selectedIcon ?? d.icon,
-            label: Text(
-              d.label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
+    return nav.map(
+      (d) {
+        final isQuickBrowse = identical(d.key, _tourQuickBrowseTargetKey);
+        return NavigationRailDestination(
+          icon: isQuickBrowse
+              ? KeyedSubtree(
+                  key: _tourQuickBrowseRailTargetKey,
+                  child: d.icon,
+                )
+              : d.icon,
+          selectedIcon: isQuickBrowse
+              ? d.selectedIcon ?? d.icon
+              : KeyedSubtree(
+                  key: d.key,
+                  child: d.selectedIcon ?? d.icon,
+                ),
+          label: Text(
+            d.label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
           ),
-        )
-        .toList();
+        );
+      },
+    ).toList();
   }
 
   // =========================
@@ -8525,6 +8699,41 @@ class _UserDashboardState extends State<UserDashboard>
             ],
           ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: Semantics(
+            label: _isArabic ? 'فلتر التصوير' : 'Photography filter',
+            child: SegmentedButton<String>(
+              segments: [
+                ButtonSegment(
+                  value: 'all',
+                  label: Text(_isArabic ? 'الكل' : 'All'),
+                ),
+                ButtonSegment(
+                  value: 'required',
+                  label: Text(_isArabic ? 'بحاجة تصوير' : 'Needs photos'),
+                ),
+                ButtonSegment(
+                  value: 'not_required',
+                  label: Text(_isArabic ? 'بلا تصوير' : 'No photos'),
+                ),
+              ],
+              selected: {_myPageAdvancedFilters.photoFilter},
+              onSelectionChanged: (selection) {
+                if (selection.isEmpty) return;
+                final value = selection.first;
+                setState(() {
+                  _myPageAdvancedFilters.photoFilter = value;
+                  _marketerPhotographyMarketFilter = value;
+                });
+              },
+              showSelectedIcon: false,
+              style: const ButtonStyle(
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ),
+        ),
         Expanded(
           child: TabBarView(
             controller: roleCtrl,
@@ -9027,9 +9236,94 @@ class _UserDashboardState extends State<UserDashboard>
                 ),
               )
             : null;
+        final kindTabs = <({HomeFeedKind kind, IconData icon, String label})>[
+          (
+            kind: HomeFeedKind.all,
+            icon: Icons.grid_view_rounded,
+            label: _isArabic ? 'الكل' : 'All',
+          ),
+          (
+            kind: HomeFeedKind.requests,
+            icon: Icons.request_quote_outlined,
+            label: _isArabic ? 'الطلبات' : 'Requests',
+          ),
+          (
+            kind: HomeFeedKind.listings,
+            icon: Icons.home_work_outlined,
+            label: _isArabic ? 'الإعلانات' : 'Listings',
+          ),
+        ];
+        final kindFilter = Semantics(
+          label: _isArabic ? 'فلتر بطاقات صفحتي' : 'My page cards filter',
+          child: Container(
+            height: 42,
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHighest.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: _brandPrimary.withValues(alpha: _op(22)),
+              ),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Row(
+              children: [
+                for (final item in kindTabs)
+                  Expanded(
+                    child: Material(
+                      color: _homeFeedKind == item.kind
+                          ? _brandPrimary
+                          : Colors.transparent,
+                      child: InkWell(
+                        onTap: () => _setHomeFeedKind(item.kind),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                item.icon,
+                                size: 17,
+                                color: _homeFeedKind == item.kind
+                                    ? Colors.white
+                                    : cs.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  item.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: _homeFeedKind == item.kind
+                                        ? Colors.white
+                                        : cs.onSurfaceVariant,
+                                    height: 1,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
         final header = Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: kindFilter,
+            ),
             countBar,
             if (errBanner != null) errBanner,
           ],
@@ -9098,10 +9392,19 @@ class _UserDashboardState extends State<UserDashboard>
           );
         }
 
+        final showListings = _homeFeedKind == HomeFeedKind.all ||
+            _homeFeedKind == HomeFeedKind.listings;
+        final showRequests = _homeFeedKind == HomeFeedKind.all ||
+            _homeFeedKind == HomeFeedKind.requests;
+        final visibleListings =
+            showListings ? mineFiltered : const <Property>[];
+        final visibleRequests = showRequests
+            ? myReq
+            : const <MarketPropertyRequestRow>[];
         final mixedMine = buildMixedHomeTimeline(
-          mineFiltered,
-          myReq,
-          limit: mineFiltered.length + myReq.length,
+          visibleListings,
+          visibleRequests,
+          limit: visibleListings.length + visibleRequests.length,
           pinPaidRequests: false,
         )..sort((a, b) {
             final fa = a.listing?.isFeatured == true;
@@ -9463,11 +9766,16 @@ class _UserDashboardState extends State<UserDashboard>
   Future<void> _openSupportHubOverlay() async {
     AppHaptics.light();
     if (!mounted) return;
-    _ss(() {
-      _tabIndex = 4;
-      _bottomNavTransientIndex = null;
-      if (kIsWeb) _webVisitedTabs.add(4);
-    });
+    await _pushRootOverlay<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => SupportHubScreen(
+          userId: _isGuest ? '' : _uid,
+          isAr: _isArabic,
+          accentColor: _brandPrimary,
+          onLogin: _navigateToLogin,
+        ),
+      ),
+    );
   }
 
   // =========================

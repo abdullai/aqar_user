@@ -1618,18 +1618,25 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get onboardingWelcomeBodyApp =>
-      'يسعدنا وجودك معنا. سواء كنت تعمل بشكل مستقل، أو تمثّل مكتباً، أو شركة، أو مؤسسة، ففريقنا في خدمتك ليجعل تجربتك سلسة ويضع اهتمامك في المقدمة. نتمنى لك استكشافاً مريحاً.';
+      'من هنا تبدأ رحلتك العقارية. سنريك أهم الأدوات خطوة بخطوة، ويمكنك الرجوع للجولة من الإعدادات متى احتجت.';
 
   @override
   String get onboardingWelcomeBodyWeb =>
-      'يسعدنا وجودك على منصة مؤسسة موثوق لاين العقارية. سواء كنت تعمل بشكل مستقل، أو تمثّل مكتباً، أو شركة، أو مؤسسة، ففريقنا في خدمتك ليجعل تجربتك سلسة ويضع اهتمامك في المقدمة. نتمنى لك استكشافاً مريحاً.';
+      'من هنا تدير رحلتك العقارية على منصة موثوق لاين. سنريك أهم الأدوات خطوة بخطوة، ويمكنك الرجوع للجولة من الإعدادات متى احتجت.';
 
   @override
   String get onboardingHomeTitle => 'الرئيسية';
 
   @override
   String get onboardingHomeBody =>
-      'تصفّح الإعلانات واستخدم الفلاتر أعلى الشاشة (المدينة، النوع، الغرض). اضغط أي بطاقة لعرض التفاصيل الكاملة.';
+      'هنا تظهر الإعلانات والطلبات العقارية. افتح أي بطاقة لتشاهد التفاصيل وتتعرّف على خيارات التواصل المتاحة.';
+
+  @override
+  String get onboardingFiltersTitle => 'ابحث بالطريقة التي تناسبك';
+
+  @override
+  String get onboardingFiltersBody =>
+      'اكتب كلمة للبحث، أو افتح «متقدم» لتحديد المدينة ونوع العقار والغرض؛ تتحدّث النتائج وفق اختياراتك.';
 
   @override
   String get onboardingMyAdsTitle => 'صفحتي';
@@ -1657,11 +1664,18 @@ class AppLocalizationsAr extends AppLocalizations {
       'إعلاناتك العقارية وطلبات السوق التي قدّمتها تظهر كبطاقات مثل الرئيسية — افتحها من تبويب «طلباتي/إعلاناتي».';
 
   @override
+  String get onboardingQuickBrowseTitle => 'استكشاف سريع';
+
+  @override
+  String get onboardingQuickBrowseBody =>
+      'يفتح لك مقاطع عقارية قصيرة للتصفّح السريع. مرّر بين المقاطع، واضغط ما يلفت انتباهك لمعرفة المزيد.';
+
+  @override
   String get onboardingCartTitle => 'صفقاتي';
 
   @override
   String get onboardingCartBody =>
-      'راجع العقارات التي أضفتها إلى «صفقاتي» قبل المتابعة أو الإتمام.';
+      'تابع العقارات التي أضفتها إلى صفقاتك، وارجع إليها لمراجعة تفاصيلها قبل المتابعة.';
 
   @override
   String get onboardingChatTitle => 'الدردشة';
@@ -1675,7 +1689,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get onboardingSupportBody =>
-      'مركز المساعدة، وشكوى داخل التطبيق، وتذاكر المتابعة مع الإدارة. يُفتح فوق كل التبويبات ويُغلق بزر X للعودة. المحادثات من أيقونة الجرس أو من هنا.';
+      'للوصول إلى المساعدة أو إرسال شكوى ومتابعة تذاكرك مع الإدارة. تُفتح هذه الصفحة فوق التبويب الحالي؛ أغلقها للعودة.';
 
   @override
   String get onboardingMyDeskTitle => 'إدارتي';
@@ -1691,6 +1705,34 @@ class AppLocalizationsAr extends AppLocalizations {
   @override
   String get onboardingMyDeskBodyOrgMember =>
       'لوحة منشأتك أو فريقك—متابعة المهام حسب صلاحياتك من أيقونة «إدارتي» أعلى الشاشة.';
+
+  @override
+  String get onboardingMapTitle => 'الخريطة العقارية';
+
+  @override
+  String get onboardingMapBody =>
+      'اعرض مواقع الإعلانات والطلبات على الخريطة، واستكشف العقارات بحسب موقعها الجغرافي.';
+
+  @override
+  String get onboardingAudienceTitle => 'الحضور المباشر';
+
+  @override
+  String get onboardingAudienceBody =>
+      'يعرض تقديراً للمستخدمين المتصلين الآن والضيوف؛ اضغطه للاطلاع على إحصاءات الحضور.';
+
+  @override
+  String get onboardingCommunicationsTitle => 'التنبيهات والمحادثات';
+
+  @override
+  String get onboardingCommunicationsBody =>
+      'هنا تصل تنبيهاتك ورسائلك غير المقروءة. افتح المركز لمراجعتها والانتقال إلى المحادثة المرتبطة.';
+
+  @override
+  String get onboardingOptionsTitle => 'خيارات حسابك';
+
+  @override
+  String get onboardingOptionsBody =>
+      'من القائمة تصل إلى تحليل السوق والمفضلة والإعدادات والاشتراكات؛ وتظهر التقارير وفق صلاحيات حسابك.';
 
   @override
   String onboardingStepCounter(int current, int total) {

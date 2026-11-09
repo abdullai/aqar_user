@@ -1638,18 +1638,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get onboardingWelcomeBodyApp =>
-      'We’re glad you’re here. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.';
+      'Your real-estate journey starts here. We’ll show you the key tools step by step, and you can replay this tour anytime from Settings.';
 
   @override
   String get onboardingWelcomeBodyWeb =>
-      'We’re glad you’re here on the Mawthuq Line Real Estate Establishment platform. Whether you work independently, run an office, a company, or an institution, our team is here to serve you and keep your experience smooth—your needs come first. Enjoy exploring.';
+      'Manage your real-estate journey from the Mawthuq Line platform. We’ll show you the key tools step by step, and you can replay this tour anytime from Settings.';
 
   @override
   String get onboardingHomeTitle => 'Home';
 
   @override
   String get onboardingHomeBody =>
-      'Browse listings and use the filters at the top (city, type, purpose). Tap any card to open full details.';
+      'Property listings and requests appear here. Open a card to see its details and available ways to contact the advertiser.';
+
+  @override
+  String get onboardingFiltersTitle => 'Find what you need';
+
+  @override
+  String get onboardingFiltersBody =>
+      'Type a search term, or open Advanced to filter by city, property type, and purpose. Results update to match your choices.';
 
   @override
   String get onboardingMyAdsTitle => 'My page';
@@ -1677,11 +1684,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your property listings and market requests you submitted appear as cards, similar to Home — open them from the Requests/Listings tab.';
 
   @override
+  String get onboardingQuickBrowseTitle => 'Quick browse';
+
+  @override
+  String get onboardingQuickBrowseBody =>
+      'Browse short real-estate videos. Swipe between clips and open anything that catches your eye to learn more.';
+
+  @override
   String get onboardingCartTitle => 'My deals';
 
   @override
   String get onboardingCartBody =>
-      'Review properties you added to My deals before you continue.';
+      'Keep track of properties you added to My deals and revisit their details before moving forward.';
 
   @override
   String get onboardingChatTitle => 'Chats';
@@ -1695,7 +1709,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get onboardingSupportBody =>
-      'Help center, in-app complaint, and tickets with administration. It opens over every tab; close with X to go back. Open chats from the bell icon or from here.';
+      'Get help, send an in-app complaint, or follow up on support tickets. This page opens over your current tab; close it to return.';
 
   @override
   String get onboardingMyDeskTitle => 'My desk';
@@ -1711,6 +1725,34 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get onboardingMyDeskBodyOrgMember =>
       'Your organization workspace—follow tasks according to your permissions from the My desk icon in the top app bar.';
+
+  @override
+  String get onboardingMapTitle => 'Property map';
+
+  @override
+  String get onboardingMapBody =>
+      'See property listings and requests on a map, and explore them by location.';
+
+  @override
+  String get onboardingAudienceTitle => 'Who\'s online';
+
+  @override
+  String get onboardingAudienceBody =>
+      'See an estimate of people currently online, including guests. Open it for live audience statistics.';
+
+  @override
+  String get onboardingCommunicationsTitle => 'Alerts and chats';
+
+  @override
+  String get onboardingCommunicationsBody =>
+      'Your notifications and unread messages are here. Open the hub to review them and jump into a conversation.';
+
+  @override
+  String get onboardingOptionsTitle => 'Account options';
+
+  @override
+  String get onboardingOptionsBody =>
+      'Open market insights, favorites, settings, and subscriptions. Reports appear when your account has access.';
 
   @override
   String onboardingStepCounter(int current, int total) {
