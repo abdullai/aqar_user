@@ -3038,7 +3038,7 @@ class _CreateMarketPropertyRequestPageState
                           child: ListView(
                             controller: _stepScrollCtrl,
                             keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
+                                ScrollViewKeyboardDismissBehavior.manual,
                             padding: EdgeInsets.fromLTRB(padH, 12, padH, 16),
                             children: [
                               Align(

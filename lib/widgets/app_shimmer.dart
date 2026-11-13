@@ -116,7 +116,7 @@ class PropertyCardSkeletonList extends StatelessWidget {
     return ListView(
       controller: scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
       padding: EdgeInsets.fromLTRB(12, topPadding, 12, bottomPadding),
       children: [
         if (header != null) ...[
@@ -209,7 +209,7 @@ class CartRowSkeletonList extends StatelessWidget {
     return ListView(
       controller: scrollController,
       physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
       padding: EdgeInsets.fromLTRB(12, topPadding, 12, 24),
       children: [
         for (var i = 0; i < count; i++) ...[

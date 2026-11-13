@@ -57,7 +57,7 @@ Future<String?> showDealCompletionNoteSheet({
       return AlertDialog(
         title: Text(t.dealCompleteNoteTitle),
         content: SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,

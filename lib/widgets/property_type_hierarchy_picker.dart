@@ -29,9 +29,9 @@ class _PropertyTypeHierarchyPickerState
     extends State<PropertyTypeHierarchyPicker> {
   late String _groupId;
   final _searchCtrl = TextEditingController();
-  final _customAr = TextEditingController();
-  final _customEn = TextEditingController();
+  final _customName = TextEditingController();
   bool _ready = false;
+  bool _customTypeEnabled = false;
   String _searchQuery = '';
 
   @override
@@ -53,8 +53,7 @@ class _PropertyTypeHierarchyPickerState
   @override
   void dispose() {
     _searchCtrl.dispose();
-    _customAr.dispose();
-    _customEn.dispose();
+    _customName.dispose();
     super.dispose();
   }
 
@@ -102,19 +101,15 @@ class _PropertyTypeHierarchyPickerState
   Future<void> _addCustom() async {
     if (widget.saving) return;
     await PropertyTypeCustomRegistry.ensureLoaded();
-    final ar = PropertyTypeCustomRegistry.normalizeLabel(_customAr.text);
-    final en = PropertyTypeCustomRegistry.normalizeLabel(
-      _customEn.text.isNotEmpty ? _customEn.text : _customAr.text,
-    );
-    if (ar.isEmpty && en.isEmpty) return;
+    final name = PropertyTypeCustomRegistry.normalizeLabel(_customName.text);
+    if (!_customTypeEnabled || name.isEmpty) return;
     final code = await PropertyTypeCustomRegistry.addCustom(
-      labelAr: ar.isNotEmpty ? ar : en,
-      labelEn: en.isNotEmpty ? en : ar,
+      labelAr: widget.isAr ? name : '',
+      labelEn: widget.isAr ? '' : name,
       groupId: _groupId,
     );
     if (!mounted || code == null) return;
-    _customAr.clear();
-    _customEn.clear();
+    _customName.clear();
     setState(() {});
     widget.onChanged(code);
   }
@@ -143,148 +138,148 @@ class _PropertyTypeHierarchyPickerState
       final match = items.any(
         (e) => PropertyTypeCatalog.normalize(e['code']) == current,
       );
-      dropdownValue = match
-          ? widget.value
-          : items.first['code']!;
+      dropdownValue = match ? widget.value : items.first['code']!;
     }
 
     return AppKeyboardReveal(
       below: 220,
       child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        AqarTextField(
-          controller: _searchCtrl,
-          enabled: !widget.saving,
-          onChanged: (v) => setState(() => _searchQuery = v),
-          decoration: InputDecoration(
-            labelText: widget.isAr
-                ? 'بحث في أنواع العقار'
-                : 'Search property types',
-            prefixIcon: const Icon(Icons.search),
-            suffixIcon: _searchQuery.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: widget.isAr ? 'مسح' : 'Clear',
-                    onPressed: widget.saving
-                        ? null
-                        : () {
-                            _searchCtrl.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                    icon: const Icon(Icons.clear),
-                  ),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AqarTextField(
+            controller: _searchCtrl,
+            enabled: !widget.saving,
+            onChanged: (v) => setState(() => _searchQuery = v),
+            decoration: InputDecoration(
+              labelText:
+                  widget.isAr ? 'بحث في أنواع العقار' : 'Search property types',
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchQuery.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: widget.isAr ? 'مسح' : 'Clear',
+                      onPressed: widget.saving
+                          ? null
+                          : () {
+                              _searchCtrl.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                      icon: const Icon(Icons.clear),
+                    ),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          widget.isAr ? 'تصنيف النوع' : 'Type category',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-            color: cs.primary,
+          const SizedBox(height: 12),
+          Text(
+            widget.isAr ? 'الفئة الرئيسية' : 'Main category',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: cs.primary,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: PropertyTypeCatalog.typeGroups
-                .where(_groupVisible)
-                .map((g) {
-              final sel = _groupId == g.id;
-              return Padding(
-                padding: const EdgeInsetsDirectional.only(end: 8),
-                child: ChoiceChip(
-                  label: Text(widget.isAr ? g.ar : g.en),
-                  selected: sel,
-                  onSelected:
-                      widget.saving ? null : (_) => _setGroup(g.id),
-                  selectedColor: const Color(0xFF0F766E).withValues(alpha: 0.2),
-                  labelStyle: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    color: sel ? const Color(0xFF0F766E) : cs.onSurface,
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children:
+                  PropertyTypeCatalog.typeGroups.where(_groupVisible).map((g) {
+                final sel = _groupId == g.id;
+                return Padding(
+                  padding: const EdgeInsetsDirectional.only(end: 8),
+                  child: ChoiceChip(
+                    label: Text(widget.isAr ? g.ar : g.en),
+                    selected: sel,
+                    onSelected: widget.saving ? null : (_) => _setGroup(g.id),
+                    selectedColor:
+                        const Color(0xFF0F766E).withValues(alpha: 0.2),
+                    labelStyle: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: sel ? const Color(0xFF0F766E) : cs.onSurface,
+                    ),
                   ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                widget.isAr
+                    ? 'لا نتائج للبحث — امسح البحث أو غيّر التصنيف.'
+                    : 'No matches — clear search or switch category.',
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
                 ),
-              );
-            }).toList(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              widget.isAr
-                  ? 'لا نتائج للبحث — امسح البحث أو غيّر التصنيف.'
-                  : 'No matches — clear search or switch category.',
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
+              ),
+            )
+          else
+            DropdownButtonFormField<String>(
+              initialValue: dropdownValue,
+              items: items
+                  .map(
+                    (e) => DropdownMenuItem<String>(
+                      value: e['code'],
+                      child: Text(_label(e)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: widget.saving
+                  ? null
+                  : (v) {
+                      if (v != null) widget.onChanged(v);
+                    },
+              decoration: deco(
+                widget.isAr ? 'نوع العقار' : 'Property type',
               ),
             ),
-          )
-        else
-          DropdownButtonFormField<String>(
-            initialValue: dropdownValue,
-            items: items
-                .map(
-                  (e) => DropdownMenuItem<String>(
-                    value: e['code'],
-                    child: Text(_label(e)),
-                  ),
-                )
-                .toList(),
+          const SizedBox(height: 14),
+          CheckboxListTile(
+            value: _customTypeEnabled,
             onChanged: widget.saving
                 ? null
-                : (v) {
-                    if (v != null) widget.onChanged(v);
-                  },
-            decoration: deco(
-              widget.isAr ? 'النوع الفرعي' : 'Subtype',
+                : (enabled) => setState(
+                      () => _customTypeEnabled = enabled ?? false,
+                    ),
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(
+              widget.isAr ? 'نوع غير مدرج؟' : 'Type not listed?',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            subtitle: Text(
+              widget.isAr
+                  ? 'فعّل الخيار لإضافة نوع جديد إلى القائمة.'
+                  : 'Enable to add a new type to the list.',
             ),
           ),
-        const SizedBox(height: 14),
-        Text(
-          widget.isAr
-              ? 'نوع غير مُدرج؟ (يُضاف للقائمة بدون تكرار)'
-              : 'Custom type (deduplicated)',
-          style: TextStyle(
-            fontSize: 12.5,
-            fontWeight: FontWeight.w800,
-            color: cs.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 6),
-        AqarTextField(
-          controller: _customAr,
-          enabled: !widget.saving,
-          textInputAction: TextInputAction.next,
-          decoration: InputDecoration(
-            labelText: widget.isAr ? 'اسم النوع (عربي)' : 'Type name (Arabic)',
-          ),
-        ),
-        const SizedBox(height: 8),
-        AqarTextField(
-          controller: _customEn,
-          enabled: !widget.saving,
-          textInputAction: TextInputAction.done,
-          decoration: InputDecoration(
-            labelText: widget.isAr
-                ? 'اسم النوع (إنجليزي — اختياري)'
-                : 'Type name (English, optional)',
-          ),
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: FilledButton.icon(
-            onPressed: widget.saving ? null : () => _addCustom(),
-            icon: const Icon(Icons.add_circle_outline),
-            label: Text(widget.isAr ? 'إضافة للقائمة' : 'Add to list'),
-          ),
-        ),
-      ],
+          if (_customTypeEnabled) ...[
+            const SizedBox(height: 6),
+            AqarTextField(
+              controller: _customName,
+              enabled: !widget.saving,
+              onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: widget.isAr ? 'اسم النوع' : 'Type name',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: FilledButton.icon(
+                onPressed: widget.saving || _customName.text.trim().isEmpty
+                    ? null
+                    : () => _addCustom(),
+                icon: const Icon(Icons.add_circle_outline),
+                label: Text(widget.isAr ? 'إضافة للقائمة' : 'Add to list'),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

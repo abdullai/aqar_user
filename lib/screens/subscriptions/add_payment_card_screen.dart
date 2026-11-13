@@ -352,7 +352,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
             child: AqarPrimaryScrollScope(
               child: SingleChildScrollView(
                 keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
+                    ScrollViewKeyboardDismissBehavior.manual,
                 padding: AppKeyboardInset.scrollViewPadding(
                   context,
                   base: const EdgeInsets.all(24),
@@ -428,7 +428,7 @@ class _AddPaymentCardScreenState extends State<AddPaymentCardScreen> {
           extra: 16,
           child: AqarPrimaryScrollScope(
             child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               padding: AppKeyboardInset.scrollViewPadding(
                 context,
                 base: const EdgeInsets.all(16),

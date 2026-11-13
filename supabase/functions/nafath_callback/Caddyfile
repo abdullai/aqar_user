@@ -1,0 +1,23 @@
+{$DOMAIN} {
+	handle /nafath/start {
+		reverse_proxy nafath-callback:3000
+	}
+
+	handle /nafath/status {
+		reverse_proxy nafath-callback:3000
+	}
+
+	handle /callback {
+		@nafath_source remote_ip 195.170.180.7 195.170.180.6
+		handle @nafath_source {
+			reverse_proxy nafath-callback:3000
+		}
+		respond "Forbidden" 403
+	}
+
+	handle /healthz {
+		reverse_proxy nafath-callback:3000
+	}
+
+	respond "Not found" 404
+}

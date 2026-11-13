@@ -531,7 +531,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
           insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
           content: SingleChildScrollView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -970,7 +970,7 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
             20,
       ),
       child: SingleChildScrollView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

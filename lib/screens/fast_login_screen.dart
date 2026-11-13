@@ -982,7 +982,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                         Expanded(
                           child: SingleChildScrollView(
                             keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
+                                ScrollViewKeyboardDismissBehavior.manual,
                             padding: EdgeInsets.fromLTRB(
                               hPad,
                               0,

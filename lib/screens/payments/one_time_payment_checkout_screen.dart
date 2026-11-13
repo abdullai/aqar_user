@@ -761,7 +761,7 @@ class _OneTimePaymentCheckoutScreenState
                 child: AqarPrimaryScrollScope(
                   child: ListView(
                     keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
+                        ScrollViewKeyboardDismissBehavior.manual,
                     padding: AppKeyboardInset.scrollViewPadding(
                       context,
                       base: const EdgeInsets.all(16),

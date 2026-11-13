@@ -9,7 +9,7 @@ import 'package:aqar_user/widgets/aqar_text_field.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,6 +22,7 @@ import '../core/forms/wizard_form_draft.dart';
 import '../core/forms/wizard_step_navigation.dart';
 import '../core/gestures/app_keyboard_inset.dart';
 import '../core/gestures/app_outside_unfocus.dart';
+import '../core/gestures/soft_keyboard_ensure_visible.dart';
 import '../core/input/input_normalizers.dart';
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/deed_number_integrity.dart';
@@ -34,6 +35,7 @@ import '../core/listing/marketing_add_property_flow_config.dart';
 import '../core/listing/post_publish_nav_result.dart';
 import '../core/listing/property_listing_display.dart';
 import '../core/listing/property_type_catalog.dart';
+import '../core/listing/property_type_custom_registry.dart';
 import '../core/market/market_request_rent_schedule.dart';
 import '../core/navigation/post_auth_navigation.dart';
 import '../core/navigation/safe_overlay_pop.dart';
@@ -82,7 +84,7 @@ import '../widgets/stable_select_chip.dart';
 import '../widgets/terms_acceptance_checkbox.dart';
 import '../widgets/year_built_picker_field.dart';
 import 'listing_request_status_page.dart';
-import 'map_picker_page.dart';
+import 'national_address_picker_screen.dart';
 import 'photo_shoot_book_page.dart';
 import 'platform_policies_screen.dart';
 import 'rega_ad_license_import_page.dart';
@@ -209,6 +211,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   final _location = TextEditingController();
   final _addressLine = TextEditingController();
   final _buildingNumber = TextEditingController();
+  final _nationalAddressCode = TextEditingController();
+  final _postalCode = TextEditingController();
+  String? _nationalAddressAdditionalNumber;
   final _deedNumber = TextEditingController();
   final _deedIssuer = TextEditingController();
   final _area = TextEditingController();
@@ -335,6 +340,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   final _parcelNumber = TextEditingController();
 
   /// حدود القطعة (اختياري) — يُخزَّن ضمن `listing_guidance`.
+  bool _parcelBoundariesEnabled = false;
   final _boundaryNorth = TextEditingController();
   final _boundarySouth = TextEditingController();
   final _boundaryEast = TextEditingController();
@@ -371,9 +377,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   /// «بيع / إيجار / شراء» في مسار المسوّق المرخّص.
   String _primaryPurposeGroup = 'sale';
-
-  /// تصنيف مبسّط (سكني، تجاري، …) عند عدم وجود ترخيص.
-  String _propertyCategory = 'residential';
 
   /// غرض فرعي: إيجار (يومي/شهري/سنوي) أو بيع (مزاد/استثمار).
   String? _subPurposeCode;
@@ -434,8 +437,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   /// عند وجود فيديو + صور: ما يُعرض أولاً في المعرض (فيديو أو أول صورة بعد الترتيب).
   bool _coverHeroIsVideo = true;
 
-  /// مناسب لسكني / تجاري (يمكن اختيار واحد أو كليهما).
-  bool _usageResidential = false;
+  /// تصنيف الاستخدام المستنتج من نوع العقار، محفوظ للتوافق مع بيانات الإعلان.
+  bool _usageResidential = true;
   bool _usageCommercial = false;
 
   // الإحداثيات
@@ -522,9 +525,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   /// البيع يتطلب بيانات الصك
   bool get _requiresDeed => _purpose == 'sale';
-
-  bool get _showBuildingNumber =>
-      PropertyTypeCatalog.showsBuildingNumber(_type);
 
   /// توافق الحفظ مع النوع المخصص والمجموعة.
   bool get _roomStatsForSave =>
@@ -679,7 +679,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _loadSaudiLocations();
     unawaited(RegaOpenIndicatorsService.instance.ensureLoaded());
     _loadOwnerName();
-    _restoreTempCoords();
     _advertiserRole = _advertiserRoleCode;
     _wireAddPropertyNumericListeners();
     _deedNumber.addListener(_scheduleDeedDuplicateCheck);
@@ -777,6 +776,14 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       'location': _location.text,
       'address_line': _addressLine.text,
       'building_number': _buildingNumber.text,
+      'national_address_code': _nationalAddressCode.text,
+      'postal_code': _postalCode.text,
+      'national_address_additional_number': _nationalAddressAdditionalNumber,
+      'parcel_boundaries_enabled': _parcelBoundariesEnabled,
+      'boundary_north': _boundaryNorth.text,
+      'boundary_south': _boundarySouth.text,
+      'boundary_east': _boundaryEast.text,
+      'boundary_west': _boundaryWest.text,
       'deed_number': _deedNumber.text,
       'deed_issuer': _deedIssuer.text,
       'deed_date': _deedDate?.toIso8601String(),
@@ -871,6 +878,19 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _location.text = '${d['location'] ?? ''}';
     _addressLine.text = '${d['address_line'] ?? ''}';
     _buildingNumber.text = '${d['building_number'] ?? ''}';
+    _nationalAddressCode.text = '${d['national_address_code'] ?? ''}';
+    _postalCode.text = '${d['postal_code'] ?? ''}';
+    _nationalAddressAdditionalNumber =
+        d['national_address_additional_number']?.toString();
+    _boundaryNorth.text = '${d['boundary_north'] ?? ''}';
+    _boundarySouth.text = '${d['boundary_south'] ?? ''}';
+    _boundaryEast.text = '${d['boundary_east'] ?? ''}';
+    _boundaryWest.text = '${d['boundary_west'] ?? ''}';
+    _parcelBoundariesEnabled = d['parcel_boundaries_enabled'] == true ||
+        _boundaryNorth.text.trim().isNotEmpty ||
+        _boundarySouth.text.trim().isNotEmpty ||
+        _boundaryEast.text.trim().isNotEmpty ||
+        _boundaryWest.text.trim().isNotEmpty;
     _deedNumber.text = '${d['deed_number'] ?? ''}';
     _deedIssuer.text = '${d['deed_issuer'] ?? ''}';
     _deedDate = DateTime.tryParse('${d['deed_date'] ?? ''}');
@@ -923,12 +943,11 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _rentStart = DateTime.tryParse(rs);
     }
     _type = '${d['type'] ?? _type}';
+    _syncUsageFromType();
     _currency = '${d['currency'] ?? _currency}';
     _commissionKind = '${d['commission_kind'] ?? ''}';
     _selectedRegion = d['selected_region']?.toString();
     _selectedGovernorate = d['selected_governorate']?.toString();
-    _usageResidential = d['usage_residential'] == true;
-    _usageCommercial = d['usage_commercial'] == true;
     _negotiable = d['negotiable'] == true;
     _priceOnSum = d['price_on_sum'] == true;
     _acceptsMortgageFinance = d['accepts_mortgage_finance'] == true;
@@ -999,6 +1018,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       userId: uid,
     );
     if (!mounted || draft == null || _hasUnsavedWizardInput()) return;
+    await PropertyTypeCustomRegistry.ensureLoaded();
+    if (!mounted || _hasUnsavedWizardInput()) return;
     setState(() => _applyListingDraft(draft));
     _scrollWizardStepToTop();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1044,6 +1065,23 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _location.clear();
     _addressLine.clear();
     _buildingNumber.clear();
+    _nationalAddressCode.clear();
+    _postalCode.clear();
+    _nationalAddressAdditionalNumber = null;
+    _parcelBoundariesEnabled = false;
+    _boundaryNorth.clear();
+    _boundarySouth.clear();
+    _boundaryEast.clear();
+    _boundaryWest.clear();
+    _lat = null;
+    _lng = null;
+    _latCtrl.clear();
+    _lngCtrl.clear();
+    _useMapCoords = false;
+    _selectedRegion = null;
+    _selectedGovernorate = null;
+    _selectedCity = null;
+    _selectedDistrict = null;
     _deedNumber.clear();
     _deedIssuer.clear();
     _deedDate = null;
@@ -1192,47 +1230,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
   }
 
-  void _applyPropertyCategoryDefaults() {
-    switch (_propertyCategory) {
-      case 'commercial':
-        _usageCommercial = true;
-        _usageResidential = false;
-        if (_type == 'villa') _type = 'commercial_building';
-        break;
-      case 'administrative':
-        _usageCommercial = true;
-        _usageResidential = false;
-        if (_type == 'villa') _type = 'office';
-        break;
-      case 'land':
-        _usageResidential = false;
-        _usageCommercial = false;
-        _type = 'land';
-        break;
-      case 'farm':
-        _usageResidential = false;
-        _usageCommercial = false;
-        _type = 'farm';
-        break;
-      case 'project':
-        _usageResidential = false;
-        _usageCommercial = true;
-        _type = 'project';
-        break;
-      case 'other':
-        _usageResidential = true;
-        _usageCommercial = true;
-        _type = 'other';
-        break;
-      case 'residential':
-      default:
-        _usageResidential = true;
-        _usageCommercial = false;
-        if (_type == 'land' || _type == 'farm' || _type == 'project') {
-          _type = 'villa';
-        }
-        break;
-    }
+  void _syncUsageFromType() {
+    final suitability = PropertyTypeCatalog.suitabilityForCode(_type);
+    _usageResidential = suitability.residential;
+    _usageCommercial = suitability.commercial;
   }
 
   void _refreshAutoTitle() {
@@ -1523,7 +1524,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     wireDigits(_parcelNumber);
     wireDecimal(_latCtrl);
     wireDecimal(_lngCtrl);
-    
+
     // Add visibility monitoring for main text fields
     _addFieldVisibilityListener(_title);
     _addFieldVisibilityListener(_desc);
@@ -1549,6 +1550,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _location.dispose();
     _addressLine.dispose();
     _buildingNumber.dispose();
+    _nationalAddressCode.dispose();
+    _postalCode.dispose();
     _deedNumber.dispose();
     _deedIssuer.dispose();
     _obligationsDetail.dispose();
@@ -1646,9 +1649,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       final lat = _parseNullableDouble(_latCtrl.text);
       final lng = _parseNullableDouble(_lngCtrl.text);
       if (lat == null || lng == null) return false;
-    }
-    if (!_usageResidential && !_usageCommercial) {
-      return false;
     }
     if (_isLand && _streetCount != null && _streetCount! > 0) {
       final widths = _buildStreetWidths();
@@ -1749,13 +1749,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         return _validateLicenseStep();
       case 1:
         _syncPurposeFromPrimaryGroup();
-        if (!_usageResidential && !_usageCommercial) {
-          final msg = _isAr
-              ? 'حدد الاستخدام (سكني / تجاري)'
-              : 'Select usage (residential / commercial)';
-          setState(() => _error = msg);
-          return false;
-        }
         if (_propertyHasObligations == null) {
           final msg = _isAr
               ? 'حدد وجود التزامات على العقار'
@@ -1865,7 +1858,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       if (!mounted) return;
       final pane = _wizardPaneKind(_wizardStep);
       final GlobalKey<FormState> targetForm;
-      
+
       switch (pane) {
         case 0:
           return; // License step doesn't need focus
@@ -1889,7 +1882,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         default:
           return;
       }
-      
+
       final form = targetForm;
       if (form.currentContext != null) {
         FocusScope.of(context).unfocus();
@@ -2076,11 +2069,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _subPurposeCode = null;
         _syncPurposeFromPrimaryGroup();
       }),
-      propertyCategory: _propertyCategory,
-      onPropertyCategoryChanged: (v) => setState(() {
-        _propertyCategory = v;
-        _applyPropertyCategoryDefaults();
-      }),
       subPurposeCode: _subPurposeCode,
       onSubPurposeCodeChanged: (v) => setState(() {
         _subPurposeCode = v;
@@ -2097,6 +2085,21 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       cityController: _city,
       locationController: _location,
       addressLineController: _addressLine,
+      nationalAddressCode: _nationalAddressCode,
+      postalCode: _postalCode,
+      onPickNationalAddress: () => _openMapPicker(
+        kingdomOverview: _lat == null && _lng == null,
+      ),
+      parcelBoundariesEnabled: _parcelBoundariesEnabled,
+      onParcelBoundariesEnabledChanged: (enabled) => setState(() {
+        _parcelBoundariesEnabled = enabled;
+        if (!enabled) {
+          _boundaryNorth.clear();
+          _boundarySouth.clear();
+          _boundaryEast.clear();
+          _boundaryWest.clear();
+        }
+      }),
       regionManual: _regionManual,
       governorateManual: _governorateManual,
       cityManual: _cityManual,
@@ -2127,6 +2130,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       onTypeChanged: (v) => setState(() {
         final wasLand = _isLand;
         _type = v;
+        _syncUsageFromType();
         if (wasLand && !_isLand) _clearLandOnlyFormFields();
         for (final k in _amenities.keys.toList()) {
           if (!PropertyTypeCatalog.amenityKeyRelevantForType(_type, k)) {
@@ -2157,10 +2161,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       onSuggestSmartTitle: () => setState(() {
         _maybeSuggestSmartTitle(force: true);
       }),
-      usageResidential: _usageResidential,
-      usageCommercial: _usageCommercial,
-      onUsageResidentialChanged: (v) => setState(() => _usageResidential = v),
-      onUsageCommercialChanged: (v) => setState(() => _usageCommercial = v),
       title: _title,
       desc: _desc,
       area: _area,
@@ -2211,7 +2211,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       onPickDeedDate: _pickDeedDate,
       onClearDeedDate: () => setState(() => _deedDate = null),
       buildingNumber: _buildingNumber,
-      showBuildingNumber: _showBuildingNumber,
       virtualTourUrl: _virtualTourUrl,
       availabilityDate: _availabilityDate,
       onPickAvailability: _pickAvailabilityDate,
@@ -2382,29 +2381,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _districtManual = true;
       });
     }
-  }
-
-  Future<void> _restoreTempCoords() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final key = 'coords_temp_${widget.userId}';
-      final raw = prefs.getString(key);
-      if (raw == null || raw.trim().isEmpty) return;
-      final json = jsonDecode(raw) as Map<String, dynamic>;
-      final lat = (json['lat'] as num?)?.toDouble();
-      final lng = (json['lng'] as num?)?.toDouble();
-      if (!mounted) return;
-      setState(() {
-        _lat = lat;
-        _lng = lng;
-        if (lat != null) _latCtrl.text = lat.toStringAsFixed(6);
-        if (lng != null) _lngCtrl.text = lng.toStringAsFixed(6);
-        if (lat != null && lng != null) _useMapCoords = true;
-      });
-      if (_lat != null && _lng != null) {
-        await _fillLocationFromNearest();
-      }
-    } catch (_) {}
   }
 
   /// REGA / FAL path satisfied — enables verified marketer **direct publish** to home.
@@ -2774,49 +2750,55 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       });
 
   Future<void> _openMapPicker({bool kingdomOverview = false}) async {
-    LatLng? initial;
-    if (_lat != null && _lng != null) {
-      initial = LatLng(_lat!, _lng!);
-    } else {
+    double? initialLatitude = _lat;
+    double? initialLongitude = _lng;
+    if (_lat == null || _lng == null) {
       final city = (_selectedCity ?? _city.text).trim();
       if (city.isNotEmpty) {
         final loc = await SaudiLocationsService.instance.findByCity(city);
         if (loc != null && loc.lat != 0 && loc.lng != 0) {
-          initial = LatLng(loc.lat, loc.lng);
+          initialLatitude = loc.lat;
+          initialLongitude = loc.lng;
         }
       }
     }
     if (!mounted) return;
-    final res = await MapPickerPage.pick(
+    final res = await NationalAddressPickerScreen.pick(
       context,
-      initial: initial,
       isAr: _isAr,
-      kingdomOverview: kingdomOverview && initial == null,
-      pinTitle: _title.text.trim().isEmpty
-          ? (_isAr ? 'إعلان عقاري جديد' : 'New property listing')
-          : _title.text.trim(),
-      pinSubtitle: (_selectedCity ?? _city.text).trim(),
-      pinKindLabel: _isAr ? 'إعلان عقاري' : 'Property listing',
-      pinAmountLabel: _price.text.trim().isEmpty
-          ? null
-          : (_currency.toUpperCase() == 'SAR'
-              ? AppMoney.sarPhrase(_price.text.trim(), isAr: _isAr)
-              : '${_price.text.trim()} $_currency'),
+      initialLatitude: initialLatitude,
+      initialLongitude: initialLongitude,
+      kingdomOverview: kingdomOverview && initialLatitude == null,
     );
     if (!mounted || res == null) return;
-    final lat = res.position.latitude;
-    final lng = res.position.longitude;
+    final lat = res.latitude;
+    final lng = res.longitude;
     final metaCity = (res.city ?? '').trim();
     final metaRegion = (res.region ?? '').trim();
     final metaGov = (res.governorate ?? '').trim();
     final metaDistrict = (res.district ?? '').trim();
     setState(() {
-      _useMapCoords = true;
-      _locationIsApproximate = false;
-      _lat = lat;
-      _lng = lng;
-      _latCtrl.text = _lat?.toStringAsFixed(6) ?? '';
-      _lngCtrl.text = _lng?.toStringAsFixed(6) ?? '';
+      if (lat != null && lng != null) {
+        _useMapCoords = true;
+        _locationIsApproximate = false;
+        _lat = lat;
+        _lng = lng;
+        _latCtrl.text = lat.toStringAsFixed(6);
+        _lngCtrl.text = lng.toStringAsFixed(6);
+      }
+      if ((res.shortAddress ?? '').trim().isNotEmpty) {
+        _nationalAddressCode.text = res.shortAddress!.trim();
+      }
+      if ((res.buildingNumber ?? '').trim().isNotEmpty) {
+        _buildingNumber.text = res.buildingNumber!.trim();
+      }
+      if ((res.postalCode ?? '').trim().isNotEmpty) {
+        _postalCode.text = res.postalCode!.trim();
+      }
+      if ((res.street ?? '').trim().isNotEmpty) {
+        _addressLine.text = res.street!.trim();
+      }
+      _nationalAddressAdditionalNumber = res.additionalNumber;
       _error = null;
     });
     if (_lat != null && _lng != null) {
@@ -3467,6 +3449,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         _publishSucceeded = false;
       });
       _resetForm();
+      final uid = _sb.auth.currentUser?.id ?? '';
+      if (uid.isNotEmpty) {
+        unawaited(
+          WizardFormDraft.clear(namespace: _draftNamespace, userId: uid),
+        );
+      }
       return;
     }
     if (choice == 'status') {
@@ -3502,6 +3490,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _location.clear();
       _addressLine.clear();
       _buildingNumber.clear();
+      _nationalAddressCode.clear();
+      _postalCode.clear();
+      _nationalAddressAdditionalNumber = null;
       _deedNumber.clear();
       _deedIssuer.clear();
       _deedDate = null;
@@ -3519,6 +3510,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _usedDefaultCover = false;
       _currentBid.clear();
       _type = 'villa';
+      _syncUsageFromType();
       _purpose = 'sale';
       _isAuction = false;
       _images.clear();
@@ -3527,8 +3519,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _lng = null;
       _latCtrl.clear();
       _lngCtrl.clear();
-      _usageResidential = false;
-      _usageCommercial = false;
       _currency = 'SAR';
       _negotiable = false;
       _priceOnSum = false;
@@ -3586,6 +3576,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _boundarySouth.clear();
       _boundaryEast.clear();
       _boundaryWest.clear();
+      _parcelBoundariesEnabled = false;
       _selectedDistrict = null;
       _districtManual = false;
       for (final k in _amenities.keys) {
@@ -3724,10 +3715,22 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       if (t.isNotEmpty) boundaries[k] = t;
     }
 
-    putB('north', _boundaryNorth);
-    putB('south', _boundarySouth);
-    putB('east', _boundaryEast);
-    putB('west', _boundaryWest);
+    if (_parcelBoundariesEnabled) {
+      putB('north', _boundaryNorth);
+      putB('south', _boundarySouth);
+      putB('east', _boundaryEast);
+      putB('west', _boundaryWest);
+    }
+
+    final nationalAddress = <String, dynamic>{
+      'short_address': _nationalAddressCode.text.trim(),
+      'postal_code': _postalCode.text.trim(),
+      'additional_number': _nationalAddressAdditionalNumber,
+    };
+    nationalAddress.removeWhere(
+      (key, value) =>
+          value == null || (value is String && value.trim().isEmpty),
+    );
 
     final out = <String, dynamic>{
       'cover_primary': cover,
@@ -3774,6 +3777,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     }
     if (boundaries.isNotEmpty) {
       out['parcel_boundaries'] = boundaries;
+    }
+    if (nationalAddress.isNotEmpty) {
+      out['national_address'] = nationalAddress;
     }
     if (_inAppTour != null && _inAppTour!.isNotEmpty) {
       out['in_app_tour'] = _inAppTour!.toJson();
@@ -4092,8 +4098,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     payload['deed_issuer'] =
         _deedIssuer.text.trim().isEmpty ? null : _deedIssuer.text.trim();
     final bn = _buildingNumber.text.trim();
-    payload['building_number'] =
-        (_showBuildingNumber && bn.isNotEmpty) ? bn : null;
+    payload['building_number'] = bn.isEmpty ? null : bn;
     if (hasLocationColumn) payload['location'] = _composeLocationForDb();
     if (_isProject) {
       payload['area'] = _plotArea ?? areaStoredM2;
@@ -4204,8 +4209,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     details['deed_issuer'] =
         _deedIssuer.text.trim().isEmpty ? null : _deedIssuer.text.trim();
     final bNum = _buildingNumber.text.trim();
-    details['building_number'] =
-        (_showBuildingNumber && bNum.isNotEmpty) ? bNum : null;
+    details['building_number'] = bNum.isEmpty ? null : bNum;
     if (_isLand) {
       details['facade'] = _facade;
       details['street_count'] = _streetCount;
@@ -4907,13 +4911,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _markSmartDefaultCoverIfNoMedia();
       _error = null;
     });
-    if (!_usageResidential && !_usageCommercial) {
-      setState(() => _error = _isAr
-          ? 'حدد ما إذا كان العقار مناسبًا للسكني أو التجاري أو كليهما'
-          : 'Select whether the property is suitable for residential and/or commercial use');
-      _scrollToKey(_formCardKey);
-      return;
-    }
     await _tryAutoFillRegionAndCoordsFromCity();
     if (_useMapCoords) {
       final lat = _parseNullableDouble(_latCtrl.text);
@@ -5718,7 +5715,9 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     final pane = _wizardPaneKind(_wizardStep);
     final stepCount = _kWizardLastStep + 1;
     final displayStep = _wizardStep + 1;
-    return Directionality(
+    final keyboardOpen = AppKeyboardInset.isOpen(context);
+    return AppKeyboardCenterFieldScope(
+        child: Directionality(
       textDirection: _isAr ? TextDirection.rtl : TextDirection.ltr,
       child: PopScope(
         canPop: _publishSucceeded ||
@@ -5791,9 +5790,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                           child: SingleChildScrollView(
                             controller: _scrollCtrl,
                             keyboardDismissBehavior:
-                                ScrollViewKeyboardDismissBehavior.onDrag,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 12),
+                                ScrollViewKeyboardDismissBehavior.manual,
+                            padding: EdgeInsets.fromLTRB(
+                              12,
+                              keyboardOpen
+                                  ? AppKeyboardInset.visibleHeightOf(context) *
+                                      0.4
+                                  : 12,
+                              12,
+                              12,
+                            ),
                             child: Align(
                               alignment: Alignment.topCenter,
                               child: ConstrainedBox(
@@ -5823,8 +5829,10 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                     const SizedBox(height: 6),
                                     Text(
                                       _isAr
-                                          ? _formSliceHint(_sliceForPane(pane), true)
-                                          : _formSliceHint(_sliceForPane(pane), false),
+                                          ? _formSliceHint(
+                                              _sliceForPane(pane), true)
+                                          : _formSliceHint(
+                                              _sliceForPane(pane), false),
                                       style: Theme.of(context)
                                           .textTheme
                                           .bodySmall
@@ -6004,7 +6012,8 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                   _EjarOptionalFieldsCard(
                                                     isAr: _isAr,
                                                     saving: _saving,
-                                                    contractCtrl: _ejarContractNo,
+                                                    contractCtrl:
+                                                        _ejarContractNo,
                                                     unitCtrl: _ejarUnitNo,
                                                     floorCtrl: _ejarFloorNo,
                                                   ),
@@ -6364,95 +6373,98 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                             ),
                           ),
                         ),
-                        Material(
-                          elevation: 8,
-                          color: cs.surface,
-                          shadowColor: Colors.black26,
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              12,
-                              10,
-                              12,
-                              10 + AppKeyboardInset.bottomOf(context),
-                            ),
-                            child: LayoutBuilder(
-                              builder: (context, c) {
-                                final narrow = c.maxWidth < 600;
-                                final nextBtn = _wizardStep < _kWizardLastStep
-                                    ? FilledButton(
-                                        onPressed: (_saving ||
-                                                _publishLock ||
-                                                _picking ||
-                                                _uploadingVideo ||
-                                                _uploadingLicensePdf)
-                                            ? null
-                                            : _wizardNext,
-                                        child: Text(_isAr ? 'التالي' : 'Next'),
-                                      )
-                                    : FilledButton(
-                                        onPressed: (_saving ||
-                                                _publishLock ||
-                                                _picking ||
-                                                _uploadingVideo ||
-                                                _uploadingLicensePdf ||
-                                                !_canSubmit)
-                                            ? null
-                                            : _submit,
-                                        child: (_saving || _publishLock)
-                                            ? Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  const SizedBox(
-                                                    width: 22,
-                                                    height: 22,
-                                                    child: AppLogoLoading(
-                                                        compact: true,
-                                                        size: 20),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Flexible(
-                                                    child: Text(
-                                                      _isAr
-                                                          ? 'جاري مراجعة التفاصيل والنشر…'
-                                                          : 'Reviewing details & publishing…',
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
+                        if (!keyboardOpen)
+                          Material(
+                            elevation: 8,
+                            color: cs.surface,
+                            shadowColor: Colors.black26,
+                            child: Padding(
+                              padding: EdgeInsets.fromLTRB(
+                                12,
+                                10,
+                                12,
+                                10 + AppKeyboardInset.bottomOf(context),
+                              ),
+                              child: LayoutBuilder(
+                                builder: (context, c) {
+                                  final narrow = c.maxWidth < 600;
+                                  final nextBtn = _wizardStep < _kWizardLastStep
+                                      ? FilledButton(
+                                          onPressed: (_saving ||
+                                                  _publishLock ||
+                                                  _picking ||
+                                                  _uploadingVideo ||
+                                                  _uploadingLicensePdf)
+                                              ? null
+                                              : _wizardNext,
+                                          child:
+                                              Text(_isAr ? 'التالي' : 'Next'),
+                                        )
+                                      : FilledButton(
+                                          onPressed: (_saving ||
+                                                  _publishLock ||
+                                                  _picking ||
+                                                  _uploadingVideo ||
+                                                  _uploadingLicensePdf ||
+                                                  !_canSubmit)
+                                              ? null
+                                              : _submit,
+                                          child: (_saving || _publishLock)
+                                              ? Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    const SizedBox(
+                                                      width: 22,
+                                                      height: 22,
+                                                      child: AppLogoLoading(
+                                                          compact: true,
+                                                          size: 20),
                                                     ),
-                                                  ),
-                                                ],
-                                              )
-                                            : Text(_isAr
-                                                ? 'نشر الإعلان'
-                                                : 'Publish listing'),
-                                      );
-                                final backBtn = OutlinedButton(
-                                  onPressed: (_wizardStep > 0 && !_saving)
-                                      ? _wizardPrev
-                                      : null,
-                                  child: Text(_isAr ? 'السابق' : 'Back'),
-                                );
-                                if (narrow) {
-                                  return Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.stretch,
+                                                    const SizedBox(width: 8),
+                                                    Flexible(
+                                                      child: Text(
+                                                        _isAr
+                                                            ? 'جاري مراجعة التفاصيل والنشر…'
+                                                            : 'Reviewing details & publishing…',
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                )
+                                              : Text(_isAr
+                                                  ? 'نشر الإعلان'
+                                                  : 'Publish listing'),
+                                        );
+                                  final backBtn = OutlinedButton(
+                                    onPressed: (_wizardStep > 0 && !_saving)
+                                        ? _wizardPrev
+                                        : null,
+                                    child: Text(_isAr ? 'السابق' : 'Back'),
+                                  );
+                                  if (narrow) {
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        nextBtn,
+                                        const SizedBox(height: 8),
+                                        backBtn,
+                                      ],
+                                    );
+                                  }
+                                  return Row(
                                     children: [
-                                      nextBtn,
-                                      const SizedBox(height: 8),
-                                      backBtn,
+                                      Expanded(child: backBtn),
+                                      const SizedBox(width: 12),
+                                      Expanded(flex: 2, child: nextBtn),
                                     ],
                                   );
-                                }
-                                return Row(
-                                  children: [
-                                    Expanded(child: backBtn),
-                                    const SizedBox(width: 12),
-                                    Expanded(flex: 2, child: nextBtn),
-                                  ],
-                                );
-                              },
+                                },
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -6496,7 +6508,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
           ),
         ),
       ),
-    );
+    ));
   }
 }
 
@@ -7727,8 +7739,6 @@ class _FormCard extends StatelessWidget {
   final bool marketingSimplifiedForm;
   final String primaryPurposeGroup;
   final ValueChanged<String> onPrimaryPurposeGroupChanged;
-  final String propertyCategory;
-  final ValueChanged<String> onPropertyCategoryChanged;
   final String? subPurposeCode;
   final ValueChanged<String?> onSubPurposeCodeChanged;
   final bool? propertyHasObligations;
@@ -7737,7 +7747,6 @@ class _FormCard extends StatelessWidget {
   final bool autoFillTitle;
 
   static void _noopPurposeGroup(String _) {}
-  static void _noopCategory(String _) {}
   static void _noopSubPurpose(String? _) {}
   static void _noopObligations(bool? _) {}
 
@@ -7747,6 +7756,11 @@ class _FormCard extends StatelessWidget {
   final TextEditingController cityController;
   final TextEditingController locationController;
   final TextEditingController addressLineController;
+  final TextEditingController nationalAddressCode;
+  final TextEditingController postalCode;
+  final VoidCallback onPickNationalAddress;
+  final bool parcelBoundariesEnabled;
+  final ValueChanged<bool> onParcelBoundariesEnabledChanged;
 
   final bool regionManual;
   final bool governorateManual;
@@ -7780,11 +7794,6 @@ class _FormCard extends StatelessWidget {
   final ValueChanged<String> onTypeChanged;
   final ValueChanged<String> onPurposeChanged;
   final Widget? rentSchedule;
-  final bool usageResidential;
-  final bool usageCommercial;
-  final ValueChanged<bool> onUsageResidentialChanged;
-  final ValueChanged<bool> onUsageCommercialChanged;
-
   final TextEditingController title;
   final TextEditingController desc;
   final TextEditingController area;
@@ -7837,7 +7846,6 @@ class _FormCard extends StatelessWidget {
   final VoidCallback onPickDeedDate;
   final VoidCallback onClearDeedDate;
   final TextEditingController buildingNumber;
-  final bool showBuildingNumber;
   final TextEditingController virtualTourUrl;
   final DateTime? availabilityDate;
   final VoidCallback onPickAvailability;
@@ -7936,8 +7944,6 @@ class _FormCard extends StatelessWidget {
     this.marketingSimplifiedForm = false,
     this.primaryPurposeGroup = 'sale',
     this.onPrimaryPurposeGroupChanged = _noopPurposeGroup,
-    this.propertyCategory = 'residential',
-    this.onPropertyCategoryChanged = _noopCategory,
     this.subPurposeCode,
     this.onSubPurposeCodeChanged = _noopSubPurpose,
     this.propertyHasObligations,
@@ -7950,6 +7956,11 @@ class _FormCard extends StatelessWidget {
     required this.cityController,
     required this.locationController,
     required this.addressLineController,
+    required this.nationalAddressCode,
+    required this.postalCode,
+    required this.onPickNationalAddress,
+    required this.parcelBoundariesEnabled,
+    required this.onParcelBoundariesEnabledChanged,
     required this.regionManual,
     required this.governorateManual,
     required this.cityManual,
@@ -7980,10 +7991,6 @@ class _FormCard extends StatelessWidget {
     required this.onTypeChanged,
     required this.onPurposeChanged,
     this.rentSchedule,
-    required this.usageResidential,
-    required this.usageCommercial,
-    required this.onUsageResidentialChanged,
-    required this.onUsageCommercialChanged,
     required this.title,
     required this.desc,
     required this.area,
@@ -8028,7 +8035,6 @@ class _FormCard extends StatelessWidget {
     required this.onPickDeedDate,
     required this.onClearDeedDate,
     required this.buildingNumber,
-    required this.showBuildingNumber,
     required this.virtualTourUrl,
     required this.availabilityDate,
     required this.onPickAvailability,
@@ -8217,39 +8223,6 @@ class _FormCard extends StatelessWidget {
                 onChanged: onTypeChanged,
               ),
               const SizedBox(height: 12),
-              Text(
-                isAr ? 'هل العقار مناسب لـ:' : 'Property is suitable for:',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 10,
-                runSpacing: 8,
-                children: [
-                  StableSelectChip(
-                    label: isAr ? 'سكني' : 'Residential',
-                    selected: usageResidential,
-                    enabled: !saving,
-                    onSelected: onUsageResidentialChanged,
-                    selectedColor:
-                        const Color(0xFF0F766E).withValues(alpha: 0.22),
-                    checkColor: const Color(0xFF0F766E),
-                  ),
-                  StableSelectChip(
-                    label: isAr ? 'تجاري' : 'Commercial',
-                    selected: usageCommercial,
-                    enabled: !saving,
-                    onSelected: onUsageCommercialChanged,
-                    selectedColor:
-                        const Color(0xFF0F766E).withValues(alpha: 0.22),
-                    checkColor: const Color(0xFF0F766E),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
               Text(
                 isAr ? 'هل على العقار التزامات؟' : 'Property obligations?',
                 style: const TextStyle(
@@ -8784,110 +8757,158 @@ class _FormCard extends StatelessWidget {
               ],
               const SizedBox(height: 12),
 
-              // حدود القطعة (اختياري)
-              Text(
-                isAr ? 'حدود القطعة (اختياري)' : 'Parcel boundaries (optional)',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
+              CheckboxListTile(
+                value: parcelBoundariesEnabled,
+                onChanged: saving
+                    ? null
+                    : (enabled) =>
+                        onParcelBoundariesEnabledChanged(enabled == true),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(
+                  isAr ? 'حدود القطعة' : 'Parcel boundaries',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text(
+                  isAr
+                      ? 'اختياري؛ فعّل المربع لإدخال الجهات الأربع.'
+                      : 'Optional; enable to enter all four sides.',
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                isAr
-                    ? 'للأراضي والمخططات؛ يُخزَّن مع بيانات الإرشاد.'
-                    : 'For land/plans; stored in listing guidance.',
-                style: TextStyle(
-                  fontSize: 11.8,
-                  fontWeight: FontWeight.w600,
-                  color: cs.onSurfaceVariant,
+              if (parcelBoundariesEnabled) ...[
+                const SizedBox(height: 4),
+                Text(
+                  isAr
+                      ? 'إدخال الجهات الأربع إلزامي عند تفعيل حدود القطعة.'
+                      : 'All four sides are required when enabled.',
+                  style: TextStyle(
+                    fontSize: 11.8,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              LayoutBuilder(
-                builder: (context, c) {
-                  final narrow = c.maxWidth < 560;
-                  Widget field(TextEditingController ctrl, String lab) {
-                    return AqarTextFormField(
-                      controller: ctrl,
-                      enabled: !saving,
-                      decoration: deco(lab),
+                const SizedBox(height: 8),
+                LayoutBuilder(
+                  builder: (context, c) {
+                    final narrow = c.maxWidth < 560;
+                    Widget field(TextEditingController ctrl, String lab) {
+                      return AqarTextFormField(
+                        controller: ctrl,
+                        enabled: !saving,
+                        decoration: deco(lab),
+                        validator: (value) => (value ?? '').trim().isEmpty
+                            ? (isAr ? 'مطلوب' : 'Required')
+                            : null,
+                      );
+                    }
+
+                    final north = field(
+                      boundaryNorth,
+                      isAr ? 'يحدها من الشمال' : 'North boundary',
                     );
-                  }
+                    final south = field(
+                      boundarySouth,
+                      isAr ? 'يحدها من الجنوب' : 'South boundary',
+                    );
+                    final east = field(
+                      boundaryEast,
+                      isAr ? 'يحدها من الشرق' : 'East boundary',
+                    );
+                    final west = field(
+                      boundaryWest,
+                      isAr ? 'يحدها من الغرب' : 'West boundary',
+                    );
 
-                  final north = field(
-                    boundaryNorth,
-                    isAr ? 'شمال' : 'North',
-                  );
-                  final south = field(
-                    boundarySouth,
-                    isAr ? 'جنوب' : 'South',
-                  );
-                  final east = field(
-                    boundaryEast,
-                    isAr ? 'شرق' : 'East',
-                  );
-                  final west = field(
-                    boundaryWest,
-                    isAr ? 'غرب' : 'West',
-                  );
-
-                  if (narrow) {
+                    if (narrow) {
+                      return Column(
+                        children: [
+                          north,
+                          const SizedBox(height: 8),
+                          south,
+                          const SizedBox(height: 8),
+                          east,
+                          const SizedBox(height: 8),
+                          west,
+                        ],
+                      );
+                    }
                     return Column(
                       children: [
-                        north,
+                        Row(
+                          children: [
+                            Expanded(child: north),
+                            const SizedBox(width: 8),
+                            Expanded(child: south),
+                          ],
+                        ),
                         const SizedBox(height: 8),
-                        south,
-                        const SizedBox(height: 8),
-                        east,
-                        const SizedBox(height: 8),
-                        west,
+                        Row(
+                          children: [
+                            Expanded(child: east),
+                            const SizedBox(width: 8),
+                            Expanded(child: west),
+                          ],
+                        ),
                       ],
                     );
-                  }
-                  return Column(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(child: north),
-                          const SizedBox(width: 8),
-                          Expanded(child: south),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(child: east),
-                          const SizedBox(width: 8),
-                          Expanded(child: west),
-                        ],
-                      ),
-                    ],
-                  );
-                },
-              ),
-              const SizedBox(height: 12),
-
-              if (showBuildingNumber) ...[
-                AqarTextFormField(
-                  controller: buildingNumber,
-                  enabled: !saving,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: latinDigitsOnlyFormatters(maxLength: 12),
-                  decoration: deco(isAr
-                      ? 'رقم المبنى (اختياري)'
-                      : 'Building number (optional)'),
+                  },
                 ),
                 const SizedBox(height: 12),
               ],
 
-              // 9. العنوان الوطني
+              AqarTextFormField(
+                controller: nationalAddressCode,
+                enabled: !saving,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp('[A-Za-z0-9]')),
+                  TextInputFormatter.withFunction(
+                    (oldValue, newValue) =>
+                        newValue.copyWith(text: newValue.text.toUpperCase()),
+                  ),
+                  LengthLimitingTextInputFormatter(8),
+                ],
+                decoration: deco(isAr
+                        ? 'العنوان الوطني المختصر (اختياري)'
+                        : 'Short national address (optional)')
+                    .copyWith(
+                  suffixIcon: IconButton(
+                    tooltip: isAr
+                        ? 'اختيار العنوان من الخريطة'
+                        : 'Pick an address from the map',
+                    onPressed: saving ? null : onPickNationalAddress,
+                    icon: const Icon(Icons.map_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              AqarTextFormField(
+                controller: buildingNumber,
+                enabled: !saving,
+                keyboardType: TextInputType.number,
+                inputFormatters: latinDigitsOnlyFormatters(maxLength: 12),
+                decoration: deco(
+                  isAr ? 'رقم المبنى (اختياري)' : 'Building number (optional)',
+                ),
+              ),
+              const SizedBox(height: 12),
+              AqarTextFormField(
+                controller: postalCode,
+                enabled: !saving,
+                keyboardType: TextInputType.number,
+                inputFormatters: latinDigitsOnlyFormatters(maxLength: 5),
+                decoration: deco(
+                  isAr ? 'الرمز البريدي (اختياري)' : 'Postal code (optional)',
+                ),
+              ),
+              const SizedBox(height: 12),
               AqarTextFormField(
                 controller: addressLineController,
                 enabled: !saving,
-                decoration: deco(isAr
-                    ? 'العنوان الوطني (اختياري)'
-                    : 'National address (optional)'),
+                decoration: deco(
+                  isAr ? 'الشارع (اختياري)' : 'Street (optional)',
+                ),
               ),
               const SizedBox(height: 12),
             ],

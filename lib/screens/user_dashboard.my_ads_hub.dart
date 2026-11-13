@@ -11534,7 +11534,7 @@ class _PublishMarketingListingDialogState
               Expanded(
                 child: SingleChildScrollView(
                   keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
+                      ScrollViewKeyboardDismissBehavior.manual,
                   padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                   child: fields,
                 ),

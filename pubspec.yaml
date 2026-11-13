@@ -107,6 +107,8 @@ dependencies:
   flutter_credit_card: ^4.1.0
   path_provider: ^2.1.5
   moyasar: ^3.0.2
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:

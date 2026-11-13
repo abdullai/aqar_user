@@ -2,6 +2,7 @@
 /// <reference lib="dom" />
 
 declare namespace Deno {
+  function serve(handler: EdgeServeHandler): void;
   namespace env {
     function get(key: string): string | undefined;
   }

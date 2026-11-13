@@ -61,6 +61,8 @@
 		<!-- ========================= -->
 		<key>NSLocationWhenInUseUsageDescription</key>
 		<string>نحتاج موقعك لعرض العقارات الأقرب ولمشاركة موقعك في الدردشة عند اختيارك لذلك</string>
+		<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+		<string>نستخدم موقعك أثناء استخدام التطبيق لتحديد موقع العقار والعنوان الوطني عند اختيارك ذلك.</string>
 		<!-- ========================= -->
 		<!-- 📷 Camera / Photos (REQUIRED) -->
 		<!-- ========================= -->

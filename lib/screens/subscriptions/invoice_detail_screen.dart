@@ -102,7 +102,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           title: Text(d.documentTitle),
         ),
         body: ListView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
           children: [
             Align(

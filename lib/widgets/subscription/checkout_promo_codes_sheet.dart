@@ -162,7 +162,7 @@ class _CheckoutPromoCodesSheetState extends State<CheckoutPromoCodesSheet> {
                     controller: _scroll,
                     shrinkWrap: true,
                     keyboardDismissBehavior:
-                        ScrollViewKeyboardDismissBehavior.onDrag,
+                        ScrollViewKeyboardDismissBehavior.manual,
                     itemCount: _codes.length + (compact ? 0 : 1),
                     separatorBuilder: (_, __) => Divider(
                       height: 1,

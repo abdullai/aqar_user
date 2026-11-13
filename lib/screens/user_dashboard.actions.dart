@@ -1958,7 +1958,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           return AlertDialog(
             title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
             content: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2046,7 +2046,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
           return AlertDialog(
             title: Text(widget.isAr ? 'إتمام الصفقة' : 'Complete deal'),
             content: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,

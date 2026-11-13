@@ -1537,7 +1537,7 @@ class _LoginScreenState extends State<LoginScreen>
                             behavior: const _LoginScrollBehavior(),
                             child: SingleChildScrollView(
                               keyboardDismissBehavior:
-                                  ScrollViewKeyboardDismissBehavior.onDrag,
+                                  ScrollViewKeyboardDismissBehavior.manual,
                               physics: const ClampingScrollPhysics(),
                               padding:
                                   EdgeInsets.fromLTRB(padH, 0, padH, padV + 16),
@@ -1906,7 +1906,7 @@ class _LoginScreenState extends State<LoginScreen>
               child: SingleChildScrollView(
                 controller: _loginScrollCtrl,
                 keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
+                    ScrollViewKeyboardDismissBehavior.manual,
                 physics: const ClampingScrollPhysics(),
                 clipBehavior: Clip.hardEdge,
                 padding: const EdgeInsets.only(bottom: 20),

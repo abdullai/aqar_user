@@ -6,6 +6,19 @@ import 'package:flutter/material.dart';
 import 'app_keyboard_inset.dart';
 import 'app_keyboard_popups.dart';
 
+/// يطلب توسيط حقول الإدخال في المساحة الظاهرة أثناء فتح لوحة المفاتيح.
+class AppKeyboardCenterFieldScope extends InheritedWidget {
+  const AppKeyboardCenterFieldScope({super.key, required super.child});
+
+  static bool activeOf(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<AppKeyboardCenterFieldScope>() !=
+      null;
+
+  @override
+  bool updateShouldNotify(AppKeyboardCenterFieldScope oldWidget) => false;
+}
+
 /// حساب إزاحة التمرير لحقل فوق الكيبورد دون قفزة خارج الحارة الظاهرة.
 abstract final class AppKeyboardFieldLane {
   /// موجبة = الحقل منخفض (مرّر للأسفل في المحتوى). `null` = لا تحرّك.
@@ -14,34 +27,33 @@ abstract final class AppKeyboardFieldLane {
     required double fieldHeight,
     required double visibleTop,
     required double visibleBottom,
-    required bool webSafe,
+    bool centerWhenVisible = false,
   }) {
     final fieldBottom = fieldTop + fieldHeight;
     if (visibleBottom <= visibleTop + 36) return null;
 
     final fullyVisible =
         fieldTop >= visibleTop - 0.5 && fieldBottom <= visibleBottom + 0.5;
-    // ويب الجوال: إعادة التوسيط لحقل ظاهر أصلاً تُمرّر المستند مرتين فيطير للأعلى.
-    if (fullyVisible) return null;
+    if (fullyVisible && !centerWhenVisible) return null;
 
-    var targetCenter = (visibleTop + visibleBottom) / 2;
-    final fieldCenter = fieldTop + fieldHeight / 2;
-    var delta = fieldCenter - targetCenter;
+    final visibleHeight = visibleBottom - visibleTop;
+    var delta = fieldHeight >= visibleHeight
+        ? fieldTop - visibleTop
+        : fieldTop + fieldHeight / 2 - (visibleTop + visibleBottom) / 2;
 
-    var nextTop = fieldTop - delta;
-    var nextBottom = nextTop + fieldHeight;
-    if (nextTop < visibleTop) {
-      delta -= visibleTop - nextTop;
-      nextTop = fieldTop - delta;
-      nextBottom = nextTop + fieldHeight;
-    }
-    if (nextBottom > visibleBottom) {
-      delta += nextBottom - visibleBottom;
+    if (fieldHeight < visibleHeight) {
+      var nextTop = fieldTop - delta;
+      var nextBottom = nextTop + fieldHeight;
+      if (nextTop < visibleTop) {
+        delta -= visibleTop - nextTop;
+        nextTop = fieldTop - delta;
+        nextBottom = nextTop + fieldHeight;
+      }
+      if (nextBottom > visibleBottom) {
+        delta += nextBottom - visibleBottom;
+      }
     }
 
-    if (webSafe && delta < 0 && fieldTop >= visibleTop) {
-      return null;
-    }
     if (delta.abs() < 8) return null;
     return delta;
   }
@@ -165,19 +177,21 @@ abstract final class AppSoftKeyboardEnsureVisible {
     final visibleTop = padTop + 8;
     final visibleBottom = keyboardTop - comfort - extra;
     if (visibleBottom <= visibleTop + 36) return false;
+    final keyboardOpen = AppKeyboardInset.isOpen(ctx);
+    final centerField = AppKeyboardCenterFieldScope.activeOf(ctx);
 
     final overlap = fieldBottom + extra + comfort - keyboardTop;
     final dockedAboveKeyboard = overlap <= 2 &&
         fieldBottom >= keyboardTop - 120 &&
         fieldTop >= visibleTop;
-    if (dockedAboveKeyboard) return false;
+    if (dockedAboveKeyboard && !centerField) return false;
 
     final delta = AppKeyboardFieldLane.scrollDelta(
       fieldTop: fieldTop,
       fieldHeight: fieldH,
       visibleTop: visibleTop,
       visibleBottom: visibleBottom,
-      webSafe: kIsWeb,
+      centerWhenVisible: keyboardOpen,
     );
     if (delta == null && overlap <= 1) return false;
     final move = delta ?? (overlap > 1 ? overlap : 0.0);

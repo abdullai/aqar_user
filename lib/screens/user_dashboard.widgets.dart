@@ -1611,7 +1611,7 @@ class _HomeMixedTimeline extends StatelessWidget {
           physics: primary
               ? const AlwaysScrollableScrollPhysics()
               : const NeverScrollableScrollPhysics(),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
           padding: pad,
           itemCount: entries.length,
           separatorBuilder: (_, __) => const SizedBox(height: 8),
@@ -1637,7 +1637,7 @@ class _HomeMixedTimeline extends StatelessWidget {
         physics: primary
             ? const AlwaysScrollableScrollPhysics()
             : const NeverScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: pad,
         itemCount: rowCount,
         separatorBuilder: (_, __) => const SizedBox(height: spacing),
@@ -2415,7 +2415,7 @@ class _PropertyGrid extends StatelessWidget {
               cacheExtent: kIsWeb ? 360 : 250,
               controller: scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
@@ -2454,7 +2454,7 @@ class _PropertyGrid extends StatelessWidget {
             cacheExtent: kIsWeb ? 360 : 250,
             controller: scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
             padding: EdgeInsets.symmetric(horizontal: paddingH, vertical: 12),
             itemCount: rowCount,
             separatorBuilder: (_, __) => const SizedBox(height: spacing),

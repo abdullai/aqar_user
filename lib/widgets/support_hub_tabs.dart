@@ -108,7 +108,7 @@ class _SupportHubTabsState extends State<SupportHubTabs>
                       child: ListView(
                         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
                         keyboardDismissBehavior:
-                            ScrollViewKeyboardDismissBehavior.onDrag,
+                            ScrollViewKeyboardDismissBehavior.manual,
                         children: [
                           ComplaintSubmitForm(
                             isAr: widget.isAr,

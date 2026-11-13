@@ -246,7 +246,7 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       child: RefreshIndicator(
         onRefresh: _load,
         child: ListView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
           padding: const EdgeInsets.all(16),
           children: [
             Text(

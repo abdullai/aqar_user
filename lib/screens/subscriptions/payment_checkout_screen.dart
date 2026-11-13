@@ -1815,7 +1815,7 @@ class _PaymentCheckoutScreenState extends State<PaymentCheckoutScreen> {
             child: AqarPrimaryScrollScope(
               child: SingleChildScrollView(
                 keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
+                    ScrollViewKeyboardDismissBehavior.manual,
                 padding: AppKeyboardInset.scrollViewPadding(
                   context,
                   base: const EdgeInsets.all(16),

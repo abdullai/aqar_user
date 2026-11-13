@@ -2052,7 +2052,7 @@ class _UserDashboardState extends State<UserDashboard>
                         child: SingleChildScrollView(
                           controller: sheetScrollCtrl,
                           keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
+                              ScrollViewKeyboardDismissBehavior.manual,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -7505,7 +7505,7 @@ class _UserDashboardState extends State<UserDashboard>
 
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
       children: [
         const SizedBox(height: 40),
@@ -7753,7 +7753,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.all(16),
         children: [
           const SizedBox(height: 80),
@@ -7852,7 +7852,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 60),
@@ -8582,7 +8582,7 @@ class _UserDashboardState extends State<UserDashboard>
                   primary: false,
                   physics: const AlwaysScrollableScrollPhysics(),
                   keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
+                      ScrollViewKeyboardDismissBehavior.manual,
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
                   itemCount: rowCount,
                   separatorBuilder: (_, __) => const SizedBox(height: spacing),
@@ -8608,7 +8608,7 @@ class _UserDashboardState extends State<UserDashboard>
     return SingleChildScrollView(
       controller: onboardingScroll,
       physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
       child: mainColumn,
     );
   }
@@ -8975,7 +8975,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 60),
@@ -9062,7 +9062,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.all(16),
         children: [
           const SizedBox(height: 80),
@@ -9115,7 +9115,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 40),
@@ -9430,7 +9430,7 @@ class _UserDashboardState extends State<UserDashboard>
           controller: onboardingScroll,
           primary: false,
           physics: const AlwaysScrollableScrollPhysics(),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
           itemCount: itemCount,
           separatorBuilder: (_, __) => const SizedBox(height: spacing),
@@ -9485,7 +9485,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.all(16),
         children: [
           const SizedBox(height: 80),
@@ -9537,7 +9537,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 60),
@@ -9589,7 +9589,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 40),
@@ -10418,7 +10418,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.all(16),
         children: [
           const SizedBox(height: 60),
@@ -10473,7 +10473,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 60),
@@ -10528,7 +10528,7 @@ class _UserDashboardState extends State<UserDashboard>
       return ListView(
         controller: onboardingScroll,
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 40),
@@ -11080,7 +11080,7 @@ class _UserDashboardState extends State<UserDashboard>
                 controller: onboardingScroll,
                 physics: const AlwaysScrollableScrollPhysics(),
                 keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
+                    ScrollViewKeyboardDismissBehavior.manual,
                 padding: const EdgeInsets.all(12),
                 children: paneChildren,
               ),
@@ -12145,7 +12145,7 @@ class _UserDashboardState extends State<UserDashboard>
 
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.all(16),
         children: [
           const SizedBox(height: 60),
@@ -12201,7 +12201,7 @@ class _UserDashboardState extends State<UserDashboard>
     if (_uid.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 60),
@@ -12252,7 +12252,7 @@ class _UserDashboardState extends State<UserDashboard>
     if (_offers.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         children: [
           const SizedBox(height: 40),
@@ -12303,7 +12303,7 @@ class _UserDashboardState extends State<UserDashboard>
 
     return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(),
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
       padding: const EdgeInsets.all(12),
       itemCount: _offers.length,
       separatorBuilder: (_, __) => const SizedBox(height: 10),

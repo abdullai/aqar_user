@@ -87,6 +87,25 @@ class PropertyTypeCatalog {
     return typeGroups.first.id;
   }
 
+  static ({bool residential, bool commercial}) suitabilityForCode(
+    String? code,
+  ) {
+    if (normalize(code) == 'other') {
+      return (residential: true, commercial: true);
+    }
+    switch (groupIdForCode(code)) {
+      case 'residential':
+        return (residential: true, commercial: false);
+      case 'commercial':
+      case 'project':
+        return (residential: false, commercial: true);
+      case 'other':
+        return (residential: true, commercial: true);
+      default:
+        return (residential: false, commercial: false);
+    }
+  }
+
   static PropertyTypeGroup? groupById(String id) {
     for (final g in typeGroups) {
       if (g.id == id) return g;

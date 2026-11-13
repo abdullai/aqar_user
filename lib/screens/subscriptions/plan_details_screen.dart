@@ -119,7 +119,7 @@ class PlanDetailsScreen extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppConfig.maxContentWidth),
           child: ListView(
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
             padding: const EdgeInsets.all(14),
             children: [
               _header(context, cs, isTrial, periodLabel),

@@ -12,21 +12,20 @@ const corsHeaders: Record<string, string> = {
 type JsonMap = Record<string, unknown>;
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
+  let result = body;
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const data = body as JsonMap;
+    result = {
+      ...data,
+      ...(status >= 400 && !data.message
+        ? { message: data.message_en ?? data.error ?? "Request failed" }
+        : {}),
+      statusCode: status,
+    };
+  }
+  return new Response(JSON.stringify(result), {
     status,
     headers: { ...corsHeaders },
-  });
-}
-
-function text(body: string, status = 200) {
-  return new Response(body, {
-    status,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": corsHeaders["Access-Control-Allow-Headers"],
-      "Access-Control-Allow-Methods": corsHeaders["Access-Control-Allow-Methods"],
-      "Content-Type": "text/plain; charset=utf-8",
-    },
   });
 }
 
@@ -41,12 +40,29 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function clientIpFromRequest(req: Request) {
+  const cloudflareIp = clean(req.headers.get("cf-connecting-ip"));
+  const forwardedIp = clean(req.headers.get("x-forwarded-for"))
+    .split(",")[0]
+    ?.trim() ?? "";
+  const value = cloudflareIp || forwardedIp;
+  if (!value || value.length > 45) return "";
+  const octets = value.split(".");
+  if (
+    octets.length === 4 &&
+    octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255)
+  ) return value;
+  return value.includes(":") && /^[\da-f:]+$/i.test(value) ? value : "";
+}
+
 function isMissingOrPlaceholder(value: string | undefined) {
   const v = clean(value);
   const lower = v.toLowerCase();
   return !v ||
     v === "..." ||
     lower === "placeholder" ||
+    lower.startsWith("your_") ||
+    lower.startsWith("your-") ||
     lower === "your-subdomain" ||
     lower === "your-api-key" ||
     lower === "default_subdomain" ||
@@ -56,28 +72,46 @@ function isMissingOrPlaceholder(value: string | undefined) {
 function nafathUnavailable(action: string, flow: string) {
   return json({
     mode: "not_configured",
+    error: "nafath_not_configured",
     message_ar:
       "خدمة الدخول عبر نفاذ قيد التفعيل حالياً. الرجاء استخدام تسجيل الدخول برقم الهوية وكلمة المرور.",
     message_en:
       "Nafath sign-in is being activated. Please use ID/password sign-in for now.",
     action,
     flow,
-  });
+  }, 503);
 }
 
 function env() {
   const supabaseUrl = clean(Deno.env.get("SUPABASE_URL"));
   const serviceRole = clean(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-  const urlBase = clean(
-    Deno.env.get("NAFATH_URL_BASE") ?? Deno.env.get("NAFATH_BASE_URL"),
-  );
-  const apiKey = clean(Deno.env.get("NAFATH_API_KEY"));
-  const callbackUrl = clean(Deno.env.get("NAFATH_CALLBACK_URL")) ||
-    `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/nafath_session`;
-  const redirectTo = clean(Deno.env.get("NAFATH_AUTH_REDIRECT_TO")) ||
-    clean(Deno.env.get("SITE_URL")) ||
-    "https://eaqar-mawthuq.web.app";
-  return { supabaseUrl, serviceRole, urlBase, apiKey, callbackUrl, redirectTo };
+  const gatewayUrl = clean(Deno.env.get("NAFATH_GATEWAY_URL"));
+  const gatewaySecret = clean(Deno.env.get("NAFATH_GATEWAY_SECRET"));
+  return { supabaseUrl, serviceRole, gatewayUrl, gatewaySecret };
+}
+
+function nafathConfig() {
+  const { gatewayUrl, gatewaySecret } = env();
+  if (
+    isMissingOrPlaceholder(gatewayUrl) ||
+    isMissingOrPlaceholder(gatewaySecret) ||
+    gatewaySecret.length < 32
+  ) return null;
+  let url: URL;
+  try {
+    url = new URL(gatewayUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+
+  return {
+    gatewayUrl: url,
+    headers: {
+      "Authorization": `Bearer ${gatewaySecret}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+  };
 }
 
 async function rest(
@@ -97,6 +131,8 @@ async function rest(
   return fetch(`${supabaseUrl.replace(/\/+$/, "")}${path}`, {
     ...init,
     headers,
+    redirect: "error",
+    signal: init.signal ?? AbortSignal.timeout(15000),
   });
 }
 
@@ -112,59 +148,26 @@ async function restJson(path: string, init: RequestInit = {}) {
     }
   }
   if (!res.ok) {
-    throw new Error(
-      `rest_${res.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`,
-    );
+    throw new Error(`rest_${res.status}`);
   }
   return data;
 }
 
-function decodeJwtPayload(token: string): JsonMap {
-  const part = token.split(".")[1] ?? "";
-  if (!part) return {};
-  const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-  return JSON.parse(atob(padded));
-}
-
-async function findProfileByNationalId(nationalId: string): Promise<JsonMap | null> {
-  const q = new URLSearchParams();
-  q.set("select", "user_id,email,username");
-  q.set("username", `eq.${nationalId}`);
-  q.set("limit", "1");
-  const rows = await restJson(`/rest/v1/users_profiles?${q.toString()}`, {
-    headers: { Accept: "application/json" },
-  });
-  if (Array.isArray(rows) && rows.length > 0) {
-    return rows[0] as JsonMap;
-  }
-  return null;
-}
-
-async function generateMagicLink(email: string): Promise<string> {
-  const { redirectTo } = env();
-  const data = await restJson("/auth/v1/admin/generate_link", {
-    method: "POST",
-    body: JSON.stringify({
-      type: "magiclink",
-      email,
-      options: { redirect_to: redirectTo },
-    }),
-  }) as JsonMap;
-  return clean(data.action_link);
-}
-
-async function startNafath(body: JsonMap) {
-  const enabled = Deno.env.get("NAFATH_INTEGRATION_ENABLED") === "true";
+async function startNafath(body: JsonMap, req: Request) {
   const flow = clean(body.flow) || "login";
   const locale = clean(body.locale) || "ar";
-  const nationalId = clean(body.national_id ?? body.nationalId ?? body.id)
-    .replace(/\D/g, "");
-  const { urlBase, apiKey, callbackUrl } = env();
+  const nationalId = clean(body.national_id ?? body.nationalId ?? body.id);
+  const clientIp = clientIpFromRequest(req);
+  const config = nafathConfig();
 
-  if (!enabled) return nafathUnavailable("start", flow);
-  if (isMissingOrPlaceholder(urlBase) || isMissingOrPlaceholder(apiKey)) {
-    return nafathUnavailable("start", flow);
+  if (!config) return nafathUnavailable("start", flow);
+  if (!clientIp) {
+    return json({
+      mode: "error",
+      error: "client_ip_unavailable",
+      message_ar: "تعذر التحقق من عنوان اتصال الجهاز لبدء طلب نفاذ.",
+      message_en: "Could not determine the device IP for the Nafath request.",
+    }, 400);
   }
   if (!["login", "register"].includes(flow)) {
     return json({ mode: "error", error: "invalid_flow" }, 400);
@@ -172,7 +175,7 @@ async function startNafath(body: JsonMap) {
   if (!["ar", "en"].includes(locale)) {
     return json({ mode: "error", error: "invalid_locale" }, 400);
   }
-  if (!/^\d{10}$/.test(nationalId)) {
+  if (!/^[123456]\d{9}$/.test(nationalId)) {
     return json({
       mode: "error",
       error: "invalid_national_id",
@@ -181,40 +184,49 @@ async function startNafath(body: JsonMap) {
     }, 400);
   }
 
-  const url = `https://${urlBase}.semati.sa/nafath/api/v1/client/authorize/`;
-  const nafathRes = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Authorization": `apikey ${apiKey}`,
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify({
-      id: nationalId,
-      action: "SpRequest",
-      service: "Login",
-      callbackUrl,
-    }),
-  });
-  const raw = await nafathRes.text();
-  let data: JsonMap = {};
+  const providerRequestId = crypto.randomUUID();
+  const gatewayUrl = new URL("/nafath/start", config.gatewayUrl);
+  let nafathRes: Response;
   try {
-    data = JSON.parse(raw);
+    nafathRes = await fetch(gatewayUrl, {
+      method: "POST",
+      headers: config.headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({
+        nationalId,
+        service: flow === "register" ? "Register" : "Login",
+        locale,
+        requestId: providerRequestId,
+        clientIp,
+      }),
+    });
   } catch {
-    data = { raw };
+    return json({ mode: "error", error: "nafath_request_unavailable" }, 502);
   }
   if (!nafathRes.ok) {
     return json({
       mode: "error",
-      error: data.error ?? data.message ?? raw,
-      message_ar: "تعذر بدء طلب نفاذ. تحقق من إعدادات NAFATH_URL_BASE و NAFATH_API_KEY.",
-      message_en: "Could not start Nafath request. Check server Nafath settings.",
-    }, nafathRes.status);
+      error: "nafath_request_failed",
+      message_ar: "تعذر بدء طلب نفاذ. تحقق من بيانات الاتصال.",
+      message_en: "Could not start Nafath request. Check connection details.",
+    }, 502);
+  }
+  let data: JsonMap;
+  try {
+    const parsed: unknown = await nafathRes.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return json({ mode: "error", error: "invalid_nafath_response" }, 502);
+    }
+    data = parsed as JsonMap;
+  } catch {
+    return json({ mode: "error", error: "invalid_nafath_response" }, 502);
   }
 
   const transId = clean(data.transId ?? data.trans_id);
   const random = clean(data.random);
-  if (!transId || !random) {
+  const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+  if (!new RegExp(`^(?:${uuid}|\\{${uuid}\\})$`, "i").test(transId) || !/^\d{2}$/.test(random)) {
     return json({
       mode: "error",
       error: "invalid_nafath_response",
@@ -223,24 +235,29 @@ async function startNafath(body: JsonMap) {
     }, 502);
   }
 
-  await restJson("/rest/v1/nafath_logins", {
+  const rows = await restJson("/rest/v1/nafath_logins", {
     method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
+    headers: { Prefer: "return=representation" },
     body: JSON.stringify({
+      id: providerRequestId,
       trans_id: transId,
       random,
       national_id: nationalId,
+      client_ip: clientIp,
       flow,
-      status: "PENDING",
+      status: "WAITING",
       updated_at: new Date().toISOString(),
     }),
   });
+  const row = Array.isArray(rows) ? rows[0] as JsonMap | undefined : undefined;
+  const requestId = clean(row?.id);
+  if (!requestId) throw new Error("nafath_request_not_saved");
 
   return json({
     mode: "polling",
-    request_id: transId,
+    request_id: requestId,
     random,
-    status: "PENDING",
+    status: "WAITING",
     message_ar:
       `افتح تطبيق نفاذ واختر الرقم ${random} لإكمال تسجيل الدخول. سيتم التحقق تلقائياً.`,
     message_en:
@@ -248,39 +265,18 @@ async function startNafath(body: JsonMap) {
   });
 }
 
-async function handleCallback(body: JsonMap) {
-  const token = clean(body.response ?? body.token ?? body.jwt);
-  const payload = token ? decodeJwtPayload(token) : body;
-  const transId = clean(payload.transId ?? payload.trans_id);
-  const status = clean(payload.status).toUpperCase();
-  if (!transId) return text("missing transId", 400);
-
-  const patch: JsonMap = {
-    status: status || "UNKNOWN",
-    callback_payload: payload,
-    updated_at: new Date().toISOString(),
-  };
-  if (status === "COMPLETED") patch.completed_at = new Date().toISOString();
-  if (status === "REJECTED") patch.rejected_at = new Date().toISOString();
-
-  await restJson(`/rest/v1/nafath_logins?trans_id=eq.${encodeURIComponent(transId)}`, {
-    method: "PATCH",
-    headers: { Prefer: "return=minimal" },
-    body: JSON.stringify(patch),
-  });
-
-  return text("TRS", 200);
-}
-
 async function pollNafath(body: JsonMap) {
-  const requestId = clean(body.request_id ?? body.trans_id);
-  if (!requestId) {
+  const requestId = clean(body.request_id);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId)) {
     return json({ mode: "error", error: "missing_request_id" }, 400);
   }
 
+  const config = nafathConfig();
+  if (!config) return nafathUnavailable("poll", "login");
+
   const q = new URLSearchParams();
-  q.set("select", "*");
-  q.set("trans_id", `eq.${requestId}`);
+  q.set("select", "id,trans_id,national_id,random,status,created_at,client_ip");
+  q.set("id", `eq.${requestId}`);
   q.set("limit", "1");
   const rows = await restJson(`/rest/v1/nafath_logins?${q.toString()}`) as unknown[];
   const row = Array.isArray(rows) && rows.length > 0 ? rows[0] as JsonMap : null;
@@ -288,68 +284,106 @@ async function pollNafath(body: JsonMap) {
     return json({ mode: "error", error: "request_not_found" }, 404);
   }
 
-  const status = clean(row.status).toUpperCase();
-  if (status === "REJECTED") {
+  const savedStatus = clean(row.status).toUpperCase();
+  if (savedStatus === "COMPLETED") {
+    return json({
+      mode: "not_configured",
+      status: "COMPLETED",
+      request_id: requestId,
+      error: "nafath_auth_session_not_configured",
+      message_ar:
+        "تم التحقق من نفاذ، لكن لم يُفعّل ربط التحقق بجلسة حساب التطبيق بعد.",
+      message_en:
+        "Nafath verified the identity, but the application account session is not configured yet.",
+    }, 503);
+  }
+  if (savedStatus === "REJECTED" || savedStatus === "EXPIRED") {
+    return json({
+      mode: "error",
+      status: savedStatus,
+      request_id: requestId,
+      error: `nafath_${savedStatus.toLowerCase()}`,
+    }, savedStatus === "EXPIRED" ? 410 : 409);
+  }
+  if (savedStatus !== "WAITING") {
+    return json({ mode: "error", error: "request_already_used" }, 409);
+  }
+  const createdAt = Date.parse(clean(row.created_at));
+  if (
+    !Number.isFinite(createdAt) ||
+    createdAt > Date.now() + 60 * 1000 ||
+    Date.now() - createdAt > 5 * 60 * 1000
+  ) {
+    return json({ mode: "error", status: "EXPIRED" }, 410);
+  }
+
+  let providerResponse: Response;
+  try {
+    providerResponse = await fetch(new URL("/nafath/status", config.gatewayUrl), {
+      method: "POST",
+      headers: config.headers,
+      redirect: "error",
+      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({
+        nationalId: clean(row.national_id),
+        transId: clean(row.trans_id),
+        random: clean(row.random),
+        clientIp: clean(row.client_ip),
+      }),
+    });
+  } catch {
+    return json({ mode: "error", error: "nafath_status_unavailable" }, 502);
+  }
+  if (!providerResponse.ok) {
+    return json({ mode: "error", error: "nafath_status_unavailable" }, 502);
+  }
+  let providerData: JsonMap;
+  try {
+    const parsed: unknown = await providerResponse.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return json({ mode: "error", error: "invalid_nafath_status" }, 502);
+    }
+    providerData = parsed as JsonMap;
+  } catch {
+    return json({ mode: "error", error: "invalid_nafath_status" }, 502);
+  }
+  const status = clean(providerData.status).toUpperCase();
+  if (!["WAITING", "REJECTED", "EXPIRED", "COMPLETED"].includes(status)) {
+    return json({ mode: "error", error: "invalid_nafath_status" }, 502);
+  }
+
+  // حالات الرفض أو انتهاء المهلة
+  if (status === "REJECTED" || status === "EXPIRED") {
     return json({
       mode: "error",
       status,
       request_id: requestId,
-      message_ar: "تم رفض طلب نفاذ أو انتهت المهلة.",
-      message_en: "Nafath request was rejected or expired.",
-    });
+      message_ar: "تم رفض طلب نفاذ أو انتهت المهلة. حاول مرة أخرى.",
+      message_en: "Nafath request was rejected or expired. Try again.",
+    }, status === "EXPIRED" ? 410 : 409);
   }
 
   if (status === "COMPLETED") {
-    const nationalId = clean(row.national_id);
-    const profile = await findProfileByNationalId(nationalId);
-    const email = clean(profile?.email);
-    if (profile?.user_id) {
-      await restJson(`/rest/v1/nafath_logins?trans_id=eq.${encodeURIComponent(requestId)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({
-          auth_user_id: profile.user_id,
-          updated_at: new Date().toISOString(),
-        }),
-      });
-    }
-    if (email) {
-      const link = await generateMagicLink(email);
-      await restJson(`/rest/v1/nafath_logins?trans_id=eq.${encodeURIComponent(requestId)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({
-          auth_link: link,
-          updated_at: new Date().toISOString(),
-        }),
-      });
-      return json({
-        mode: "redirect",
-        status,
-        request_id: requestId,
-        authorization_url: link,
-        message_ar: "تم التحقق عبر نفاذ. جاري إكمال تسجيل الدخول.",
-        message_en: "Nafath verified. Completing sign-in.",
-      });
-    }
     return json({
-      mode: "error",
-      status,
+      mode: "not_configured",
+      status: "COMPLETED",
       request_id: requestId,
+      error: "nafath_auth_session_not_configured",
       message_ar:
-        "تم التحقق عبر نفاذ، لكن لا يوجد بريد إلكتروني مرتبط بالحساب لإنشاء جلسة Supabase تلقائية.",
+        "تم التحقق من نفاذ، لكن لم يُفعّل ربط التحقق بجلسة حساب التطبيق بعد.",
       message_en:
-        "Nafath verified, but this account has no email for automatic Supabase sign-in.",
-    });
+        "Nafath verified the identity, but the application account session is not configured yet.",
+    }, 503);
   }
 
+  // حالة الانتظار: لا تزال الطلب معلقة
   return json({
     mode: "polling",
-    status: status || "PENDING",
+    status: status || "WAITING",
     request_id: requestId,
     random: row.random,
-    message_ar: `بانتظار تأكيد نفاذ. اختر الرقم ${clean(row.random)} في تطبيق نفاذ.`,
-    message_en: `Waiting for Nafath confirmation. Choose ${clean(row.random)} in Nafath app.`,
+    message_ar: `⏳ بانتظار تأكيد نفاذ... اختر الرقم ${clean(row.random)} في التطبيق.`,
+    message_en: `⏳ Waiting for Nafath confirmation. Choose ${clean(row.random)} in the app.`,
   });
 }
 
@@ -358,16 +392,28 @@ serve(async (req) => {
     if (req.method === "OPTIONS") return corsPreflight();
     if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
-    const body = await req.json().catch(() => ({})) as JsonMap;
-    const action = clean(body.action || (body.response ? "callback" : "start"));
-    if (action === "callback") return await handleCallback(body);
-    if (action === "start") return await startNafath(body);
+    let body: JsonMap;
+    try {
+      const parsed: unknown = await req.json();
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return json({ mode: "error", error: "invalid_body" }, 400);
+      }
+      body = parsed as JsonMap;
+    } catch {
+      return json({ mode: "error", error: "invalid_json" }, 400);
+    }
+    const action = clean(body.action || (body.requestId ? "callback" : "start"));
+    if (action === "callback") {
+      return await pollNafath({ request_id: body.requestId ?? body.request_id });
+    }
+    if (action === "start") return await startNafath(body, req);
     if (action === "poll") return await pollNafath(body);
     return json({ mode: "error", error: "invalid_action" }, 400);
   } catch (e) {
+    console.error("Error processing Nafath request:", e instanceof Error ? e.name : "unknown");
     return json({
       mode: "error",
-      error: String(e),
+      error: "nafath_server_error",
       message_ar: "خطأ في الخادم أثناء معالجة طلب نفاذ.",
       message_en: "Server error in nafath_session.",
     }, 500);

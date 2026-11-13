@@ -1058,7 +1058,7 @@ class _ShortsCommentsSheetState extends State<_ShortsCommentsSheet> {
                         )
                       : ListView.builder(
                           keyboardDismissBehavior:
-                              ScrollViewKeyboardDismissBehavior.onDrag,
+                              ScrollViewKeyboardDismissBehavior.manual,
                           physics: const AlwaysScrollableScrollPhysics(
                             parent: BouncingScrollPhysics(),
                           ),

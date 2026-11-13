@@ -62,6 +62,7 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
   late final TextEditingController _idCtrl;
   bool _busy = false;
   bool _polling = false;
+  bool _pollInFlight = false;
   String? _error;
   String _random = '';
   String? _requestId;
@@ -155,6 +156,16 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
   }
 
   Future<void> _pollOnce() async {
+    if (_pollInFlight) return;
+    _pollInFlight = true;
+    try {
+      await _pollOnceInternal();
+    } finally {
+      _pollInFlight = false;
+    }
+  }
+
+  Future<void> _pollOnceInternal() async {
     final rid = (_requestId ?? '').trim();
     if (rid.isEmpty || !_polling) return;
     _pollTicks += 1;
@@ -173,6 +184,41 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
     final svc = NafathAuthService(Supabase.instance.client);
     final r = await svc.pollStatus(rid);
     if (!mounted) return;
+
+    if (r.mode == NafathSessionMode.error ||
+        r.mode == NafathSessionMode.notConfigured) {
+      _pollTimer?.cancel();
+      setState(() {
+        _polling = false;
+        _error = _isAr
+            ? (r.messageAr ?? 'تعذر التحقق من طلب نفاذ.')
+            : (r.messageEn ?? 'Could not verify the Nafath request.');
+      });
+      return;
+    }
+
+    if (r.mode == NafathSessionMode.redirect) {
+      _pollTimer?.cancel();
+      final uri = Uri.tryParse((r.authorizationUrl ?? '').trim());
+      var opened = false;
+      try {
+        opened = uri != null &&
+            uri.scheme == 'https' &&
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } on Exception catch (e) {
+        debugPrint('Could not open Nafath sign-in link: $e');
+      }
+      if (!mounted) return;
+      setState(() {
+        _polling = false;
+        if (!opened) {
+          _error = _isAr
+              ? 'تعذر فتح رابط إكمال الدخول.'
+              : 'Could not open the sign-in link.';
+        }
+      });
+      return;
+    }
 
     final token = (r.accessToken ?? '').trim();
     final refresh = (r.refreshToken ?? '').trim();

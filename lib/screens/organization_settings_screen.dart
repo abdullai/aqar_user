@@ -191,7 +191,7 @@ class _OrganizationSettingsScreenState extends State<OrganizationSettingsScreen>
       body: _loading
           ? const Center(child: AppLogoLoading())
           : SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,

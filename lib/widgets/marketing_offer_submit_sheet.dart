@@ -1265,7 +1265,7 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
         child: widget.useInnerScroll
             ? SingleChildScrollView(
                 keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
+                    ScrollViewKeyboardDismissBehavior.manual,
                 padding: contentPadding,
                 child: innerContent,
               )
