@@ -94,9 +94,16 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         widget.requestId,
         preferArabicNames: _isAr,
       );
+      final orderedOffers = [...list]..sort((a, b) {
+          final aAt = DateTime.tryParse('${a['created_at'] ?? ''}');
+          final bAt = DateTime.tryParse('${b['created_at'] ?? ''}');
+          if (aAt == null) return bAt == null ? 0 : 1;
+          if (bAt == null) return -1;
+          return aAt.compareTo(bAt);
+        });
       final prop = await _svc.linkedPropertyForListingRequest(widget.requestId);
 
-      final mids = list
+      final mids = orderedOffers
           .map((e) => (e['marketer_id'] ?? '').toString().trim())
           .where((e) => e.isNotEmpty)
           .toSet()
@@ -120,7 +127,7 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
       setState(() {
         _request = req;
         _linkedProperty = prop;
-        _offers = list;
+        _offers = orderedOffers;
         _ratingByMarketerId = ratings;
         _loading = false;
         _refreshing = false;
@@ -955,7 +962,6 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
     final canAccept = _canTapAccept(o);
     final canDecline =
         _canOwnerDecide(o) && !_anotherOfferWasSelected(id) && !_acceptInFlight;
-    final shortStatus = ListingWorkflowCopy.offerStatusShort(_isAr, statusRaw);
     final longStatus = ListingWorkflowCopy.offerStatusLong(_isAr, statusRaw);
     final mid = (o['marketer_id'] ?? '').toString().trim();
     final rating = mid.isEmpty ? null : _ratingByMarketerId[mid];
@@ -979,366 +985,339 @@ class _OwnerOffersPageState extends State<OwnerOffersPage> {
         borderRadius: BorderRadius.circular(18),
         side: BorderSide(color: borderColor, width: winner ? 2.2 : 1),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+        title: Row(
           children: [
-            if (winner) ...[
-              Material(
-                color: _brandTeal.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      Icon(Icons.verified_rounded, color: cs.primary, size: 22),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          ListingWorkflowCopy.ownerSelectedMarketerBadge(_isAr),
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            color: cs.primary,
-                            fontSize: 14,
-                          ),
-                        ),
+            CircleAvatar(
+              radius: 23,
+              backgroundColor: _brandTeal.withValues(alpha: 0.18),
+              backgroundImage: avatarUrl.isNotEmpty
+                  ? CachedNetworkImageProvider(avatarUrl)
+                  : null,
+              child: avatarUrl.isEmpty
+                  ? Text(
+                      chatAvatarInitialLetter(
+                        name.isNotEmpty ? name : (_isAr ? 'م' : 'P'),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 30,
-                  backgroundColor: _brandTeal.withValues(alpha: 0.18),
-                  backgroundImage: avatarUrl.isNotEmpty
-                      ? CachedNetworkImageProvider(avatarUrl)
-                      : null,
-                  child: avatarUrl.isEmpty
-                      ? Text(
-                          chatAvatarInitialLetter(
-                            name.isNotEmpty ? name : (_isAr ? 'م' : 'P'),
-                          ),
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w900,
-                            fontSize: 20,
-                            color: _brandTeal,
-                          ),
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name.isNotEmpty
-                            ? name
-                            : ListingWorkflowCopy.t(
-                                _isAr,
-                                'مسوّق عقاري',
-                                'Marketer',
-                              ),
-                        maxLines: 6,
-                        softWrap: true,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 16.5,
-                        ),
-                      ),
-                      // سطر حالة المسوّق (متصل الآن / آخر ظهور) لحظيّ —
-                      // يحدّث عبر Realtime ولا يحتاج تحديث الصفحة. يظهر لكل
-                      // مسوّق قدّم عرضاً داخل تبويب «العروض المقدّمة» للمالك
-                      // وعند الانتقال إلى تبويب «بانتظار التعاقد» يبقى ظاهراً.
-                      if (mid.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        UserPresenceStrip(
-                          userId: mid,
-                          isAr: _isAr,
-                          compact: true,
-                          surface: PresenceDisplaySurface.listingCards,
-                        ),
-                      ],
-                      const SizedBox(height: 4),
-                      Text(
-                        ListingWorkflowCopy.t(
-                          _isAr,
-                          'شريك: ${_accountTypeHuman(o)}',
-                          'Partner: ${_accountTypeHuman(o)}',
-                        ),
-                        style: TextStyle(
-                          color: cs.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Chip(
-                  label: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      shortStatus,
                       style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w900,
+                        color: _brandTeal,
                       ),
-                    ),
-                  ),
-                ),
-              ],
+                    )
+                  : null,
             ),
-            const SizedBox(height: 8),
-            RequestSummaryTable(
-              title: _isAr ? 'بيانات الشريك والعرض' : 'Partner & offer details',
-              rows: [
-                RequestSummaryRow(
-                  label: _isAr ? 'اسم الشريك' : 'Partner name',
-                  value: name.isNotEmpty
-                      ? name
-                      : ListingWorkflowCopy.t(
-                          _isAr,
-                          'شريك مسوّق',
-                          'Partner marketer',
-                        ),
-                  emphasize: true,
-                ),
-                RequestSummaryRow(
-                  label: _isAr ? 'نوع الجهة' : 'Entity type',
-                  value: _accountTypeHuman(o),
-                ),
-                RequestSummaryRow(
-                  label: _isAr ? 'صفة الظهور' : 'Name shown as',
-                  value: identity.source == PublicNameSource.display
-                      ? (_isAr ? 'اسم مستعار' : 'Alias')
-                      : (_isAr
-                          ? 'الاسم المعتمد (رباعي / مكتب / مؤسسة / شركة)'
-                          : 'Official (quad / office / institution / company)'),
-                ),
-                if (phone.isNotEmpty)
-                  RequestSummaryRow(
-                    label: _isAr ? 'الجوال' : 'Phone',
-                    value: _fmtNumericUi(phone),
-                  ),
-                if (license.isNotEmpty)
-                  RequestSummaryRow(
-                    label: _isAr ? 'ترخيص الشريك' : 'Partner license',
-                    value: normalizeAsciiDigits(license),
-                  ),
-                RequestSummaryRow(
-                  label: _isAr ? 'حالة الشريك' : 'Partner status',
-                  value: longStatus,
-                ),
-                RequestSummaryRow(
-                  label: _isAr ? 'قيمة العرض' : 'Offer amount',
-                  value: _amountLine(o),
-                  emphasize: true,
-                ),
-                if (photography != null)
-                  RequestSummaryRow(
-                    label: _isAr ? 'أتعاب التصوير' : 'Photography fee',
-                    value: AppMoney.sarPhrase(
-                      ((photography['amount_sar'] as num?) ?? 0)
-                          .toStringAsFixed(0),
-                      isAr: _isAr,
-                    ),
-                    emphasize: true,
-                  ),
-                RequestSummaryRow(
-                  label: _isAr ? 'تاريخ التقديم' : 'Submitted date',
-                  value: _fmtDateOnly(o['created_at']) ?? '—',
-                ),
-                RequestSummaryRow(
-                  label: _isAr ? 'وقت التقديم' : 'Submitted time',
-                  value: _fmtTimeOnly(o['created_at']) ?? '—',
-                ),
-                if (rating != null && rating.count > 0)
-                  RequestSummaryRow(
-                    label: _isAr ? 'تقييم الشريك' : 'Partner rating',
-                    value: _isAr
-                        ? '${_fmtNumericUi(rating.avg.toStringAsFixed(1))} • ${_fmtNumericUi('${rating.count}')} تقييم'
-                        : '${rating.avg.toStringAsFixed(1)} • ${rating.count} ratings',
-                  ),
-              ],
-            ),
-            if (notes.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                _isAr ? 'رسالة العرض' : 'Offer message',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                notes,
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  height: 1.35,
-                ),
-              ),
-            ],
-            if ((photography?['details'] ?? '')
-                .toString()
-                .trim()
-                .isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                _isAr ? 'تفاصيل التصوير' : 'Photography details',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 12,
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                photography!['details'].toString(),
-                style: TextStyle(color: cs.onSurfaceVariant, height: 1.35),
-              ),
-            ],
-            if (declineReason.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text(
-                ListingWorkflowCopy.t(
-                  _isAr,
-                  declineKind == 'apology'
-                      ? 'سبب الاعتذار: $declineReason'
-                      : 'سبب الرفض: $declineReason',
-                  declineKind == 'apology'
-                      ? 'Apology note: $declineReason'
-                      : 'Decline reason: $declineReason',
-                ),
-                style: TextStyle(
-                  color: declineKind == 'apology' ? cs.primary : cs.error,
-                  fontWeight: FontWeight.w700,
-                  height: 1.35,
-                ),
-              ),
-            ],
-            if (exp != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                ListingWorkflowCopy.t(
-                  _isAr,
-                  'آخر موعد للرد: ${_fmtDt(o['expires_at'])}',
-                  'Respond by: ${_fmtDt(o['expires_at'])}',
-                ),
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: Colors.orange.shade900,
-                ),
-              ),
-              _OfferExpiryCountdown(expiresAt: exp, isAr: _isAr),
-            ],
-            if (!canAccept &&
-                _canOwnerDecide(o) &&
-                _anotherOfferWasSelected(id)) ...[
-              const SizedBox(height: 10),
-              Text(
-                ListingWorkflowCopy.t(
-                  _isAr,
-                  'تم تثبيت عرض آخر — لا يمكن قبول هذا العرض.',
-                  'Another offer was selected — this offer cannot be accepted.',
-                ),
-                style: TextStyle(
-                  color: cs.onSurfaceVariant,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
-                ),
-              ),
-            ],
-            if (canAccept || canDecline) ...[
-              const SizedBox(height: 14),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (canAccept)
-                    FilledButton(
-                      onPressed:
-                          (_loading || _refreshing || busy || _acceptInFlight)
-                              ? null
-                              : () => _accept(o),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _brandTeal,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                      ),
-                      child: busy
-                          ? SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: cs.onPrimary,
-                              ),
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.check_circle_outline,
-                                    size: 22),
-                                const SizedBox(width: 8),
-                                Text(
-                                  photography != null
-                                      ? (_isAr
-                                          ? 'قبول عرض التسويق والتصوير'
-                                          : 'Accept marketing and photography')
-                                      : ListingWorkflowCopy.btnAcceptOffer(
-                                          _isAr),
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    fontSize: 15,
-                                  ),
-                                ),
-                              ],
-                            ),
+                  Text(
+                    name.isNotEmpty
+                        ? name
+                        : ListingWorkflowCopy.t(
+                            _isAr,
+                            'مسوّق عقاري',
+                            'Marketer',
+                          ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 15,
                     ),
-                  if (canAccept && canDecline) const SizedBox(height: 10),
-                  if (canDecline) ...[
-                    OutlinedButton.icon(
-                      onPressed:
-                          (_loading || _refreshing || busy || _acceptInFlight)
-                              ? null
-                              : () => _decline(o),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: cs.error,
-                        side: BorderSide(
-                          color: cs.error.withValues(alpha: 0.55),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      icon: Icon(
-                        Icons.cancel_outlined,
-                        size: 22,
-                        color: cs.error,
-                      ),
-                      label: Text(
-                        ListingWorkflowCopy.btnDeclineOffer(_isAr),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${_amountLine(o)} • ${_fmtDateOnly(o['created_at']) ?? '—'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: cs.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        children: [
+          if (winner) ...[
+            Material(
+              color: _brandTeal.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.verified_rounded, color: cs.primary, size: 22),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        ListingWorkflowCopy.ownerSelectedMarketerBadge(_isAr),
                         style: TextStyle(
                           fontWeight: FontWeight.w900,
-                          fontSize: 14.5,
-                          color: cs.error,
+                          color: cs.primary,
+                          fontSize: 14,
                         ),
                       ),
                     ),
                   ],
-                ],
+                ),
               ),
-            ],
+            ),
+            const SizedBox(height: 12),
           ],
-        ),
+          RequestSummaryTable(
+            title: _isAr ? 'بيانات الشريك والعرض' : 'Partner & offer details',
+            rows: [
+              RequestSummaryRow(
+                label: _isAr ? 'اسم الشريك' : 'Partner name',
+                value: name.isNotEmpty
+                    ? name
+                    : ListingWorkflowCopy.t(
+                        _isAr,
+                        'شريك مسوّق',
+                        'Partner marketer',
+                      ),
+                emphasize: true,
+              ),
+              RequestSummaryRow(
+                label: _isAr ? 'نوع الجهة' : 'Entity type',
+                value: _accountTypeHuman(o),
+              ),
+              RequestSummaryRow(
+                label: _isAr ? 'الاسم المعتمد' : 'Approved display name',
+                value: identity.source == PublicNameSource.display
+                    ? (_isAr ? 'اسم مستعار' : 'Alias')
+                    : (_isAr
+                        ? 'الاسم المعتمد (رباعي / مكتب / مؤسسة / شركة)'
+                        : 'Official (quad / office / institution / company)'),
+              ),
+              if (mid.isNotEmpty)
+                RequestSummaryRow(
+                  label: _isAr ? 'آخر ظهور' : 'Last seen',
+                  valueWidget: UserPresenceStrip(
+                    userId: mid,
+                    isAr: _isAr,
+                    compact: true,
+                    surface: PresenceDisplaySurface.listingCards,
+                  ),
+                ),
+              if (phone.isNotEmpty)
+                RequestSummaryRow(
+                  label: _isAr ? 'الجوال' : 'Phone',
+                  value: _fmtNumericUi(phone),
+                ),
+              if (license.isNotEmpty)
+                RequestSummaryRow(
+                  label: _isAr ? 'ترخيص الشريك' : 'Partner license',
+                  value: normalizeAsciiDigits(license),
+                ),
+              RequestSummaryRow(
+                label: _isAr ? 'حالة العرض' : 'Offer status',
+                value: longStatus,
+              ),
+              RequestSummaryRow(
+                label: _isAr ? 'قيمة العرض' : 'Offer amount',
+                value: _amountLine(o),
+                emphasize: true,
+              ),
+              if (photography != null)
+                RequestSummaryRow(
+                  label: _isAr ? 'أتعاب التصوير' : 'Photography fee',
+                  value: AppMoney.sarPhrase(
+                    ((photography['amount_sar'] as num?) ?? 0)
+                        .toStringAsFixed(0),
+                    isAr: _isAr,
+                  ),
+                  emphasize: true,
+                ),
+              RequestSummaryRow(
+                label: _isAr ? 'تاريخ التقديم' : 'Submitted date',
+                value: _fmtDateOnly(o['created_at']) ?? '—',
+              ),
+              RequestSummaryRow(
+                label: _isAr ? 'وقت التقديم' : 'Submitted time',
+                value: _fmtTimeOnly(o['created_at']) ?? '—',
+              ),
+              if (rating != null && rating.count > 0)
+                RequestSummaryRow(
+                  label: _isAr ? 'تقييم الشريك' : 'Partner rating',
+                  value: _isAr
+                      ? '${_fmtNumericUi(rating.avg.toStringAsFixed(1))} • ${_fmtNumericUi('${rating.count}')} تقييم'
+                      : '${rating.avg.toStringAsFixed(1)} • ${rating.count} ratings',
+                ),
+            ],
+          ),
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _isAr ? 'رسالة العرض' : 'Offer message',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              notes,
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if ((photography?['details'] ?? '').toString().trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _isAr ? 'تفاصيل التصوير' : 'Photography details',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              photography!['details'].toString(),
+              style: TextStyle(color: cs.onSurfaceVariant, height: 1.35),
+            ),
+          ],
+          if (declineReason.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              ListingWorkflowCopy.t(
+                _isAr,
+                declineKind == 'apology'
+                    ? 'سبب الاعتذار: $declineReason'
+                    : 'سبب الرفض: $declineReason',
+                declineKind == 'apology'
+                    ? 'Apology note: $declineReason'
+                    : 'Decline reason: $declineReason',
+              ),
+              style: TextStyle(
+                color: declineKind == 'apology' ? cs.primary : cs.error,
+                fontWeight: FontWeight.w700,
+                height: 1.35,
+              ),
+            ),
+          ],
+          if (exp != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              ListingWorkflowCopy.t(
+                _isAr,
+                'آخر موعد للرد: ${_fmtDt(o['expires_at'])}',
+                'Respond by: ${_fmtDt(o['expires_at'])}',
+              ),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Colors.orange.shade900,
+              ),
+            ),
+            _OfferExpiryCountdown(expiresAt: exp, isAr: _isAr),
+          ],
+          if (!canAccept &&
+              _canOwnerDecide(o) &&
+              _anotherOfferWasSelected(id)) ...[
+            const SizedBox(height: 10),
+            Text(
+              ListingWorkflowCopy.t(
+                _isAr,
+                'تم تثبيت عرض آخر — لا يمكن قبول هذا العرض.',
+                'Another offer was selected — this offer cannot be accepted.',
+              ),
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
+            ),
+          ],
+          if (canAccept || canDecline) ...[
+            const SizedBox(height: 14),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (canAccept)
+                  FilledButton(
+                    onPressed:
+                        (_loading || _refreshing || busy || _acceptInFlight)
+                            ? null
+                            : () => _accept(o),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _brandTeal,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: busy
+                        ? SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: cs.onPrimary,
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.check_circle_outline, size: 22),
+                              const SizedBox(width: 8),
+                              Text(
+                                photography != null
+                                    ? (_isAr
+                                        ? 'قبول عرض التسويق والتصوير'
+                                        : 'Accept marketing and photography')
+                                    : ListingWorkflowCopy.btnAcceptOffer(_isAr),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                if (canAccept && canDecline) const SizedBox(height: 10),
+                if (canDecline) ...[
+                  OutlinedButton.icon(
+                    onPressed:
+                        (_loading || _refreshing || busy || _acceptInFlight)
+                            ? null
+                            : () => _decline(o),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: cs.error,
+                      side: BorderSide(
+                        color: cs.error.withValues(alpha: 0.55),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    icon: Icon(
+                      Icons.cancel_outlined,
+                      size: 22,
+                      color: cs.error,
+                    ),
+                    label: Text(
+                      ListingWorkflowCopy.btnDeclineOffer(_isAr),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14.5,
+                        color: cs.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }

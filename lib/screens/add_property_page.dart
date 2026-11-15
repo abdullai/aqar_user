@@ -63,6 +63,7 @@ import '../services/saudi_locations_service.dart';
 import '../services/subscription_service.dart';
 import '../utils/video_duration_check.dart';
 import '../widgets/adaptive_post_publish_dialog.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/budget_text_field.dart';
@@ -709,8 +710,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         ),
       );
       unawaited(_restoreListingDraftIfAny());
-      // Monitor keyboard visibility to ensure focused field stays visible
-      _setupKeyboardVisibilityMonitor();
     });
   }
 
@@ -1474,6 +1473,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
     void wireDigits(TextEditingController c) {
       c.addListener(() {
+        if (!c.value.composing.isCollapsed) return;
         final raw = normalizeAsciiDigits(c.text);
         warnNonNumericChars(raw);
         final n = digitsOnly(raw);
@@ -1483,13 +1483,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             selection: TextSelection.collapsed(offset: n.length),
           );
         }
-        // Ensure field stays visible when typing
-        _ensureFocusedFieldVisible();
       });
     }
 
     void wireDecimal(TextEditingController c) {
       c.addListener(() {
+        if (!c.value.composing.isCollapsed) return;
         var t = normalizeAsciiDigits(c.text);
         warnNonNumericChars(t);
         t = t.replaceAll(RegExp(r'[^0-9.]'), '');
@@ -1504,8 +1503,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
             selection: TextSelection.collapsed(offset: t.length),
           );
         }
-        // Ensure field stays visible when typing
-        _ensureFocusedFieldVisible();
       });
     }
 
@@ -1524,18 +1521,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     wireDigits(_parcelNumber);
     wireDecimal(_latCtrl);
     wireDecimal(_lngCtrl);
-
-    // Add visibility monitoring for main text fields
-    _addFieldVisibilityListener(_title);
-    _addFieldVisibilityListener(_desc);
-  }
-
-  void _addFieldVisibilityListener(TextEditingController controller) {
-    controller.addListener(() {
-      if (FocusScope.of(context).hasPrimaryFocus) {
-        _ensureFocusedFieldVisible();
-      }
-    });
   }
 
   @override
@@ -1853,77 +1838,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
 
   void _scrollWizardStepToTop() {
     WizardStepNavigation.scrollToTop(_scrollCtrl, animate: true);
-    // Focus on the first input field of the current step
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final pane = _wizardPaneKind(_wizardStep);
-      final GlobalKey<FormState> targetForm;
-
-      switch (pane) {
-        case 0:
-          return; // License step doesn't need focus
-        case 1:
-          targetForm = _formKeyClassification;
-          break;
-        case 23:
-        case 2:
-        case 3:
-          targetForm = _formKeyLocation;
-          break;
-        case 4:
-        case 45:
-          targetForm = _formKeyPricing;
-          break;
-        case 5:
-          targetForm = _formKeyDetails;
-          break;
-        case 6:
-          return; // Media step
-        default:
-          return;
-      }
-
-      final form = targetForm;
-      if (form.currentContext != null) {
-        FocusScope.of(context).unfocus();
-        Future.delayed(const Duration(milliseconds: 100), () {
-          final formContext = form.currentContext;
-          if (mounted && formContext != null) {
-            FocusScope.of(formContext).requestFocus();
-            // Ensure the focused field is visible above keyboard
-            _ensureFocusedFieldVisible();
-          }
-        });
-      }
-    });
-  }
-
-  void _ensureFocusedFieldVisible() {
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (!mounted) return;
-      final FocusScopeNode currentFocus = FocusScope.of(context);
-      if (currentFocus.hasPrimaryFocus && currentFocus.focusedChild != null) {
-        // Get the render object of the focused field
-        final focusedContext = currentFocus.focusedChild?.context;
-        if (focusedContext != null) {
-          final RenderObject? renderObject = focusedContext.findRenderObject();
-          if (renderObject is RenderBox && renderObject.attached) {
-            renderObject.showOnScreen(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
-          }
-        }
-      }
-    });
-  }
-
-  void _setupKeyboardVisibilityMonitor() {
-    // Monitor keyboard visibility and scroll focused field into view
-    WidgetsBinding.instance.window.onSemanticsEnabledChanged = () {
-      if (!mounted) return;
-      _ensureFocusedFieldVisible();
-    };
   }
 
   /// بطاقة جاهزية الإعلان: تتحدّث مباشرة وتُظهر ما ينقص لرفع جودة الإعلان.
@@ -2034,10 +1948,12 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
   }
 
   void _wizardNext() {
-    if (!_validateWizardStep(_wizardStep)) return;
-    if (_wizardStep < _kWizardLastStep) {
+    final step = _wizardStep;
+    if (!_validateWizardStep(step)) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (step < _kWizardLastStep) {
       setState(() {
-        _wizardStep++;
+        _wizardStep = step + 1;
         _error = null;
       });
       unawaited(_persistListingDraft(showSnack: false));
@@ -5895,6 +5811,7 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
                                                     setState(() {
                                                   _consentMarketNoLicense = v;
                                                   _licenseStepError = null;
+                                                  _error = null;
                                                 }),
                                                 showPhoneOnMarket:
                                                     _showPhoneOnMarket,
@@ -9311,10 +9228,19 @@ class _FormCard extends StatelessWidget {
 
                   final currencyField = DropdownButtonFormField<String>(
                     initialValue: currency,
-                    items: const [
-                      DropdownMenuItem(value: 'SAR', child: Text('SAR')),
-                      DropdownMenuItem(value: 'AED', child: Text('AED')),
-                      DropdownMenuItem(value: 'USD', child: Text('USD')),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'SAR',
+                        child: isAr
+                            ? AqarCurrencyMark(
+                                isAr: true,
+                                size: 14,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              )
+                            : const Text('SAR'),
+                      ),
+                      const DropdownMenuItem(value: 'AED', child: Text('AED')),
+                      const DropdownMenuItem(value: 'USD', child: Text('USD')),
                     ],
                     onChanged: saving
                         ? null
@@ -9789,8 +9715,15 @@ class _CommissionKindQuestion extends StatelessWidget {
               inputFormatters: latinDecimalNumberFormatters(),
               decoration: InputDecoration(
                 labelText: isAr
-                    ? 'مبلغ العمولة المقطوع ($currencyCode)'
-                    : 'Fixed commission amount ($currencyCode)',
+                    ? 'مبلغ العمولة المقطوع${currencyCode.trim().toUpperCase() == 'SAR' ? '' : ' ($currencyCode)'}'
+                    : 'Fixed commission amount${currencyCode.trim().toUpperCase() == 'SAR' ? '' : ' ($currencyCode)'}',
+                suffixIcon: currencyCode.trim().toUpperCase() == 'SAR'
+                    ? AqarCurrencyMark(
+                        isAr: isAr,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      )
+                    : null,
                 isDense: true,
                 border: const OutlineInputBorder(),
               ),

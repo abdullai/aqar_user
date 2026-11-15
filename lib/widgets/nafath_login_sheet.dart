@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/auth/auth_challenge_service.dart';
 import '../core/auth/in_app_otp_handoff.dart';
 import '../core/auth/login_success_banner.dart';
+import '../core/branding/app_branding.dart';
 import '../core/gestures/app_keyboard_stable.dart';
 import '../core/government/nafath_models.dart';
 import '../core/input/saudi_input_formatters.dart';
@@ -18,6 +19,7 @@ import '../core/session/return_after_auth.dart';
 import '../services/fast_login_service.dart';
 import '../services/nafath_auth_service.dart';
 import '../screens/verify_screen.dart';
+import '../core/branding/branding_logo_image.dart';
 import 'aqar_text_field.dart';
 import 'app_logo_loading.dart';
 
@@ -26,18 +28,15 @@ class NafathLoginSheet extends StatefulWidget {
   const NafathLoginSheet({
     super.key,
     required this.isAr,
-    this.initialNationalId = '',
     this.rememberMe = false,
   });
 
   final bool isAr;
-  final String initialNationalId;
   final bool rememberMe;
 
   static Future<void> show(
     BuildContext context, {
     required bool isAr,
-    String initialNationalId = '',
     bool rememberMe = false,
   }) {
     return showAppModalBottomSheet<void>(
@@ -46,7 +45,6 @@ class NafathLoginSheet extends StatefulWidget {
       showDragHandle: true,
       builder: (sheetCtx) => NafathLoginSheet(
         isAr: isAr,
-        initialNationalId: initialNationalId,
         rememberMe: rememberMe,
       ),
     );
@@ -74,9 +72,7 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
   @override
   void initState() {
     super.initState();
-    final raw = arabicAndPersianDigitsToLatin(widget.initialNationalId)
-        .replaceAll(RegExp(r'\D'), '');
-    _idCtrl = TextEditingController(text: raw);
+    _idCtrl = TextEditingController();
   }
 
   @override
@@ -130,6 +126,16 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
       });
       return;
     }
+    final token = (r.accessToken ?? '').trim();
+    final refresh = (r.refreshToken ?? '').trim();
+    if (r.mode == NafathSessionMode.redirect &&
+        token.isNotEmpty &&
+        refresh.isNotEmpty) {
+      _pollTimer?.cancel();
+      await _applySession(refreshToken: refresh);
+      return;
+    }
+
     if (r.mode == NafathSessionMode.redirect) {
       setState(() => _busy = false);
       final url = (r.authorizationUrl ?? '').trim();
@@ -169,7 +175,7 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
     final rid = (_requestId ?? '').trim();
     if (rid.isEmpty || !_polling) return;
     _pollTicks += 1;
-    if (_pollTicks > 45) {
+    if (_pollTicks > 150) {
       _pollTimer?.cancel();
       if (mounted) {
         setState(() {
@@ -220,14 +226,6 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
       return;
     }
 
-    final token = (r.accessToken ?? '').trim();
-    final refresh = (r.refreshToken ?? '').trim();
-    if (token.isNotEmpty && refresh.isNotEmpty) {
-      _pollTimer?.cancel();
-      await _applySession(accessToken: token, refreshToken: refresh);
-      return;
-    }
-
     final st = (r.status ?? '').toLowerCase();
     if (st == 'rejected' || st == 'expired' || st == 'failed') {
       _pollTimer?.cancel();
@@ -247,7 +245,6 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
   }
 
   Future<void> _applySession({
-    required String accessToken,
     required String refreshToken,
   }) async {
     setState(() {
@@ -256,10 +253,17 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
     });
     try {
       await Supabase.instance.client.auth.setSession(refreshToken);
-    } catch (_) {
-      try {
-        await Supabase.instance.client.auth.setSession(accessToken);
-      } catch (_) {}
+    } catch (e) {
+      debugPrint('Could not establish the Nafath Supabase session: $e');
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = _isAr
+              ? 'تم التحقق من نفاذ لكن تعذر إنشاء جلسة الدخول. أعد المحاولة.'
+              : 'Nafath verified, but a sign-in session could not be created. Try again.';
+        });
+      }
+      return;
     }
     final uid = Supabase.instance.client.auth.currentUser?.id ?? '';
     if (uid.isEmpty) {
@@ -303,8 +307,7 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
       await nav.pushReplacement(
         PageRouteBuilder<void>(
           settings: RouteSettings(name: '/verify', arguments: args),
-          pageBuilder: (context, animation, secondaryAnimation) =>
-              VerifyScreen(
+          pageBuilder: (context, animation, secondaryAnimation) => VerifyScreen(
             initialUsername: _nationalId,
             initialChallengeId: challenge.challengeId,
             initialCode: challenge.devCode,
@@ -344,100 +347,175 @@ class _NafathLoginSheetState extends State<NafathLoginSheet> {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              _isAr ? 'الدخول عبر نفاذ' : 'Sign in with Nafath',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _isAr
-                  ? 'أدخل رقم الهوية ثم أكّد الطلب من تطبيق نفاذ.'
-                  : 'Enter your ID then confirm in the Nafath app.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: cs.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 14),
-            AqarTextField(
-              controller: _idCtrl,
-              keyboardType: TextInputType.number,
-              enabled: !_busy && !_polling,
-              inputFormatters: [
-                const ArabicDigitsToLatinFormatter(),
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(10),
-              ],
-              decoration: InputDecoration(
-                labelText: _isAr ? 'رقم الهوية / الإقامة' : 'National / Iqama ID',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            if (_random.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 18),
-                decoration: BoxDecoration(
-                  color: _bank.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      _isAr ? 'الرقم في تطبيق نفاذ' : 'Number in Nafath app',
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      _random,
-                      style: const TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 6,
-                        color: _bank,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (_error != null) ...[
-              const SizedBox(height: 10),
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               Text(
-                _error!,
+                _isAr ? 'الدخول عبر نفاذ' : 'Sign in with Nafath',
+                textAlign: TextAlign.center,
+                style:
+                    const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _isAr
+                    ? 'أدخل رقم الهوية ثم أكّد الطلب من تطبيق نفاذ.'
+                    : 'Enter your ID then confirm in the Nafath app.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: cs.error,
-                  fontWeight: FontWeight.w800,
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _signInBrandTile(
+                      label: _isAr ? 'نفاذ' : 'Nafath',
+                      child: Image.asset(
+                        'assets/nafath_mark.png',
+                        width: 48,
+                        height: 48,
+                        fit: BoxFit.contain,
+                        semanticLabel: _isAr ? 'شعار نفاذ' : 'Nafath logo',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _signInBrandTile(
+                      label: AppBranding.displayNameForContext(
+                        context,
+                        isAr: _isAr,
+                      ),
+                      child: const BrandingLogoImage(
+                        size: 48,
+                        semanticLabel: 'Aqar',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              AqarTextField(
+                controller: _idCtrl,
+                keyboardType: TextInputType.number,
+                enabled: !_busy && !_polling,
+                inputFormatters: [
+                  const ArabicDigitsToLatinFormatter(),
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(10),
+                ],
+                decoration: InputDecoration(
+                  labelText:
+                      _isAr ? 'رقم الهوية / الإقامة' : 'National / Iqama ID',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+              if (_random.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  decoration: BoxDecoration(
+                    color: _bank.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        _isAr ? 'الرقم في تطبيق نفاذ' : 'Number in Nafath app',
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _random,
+                        style: const TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 6,
+                          color: _bank,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: cs.error,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 52,
+                child: FilledButton(
+                  onPressed: (_busy || _polling) ? null : _start,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _bank,
+                    alignment: Alignment.center,
+                  ),
+                  child: (_busy || _polling)
+                      ? const AppLogoLoading(size: 28)
+                      : Text(
+                          _polling
+                              ? (_isAr ? 'بانتظار التأكيد…' : 'Waiting…')
+                              : (_isAr
+                                  ? 'متابعة عبر نفاذ'
+                                  : 'Continue with Nafath'),
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                          textAlign: TextAlign.center,
+                        ),
                 ),
               ),
             ],
-            const SizedBox(height: 14),
-            SizedBox(
-              height: 48,
-              child: FilledButton(
-                onPressed: (_busy || _polling) ? null : _start,
-                style: FilledButton.styleFrom(backgroundColor: _bank),
-                child: (_busy || _polling)
-                    ? const AppLogoLoading(size: 28)
-                    : Text(
-                        _polling
-                            ? (_isAr ? 'بانتظار التأكيد…' : 'Waiting…')
-                            : (_isAr ? 'متابعة عبر نفاذ' : 'Continue with Nafath'),
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-              ),
-            ),
-          ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _signInBrandTile({
+    required String label,
+    required Widget child,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      height: 88,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+        border: Border.all(color: cs.outlineVariant),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(height: 50, child: Center(child: child)),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: cs.onSurface,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
       ),
     );
   }

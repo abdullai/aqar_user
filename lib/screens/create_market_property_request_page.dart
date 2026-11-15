@@ -1141,13 +1141,9 @@ class _CreateMarketPropertyRequestPageState
       isAr: _isAr,
     );
     if (n.isEmpty) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_isAr)
-          SaudiRiyalSymbolIcon(size: 14, color: cs.primary)
-        else
-          Text(
+    final currencyMark = _isAr
+        ? SaudiRiyalSymbolIcon(size: 14, color: cs.primary)
+        : Text(
             AppMoney.sarUiSuffix(isAr: false),
             style: TextStyle(
               color: cs.primary,
@@ -1155,17 +1151,23 @@ class _CreateMarketPropertyRequestPageState
               fontSize: 11,
               fontFamily: 'Cairo',
             ),
-          ),
+          );
+    final amount = Text(
+      n,
+      style: TextStyle(
+        color: cs.primary,
+        fontWeight: FontWeight.w900,
+        fontSize: 12,
+        fontFamily: 'Cairo',
+      ),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      textDirection: TextDirection.ltr,
+      children: [
+        if (_isAr) currencyMark else amount,
         const SizedBox(width: 4),
-        Text(
-          n,
-          style: TextStyle(
-            color: cs.primary,
-            fontWeight: FontWeight.w900,
-            fontSize: 12,
-            fontFamily: 'Cairo',
-          ),
-        ),
+        if (_isAr) amount else currencyMark,
       ],
     );
   }

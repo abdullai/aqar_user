@@ -368,7 +368,7 @@ BEGIN
     v_title_ar := 'عقار جديد يطابق بحثك';
     v_body_ar := left(v_title, 80)
       || CASE WHEN v_price IS NOT NULL
-           THEN ' — ' || to_char(v_price, 'FM999,999,999,999') || ' ر.س' ELSE '' END
+           THEN ' — ' || to_char(v_price, 'FM999,999,999,999') || ' ﷼' ELSE '' END
       || CASE WHEN v_reason <> '' THEN E'\nسبب الاقتراح: ' || v_reason ELSE '' END
       || E'\nالمطابقة تقديرية بحسب بيانات الإعلان.';
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'programmatic_pop_guard.dart';
+
 /// إغلاق الصفحة/الطبقة الحالية دون إسقاط هيكل اللوحة إلى تبويب الرئيسية
 /// ودون الخروج إلى شاشة تسجيل الدخول.
 ///
@@ -64,6 +66,10 @@ abstract final class SafeOverlayPop {
     return isAppShellName(route.settings.name);
   }
 
+  static void _pop(NavigatorState nav, [Object? result]) {
+    ProgrammaticPopGuard.run(() => nav.pop(result));
+  }
+
   static Route<dynamic>? peekTop(NavigatorState nav) {
     Route<dynamic>? top;
     try {
@@ -86,11 +92,11 @@ abstract final class SafeOverlayPop {
     final top = peekTop(nav);
     // حوارات/شيتات تُغلق دائماً حتى لو حُملت اسماً مشابهاً للهيكل.
     if (top is PopupRoute) {
-      nav.pop(result);
+      _pop(nav, result);
       return true;
     }
     if (isShellRoute(top)) return false;
-    nav.pop(result);
+    _pop(nav, result);
     return true;
   }
 
@@ -101,8 +107,13 @@ abstract final class SafeOverlayPop {
     bool Function()? popNestedOverride,
   }) {
     if (root != null && popIfOverlay(root)) return true;
+    final nestedCanPop = nested?.canPop() ?? (canPopNested?.call() ?? false);
     final nestedPop = popNestedOverride ?? popNested;
-    if (nestedPop?.call() == true) return true;
+    if (nestedCanPop && nestedPop != null) {
+      var popped = false;
+      ProgrammaticPopGuard.run(() => popped = nestedPop());
+      if (popped) return true;
+    }
     if (nested != null && popIfOverlay(nested)) return true;
     return false;
   }
@@ -114,7 +125,7 @@ abstract final class SafeOverlayPop {
       final local = Navigator.of(context);
       if (local.canPop() &&
           (route is PopupRoute || (route != null && !isShellRoute(route)))) {
-        local.pop(result);
+        _pop(local, result);
         return true;
       }
     } catch (_) {}
@@ -122,7 +133,12 @@ abstract final class SafeOverlayPop {
       final local = Navigator.of(context);
       if (popIfOverlay(local, result)) return true;
     } catch (_) {}
-    if (popNested?.call() == true) return true;
+    final nestedPop = popNested;
+    if (canPopNested?.call() == true && nestedPop != null) {
+      var popped = false;
+      ProgrammaticPopGuard.run(() => popped = nestedPop());
+      if (popped) return true;
+    }
     try {
       final root = Navigator.of(context, rootNavigator: true);
       if (root.canPop() && popIfOverlay(root, result)) return true;

@@ -15,6 +15,7 @@ import '../services/subscription_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../widgets/aqar_text_field.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../widgets/certified_photographer_name.dart';
 import 'subscriptions/subscriptions_root_screen.dart';
 import 'photographer_deliver_page.dart';
@@ -899,7 +900,13 @@ class _PhotographerHubPageState extends State<PhotographerHubPage>
                     ),
                     onChanged: (_) => setLocal(() {}),
                     decoration: InputDecoration(
-                      labelText: _isAr ? 'المبلغ بالريال' : 'Amount in SAR',
+                      labelText: _isAr ? 'المبلغ' : 'Amount',
+                      suffixIcon: AqarCurrencyMark(
+                        isAr: _isAr,
+                        size: 16,
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],

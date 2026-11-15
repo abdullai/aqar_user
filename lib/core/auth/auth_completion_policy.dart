@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 /// سياسة اكتمال الدخول — قرارات صرفة قابلة للاختبار بدون شبكة.
 /// الخادم يبقى مصدر الحقيقة؛ هذه الطبقة تمنع الالتفاف من الواجهة.
 abstract final class AuthCompletionPolicy {
-  /// أندرويد/iOS أصلي فقط. كل ما عداه (ويب، ويندوز، ماك، لينكس) يُعامل كسطح OTP دائم.
+  /// تسجيل الدخول الجديد على الويب/سطح المكتب يبقى محمياً بـ OTP.
+  /// فتح جلسة محفوظة بقفل محلي قرار منفصل ومقيّد بثقة الخادم بالجهاز.
   static bool isNativeMobileSurface({
     required bool isWeb,
     required TargetPlatform platform,
@@ -30,11 +31,18 @@ abstract final class AuthCompletionPolicy {
     return isNativeMobileSurface(isWeb: isWeb, platform: platform);
   }
 
+  static bool allowTrustedSessionPinUnlock({
+    required bool isWeb,
+    required TargetPlatform platform,
+  }) {
+    return isWeb || isNativeMobileSurface(isWeb: isWeb, platform: platform);
+  }
+
   static bool allowPinOrBiometrics({
     required bool isWeb,
     required TargetPlatform platform,
   }) =>
-      allowFastLogin(isWeb: isWeb, platform: platform);
+      isNativeMobileSurface(isWeb: isWeb, platform: platform);
 
   /// أعلام SharedPreferences / priorUid لا تُكمل المصادقة وحدها.
   static bool localFlagCanBypassOtp() => false;

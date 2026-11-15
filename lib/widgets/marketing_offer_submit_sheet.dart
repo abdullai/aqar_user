@@ -38,6 +38,7 @@ import 'app_shimmer.dart';
 import 'listing_pricing_breakdown.dart';
 import 'listing_media_preview.dart';
 import 'aqar_text_field.dart';
+import 'saudi_riyal_symbol_icon.dart';
 import 'app_page_close_button.dart';
 
 /// نموذج موحّد: أتعاب التسويق من [MarketingOfferFee] على (قيمة العقار + ضريبة 5٪ على العقار).
@@ -1218,8 +1219,13 @@ class _MarketingOfferSubmitPanelState extends State<MarketingOfferSubmitPanel> {
                 ),
                 decoration: InputDecoration(
                   labelText: widget.isAr
-                      ? 'أتعاب التصوير بالريال'
-                      : 'Photography fee (SAR)',
+                      ? 'أتعاب التصوير'
+                      : 'Photography fee',
+                  suffixIcon: AqarCurrencyMark(
+                    isAr: widget.isAr,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),

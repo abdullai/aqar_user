@@ -11,6 +11,13 @@ import '../core/input/locale_text_input_guard.dart';
 import '../core/platform/viewport_scroll_policy.dart';
 import 'aqar_input_helpers.dart';
 
+void _advanceOrUnfocus(BuildContext context) {
+  final scope = FocusScope.of(context);
+  if (!scope.nextFocus()) {
+    scope.unfocus();
+  }
+}
+
 /// هامش سفلي يكفي لإبقاء الحقل فوق الكيبورد مع بقاء التمرير في الخلفية.
 EdgeInsets aqarFieldScrollPadding(BuildContext context) {
   final extra = AppKeyboardInset.scrollContentBottomOf(context);
@@ -196,7 +203,7 @@ class AqarTextField extends StatelessWidget {
       onEditingComplete: resolvedAction == TextInputAction.next
           ? () {
               AppHaptics.selection();
-              FocusScope.of(context).nextFocus();
+              _advanceOrUnfocus(context);
             }
           : null,
     );
@@ -344,7 +351,7 @@ class AqarTextFormField extends FormField<String> {
               onEditingComplete: resolvedAction == TextInputAction.next
                   ? () {
                       AppHaptics.selection();
-                      FocusScope.of(ctx).nextFocus();
+                      _advanceOrUnfocus(ctx);
                     }
                   : null,
             );

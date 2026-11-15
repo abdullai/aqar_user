@@ -1818,8 +1818,7 @@ class _StartRouterState extends State<StartRouter> {
         unawaited(FastLoginService.syncBootstrapRoutePrefs());
 
         // عند كل فتح جديد للعملية: إن وُجد قفل سريع (PIN/بصمة) يُطلب قبل اللوحة.
-        if (!kIsWeb &&
-            AuthChallengeService.allowQuickUnlockOnThisSurface() &&
+        if (AuthChallengeService.allowQuickUnlockOnThisSurface() &&
             await FastLoginService.hasAnyLockEnabled() &&
             !FastLoginService.hasUnlockedThisRuntimeSession) {
           if (!_isCurrentResolve(generation)) return;

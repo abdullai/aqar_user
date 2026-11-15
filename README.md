@@ -50,7 +50,7 @@ flutter build web --release --dart-define=SUPABASE_URL=https://example.supabase.
 - اضبط `MOYASAR_SECRET_KEY=sk_test_...` و`MOYASAR_WEBHOOK_SECRET` كـ Supabase
   Edge Function Secrets، ثم انشر `moyasar-webhook` وسجّل عنوانه في لوحة Moyasar.
   تأكيد الدفع وحفظ البطاقة وتفعيل الشراء يعتمد على وصول الـ Webhook والتحقق منه.
-- حفظ بطاقة مستقلة متاح في وضع الاختبار عبر معاملة تحقق تجريبية بقيمة 1 ريال
+- حفظ بطاقة مستقلة متاح في وضع الاختبار عبر معاملة تحقق تجريبية بقيمة 1 ﷼
   فقط؛ لا تُضاف رسوم تحقق في وضع الإنتاج. في الإنتاج تُحفَظ البطاقة بعد أول دفعة
   ناجحة. لا تضع مفاتيح `sk_...` أو أسرار Webhook داخل Flutter أو `.env` المضمّن.
 

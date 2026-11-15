@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/branding/branding_pdf.dart';
 import '../core/utils/date_helper.dart';
 import '../core/payment/invoice_copy.dart';
+import '../core/utils/app_money.dart';
 
 /// تقارير اشتراكات ومدفوعات لموظفي المنصة (RLS: `*_staff_read`).
 class SubscriptionAdminReportService {
@@ -123,7 +124,11 @@ class SubscriptionAdminReportService {
         TextCellValue(
           excelAmountCell(_amount(r), isAr: isAr),
         ),
-        TextCellValue('${r['currency'] ?? 'SAR'}'),
+        TextCellValue(
+          (r['currency'] ?? 'SAR').toString().trim().toUpperCase() == 'SAR'
+              ? AppMoney.sarUiSuffix(isAr: isAr)
+              : '${r['currency'] ?? 'SAR'}'.trim().toUpperCase(),
+        ),
         TextCellValue(
           InvoiceCopy.methodLabel('${r['payment_method'] ?? ''}', isAr: isAr),
         ),

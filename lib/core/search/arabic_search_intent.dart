@@ -2,6 +2,8 @@ import '../../models/property.dart';
 
 /// تحليل محلي (دون إرسال النص لأي خدمة خارجية) لصياغة بحث عربية طبيعية مثل
 /// «شقة للإيجار بميزانية 50 ألف 3 غرف الرياض» إلى معايير منظمة.
+const _saudiRiyalSign = '\u{FDFC}';
+
 class ArabicSearchIntent {
   const ArabicSearchIntent({
     this.type,
@@ -315,15 +317,15 @@ class ArabicSearchIntent {
     }
     if (priceMin != null && priceMax != null) {
       out.add(arabic
-          ? 'من ${_fmtMoney(priceMin!)} إلى ${_fmtMoney(priceMax!)} ر.س'
+          ? 'من ${_fmtMoney(priceMin!)} إلى ${_fmtMoney(priceMax!)} $_saudiRiyalSign'
           : '${_fmtMoney(priceMin!)}–${_fmtMoney(priceMax!)} SAR');
     } else if (priceMax != null) {
       out.add(arabic
-          ? 'حتى ${_fmtMoney(priceMax!)} ر.س'
+          ? 'حتى ${_fmtMoney(priceMax!)} $_saudiRiyalSign'
           : 'Up to ${_fmtMoney(priceMax!)} SAR');
     } else if (priceMin != null) {
       out.add(arabic
-          ? 'من ${_fmtMoney(priceMin!)} ر.س'
+          ? 'من ${_fmtMoney(priceMin!)} $_saudiRiyalSign'
           : 'From ${_fmtMoney(priceMin!)} SAR');
     }
     if (bedroomsMin != null) {

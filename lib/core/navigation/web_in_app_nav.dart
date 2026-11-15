@@ -8,6 +8,7 @@ import '../auth/inactivity_auth_landing.dart';
 import '../auth/safe_sign_out_service.dart';
 import '../session/web_visibility.dart';
 import '../../services/fast_login_service.dart';
+import 'programmatic_pop_guard.dart';
 import 'safe_overlay_pop.dart';
 import 'sensitive_nav_policy.dart';
 import 'web_in_app_history.dart';
@@ -25,7 +26,6 @@ abstract final class WebInAppNav {
   static bool _armed = false;
   static int _holdBack = 0;
   static int _sealDepth = 0;
-  static int _programmaticPopDepth = 0;
 
   static bool get _sealing => _sealDepth > 0;
 
@@ -47,7 +47,6 @@ abstract final class WebInAppNav {
     popNested = null;
     _fromHistory = false;
     _holdBack = 0;
-    _programmaticPopDepth = 0;
     _forward.clear();
   }
 
@@ -68,12 +67,7 @@ abstract final class WebInAppNav {
   /// Marks a Flutter close action so its NavigatorObserver pop is not replayed
   /// as a second browser-history back action.
   static void runProgrammaticPop(VoidCallback action) {
-    _programmaticPopDepth++;
-    try {
-      action();
-    } finally {
-      if (_programmaticPopDepth > 0) _programmaticPopDepth--;
-    }
+    ProgrammaticPopGuard.run(action);
   }
 
   static void sealBrowserToLogin() {
@@ -120,12 +114,15 @@ abstract final class WebInAppNav {
       return;
     }
     if (_bypassesHistory(route)) return;
-    if (_programmaticPopDepth > 0) {
+    if (_fromHistory) {
+      _remember(route, nested: nested);
+      return;
+    }
+    if (ProgrammaticPopGuard.isActive) {
       if (route is PageRoute) webInAppHistoryGoBack();
       return;
     }
     _remember(route, nested: nested);
-    if (_fromHistory) return;
     if (route is! PageRoute) return;
     webInAppHistoryGoBack();
   }

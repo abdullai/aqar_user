@@ -227,7 +227,7 @@ void main() {
       expect(ar.contains('SAR'), isFalse);
       expect(ar.contains(AppMoney.saudiRiyalSignCompat), isTrue);
       expect(ar.contains('12.5'), isTrue);
-      expect(ar, contains('${AppMoney.saudiRiyalSignCompat}12.5'));
+      expect(ar, contains('12.5 ${AppMoney.saudiRiyalSignCompat}'));
       expect(en.contains('SAR'), isTrue);
       expect(en.contains('ر.س'), isFalse);
       expect(en.contains(AppMoney.saudiRiyalSignCompat), isFalse);

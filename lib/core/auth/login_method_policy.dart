@@ -61,13 +61,19 @@ class LoginMethodSnapshot {
   bool get nameOnlyPassword => hasKnownUser;
 
   bool get _lockEligible =>
-      isNativeMobile && trustedThisInstall && firstPasswordDone && hasSession;
+      (isNativeMobile ||
+          host == LoginHostKind.webMobile ||
+          host == LoginHostKind.webDesktop) &&
+      trustedThisInstall &&
+      firstPasswordDone &&
+      hasSession;
 
   bool get showPin => _lockEligible && pinEnabled;
 
-  bool get showFace => _lockEligible && faceEnabled;
+  bool get showFace => isNativeMobile && _lockEligible && faceEnabled;
 
-  bool get showFingerprint => _lockEligible && fingerprintEnabled;
+  bool get showFingerprint =>
+      isNativeMobile && _lockEligible && fingerprintEnabled;
 
   bool get showAnyQuickUnlock => showPin || showFace || showFingerprint;
 
@@ -181,21 +187,23 @@ abstract final class LoginMethodPolicy {
 
     if (trusted) {
       try {
-        trusted = await AuthChallengeService.isNativeDeviceTrustedOnServer();
+        trusted = await AuthChallengeService.isDeviceTrustedOnServer();
       } catch (_) {
         trusted = false;
       }
     }
 
-    if (!AuthCompletionPolicy.allowFastLogin(
+    if (!AuthCompletionPolicy.allowTrustedSessionPinUnlock(
       isWeb: kIsWeb,
       platform: defaultTargetPlatform,
     )) {
       trusted = false;
     }
 
-    // الويب وسطح المكتب: لا بصمة أصلية ولا رمز تطبيق.
-    if (host == LoginHostKind.nativeMobile) {
+    // المتصفح يدعم PIN للجلسة الموثوقة؛ البصمة تبقى لتطبيق الجوال فقط.
+    if (host == LoginHostKind.nativeMobile ||
+        host == LoginHostKind.webMobile ||
+        host == LoginHostKind.webDesktop) {
       try {
         pin = await FastLoginService.isPinEnabled();
         mode = await FastLoginService.resolveUnlockMode();

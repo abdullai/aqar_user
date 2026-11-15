@@ -24,6 +24,7 @@ import '../widgets/auth_top_chrome.dart';
 import '../widgets/login_known_user_hero.dart';
 import '../widgets/nafath_login_sheet.dart';
 import '../widgets/caps_aware_password_field.dart';
+import '../widgets/six_digit_pin_fields.dart';
 import '../core/auth/login_method_policy.dart';
 import '../core/haptics/app_haptics.dart';
 import '../theme.dart' show AqarAuthScrollBehavior;
@@ -67,6 +68,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   );
 
   final _passwordCtrl = TextEditingController();
+  final _pinController = TextEditingController();
   final _passwordFocus = FocusNode();
   bool _obscure = true;
 
@@ -89,12 +91,12 @@ class _FastLoginScreenState extends State<FastLoginScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      if (kIsWeb) {
-        Navigator.pushReplacementNamed(context, '/login');
-        return;
-      }
       final hasSession = Supabase.instance.client.auth.currentSession != null;
       if (!hasSession) {
+        if (kIsWeb) {
+          Navigator.pushReplacementNamed(context, '/login');
+          return;
+        }
         final stay = InactivityAuthLanding.isActive ||
             await FastLoginService.canSoftLockSession();
         if (!stay) {
@@ -163,6 +165,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
   void dispose() {
     _shakeCtrl.dispose();
     _passwordCtrl.dispose();
+    _pinController.dispose();
     _passwordFocus.dispose();
     super.dispose();
   }
@@ -172,9 +175,8 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       if (!mounted) return;
       setState(() {
         _showBio = false;
-        _unlockMode = _pinEnabled
-            ? FastUnlockMode.pinOnly
-            : FastUnlockMode.password;
+        _unlockMode =
+            _pinEnabled ? FastUnlockMode.pinOnly : FastUnlockMode.password;
         if (!_pinEnabled) _passwordMode = true;
       });
       return;
@@ -320,34 +322,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     }
   }
 
-  void _pressDigit(String d) async {
-    if (_busy || !_pinEnabled || _pinLockSec > 0) return;
-    if (_pin.length >= _pinLen) return;
-
-    setState(() {
-      _pin += d;
-      _err = false;
-    });
-
-    AppHaptics.selection();
-
-    if (_pin.length == _pinLen) {
-      _submitPin();
-    }
-  }
-
-  void _backspace() {
-    if (_busy || !_pinEnabled) return;
-    if (_pin.isEmpty) return;
-
-    setState(() {
-      _pin = _pin.substring(0, _pin.length - 1);
-      _err = false;
-    });
-
-    AppHaptics.selection();
-  }
-
   Future<void> _submitPin() async {
     if (_busy || !_pinEnabled) return;
 
@@ -359,6 +333,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
         _pin = '';
         _pinLockSec = rem;
       });
+      _pinController.clear();
       _triggerErrorFeedback();
       return;
     }
@@ -390,6 +365,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
         _pin = '';
         _pinLockSec = rem;
       });
+      _pinController.clear();
       _triggerErrorFeedback();
     }
   }
@@ -437,6 +413,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
       _err = false;
       _pin = '';
     });
+    _pinController.clear();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _passwordFocus.requestFocus();
     });
@@ -462,7 +439,6 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     await NafathLoginSheet.show(
       context,
       isAr: _isAr,
-      initialNationalId: (_username ?? '').trim(),
     );
   }
 
@@ -533,65 +509,10 @@ class _FastLoginScreenState extends State<FastLoginScreen>
     Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
   }
 
-  Color _onBg(bool isLight) => isLight ? const Color(0xFF0B1220) : Colors.white;
   Color _sub(bool isLight) =>
       isLight ? const Color(0xFF5B6475) : const Color(0xFFB8C0D4);
   Color _bg(bool isLight) =>
       isLight ? const Color(0xFFF5F7FA) : const Color(0xFF071210);
-
-  Widget _dot({
-    required bool filled,
-    required bool isLight,
-    required double size,
-  }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 160),
-      width: size,
-      height: size,
-      margin: EdgeInsets.symmetric(horizontal: size * 0.35),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: filled
-            ? _brand
-            : (isLight ? const Color(0xFFE5E7EB) : const Color(0xFF2A355A)),
-      ),
-    );
-  }
-
-  Widget _keyButton({
-    required Widget child,
-    required VoidCallback? onTap,
-    required bool isLight,
-    Color? highlight,
-    String? semanticsLabel,
-  }) {
-    final border = isLight ? const Color(0xFFE5E7EB) : const Color(0xFF22283A);
-    final surface = isLight ? Colors.white : const Color(0xFF141722);
-
-    return Semantics(
-      button: true,
-      label: semanticsLabel,
-      child: Material(
-        color: surface,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: highlight ?? border,
-                width: highlight != null ? 2 : 1,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
 
   IconData _bioIcon() {
     switch (_unlockMode) {
@@ -646,104 +567,48 @@ class _FastLoginScreenState extends State<FastLoginScreen>
         final isLight =
             UserAppearanceSession.resolvesLight(themeModeNotifier.value);
         final size = MediaQuery.sizeOf(context);
-        final shortest = size.shortestSide;
         final width = size.width;
         final bottomInset = MediaQuery.paddingOf(context).bottom;
         final isNarrow = width < 520;
         final isWideWeb = kIsWeb && width >= 720;
 
-        final maxCard = isWideWeb ? 460.0 : (isNarrow ? double.infinity : 420.0);
+        final maxCard =
+            isWideWeb ? 460.0 : (isNarrow ? double.infinity : 420.0);
         final hPad = isNarrow ? 14.0 : 22.0;
-        final dotSize = shortest < 360 ? 11.0 : 13.0;
-        final keyTextSize = shortest < 360 ? 20.0 : 22.0;
-        final gridHPad = shortest < 360 ? 8.0 : 16.0;
-
         final bg = _bg(isLight);
-        final onBg = _onBg(isLight);
         final sub = _sub(isLight);
         final errColor = Theme.of(context).colorScheme.error;
-
-        final keypad = Directionality(
-          textDirection: TextDirection.ltr,
-          child: LayoutBuilder(
-            builder: (context, c) {
-              final font = TextStyle(
-                fontSize: keyTextSize,
-                fontWeight: FontWeight.w900,
-                color: onBg,
-              );
-
-              Widget digit(String v) => _keyButton(
-                    isLight: isLight,
-                    semanticsLabel: 'Digit $v',
-                    onTap: _busy || _pinLockSec > 0
-                        ? null
-                        : () => _pressDigit(v),
-                    child: Text(v, style: font),
-                  );
-
-              Widget bioKey() {
-                if (!_showBio) return const SizedBox.shrink();
-                return _keyButton(
-                  isLight: isLight,
-                  highlight: _accentBio.withValues(alpha: 0.85),
-                  semanticsLabel: 'Biometric',
-                  onTap: _busy ? null : () => _tryBiometric(fromAuto: false),
-                  child: Icon(_bioIcon(), size: 28, color: _accentBio),
-                );
-              }
-
-              Widget backKey() => _keyButton(
-                    isLight: isLight,
-                    semanticsLabel: 'Backspace',
-                    onTap: _busy ? null : _backspace,
-                    child:
-                        Icon(Icons.backspace_outlined, color: onBg, size: 24),
-                  );
-
-              return GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                padding: EdgeInsets.symmetric(horizontal: gridHPad),
-                childAspectRatio: isNarrow ? 1.35 : 1.2,
-                children: [
-                  for (var i = 1; i <= 9; i++) digit('$i'),
-                  bioKey(),
-                  digit('0'),
-                  backKey(),
-                ],
-              );
-            },
-          ),
-        );
-
-        final dotsRow = _pinEnabled
+        final pinFields = _pinEnabled
             ? AnimatedBuilder(
                 animation: _shakeCtrl,
                 builder: (context, child) {
                   final t = _shakeCtrl.value;
-                  final dx =
-                      _err ? (8.0 * (1 - t) * math.sin(t * 18.0)) : 0.0;
-                  return Transform.translate(offset: Offset(dx, 0), child: child);
+                  final dx = _err ? (8.0 * (1 - t) * math.sin(t * 18.0)) : 0.0;
+                  return Transform.translate(
+                      offset: Offset(dx, 0), child: child);
                 },
                 child: Column(
                   children: [
-                    Directionality(
-                      textDirection:
-                          _isAr ? TextDirection.rtl : TextDirection.ltr,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(
-                          _pinLen,
-                          (i) => _dot(
-                            filled: i < _pin.length,
-                            isLight: isLight,
-                            size: dotSize,
-                          ),
-                        ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: SixDigitPinFields(
+                        controller: _pinController,
+                        length: _pinLen,
+                        label: _isAr ? 'رمز الدخول السريع' : 'Quick PIN',
+                        enabled: !_busy && _pinLockSec == 0,
+                        autofocus: _pinLockSec == 0,
+                        onChanged: (value) {
+                          if (!mounted) return;
+                          setState(() {
+                            _pin = value;
+                            _err = false;
+                          });
+                          if (value.length == _pinLen &&
+                              !_busy &&
+                              _pinLockSec == 0) {
+                            unawaited(_submitPin());
+                          }
+                        },
                       ),
                     ),
                     AnimatedSwitcher(
@@ -783,9 +648,9 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                 animation: _shakeCtrl,
                 builder: (context, child) {
                   final t = _shakeCtrl.value;
-                  final dx =
-                      _err ? (8.0 * (1 - t) * math.sin(t * 18.0)) : 0.0;
-                  return Transform.translate(offset: Offset(dx, 0), child: child);
+                  final dx = _err ? (8.0 * (1 - t) * math.sin(t * 18.0)) : 0.0;
+                  return Transform.translate(
+                      offset: Offset(dx, 0), child: child);
                 },
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -824,9 +689,7 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                       FittedBox(
                         fit: BoxFit.scaleDown,
                         child: Text(
-                          _isAr
-                              ? 'كلمة المرور غير صحيحة'
-                              : 'Wrong password',
+                          _isAr ? 'كلمة المرور غير صحيحة' : 'Wrong password',
                           maxLines: 1,
                           softWrap: false,
                           style: TextStyle(
@@ -866,9 +729,8 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                       color: Colors.transparent,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(28),
-                        onTap: _busy
-                            ? null
-                            : () => _tryBiometric(fromAuto: false),
+                        onTap:
+                            _busy ? null : () => _tryBiometric(fromAuto: false),
                         child: Container(
                           width: 120,
                           height: 120,
@@ -952,9 +814,8 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                             constraints: BoxConstraints(maxWidth: maxCard),
                             child: AuthTopChrome(
                               snapshot: _methodSnapshot.copyWith(
-                                hasKnownUser:
-                                    _displayName.trim().isNotEmpty ||
-                                        (_username ?? '').isNotEmpty,
+                                hasKnownUser: _displayName.trim().isNotEmpty ||
+                                    (_username ?? '').isNotEmpty,
                                 preferPassword: _passwordMode,
                               ),
                               busy: _busy,
@@ -1003,14 +864,26 @@ class _FastLoginScreenState extends State<FastLoginScreen>
                                       compact: isNarrow,
                                       showPasswordPrompt: _passwordMode,
                                     ),
+                                    if (!_passwordMode &&
+                                        (_username ?? '')
+                                            .trim()
+                                            .isNotEmpty) ...[
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        _username!.trim(),
+                                        textDirection: TextDirection.ltr,
+                                        style: TextStyle(
+                                          color: sub,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
                                     busyBar,
                                     const SizedBox(height: 14),
                                     if (_passwordMode) ...[
                                       passwordBlock,
                                     ] else if (_pinEnabled) ...[
-                                      dotsRow,
-                                      const SizedBox(height: 12),
-                                      keypad,
+                                      pinFields,
                                     ] else ...[
                                       bioOnlyBlock,
                                     ],

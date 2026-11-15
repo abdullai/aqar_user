@@ -161,7 +161,7 @@ BEGIN
     title_ar, title_en, gateway_response
   ) VALUES (
     v_uid, v_amt, 'SAR', 'pending', 'card',
-    coalesce(v_ar, N'طلب عقاري فوري') || N' — ' || v_amt::text || N' ر.س',
+    coalesce(v_ar, N'طلب عقاري فوري') || N' — ' || v_amt::text || N' ﷼',
     coalesce(v_en, 'Instant property request') || ' — SAR ' || v_amt::text,
     jsonb_build_object(
       'purpose', 'instant_market_request',

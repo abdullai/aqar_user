@@ -154,15 +154,19 @@ class NotificationService {
 
       final n = m.notification;
       final data = Map<String, dynamic>.from(m.data);
-      final title = AppBranding.normalizeUserFacing(
+      final isAr =
+          !(langResolver?.call().toLowerCase().startsWith('en') ?? false);
+      final rawTitle = AppBranding.normalizeUserFacing(
         (n?.title ?? data['title_ar'] ?? data['title'] ?? AppBranding.brandNameAr)
             .toString(),
         isAr: true,
       );
-      final body = AppBranding.normalizeUserFacing(
+      final title = AppBranding.normalizeCurrencyText(rawTitle, isAr: isAr);
+      final rawBody = AppBranding.normalizeUserFacing(
         (n?.body ?? data['body_ar'] ?? data['body'] ?? '').toString(),
         isAr: true,
       );
+      final body = AppBranding.normalizeCurrencyText(rawBody, isAr: isAr);
       if (body.isEmpty && n == null) return;
 
       final dedupe =

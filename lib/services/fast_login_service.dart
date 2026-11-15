@@ -1,5 +1,6 @@
 // lib/services/fast_login_service.dart
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -70,6 +71,14 @@ class FastLoginService {
   static const _kPinLockUntilMs = 'fast_pin_lock_until_ms';
   static const int kPinMaxAttempts = 5;
   static const Duration kPinLockout = Duration(minutes: 2);
+  static const int kQuickPinLength = 6;
+  static const int _pinHashIterations = 120000;
+  static const String _pinHashPrefix = 'pbkdf2_sha256';
+
+  static bool isValidPin(String pinRaw) {
+    final pin = normalizeDigits(pinRaw);
+    return pin.length == kQuickPinLength && RegExp(r'^\d+$').hasMatch(pin);
+  }
 
   /// لقطة استئناف الحساب بعد الخروج الكامل (كلمة المرور فقط — بدون أسرار القفل).
   static const _kResumeUid = 'fast_resume_uid';
@@ -118,9 +127,7 @@ class FastLoginService {
   }
 
   static Future<void> _writePinHash(String hash) async {
-    try {
-      await _secure.write(key: _kPinHashSecure, value: hash);
-    } catch (_) {}
+    await _secure.write(key: _kPinHashSecure, value: hash);
     final p = await _prefs();
     await p.remove(_kPinHash);
   }
@@ -270,9 +277,78 @@ class FastLoginService {
     return buf.toString();
   }
 
-  static String _hashPin(String pin) {
-    final bytes = utf8.encode(pin);
-    return sha256.convert(bytes).toString();
+  static String _legacyHashPin(String pin) {
+    return sha256.convert(utf8.encode(pin)).toString();
+  }
+
+  static Future<List<int>> _derivePinKey(
+    String pin,
+    List<int> salt,
+    int iterations,
+  ) async {
+    final hmac = Hmac(sha256, utf8.encode(pin));
+    final initialBlock = Uint8List(salt.length + 4)
+      ..setRange(0, salt.length, salt)
+      ..setRange(salt.length, salt.length + 4, const [0, 0, 0, 1]);
+    var u = hmac.convert(initialBlock).bytes;
+    final derived = Uint8List.fromList(u);
+
+    for (var iteration = 1; iteration < iterations; iteration++) {
+      u = hmac.convert(u).bytes;
+      for (var i = 0; i < derived.length; i++) {
+        derived[i] ^= u[i];
+      }
+      if (iteration % 2000 == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    }
+    return derived;
+  }
+
+  static Future<String> _hashPin(String pin) async {
+    final random = Random.secure();
+    final salt = List<int>.generate(16, (_) => random.nextInt(256));
+    final digest = await _derivePinKey(pin, salt, _pinHashIterations);
+    return '$_pinHashPrefix:$_pinHashIterations:'
+        '${base64Url.encode(salt)}:${base64Url.encode(digest)}';
+  }
+
+  static Future<bool> _matchesPinHash(String pin, String stored) async {
+    final parts = stored.split(':');
+    if (parts.length == 4 && parts.first == _pinHashPrefix) {
+      final iterations = int.tryParse(parts[1]);
+      if (iterations == null || iterations < 50000 || iterations > 200000) {
+        return false;
+      }
+      try {
+        final salt = base64Url.decode(parts[2]);
+        final expected = base64Url.decode(parts[3]);
+        if (salt.length < 16 || expected.length != 32) return false;
+        final actual = await _derivePinKey(pin, salt, iterations);
+        return _constantTimeBytesEqual(actual, expected);
+      } on FormatException {
+        return false;
+      }
+    }
+    return _constantTimeTextEqual(_legacyHashPin(pin), stored);
+  }
+
+  static bool _constantTimeBytesEqual(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    var difference = 0;
+    for (var i = 0; i < a.length; i++) {
+      difference |= a[i] ^ b[i];
+    }
+    return difference == 0;
+  }
+
+  static bool _constantTimeTextEqual(String a, String b) {
+    if (a.length != b.length) return false;
+    var difference = 0;
+    for (var i = 0; i < a.length; i++) {
+      difference |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return difference == 0;
   }
 
   // -----------------------------
@@ -351,28 +427,28 @@ class FastLoginService {
   // PIN
   // -----------------------------
   static Future<bool> isPinEnabled() async {
-    if (kIsWeb) return false;
     final p = await _prefs();
     return p.getBool(_kPinEnabled) ?? false;
   }
 
   static Future<void> setPinEnabled(bool enabled) async {
-    if (kIsWeb) return;
     final p = await _prefs();
+    if (!enabled) {
+      await _deletePinHash();
+      await p.remove(_kPinLength);
+      await clearPinFailState();
+    }
     await p.setBool(_kPinEnabled, enabled);
     await syncBootstrapRoutePrefs();
   }
 
   static Future<void> setPin(String pinRaw) async {
-    if (kIsWeb) {
-      throw Exception('PIN_FORBIDDEN_ON_WEB');
-    }
     final pin = normalizeDigits(pinRaw);
-    if (pin.length < 4 || pin.length > 8) {
-      throw Exception('PIN_TOO_SHORT');
+    if (!isValidPin(pin)) {
+      throw Exception('PIN_MUST_BE_SIX_DIGITS');
     }
     final p = await _prefs();
-    await _writePinHash(_hashPin(pin));
+    await _writePinHash(await _hashPin(pin));
     await p.setInt(_kPinLength, pin.length);
     await p.setBool(_kPinEnabled, true);
 
@@ -381,15 +457,17 @@ class FastLoginService {
   }
 
   static Future<bool> verifyPin(String pinRaw) async {
-    if (kIsWeb) return false;
     if (await isPinTemporarilyLocked()) return false;
     final pin = normalizeDigits(pinRaw);
     final p = await _prefs();
     final hash = await _readPinHash(p);
     if (hash == null || hash.isEmpty) return false;
-    final ok = _hashPin(pin) == hash;
+    final ok = await _matchesPinHash(pin, hash);
     if (ok) {
       await clearPinFailState();
+      if (!hash.startsWith('$_pinHashPrefix:')) {
+        await _writePinHash(await _hashPin(pin));
+      }
       return true;
     }
     await registerPinFailure();
@@ -570,7 +648,6 @@ class FastLoginService {
   // Combined
   // -----------------------------
   static Future<bool> hasAnyLockEnabled() async {
-    if (kIsWeb) return false;
     final pin = await isPinEnabled();
     final bio = await hasAnyBiometricUnlockConfigured();
     return pin || bio;

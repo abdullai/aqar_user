@@ -65,7 +65,7 @@ BEGIN
     title_ar, title_en, gateway_response
   ) VALUES (
     v_uid, 30.00, 'SAR', 'pending', 'card',
-    N'طلب عقاري فوري — 30 ر.س',
+    N'طلب عقاري فوري — 30 ﷼',
     'Instant property request — SAR 30',
     jsonb_build_object(
       'purpose', 'instant_market_request',

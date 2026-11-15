@@ -881,6 +881,16 @@ class InactivityService {
     InactivityAuthLanding.begin(route: dest);
     await ReturnAfterAuth.saveFromNavigatorKey(navigatorKey);
 
+    if (dest == '/fastLogin') {
+      if (_routeName() != dest) {
+        navigatorKey.currentState?.pushNamedAndRemoveUntil(
+          dest,
+          (route) => false,
+        );
+      }
+      return;
+    }
+
     if (_signOutRunning) return;
     _signOutRunning = true;
     try {

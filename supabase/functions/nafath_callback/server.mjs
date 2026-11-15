@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 const MAX_BODY_BYTES = 64 * 1024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const TRANS_ID_PATTERN =
+  /^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$/i;
 const FINAL_STATUSES = new Set(["COMPLETED", "REJECTED"]);
 
 function json(res, status, body) {
@@ -166,7 +168,20 @@ async function fetchJson(fetchImpl, url, init) {
     signal: AbortSignal.timeout(10_000),
   });
   const text = await response.text();
-  if (!response.ok) throw new Error(`upstream_${response.status}`);
+  if (!response.ok) {
+    const errorCode = (() => {
+      try {
+        const body = JSON.parse(text);
+        return String(body.code ?? body.errorCode ?? body.error_code ?? "");
+      } catch {
+        return "";
+      }
+    })();
+    if (/400-034-050/i.test(`${errorCode} ${text}`)) {
+      throw new Error("nafath_400-034-050");
+    }
+    throw new Error(`upstream_${response.status}`);
+  }
   try {
     return text ? JSON.parse(text) : null;
   } catch {
@@ -189,12 +204,7 @@ export function createNafathCallbackHandler({
     const currentConfig = getConfig();
     if (!forceRefresh && jwksCache && now() < jwksCacheUntil) return jwksCache;
     const response = await fetchJson(fetchImpl, currentConfig.jwkUrl, {
-      headers: {
-        "APP-ID": currentConfig.appId,
-        "APP-KEY": currentConfig.appKey,
-        "X-Forwarded-For": `${clientIp},${currentConfig.serviceProviderIp}`,
-        "Content-Type": "application/json",
-      },
+      headers: providerHeaders(clientIp),
     });
     if (!response || !Array.isArray(response.keys)) {
       throw new Error("invalid_jwks_response");
@@ -220,30 +230,26 @@ export function createNafathCallbackHandler({
     return Array.isArray(rows) ? rows[0] ?? null : null;
   }
 
-  async function updateRow(requestId, transId, status) {
+  async function updateRow(requestId, transId, status, kid) {
     const currentConfig = getConfig();
-    const url = new URL("/rest/v1/nafath_logins", currentConfig.supabaseUrl);
-    url.searchParams.set("id", `eq.${requestId}`);
-    url.searchParams.set("trans_id", `eq.${transId}`);
-    url.searchParams.set("status", "eq.WAITING");
-    const updatedAt = new Date(now()).toISOString();
-    const update = {
-      status,
-      updated_at: updatedAt,
-      ...(status === "COMPLETED" ? { completed_at: updatedAt } : {}),
-      ...(status === "REJECTED" ? { rejected_at: updatedAt } : {}),
-    };
-    const rows = await fetchJson(fetchImpl, url, {
-      method: "PATCH",
+    const url = new URL(
+      "/rest/v1/rpc/complete_nafath_callback",
+      currentConfig.supabaseUrl,
+    );
+    return await fetchJson(fetchImpl, url, {
+      method: "POST",
       headers: {
         apikey: currentConfig.serviceRoleKey,
         Authorization: `Bearer ${currentConfig.serviceRoleKey}`,
         "Content-Type": "application/json",
-        Prefer: "return=representation",
       },
-      body: JSON.stringify(update),
+      body: JSON.stringify({
+        p_request_id: requestId,
+        p_trans_id: transId,
+        p_status: status,
+        p_jwt_kid: kid,
+      }),
     });
-    return Array.isArray(rows) ? rows.length > 0 : false;
   }
 
   async function processCallback(body) {
@@ -251,11 +257,11 @@ export function createNafathCallbackHandler({
       ? body.requestId.toLowerCase()
       : "";
     const transId = typeof body.transId === "string"
-      ? body.transId.toLowerCase()
+      ? body.transId.replace(/^\{|\}$/g, "").toLowerCase()
       : "";
     if (
       !UUID_PATTERN.test(requestId) ||
-      !UUID_PATTERN.test(transId) ||
+      !TRANS_ID_PATTERN.test(body.transId) ||
       typeof body.token !== "string"
     ) {
       return { status: 400, body: { error: "invalid_callback" } };
@@ -268,7 +274,7 @@ export function createNafathCallbackHandler({
     if (
       !Number.isFinite(createdAt) ||
       createdAt > now() + 60_000 ||
-      now() - createdAt > 200_000
+      now() - createdAt > 5 * 60 * 1000
     ) {
       return { status: 410, body: { error: "transaction_expired" } };
     }
@@ -305,7 +311,7 @@ export function createNafathCallbackHandler({
     } catch {
       return { status: 401, body: { error: "invalid_token" } };
     }
-    if (claims.transId.toLowerCase() !== transId) {
+    if (claims.transId.replace(/^\{|\}$/g, "").toLowerCase() !== transId) {
       return { status: 401, body: { error: "transaction_mismatch" } };
     }
 
@@ -315,7 +321,7 @@ export function createNafathCallbackHandler({
     if (row.status !== "WAITING") {
       return { status: 409, body: { error: "transaction_already_final" } };
     }
-    if (!(await updateRow(requestId, transId, claims.status))) {
+    if (!(await updateRow(requestId, transId, claims.status, header.kid))) {
       const current = await findRow(requestId, transId);
       if (current?.status !== claims.status) {
         return { status: 409, body: { error: "transaction_already_final" } };
@@ -338,6 +344,8 @@ export function createNafathCallbackHandler({
     return {
       "APP-ID": currentConfig.appId,
       "APP-KEY": currentConfig.appKey,
+      app_id: currentConfig.appId,
+      app_key: currentConfig.appKey,
       "X-Forwarded-For": `${clientIp},${currentConfig.serviceProviderIp}`,
       "Content-Type": "application/json",
     };
@@ -380,7 +388,7 @@ export function createNafathCallbackHandler({
       ? response.transId.replace(/^\{|\}$/g, "").toLowerCase()
       : "";
     const random = response?.random;
-    if (!UUID_PATTERN.test(transId) || !/^\d{2}$/.test(String(random ?? ""))) {
+    if (!TRANS_ID_PATTERN.test(transId) || !/^\d{2}$/.test(String(random ?? ""))) {
       throw new Error("invalid_nafath_start_response");
     }
     return { status: 200, body: { transId, random: String(random) } };
@@ -393,7 +401,7 @@ export function createNafathCallbackHandler({
       typeof body.nationalId !== "string" ||
       !/^[123456]\d{9}$/.test(body.nationalId) ||
       typeof body.transId !== "string" ||
-      !UUID_PATTERN.test(body.transId) ||
+      !TRANS_ID_PATTERN.test(body.transId) ||
       typeof body.random !== "string" ||
       !/^\d{2}$/.test(body.random)
     ) {
@@ -455,6 +463,12 @@ export function createNafathCallbackHandler({
         }
         if (error instanceof SyntaxError) {
           return json(res, 400, { error: "invalid_json" });
+        }
+        if (code === "nafath_400-034-050") {
+          return json(res, 409, {
+            error: "nafath_request_already_active",
+            error_code: "400-034-050",
+          });
         }
         console.error("Nafath gateway request failed:", code);
         return json(res, 502, { error: "nafath_gateway_unavailable" });

@@ -148,6 +148,7 @@ flutter:
     # Optional local secrets (copy env.sample → .env); uncomment when the file exists:
     # - .env
     - assets/logo.png
+    - assets/nafath_mark.png
     - assets/logoe.png
     - assets/splashscreen.png
     - assets/sounds/in_app_chime.wav

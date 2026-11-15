@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'aqar_text_field.dart';
 import 'saudi_riyal_symbol_icon.dart';
 
-/// حقل مبلغ: رمز الريال أو SAR ظاهر دائماً قبل الرقم.
+/// حقل مبلغ: رمز الريال أو SAR في نهاية الحقل بعد الرقم.
 ///
 /// يُبنى على [AqarTextField] / [AqarTextFormField] فقط — نفس التحديد الضيّق
 /// ([AqarEditableDefaults]) وتفريق التركيز ([AppOutsideUnfocus]) لكل الحقول.
@@ -42,22 +42,15 @@ class _BudgetTextFieldState extends State<BudgetTextField> {
     final base = theme.textTheme.bodyLarge?.fontSize ??
         theme.textTheme.titleMedium?.fontSize ??
         16.0;
-    return MediaQuery.textScalerOf(context).scale(base).clamp(14.0, 22.0);
+    return base;
   }
 
   Widget _currency(BuildContext context, Color color, double h) {
-    if (widget.isAr) {
-      return SaudiRiyalSymbolIcon(size: h, color: color);
-    }
-    return Text(
-      'SAR',
-      style: TextStyle(
-        fontWeight: FontWeight.w900,
-        fontSize: h * 0.72,
-        color: color,
-        fontFamily: 'Cairo',
-        height: 1.0,
-      ),
+    return AqarCurrencyMark(
+      isAr: widget.isAr,
+      size: h,
+      color: color,
+      textStyle: const TextStyle(fontFamily: 'Cairo'),
     );
   }
 
@@ -72,7 +65,7 @@ class _BudgetTextFieldState extends State<BudgetTextField> {
       labelText: widget.label,
       border: const OutlineInputBorder(),
       isDense: true,
-      prefixIcon: Padding(
+      suffixIcon: Padding(
         padding: const EdgeInsetsDirectional.only(start: 8, end: 4),
         child: Align(
           widthFactor: 1,
@@ -81,7 +74,7 @@ class _BudgetTextFieldState extends State<BudgetTextField> {
           child: _currency(context, color, h),
         ),
       ),
-      prefixIconConstraints: BoxConstraints(
+      suffixIconConstraints: BoxConstraints(
         minWidth: suffixW,
         minHeight: 40,
         maxHeight: 48,

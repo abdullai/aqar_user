@@ -37,6 +37,21 @@ abstract final class AppBranding {
   static const String invoiceFalLicensePlaceholder = 'XXXXXXXXXX';
   static const String invoiceLetterheadPhone = '0555317770';
 
+  static const String _currencyMarkerPattern =
+      '(?:\u{FDFC}|\u{20C1}|ر\\s*[./]?\\s*س|س\\s*[./]?\\s*ر|ريال|SAR)';
+  static final RegExp _amountBeforeCurrencyMarker = RegExp(
+    r'(\d[\d,]*(?:\.\d+)?)\s*' + _currencyMarkerPattern,
+    caseSensitive: false,
+  );
+  static final RegExp _currencyMarkerBeforeAmount = RegExp(
+    _currencyMarkerPattern + r'\s*(\d[\d,]*(?:\.\d+)?)',
+    caseSensitive: false,
+  );
+  static final RegExp _currencyMarker = RegExp(
+    _currencyMarkerPattern,
+    caseSensitive: false,
+  );
+
   /// طباعة الفاتورة: تطبيق على الجوال وويب الجوال، مؤسسة على ويندوز وسطح المكتب.
   static bool get invoiceUsesAppDisplayName {
     if (isNativeMobileApp) return true;
@@ -307,7 +322,24 @@ abstract final class AppBranding {
     final t = (input ?? '').trim();
     if (t.isEmpty) return t;
     final migrated = migrateLegacyText(t);
-    return LocaleContent.forUi(migrated, isAr: isAr);
+    return LocaleContent.forUi(
+      normalizeCurrencyText(migrated, isAr: isAr),
+      isAr: isAr,
+    );
+  }
+
+  static String normalizeCurrencyText(String input, {required bool isAr}) {
+    final symbol = isAr ? '\u{FDFC}' : 'SAR';
+    return input
+        .replaceAllMapped(
+          _amountBeforeCurrencyMarker,
+          (match) => '${match[1]} $symbol',
+        )
+        .replaceAllMapped(
+          _currencyMarkerBeforeAmount,
+          (match) => '${match[1]} $symbol',
+        )
+        .replaceAll(_currencyMarker, symbol);
   }
 
   /// اسم باقة اشتراك من صف قاعدة البيانات.

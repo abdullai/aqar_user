@@ -6,12 +6,17 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../core/gestures/app_keyboard_inset.dart';
+import '../core/gestures/app_keyboard_stable.dart' show showAppDialog;
+import '../core/navigation/web_in_app_nav.dart';
 import '../models/national_address_model.dart';
 import '../services/national_address_service.dart';
-import '../widgets/aqar_text_field.dart';
 import '../widgets/app_page_close_button.dart';
+import '../widgets/aqar_text_field.dart';
 
 class NationalAddressPickerScreen extends StatefulWidget {
+  static const routeName = '/national-address-picker';
+
   const NationalAddressPickerScreen({
     super.key,
     required this.isAr,
@@ -35,6 +40,7 @@ class NationalAddressPickerScreen extends StatefulWidget {
     return Navigator.of(context).push<NationalAddressModel>(
       MaterialPageRoute<NationalAddressModel>(
         fullscreenDialog: true,
+        settings: const RouteSettings(name: routeName),
         builder: (_) => NationalAddressPickerScreen(
           isAr: isAr,
           initialLatitude: initialLatitude,
@@ -229,6 +235,11 @@ class _NationalAddressPickerScreenState
     }
   }
 
+  void _submitSearch() {
+    FocusScope.of(context).unfocus();
+    unawaited(_search());
+  }
+
   void _selectAddress(NationalAddressModel address) {
     final latitude = address.latitude;
     final longitude = address.longitude;
@@ -242,6 +253,7 @@ class _NationalAddressPickerScreenState
       });
       return;
     }
+    FocusScope.of(context).unfocus();
     final point = LatLng(latitude, longitude);
     _requestGeneration++;
     _service.cancelPending();
@@ -327,7 +339,7 @@ class _NationalAddressPickerScreenState
 
   Future<void> _showSettingsPrompt({required bool locationService}) async {
     if (!mounted) return;
-    final openSettings = await showDialog<bool>(
+    final openSettings = await showAppDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: Text(
@@ -374,7 +386,7 @@ class _NationalAddressPickerScreenState
       _searching = false;
       _loadingAddress = false;
     });
-    final address = await showDialog<NationalAddressModel>(
+    final address = await showAppDialog<NationalAddressModel>(
       context: context,
       builder: (context) => _DetailedAddressDialog(
         isAr: _isAr,
@@ -387,10 +399,12 @@ class _NationalAddressPickerScreenState
 
   void _confirmSelection() {
     final address = _selected ?? const NationalAddressModel();
-    Navigator.of(context).pop(
-      address.copyWith(
-        latitude: _center.latitude,
-        longitude: _center.longitude,
+    WebInAppNav.runProgrammaticPop(
+      () => Navigator.of(context).pop(
+        address.copyWith(
+          latitude: _center.latitude,
+          longitude: _center.longitude,
+        ),
       ),
     );
   }
@@ -399,6 +413,8 @@ class _NationalAddressPickerScreenState
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final address = _selected ?? const NationalAddressModel();
+    final keyboardOpen = AppKeyboardInset.isOpen(context) ||
+        AppKeyboardInset.rawInsetOf(context) > 48;
     final details = <String>[
       if ((address.shortAddress ?? '').trim().isNotEmpty)
         '${_isAr ? 'العنوان المختصر' : 'Short address'}: ${address.shortAddress}',
@@ -474,7 +490,7 @@ class _NationalAddressPickerScreenState
                           controller: _searchController,
                           enabled: !_searching,
                           textInputAction: TextInputAction.search,
-                          onSubmitted: (_) => _search(),
+                          onSubmitted: (_) => _submitSearch(),
                           decoration: InputDecoration(
                             hintText: _isAr
                                 ? 'ابحث بالعنوان المختصر أو اسم الموقع'
@@ -498,7 +514,7 @@ class _NationalAddressPickerScreenState
                       ),
                       IconButton(
                         tooltip: _isAr ? 'بحث' : 'Search',
-                        onPressed: _searching ? null : _search,
+                        onPressed: _searching ? null : _submitSearch,
                         icon: _searching
                             ? const SizedBox(
                                 width: 18,
@@ -548,116 +564,120 @@ class _NationalAddressPickerScreenState
               ],
             ),
           ),
-          PositionedDirectional(
-            end: 14,
-            bottom: 220,
-            child: FloatingActionButton.small(
-              heroTag: 'national_address_current_location',
-              onPressed: _locating ? null : _locateCurrentPosition,
-              tooltip: _isAr ? 'موقعي الحالي' : 'My current location',
-              child: _locating
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.my_location),
-            ),
-          ),
-          PositionedDirectional(
-            start: 10,
-            bottom: 194,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface.withValues(
-                      alpha: 0.9,
-                    ),
-                borderRadius: BorderRadius.circular(4),
+          if (!keyboardOpen)
+            PositionedDirectional(
+              end: 14,
+              bottom: 220,
+              child: FloatingActionButton.small(
+                heroTag: 'national_address_current_location',
+                onPressed: _locating ? null : _locateCurrentPosition,
+                tooltip: _isAr ? 'موقعي الحالي' : 'My current location',
+                child: _locating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location),
               ),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                child: Text(
-                  '© OpenStreetMap contributors',
-                  style: TextStyle(fontSize: 10),
+            ),
+          if (!keyboardOpen)
+            PositionedDirectional(
+              start: 10,
+              bottom: 194,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface.withValues(
+                        alpha: 0.9,
+                      ),
+                  borderRadius: BorderRadius.circular(4),
                 ),
-              ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Material(
-              color: cs.surface,
-              elevation: 8,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-              child: SafeArea(
-                top: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.location_on_outlined, color: cs.primary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _isAr
-                                  ? 'حرّك الخريطة لتحديد الموقع'
-                                  : 'Move the map to select a location',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          if (_loadingAddress)
-                            const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      if (details.isNotEmpty)
-                        Text(
-                          details.join(' • '),
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        )
-                      else
-                        Text(
-                          _isAr
-                              ? 'يمكن اعتماد النقطة يدويًا أو البحث عن عنوان عند تهيئة خدمة سُبل.'
-                              : 'You can confirm the pin manually or search after configuring SPL.',
-                          style: TextStyle(color: cs.onSurfaceVariant),
-                        ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _error!,
-                          style: TextStyle(
-                            color: cs.error,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: _mapReady ? _confirmSelection : null,
-                        icon: const Icon(Icons.check),
-                        label:
-                            Text(_isAr ? 'اعتماد العنوان' : 'Use this address'),
-                      ),
-                    ],
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  child: Text(
+                    '© OpenStreetMap contributors',
+                    style: TextStyle(fontSize: 10),
                   ),
                 ),
               ),
             ),
-          ),
+          if (!keyboardOpen)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Material(
+                color: cs.surface,
+                elevation: 8,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.location_on_outlined, color: cs.primary),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _isAr
+                                    ? 'حرّك الخريطة لتحديد الموقع'
+                                    : 'Move the map to select a location',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                            if (_loadingAddress)
+                              const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        if (details.isNotEmpty)
+                          Text(
+                            details.join(' • '),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: cs.onSurfaceVariant),
+                          )
+                        else
+                          Text(
+                            _isAr
+                                ? 'يمكن اعتماد النقطة يدويًا أو البحث عن عنوان عند تهيئة خدمة سُبل.'
+                                : 'You can confirm the pin manually or search after configuring SPL.',
+                            style: TextStyle(color: cs.onSurfaceVariant),
+                          ),
+                        if (_error != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _error!,
+                            style: TextStyle(
+                              color: cs.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          onPressed: _mapReady ? _confirmSelection : null,
+                          icon: const Icon(Icons.check),
+                          label: Text(
+                              _isAr ? 'اعتماد العنوان' : 'Use this address'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -745,37 +765,36 @@ class _DetailedAddressDialogState extends State<_DetailedAddressDialog> {
   Widget build(BuildContext context) {
     final isAr = widget.isAr;
     return AlertDialog(
+      scrollable: true,
       title: Text(isAr ? 'التحقق من عنوان تفصيلي' : 'Verify detailed address'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final entry in <(TextEditingController, String)>[
-              (_building, isAr ? 'رقم المبنى' : 'Building number'),
-              (_street, isAr ? 'اسم الشارع' : 'Street name'),
-              (_district, isAr ? 'الحي' : 'District'),
-              (_city, isAr ? 'المدينة' : 'City'),
-              (_postalCode, isAr ? 'الرمز البريدي' : 'Postal code'),
-              (_additionalNumber, isAr ? 'الرقم الإضافي' : 'Additional number'),
-            ]) ...[
-              AqarTextField(
-                controller: entry.$1,
-                enabled: !_busy,
-                textInputAction: TextInputAction.next,
-                decoration: InputDecoration(labelText: entry.$2),
-              ),
-              const SizedBox(height: 8),
-            ],
-            if (_error != null)
-              Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final entry in <(TextEditingController, String)>[
+            (_building, isAr ? 'رقم المبنى' : 'Building number'),
+            (_street, isAr ? 'اسم الشارع' : 'Street name'),
+            (_district, isAr ? 'الحي' : 'District'),
+            (_city, isAr ? 'المدينة' : 'City'),
+            (_postalCode, isAr ? 'الرمز البريدي' : 'Postal code'),
+            (_additionalNumber, isAr ? 'الرقم الإضافي' : 'Additional number'),
+          ]) ...[
+            AqarTextField(
+              controller: entry.$1,
+              enabled: !_busy,
+              textInputAction: TextInputAction.next,
+              decoration: InputDecoration(labelText: entry.$2),
+            ),
+            const SizedBox(height: 8),
           ],
-        ),
+          if (_error != null)
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+        ],
       ),
       actions: [
         TextButton(

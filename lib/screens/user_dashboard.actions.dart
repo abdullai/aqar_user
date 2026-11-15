@@ -1992,8 +1992,13 @@ extension _UserDashboardStateActions on _UserDashboardState {
                     inputFormatters: latinDecimalNumberFormatters(),
                     decoration: InputDecoration(
                       labelText: widget.isAr
-                          ? 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})'
-                          : 'Suggested price (SAR)',
+                          ? 'سعر مقترح'
+                          : 'Suggested price',
+                      suffixIcon: AqarCurrencyMark(
+                        isAr: widget.isAr,
+                        size: 16,
+                        color: Theme.of(dCtx).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ],
@@ -2064,9 +2069,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
                   const SizedBox(height: 12),
                   if (p.isAuction) ...[
                     Text(
-                      widget.isAr
-                          ? 'آخر مزايدة (${AppMoney.sarUiSuffix(isAr: true)})'
-                          : 'Latest bid (SAR)',
+                      widget.isAr ? 'آخر مزايدة' : 'Latest bid',
                       style: Theme.of(context).textTheme.labelMedium?.copyWith(
                             fontWeight: FontWeight.w800,
                             color:

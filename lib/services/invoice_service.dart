@@ -594,7 +594,13 @@ class InvoiceService {
           t('إجمالي العمليات المؤهلة (مدفوعة)', 'Eligible paid total'),
           totalStyle);
       _excelNumber(sheet, 1, r, sum, totalStyle);
-      _excelText(sheet, 2, r, isAr ? 'ريال' : 'Riyal', totalStyle);
+      _excelText(
+        sheet,
+        2,
+        r,
+        isAr ? AppMoney.saudiRiyalSignCompat : 'SAR',
+        totalStyle,
+      );
       r++;
     }
     if (refunded.isNotEmpty) {
@@ -609,7 +615,13 @@ class InvoiceService {
           t('إجمالي المسترجع (ليس إيراداً)', 'Refunded total (not revenue)'),
           totalStyle);
       _excelNumber(sheet, 1, r, sum, totalStyle);
-      _excelText(sheet, 2, r, isAr ? 'ريال' : 'Riyal', totalStyle);
+      _excelText(
+        sheet,
+        2,
+        r,
+        isAr ? AppMoney.saudiRiyalSignCompat : 'SAR',
+        totalStyle,
+      );
       r++;
     }
     r++;

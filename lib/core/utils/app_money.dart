@@ -6,7 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../widgets/saudi_riyal_symbol_icon.dart';
 
-/// تنسيق المبالغ في واجهات التطبيق: رمز الريال بعد الرقم بالعربية وSAR بالإنجليزية.
+/// تنسيق المبالغ في واجهات التطبيق: رمز الريال يسار الرقم بالعربية وSAR بعده بالإنجليزية.
 class AppMoney {
   AppMoney._();
 
@@ -21,7 +21,7 @@ class AppMoney {
     return isAr ? saudiRiyalSignCompat : 'SAR';
   }
 
-  /// العملة حسب اتجاه اللغة: `1234 ﷼` بالعربية و`1234 SAR` بالإنجليزية.
+  /// العملة بعد الرقم بالعربية والإنجليزية؛ الواجهة تضبط الموضع بصرياً حسب اتجاهها.
   static String sarPhrase(String amountText, {required bool isAr}) {
     final t = amountText.trim();
     final suffix = sarUiSuffix(isAr: isAr);
@@ -91,7 +91,7 @@ class AppMoney {
     return code == 'SAR' ? sarPhrase(fmt, isAr: isAr) : '$fmt $code';
   }
 
-  /// PDF — رمز الريال قبل الرقم بالعربية وSAR بعد الرقم بالإنجليزية.
+  /// PDF والنصوص التابعة له: المبلغ ثم العملة باللغتين.
   static String formatForPdf(
     double amount, {
     required bool isAr,
@@ -105,12 +105,12 @@ class AppMoney {
     );
     final code = currencyCode.trim().toUpperCase();
     if (code == 'SAR') {
-      return isAr ? '$saudiRiyalSignCompat$fmt' : '$fmt SAR';
+      return isAr ? '$fmt $saudiRiyalSignCompat' : '$fmt SAR';
     }
     return '$fmt $code';
   }
 
-  /// CSV / Excel — نص «ريال» بدلاً من رمز يونيكود (Excel لا يعرضه).
+  /// CSV / Excel — رمز الريال النصي للعربية وSAR للإنجليزية.
   static String formatForExport(
     double amount, {
     required bool isAr,
@@ -130,7 +130,7 @@ class AppMoney {
   }
 }
 
-/// اتجاه رمز الريال حسب اللغة: بعد الرقم في العربية، وبعده SAR بالإنجليزية.
+/// سطر المبلغ: يظهر الرمز يسار الرقم بالعربية وSAR بعد الرقم بالإنجليزية.
 class AppMoneyInline extends StatelessWidget {
   final String amountText;
   final bool isAr;
@@ -191,11 +191,9 @@ class AppMoneyInline extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         textDirection: ui.TextDirection.ltr,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          amount,
-          gap,
-          currency,
-        ],
+        children: isAr
+            ? [currency, gap, amount]
+            : [amount, gap, currency],
       ),
     );
   }

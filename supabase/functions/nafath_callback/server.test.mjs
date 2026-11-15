@@ -9,7 +9,7 @@ const { privateKey, publicKey } = generateKeyPairSync("rsa", {
 });
 const jwk = { ...publicKey.export({ format: "jwk" }), kid: "test-kid", use: "sig", alg: "RS256" };
 const requestId = "e6a78347-3c72-4b9b-8b09-daa497e5c4bc";
-const transId = "b6cba251-896b-492a-9a2c-f6ca00e17e48";
+const transId = "bb0fd95a-baa2-83ce-3f36-4ffc92fd49d0";
 const now = Date.now();
 
 function token(claimOverrides = {}) {
@@ -28,7 +28,11 @@ function token(claimOverrides = {}) {
   return `${signed}.${sign("RSA-SHA256", Buffer.from(signed), privateKey).toString("base64url")}`;
 }
 
-function createHarness({ status = "WAITING", callbackToken = token() } = {}) {
+function createHarness({
+  status = "WAITING",
+  callbackToken = token(),
+  nafathStartStatus = 200,
+} = {}) {
   const calls = [];
   let currentStatus = status;
   const env = {
@@ -49,6 +53,11 @@ function createHarness({ status = "WAITING", callbackToken = token() } = {}) {
       return Response.json({ keys: [jwk] });
     }
     if (url.pathname.endsWith("/api/v1/mfa/request")) {
+      if (nafathStartStatus !== 200) {
+        return Response.json({ code: "400-034-050" }, {
+          status: nafathStartStatus,
+        });
+      }
       return Response.json({
         transId,
         random: "42",
@@ -57,13 +66,16 @@ function createHarness({ status = "WAITING", callbackToken = token() } = {}) {
     if (url.pathname.endsWith("/api/v1/mfa/request/status")) {
       return Response.json({ status: "WAITING", nationalId: "should-not-leak" });
     }
-    if (url.pathname === "/rest/v1/nafath_logins" && init.method === "PATCH") {
+    if (
+      url.pathname === "/rest/v1/rpc/complete_nafath_callback" &&
+      init.method === "POST"
+    ) {
       const update = JSON.parse(init.body);
       if (currentStatus === "WAITING") {
-        currentStatus = update.status;
-        return Response.json([{ status: currentStatus }]);
+        currentStatus = update.p_status;
+        return Response.json(true);
       }
-      return Response.json([]);
+      return Response.json(currentStatus === update.p_status);
     }
     if (url.pathname === "/rest/v1/nafath_logins") {
       if (
@@ -132,7 +144,25 @@ test("authenticated Saudi gateway starts Nafath with the provider-required IP he
   assert.equal(result.body.transId, transId);
   const request = h.calls.find((call) => call.url.pathname.endsWith("/api/v1/mfa/request"));
   assert.equal(request.init.headers["X-Forwarded-For"], "203.0.113.25,198.51.100.10");
+  assert.equal(request.init.headers["APP-ID"], "test-app-id");
+  assert.equal(request.init.headers["APP-KEY"], "test-app-key");
   assert.equal(request.url.searchParams.get("requestId"), requestId);
+});
+
+test("active Nafath requests return the provider's 400-034-050 code", async () => {
+  const h = createHarness({ nafathStartStatus: 400 });
+  const result = await h.invoke({
+    requestId,
+    clientIp: "203.0.113.25",
+    nationalId: "1234567890",
+    service: "Login",
+    locale: "ar",
+  }, {
+    path: "/nafath/start",
+    authorization: `Bearer ${h.env.NAFATH_GATEWAY_SECRET}`,
+  });
+  assert.equal(result.status, 409);
+  assert.equal(result.body.error_code, "400-034-050");
 });
 
 test("unauthorized gateway callers cannot reach Nafath", async () => {
@@ -164,6 +194,8 @@ test("gateway status returns only the status and forwards the recorded user IP",
     call.url.pathname.endsWith("/api/v1/mfa/request/status")
   );
   assert.equal(request.init.headers["X-Forwarded-For"], "203.0.113.25,198.51.100.10");
+  assert.equal(request.init.headers["APP-ID"], "test-app-id");
+  assert.equal(request.init.headers["APP-KEY"], "test-app-key");
 });
 
 test("valid signed completion updates only the matching waiting transaction", async () => {
@@ -171,9 +203,15 @@ test("valid signed completion updates only the matching waiting transaction", as
   const result = await h.invoke({ requestId, transId, token: h.callbackToken });
   assert.equal(result.status, 200);
   assert.equal(h.currentStatus(), "COMPLETED");
-  const update = h.calls.find((call) => call.init.method === "PATCH");
-  assert.deepEqual(JSON.parse(update.init.body).status, "COMPLETED");
-  assert.equal("callback_payload" in JSON.parse(update.init.body), false);
+  const update = h.calls.find((call) =>
+    call.url.pathname === "/rest/v1/rpc/complete_nafath_callback"
+  );
+  assert.deepEqual(JSON.parse(update.init.body), {
+    p_request_id: requestId,
+    p_trans_id: transId,
+    p_status: "COMPLETED",
+    p_jwt_kid: "test-kid",
+  });
   const jwkRequest = h.calls.find((call) => call.url.pathname.endsWith("/jwk"));
   assert.equal(jwkRequest.init.headers["APP-KEY"], "test-app-key");
   assert.equal(

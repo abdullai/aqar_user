@@ -70,7 +70,7 @@ abstract final class AuthChallengeService {
       );
 
   static bool allowQuickUnlockOnThisSurface() =>
-      AuthCompletionPolicy.allowFastLogin(
+      AuthCompletionPolicy.allowTrustedSessionPinUnlock(
         isWeb: kIsWeb,
         platform: defaultTargetPlatform,
       );
@@ -98,7 +98,8 @@ abstract final class AuthChallengeService {
           : (m['challenge_id'] ?? '').toString().trim(),
       expiresAt: _parseTime(m['expiresAt'] ?? m['expires_at']),
       devCode: () {
-        final c = (m['dev_code'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+        final c =
+            (m['dev_code'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
         return c.length >= 6 ? c.substring(0, 6) : null;
       }(),
       error: err.isEmpty ? null : err,
@@ -207,6 +208,112 @@ abstract final class AuthChallengeService {
     }
   }
 
+  static Future<AuthChallengeStart> startFastPinSettingsChallenge({
+    required String username,
+    required String action,
+  }) async {
+    const actions = {'enable', 'change', 'disable'};
+    final normalizedAction = action.trim().toLowerCase();
+    if (!actions.contains(normalizedAction)) {
+      return const AuthChallengeStart(
+        ok: false,
+        needsOtp: true,
+        fullyAuthenticated: false,
+        error: 'invalid_action',
+      );
+    }
+
+    if (_sb.auth.currentUser?.id == null) {
+      return const AuthChallengeStart(
+        ok: false,
+        needsOtp: true,
+        fullyAuthenticated: false,
+        error: 'not_authenticated',
+      );
+    }
+
+    try {
+      final fingerprint = await InstallDeviceIdentity.key();
+      final raw = await _sb.rpc(
+        'request_fast_pin_settings_otp',
+        params: {
+          'p_username': username,
+          'p_platform': clientPlatform(),
+          'p_device_fingerprint': fingerprint,
+          'p_action': normalizedAction,
+        },
+      );
+      final parsed = _parseStart(raw);
+      if (parsed.ok &&
+          parsed.needsOtp &&
+          (parsed.challengeId ?? '').isNotEmpty) {
+        await persistPending(
+          challengeId: parsed.challengeId,
+          username: username,
+        );
+      }
+      return parsed;
+    } catch (e) {
+      final raw = e.toString();
+      final lower = raw.toLowerCase();
+      final error = lower.contains('rate') || lower.contains('too many')
+          ? 'rate_limited'
+          : lower.contains('device_not_trusted')
+              ? 'device_not_trusted'
+              : raw;
+      return AuthChallengeStart(
+        ok: false,
+        needsOtp: true,
+        fullyAuthenticated: false,
+        error: error,
+      );
+    }
+  }
+
+  static Future<AuthOtpVerifyResult> verifyFastPinSettingsChallenge({
+    required String code,
+    required String challengeId,
+    required String action,
+  }) async {
+    const actions = {'enable', 'change', 'disable'};
+    final normalizedAction = action.trim().toLowerCase();
+    final id = challengeId.trim();
+    final digits = code.replaceAll(RegExp(r'\D'), '');
+    if (!actions.contains(normalizedAction) || id.isEmpty) {
+      return const AuthOtpVerifyResult(
+        ok: false,
+        error: 'invalid_challenge',
+      );
+    }
+
+    try {
+      final fingerprint = await InstallDeviceIdentity.key();
+      final raw = await _sb.rpc(
+        'verify_fast_pin_settings_otp',
+        params: {
+          'p_challenge_id': id,
+          'p_code': digits,
+          'p_device_fingerprint': fingerprint,
+          'p_action': normalizedAction,
+        },
+      );
+      final result = _asMap(raw);
+      final ok = result['ok'] == true;
+      if (ok) await clearPending();
+      return AuthOtpVerifyResult(
+        ok: ok,
+        locked: result['locked'] == true,
+        remainingAttempts:
+            int.tryParse('${result['remaining_attempts'] ?? ''}'),
+        error: (result['error'] ?? '').toString().trim().isEmpty
+            ? null
+            : (result['error'] ?? '').toString().trim(),
+      );
+    } catch (e) {
+      return AuthOtpVerifyResult(ok: false, error: e.toString());
+    }
+  }
+
   static Future<AuthGateStatus> gateStatus() async {
     try {
       if (_sb.auth.currentSession == null) {
@@ -238,7 +345,7 @@ abstract final class AuthChallengeService {
     return g.complete;
   }
 
-  static Future<bool> isNativeDeviceTrustedOnServer() async {
+  static Future<bool> isDeviceTrustedOnServer() async {
     if (!allowQuickUnlockOnThisSurface()) return false;
     try {
       final fp = await InstallDeviceIdentity.key();
@@ -247,11 +354,11 @@ abstract final class AuthChallengeService {
         params: {
           'p_platform': clientPlatform(),
           'p_device_fingerprint': fp,
-          'p_login_method': 'password',
+          'p_login_method': 'fast_unlock',
         },
       );
       final m = _asMap(res);
-      return m['trusted'] == true && m['otp_required'] != true;
+      return m['trusted'] == true && m['ok'] != false;
     } catch (_) {
       return false;
     }

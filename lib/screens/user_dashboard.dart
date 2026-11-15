@@ -60,6 +60,7 @@ import '../models/market_property_request_priority.dart';
 import '../models/home_mixed_feed_entry.dart';
 import '../core/market/instant_market_request_feed.dart';
 import '../core/utils/app_money.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../core/deals/deal_messaging_gate.dart';
 import '../core/deals/deal_inventory_policy.dart';
 import '../core/deals/deal_completion_inbox.dart';

@@ -44,6 +44,7 @@ import 'listing_media_gallery.dart';
 import 'marketer_policy_notice_card.dart';
 import 'property_video_sheet.dart';
 import 'specified_budget_display.dart';
+import 'saudi_riyal_symbol_icon.dart';
 
 /// تفاصيل طلب السوق من الرئيسية + عروض + محادثة (بعد تطبيق SQL v20260411).
 Future<void> showMarketRequestHomeSheet({
@@ -561,11 +562,16 @@ class _MarketRequestSheetBodyState extends State<_MarketRequestSheetBody> {
                   decoration: InputDecoration(
                     labelText: widget.isAr
                         ? (priceLocked
-                            ? 'المبلغ المطلوب (${AppMoney.sarUiSuffix(isAr: true)})'
-                            : 'سعر مقترح (${AppMoney.sarUiSuffix(isAr: true)})')
+                            ? 'المبلغ المطلوب'
+                            : 'سعر مقترح')
                         : (priceLocked
-                            ? 'Requested amount (SAR)'
-                            : 'Suggested price (SAR)'),
+                            ? 'Requested amount'
+                            : 'Suggested price'),
+                    suffixIcon: AqarCurrencyMark(
+                      isAr: widget.isAr,
+                      size: 16,
+                      color: Theme.of(dCtx).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ],

@@ -84,13 +84,21 @@ void main() {
       );
     });
 
-    test('fast login / pin / biometrics only on native mobile', () {
+    test('trusted-session PIN is available on web; biometrics stay native-only',
+        () {
       expect(
         AuthCompletionPolicy.allowFastLogin(
           isWeb: true,
           platform: TargetPlatform.android,
         ),
         isFalse,
+      );
+      expect(
+        AuthCompletionPolicy.allowTrustedSessionPinUnlock(
+          isWeb: true,
+          platform: TargetPlatform.android,
+        ),
+        isTrue,
       );
       expect(
         AuthCompletionPolicy.allowPinOrBiometrics(
@@ -108,13 +116,24 @@ void main() {
       );
     });
 
+    test('trusted browser still needs OTP for a new login', () {
+      expect(
+        AuthCompletionPolicy.otpRequired(
+          isWeb: true,
+          platform: TargetPlatform.windows,
+          serverTrustedNativeDevice: true,
+        ),
+        isTrue,
+      );
+    });
+
     test('local flags cannot bypass OTP', () {
       expect(AuthCompletionPolicy.localFlagCanBypassOtp(), isFalse);
     });
   });
 
   group('LoginMethodSnapshot web lock', () {
-    test('web snapshot never exposes pin/face/fingerprint', () {
+    test('trusted web session exposes PIN but not biometrics', () {
       const snap = LoginMethodSnapshot(
         host: LoginHostKind.webDesktop,
         trustedThisInstall: true,
@@ -127,11 +146,11 @@ void main() {
         preferPassword: false,
         unlockMode: FastUnlockMode.pinWithBiometric,
       );
-      expect(snap.showPin, isFalse);
+      expect(snap.showPin, isTrue);
       expect(snap.showFace, isFalse);
       expect(snap.showFingerprint, isFalse);
-      expect(snap.showAnyQuickUnlock, isFalse);
-      expect(snap.visibleMethods, isNot(contains(LoginMethodKind.pin)));
+      expect(snap.showAnyQuickUnlock, isTrue);
+      expect(snap.visibleMethods, contains(LoginMethodKind.pin));
       expect(snap.visibleMethods, isNot(contains(LoginMethodKind.face)));
       expect(
         snap.visibleMethods,
@@ -158,6 +177,13 @@ void main() {
 
   test('OTP length is 6 digits', () {
     expect(InAppOtpHandoff.otpLen, 6);
+  });
+
+  test('quick PIN accepts exactly six normalized digits', () {
+    expect(FastLoginService.isValidPin('123456'), isTrue);
+    expect(FastLoginService.isValidPin('١٢٣٤٥٦'), isTrue);
+    expect(FastLoginService.isValidPin('12345'), isFalse);
+    expect(FastLoginService.isValidPin('12345a'), isFalse);
   });
 
   test('six OTP boxes fit equally on small phone and web widths', () {
@@ -224,5 +250,16 @@ void main() {
     expect(sql.contains('rate_limited'), isTrue);
     expect(sql.contains('fast_login_forbidden'), isTrue);
     expect(sql.contains('nafath_skip_otp_web'), isTrue);
+  });
+
+  test('browser quick unlock requires server-registered device trust', () {
+    final sql = File(
+      'supabase/migrations/20261115020000_allow_trusted_browser_quick_unlock.sql',
+    ).readAsStringSync();
+    expect(
+        sql.contains('public._auth_device_trusted(uid, p_device_fingerprint)'),
+        isTrue);
+    expect(sql.contains("IF method = 'fast_unlock' AND NOT trusted"), isTrue);
+    expect(sql.contains("'otp_required', true"), isTrue);
   });
 }

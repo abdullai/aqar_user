@@ -29,6 +29,7 @@ import '../core/pdf/pdf_readable_qr.dart';
 import '../core/utils/date_helper.dart';
 import '../core/session/account_role_cache.dart';
 import '../core/subscription/card_scheme.dart';
+import '../core/utils/app_money.dart';
 import '../core/workflow/listing_workflow.dart';
 import 'payment_gateway_mock.dart';
 
@@ -1326,6 +1327,16 @@ class PaymentService {
     required String? titleEn,
     required String txRowId,
   }) async {
+    final amountAr = AppMoney.formatWithCurrencyCode(
+      amount,
+      isAr: true,
+      currencyCode: currency,
+    );
+    final amountEn = AppMoney.formatWithCurrencyCode(
+      amount,
+      isAr: false,
+      currencyCode: currency,
+    );
     try {
       HapticFeedback.mediumImpact();
     } catch (_) {}
@@ -1340,11 +1351,11 @@ class PaymentService {
           'title_ar': titleAr ?? 'تم تأكيد الدفع',
           'title_en': titleEn ?? 'Payment confirmed',
           'body_ar': titleAr == 'تم تفعيل الطلب العقاري الفوري'
-              ? 'تم تفعيل رصيد الطلب الفوري بمبلغ ${amount.toStringAsFixed(2)} $currency ويمكنك استخدامه الآن.'
-              : 'المبلغ ${amount.toStringAsFixed(2)} $currency — راجع سجل المدفوعات.',
+              ? 'تم تفعيل رصيد الطلب الفوري بمبلغ $amountAr ويمكنك استخدامه الآن.'
+              : 'المبلغ $amountAr — راجع سجل المدفوعات.',
           'body_en': titleEn == 'Instant property request activated'
-              ? 'Your ${amount.toStringAsFixed(2)} $currency instant-request credit is ready to use.'
-              : 'Amount ${amount.toStringAsFixed(2)} $currency — see payment history.',
+              ? 'Your $amountEn instant-request credit is ready to use.'
+              : 'Amount $amountEn — see payment history.',
           'gateway_transaction_id': gatewayId,
           'billing_tx_id': txRowId,
         },

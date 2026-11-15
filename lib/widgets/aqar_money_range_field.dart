@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../core/branding/aqar_brand_colors.dart';
 import '../core/input/saudi_input_formatters.dart';
-import '../core/utils/app_money.dart';
 import 'aqar_text_field.dart';
 import 'saudi_riyal_symbol_icon.dart';
 
@@ -74,8 +73,8 @@ class AqarMoneyRangeField extends StatelessWidget {
             width: 1.5,
           ),
         ),
-        prefixIcon: iconPad,
-        prefixIconConstraints: const BoxConstraints(
+        suffixIcon: iconPad,
+        suffixIconConstraints: const BoxConstraints(
           minWidth: 44,
           minHeight: 40,
           maxHeight: 48,
@@ -84,19 +83,12 @@ class AqarMoneyRangeField extends StatelessWidget {
     }
 
     Widget currencySuffix() {
-      if (isAr) {
-        return const SaudiRiyalSymbolIcon(
-          size: 16,
-          color: AqarBrandColors.primary,
-        );
-      }
-      return Text(
-        AppMoney.sarUiSuffix(isAr: false),
-        style: theme.textTheme.labelLarge?.copyWith(
-          fontWeight: FontWeight.w900,
-          color: AqarBrandColors.primary,
+      return AqarCurrencyMark(
+        isAr: isAr,
+        size: theme.textTheme.bodyMedium?.fontSize ?? 16,
+        color: AqarBrandColors.primary,
+        textStyle: theme.textTheme.labelLarge?.copyWith(
           fontFamily: 'Cairo',
-          height: 1.0,
         ),
       );
     }
@@ -159,8 +151,8 @@ class AqarMoneyRangeField extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           isAr
-              ? 'نطاق المبلغ المحدد: رمز الريال ثم الرقم — بدون لفّ'
-              : 'Specified amount range: SAR then the number — no wrap',
+              ? 'نطاق المبلغ المحدد: الرقم ثم ﷼ — بدون لفّ'
+              : 'Specified amount range: amount then SAR — no wrap',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: theme.textTheme.labelSmall?.copyWith(

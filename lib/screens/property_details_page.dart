@@ -54,6 +54,7 @@ import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import '../core/navigation/safe_overlay_pop.dart';
 import '../widgets/marketing_offer_submit_sheet.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../widgets/marketer_policy_notice_card.dart';
 import '../widgets/inline_property_video.dart';
 import '../widgets/listing_watermark_overlay.dart';
@@ -2499,8 +2500,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             decimal: true),
                         decoration: InputDecoration(
                           labelText: widget.isAr
-                              ? 'الحد الأدنى للزيادة (${AppMoney.sarUiSuffix(isAr: true)}) — اختياري'
-                              : 'Min increment (${AppMoney.sarUiSuffix(isAr: false)}) — optional',
+                              ? 'الحد الأدنى للزيادة — اختياري'
+                              : 'Min increment — optional',
+                          suffixIcon: AqarCurrencyMark(
+                            isAr: widget.isAr,
+                            size: 16,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                           border: const OutlineInputBorder(),
                           helperText: widget.isAr
                               ? 'اتركه 100 للافتراضي من الخادم'
@@ -2876,8 +2883,14 @@ class _PropertyDetailsPageState extends State<PropertyDetailsPage> {
                             decimal: true),
                         decoration: InputDecoration(
                           labelText: widget.isAr
-                              ? 'المبلغ (${AppMoney.sarUiSuffix(isAr: true)})'
-                              : 'Amount (${AppMoney.sarUiSuffix(isAr: false)})',
+                              ? 'المبلغ'
+                              : 'Amount',
+                          suffixIcon: AqarCurrencyMark(
+                            isAr: widget.isAr,
+                            size: 16,
+                            color:
+                                Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
                           border: const OutlineInputBorder(),
                         ),
                       ),

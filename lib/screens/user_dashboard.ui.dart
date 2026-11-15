@@ -4799,17 +4799,9 @@ class _UserDashboardState extends State<UserDashboard>
   }
 
   bool _popDashboardBodyRoute() {
-    final snap = _captureOverlayNavMemory();
     final bodyNav = _dashboardBodyNavKey.currentState;
-    if (bodyNav == null || !bodyNav.canPop()) {
-      if (_tabIndex != 1) return false;
-      _inlineSearchCtrl.text = _searchQuery;
-      _ss(() {
-        _tabIndex = 0;
-        _bottomNavTransientIndex = null;
-      });
-      return true;
-    }
+    if (bodyNav == null || !bodyNav.canPop()) return false;
+    final snap = _captureOverlayNavMemory();
     bodyNav.pop();
     if (mounted) {
       if (!_bottomNavSlideVisible) {
@@ -4819,6 +4811,17 @@ class _UserDashboardState extends State<UserDashboard>
         _restoreOverlayNavMemory(snap);
       }
     }
+    return true;
+  }
+
+  bool _handleDashboardBack() {
+    if (_popDashboardBodyRoute()) return true;
+    if (_tabIndex != 1) return false;
+    _inlineSearchCtrl.text = _searchQuery;
+    _ss(() {
+      _tabIndex = 0;
+      _bottomNavTransientIndex = null;
+    });
     return true;
   }
 
@@ -5001,7 +5004,7 @@ class _UserDashboardState extends State<UserDashboard>
     if (!context.read<AppSession>().hasInternet) return;
     // ويب: سهم المتصفح يمر عبر [WebInAppNav.handleBack] فقط — لا إغلاق مزدوج.
     if (kIsWeb) return;
-    if (_popDashboardBodyRoute()) return;
+    if (_handleDashboardBack()) return;
     SafeOverlayPop.pop(context);
   }
 
@@ -5051,7 +5054,7 @@ class _UserDashboardState extends State<UserDashboard>
       return;
     }
     AppHaptics.selection();
-    _popDashboardBodyRoute();
+    _handleDashboardBack();
   }
 
   KeyEventResult _handleDashboardKeyEvent(FocusNode node, KeyEvent event) {
@@ -5066,7 +5069,7 @@ class _UserDashboardState extends State<UserDashboard>
         key != LogicalKeyboardKey.goBack) {
       return KeyEventResult.ignored;
     }
-    return SafeOverlayPop.pop(context)
+    return (_handleDashboardBack() || SafeOverlayPop.pop(context))
         ? KeyEventResult.handled
         : KeyEventResult.ignored;
   }

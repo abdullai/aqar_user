@@ -5,6 +5,7 @@ import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 
 import '../core/navigation/payment_overlay_route.dart';
+import 'app_page_close_button.dart';
 
 /// معاينة PDF داخل التطبيق؛ تمنع فتح تبويبات متصفح إضافية أثناء الطباعة.
 class PdfPrintPreviewOverlay extends StatelessWidget {
@@ -41,11 +42,7 @@ class PdfPrintPreviewOverlay extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        leading: IconButton(
-          tooltip: 'Close',
-          icon: const Icon(Icons.close),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        leading: const AppPageCloseButton(tooltip: 'Close'),
         title: Text(title),
       ),
       body: PdfPreview(

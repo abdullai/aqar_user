@@ -1,0 +1,207 @@
+================================================================================
+  KEYBOARD, FIELD CUTOFF, AND FLOW ISSUES AUDIT - EXECUTIVE SUMMARY
+================================================================================
+
+Date: 2026-11-15
+Report: KEYBOARD_FIELD_AUDIT_REPORT.md (26.6 KB)
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+✅ KEYBOARD HANDLING: Mostly working
+   - Centralized keyboard metrics system is solid
+   - AppKeyboardPad, AppOutsideUnfocus, AppKeyboardStableScope properly used
+   - Add Property page correctly implemented
+
+⚠️  FIELD VISIBILITY: Issues on small screens only
+   - Nafath sheet: No dynamic keyboard padding
+   - National Address: Fixed height constraints don't adapt to keyboard
+   - Acceptable on larger devices, problematic on < 400px height phones
+
+🔴 AUTO-VERIFICATION: Incomplete visual feedback
+   - Deed verification works silently (no progress indicator)
+   - National ID field doesn't show completion state
+   - User doesn't know when checks are in progress
+
+⚠️  FONT SCALING: Hard-coded sizes break at 1.5x+ scale
+   - Found 36px, 12.5px, 14.5px hard-coded sizes
+   - Doesn't respect user accessibility text scaling
+   - Layout breaks with magnified text on older/accessibility devices
+
+================================================================================
+CRITICAL ISSUES (Fix ASAP)
+================================================================================
+
+1. NAFATH LOGIN SHEET - Small Screen Field Cutoff
+   Location: lib/widgets/nafath_login_sheet.dart
+   Problem: Fixed 20px bottom padding ignores keyboard on 360-400px screens
+   Impact: ID field and submit button can be hidden by keyboard
+   
+   Calculation:
+   - Screen: 360px height
+   - Status bar: 24px
+   - Keyboard: 220-260px
+   - Available: 76-116px
+   - Content needs: 120px
+   Result: Content cut off
+   
+   Fix: Change padding from const to dynamic using AppKeyboardInset.bottomOf()
+
+2. NATIONAL ADDRESS RESULTS LIST - Overflow on Keyboard
+   Location: lib/screens/national_address_picker_screen.dart
+   Problem: ConstrainedBox(maxHeight: 220) doesn't adapt to keyboard
+   Impact: Results list partially hidden/unscrollable with keyboard open
+   
+   Calculation:
+   - Visible area with keyboard: ~100px
+   - List tries to use: 220px
+   - Result: List is constrained to 100px, only 2-3 items visible
+   
+   Fix: Use MediaQuery/AppKeyboardInset to calculate dynamic max height
+
+3. ACCEPT BUTTON HIDDEN - National Address Picker
+   Location: lib/screens/national_address_picker_screen.dart:659
+   Problem: Button wrapped in if (!keyboardOpen) - disappears when typing
+   Impact: User can't accept selection while search field is active
+   
+   Fix: Keep button visible above keyboard or auto-close sheet on selection
+
+4. HARD-CODED FONT SIZES - Text Scaling Issues
+   Location: Multiple files
+   Problem: Found fontSize: 36, 14.5, 12.5 hard-coded (ignore text scaling)
+   Impact: At 1.5x font scale, layout breaks and elements overflow
+   
+   Examples:
+   - Nafath random code box: 36px → 54px (overflows sheet)
+   - Error messages: 12.5px → 18.75px (too prominent)
+   - Titles: 14.5px → 21.75px (acceptable but not responsive)
+   
+   Fix: Replace with Theme.of(context).textTheme.* + MediaQuery.textScaleFactor
+
+================================================================================
+ISSUES NEEDING ATTENTION (Fix this week)
+================================================================================
+
+5. DEED NUMBER VERIFICATION - No Progress Indicator
+   Status: Verification works but silently
+   Issue: User types deed number, check happens at 480ms, result shown
+   Problem: No loading spinner or success checkmark visible
+   Fix: Add suffixIcon showing CircularProgressIndicator while checking
+
+6. NATIONAL ID FIELD - No Auto-Verification State
+   Status: User enters 10 digits but no feedback
+   Issue: LengthLimitingTextInputFormatter stops at 10 digits
+   Problem: No visual indication that field is "ready to verify"
+   Fix: Track when 10 digits reached, show checkmark or enable auto-verify
+
+7. RTL/FONT SCALING CONFLICT - Arabic at 1.5x Scale
+   Status: Arabic text at large scale pushes padding requirements
+   Issue: Fixed 12px margins become narrow with RTL + scaled text
+   Problem: Text might feel cramped or overflow
+   Fix: Increase margins for RTL or use responsive padding
+
+================================================================================
+WHAT'S WORKING WELL
+================================================================================
+
+✅ Keyboard Height Calculations
+   - Centralized in AppKeyboardInset
+   - Multiple redundancy layers (reported, inferred, web)
+   - Handles edge cases well
+
+✅ Add Property Page
+   - Proper resizeToAvoidBottomInset: false
+   - Uses AppKeyboardPad correctly
+   - Dynamic scroll padding adjusts with keyboard
+   - Scroll listener prevents keyboard interference
+
+✅ Back Button Navigation
+   - Uses close button (not back arrow) intentionally
+   - AppPageCloseButton disables during publishing
+   - Exit confirmation dialog works
+
+✅ Draft Persistence
+   - Saves on each step
+   - Restores on re-open
+   - Handles legacy format migration
+
+✅ scrollPadding Implementation
+   - AqarTextField uses AppKeyboardInset.inputScrollPadding()
+   - Provides 56px margin above keyboard
+   - Ensures comfort for input
+
+================================================================================
+TESTING RECOMMENDATIONS
+================================================================================
+
+Device configs to test:
+- [ ] iPhone SE (375×667) with keyboard
+- [ ] Samsung Galaxy A51 (412×915) at 1.5x font scale
+- [ ] iPad in split view (50% width)
+- [ ] Web at 480px mobile view
+- [ ] Device with 1.5x text scale + keyboard open
+
+Test scenarios:
+- [ ] Type in Nafath ID field on 360px phone - verify it doesn't hide
+- [ ] Search address with 10+ results - verify list scrollable with keyboard
+- [ ] Enter deed number slowly - verify check progress is visible
+- [ ] Open Nafath sheet on device with 1.5x font - verify layout fits
+- [ ] Navigate National Address and confirm accept button
+
+================================================================================
+PRIORITY FIX ORDER
+================================================================================
+
+Week 1 (Critical):
+1. Nafath sheet: Add dynamic keyboard padding
+2. National Address: Make results list keyboard-aware
+3. Accept button: Ensure visible/accessible with keyboard
+4. Deed verification: Add loading/success indicator
+
+Week 2 (High):
+5. Replace all hard-coded font sizes
+6. National ID: Show completion state at 10 digits
+7. RTL padding: Adjust for scaled text on Arabic
+
+Week 3 (Medium):
+8. Error recovery in Nafath sheet
+9. Confirmation flow improvement
+10. Accessibility audit for text scaling
+
+================================================================================
+FILES MODIFIED IN RECOMMENDATIONS
+================================================================================
+
+1. lib/core/gestures/app_keyboard_inset.dart - (No changes needed - working)
+2. lib/widgets/nafath_login_sheet.dart - Add dynamic padding
+3. lib/screens/national_address_picker_screen.dart - Make results adaptive
+4. lib/screens/add_property_page.dart - Replace hard-coded font sizes
+5. lib/core/input/aqar_editable_defaults.dart - Ensure theme-based sizing
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The app's keyboard handling foundation is SOLID. The architecture through
+AppKeyboardInset, AppKeyboardPad, and AppOutsideUnfocus is well-designed.
+
+Main issues are:
+1. Small screen edge cases (< 400px height) not fully tested
+2. Hard-coded font sizes don't respect accessibility settings
+3. Visual feedback for field verification is missing
+4. Some screens don't adapt to keyboard dynamically
+
+These are FIXABLE in a focused sprint. No fundamental architectural changes
+needed. The issues are implementation details, not design flaws.
+
+Impact is MEDIUM on end users:
+- Large phones (> 400px): Works fine
+- Small phones (< 400px): Occasional field cutoff
+- Accessibility users (1.5x+ font): Layout issues
+
+Recommendation: Prioritize small screen testing and font scaling fixes.
+
+================================================================================
+For detailed analysis, see: KEYBOARD_FIELD_AUDIT_REPORT.md
+================================================================================

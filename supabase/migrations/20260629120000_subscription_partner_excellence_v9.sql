@@ -361,7 +361,7 @@ BEGIN
         'error', 'penalty_required',
         'penalty_sar', v_penalty,
         'message_ar', format(
-          'لإيقاف التجديد التلقائي قبل نهاية الفترة يلزم دفع رسوم تكميلية %s ر.س (فرق خصم %s%%).',
+          'لإيقاف التجديد التلقائي قبل نهاية الفترة يلزم دفع رسوم تكميلية %s ﷼ (فرق خصم %s%%).',
           v_penalty, v_pct
         ),
         'message_en', format(

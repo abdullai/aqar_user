@@ -1,7 +1,7 @@
 // ignore_for_file: unused_element, unused_element_parameter, unused_field
 
 // lib/screens/settings_page.dart
-import 'dart:async' show unawaited;
+import 'dart:async';
 import 'dart:convert' show jsonDecode;
 
 import 'package:file_picker/file_picker.dart';
@@ -34,6 +34,7 @@ import '../core/motion/app_motion_policy.dart';
 import '../core/motion/app_motion_prefs.dart';
 import '../core/utils/listing_date_display.dart';
 import '../core/utils/profile_greeting_from_row.dart';
+import '../core/utils/users_profiles_safe_select.dart';
 import '../core/presence/presence_display_prefs.dart';
 import '../core/permissions/runtime_permission_helper.dart';
 import '../l10n/app_localizations.dart';
@@ -51,6 +52,8 @@ import '../main.dart'
         textScaleNotifier,
         setAppTextScaleFactor;
 import '../core/haptics/app_haptics.dart';
+import '../core/auth/auth_challenge_service.dart';
+import '../core/auth/in_app_otp_handoff.dart';
 import '../core/notifications/in_app_notification_sound.dart';
 import '../core/notifications/chat_message_sound.dart';
 import '../core/theme/app_accent.dart';
@@ -61,9 +64,11 @@ import 'session_history_screen.dart';
 import 'switch_account_screen.dart';
 import 'browse_organizations_screen.dart';
 import '../services/fast_login_service.dart';
+import '../services/auth_service.dart';
 import '../services/org_team_service.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_confirm_dialog.dart';
+import '../widgets/six_digit_pin_fields.dart';
 import '../models/saudi_location.dart';
 import '../services/saudi_locations_service.dart';
 import 'map_picker_page.dart';
@@ -2156,106 +2161,381 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
-  Future<void> _showChangePinDialog() async {
-    final t = AppLocalizations.of(context)!;
-    final c1 = TextEditingController();
-    final c2 = TextEditingController();
-
-    final ok = await showAppDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(t.changeQuickPin),
-          content: _keyboardAwareDialogBody(
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AqarTextField(
-                  controller: c1,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  decoration: InputDecoration(
-                    labelText: t.newPinLabel,
-                    counterText: '',
-                  ),
-                  inputFormatters: [
-                    const ArabicDigitsToLatinFormatter(),
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(6),
-                  ],
-                ),
-                AqarTextField(
-                  controller: c2,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  decoration: InputDecoration(
-                    labelText: t.confirmPinLabel,
-                    counterText: '',
-                  ),
-                  inputFormatters: [
-                    const ArabicDigitsToLatinFormatter(),
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(6),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(_isAr ? 'إلغاء' : 'Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(_isAr ? 'حفظ' : 'Save'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (ok != true || !mounted) {
-      c1.dispose();
-      c2.dispose();
-      return;
-    }
-
-    final p1 = FastLoginService.normalizeDigits(c1.text);
-    final p2 = FastLoginService.normalizeDigits(c2.text);
-    c1.dispose();
-    c2.dispose();
-
-    if (p1.length != 6 || p2.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
+  void _showPinNotice(String message, {bool success = true}) {
+    final cs = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
         SnackBar(
-          content: Text(
-              _isAr ? 'الرمز يجب أن يكون 6 أرقام' : 'PIN must be 6 digits'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: success ? const Color(0xFF16834A) : cs.error,
+          content: Row(
+            children: [
+              Icon(
+                success ? Icons.check_circle_outline : Icons.error_outline,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
         ),
       );
-      return;
-    }
-    if (p1 != p2) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t.pinMismatch)),
-      );
-      return;
+  }
+
+  Future<String?> _quickPinOtpUsername() async {
+    final user = _sb.auth.currentUser;
+    if (user == null) return null;
+
+    String? validUsername(String? raw) {
+      final digits = FastLoginService.normalizeDigits(raw ?? '')
+          .replaceAll(RegExp(r'\D'), '');
+      return digits.length == 10 ? digits : null;
     }
 
+    final contextUid = await FastLoginService.getCtxUid();
+    if (contextUid == user.id) {
+      final saved = validUsername(await FastLoginService.getUsernameNationalId());
+      if (saved != null) return AuthService.securityUsernameForDeviceFlow(saved);
+    }
+
+    final resume = await FastLoginService.getResumeAccount();
+    if (resume.uid == user.id) {
+      final saved = validUsername(resume.username);
+      if (saved != null) return AuthService.securityUsernameForDeviceFlow(saved);
+    }
+
+    final metadata = user.userMetadata;
+    if (metadata != null) {
+      for (final key in const ['username', 'national_id', 'license_no']) {
+        final value = validUsername(metadata[key]?.toString());
+        if (value != null) return AuthService.securityUsernameForDeviceFlow(value);
+      }
+    }
+
+    final row = await UsersProfilesSafeSelect.fetchProfileById(
+      _sb,
+      user.id,
+      columnAttempts: const [
+        'user_id,username,unified_national_number',
+        'user_id,username',
+        'user_id',
+      ],
+    );
+    if (row == null) return null;
+
+    for (final key in const [
+      'username',
+      'unified_national_number',
+      'license_no',
+    ]) {
+      final value = validUsername(row[key]?.toString());
+      if (value != null) {
+        await FastLoginService.saveUserContext(
+          uid: user.id,
+          usernameNationalId: value,
+        );
+        return AuthService.securityUsernameForDeviceFlow(value);
+      }
+    }
+    return null;
+  }
+
+  Future<bool> _confirmQuickPinActionOtp(String action) async {
+    String? username;
     try {
-      await FastLoginService.setPin(p1);
-      await FastLoginService.setPinEnabled(true);
+      username = await _quickPinOtpUsername();
+    } catch (_) {
+      if (mounted) {
+        _showPinNotice(
+          _isAr
+              ? 'تعذر تحميل بيانات الحساب لإرسال رمز التحقق.'
+              : 'Could not load account details for verification.',
+          success: false,
+        );
+      }
+      return false;
+    }
+    if (username == null) {
+      if (mounted) {
+        _showPinNotice(
+          _isAr
+              ? 'تعذر تحديد حساب المستخدم لإرسال رمز التحقق.'
+              : 'Could not identify the account for verification.',
+          success: false,
+        );
+      }
+      return false;
+    }
+
+    final user = _sb.auth.currentUser;
+    final contextUid = await FastLoginService.getCtxUid();
+    var accountName = '';
+    if (contextUid == user?.id) {
+      accountName = (await FastLoginService.getDisplayName() ?? '').trim();
+    }
+    if (accountName.isEmpty) {
+      final metadata = user?.userMetadata;
+      accountName =
+          (metadata?['full_name'] ?? metadata?['name'] ?? '').toString().trim();
+    }
+
+    final verified = await showAppDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _FastPinOtpDialog(
+        username: username!,
+        action: action,
+        accountName: accountName,
+        isAr: _isAr,
+      ),
+    );
+    return verified == true;
+  }
+
+  Future<void> _showChangePinDialog({bool verifyCurrent = false}) async {
+    final t = AppLocalizations.of(context)!;
+    final currentPin = TextEditingController();
+    final newPin = TextEditingController();
+    final confirmPin = TextEditingController();
+    var step = verifyCurrent ? 0 : 1;
+    var busy = false;
+    String? error;
+
+    final savedPin = await showAppDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          Future<void> advance() async {
+            setDialogState(() {
+              busy = true;
+              error = null;
+            });
+
+            if (step == 0) {
+              if (!FastLoginService.isValidPin(currentPin.text)) {
+                setDialogState(() {
+                  busy = false;
+                  error = _isAr
+                      ? 'أدخل رمز الدخول الحالي المكوّن من 6 أرقام.'
+                      : 'Enter your current six-digit PIN.';
+                });
+                return;
+              }
+              final valid = await FastLoginService.verifyPin(currentPin.text);
+              if (!dialogContext.mounted) return;
+              if (!valid) {
+                final remaining =
+                    await FastLoginService.pinLockRemainingSeconds();
+                setDialogState(() {
+                  busy = false;
+                  error = remaining > 0
+                      ? (_isAr
+                          ? 'تجاوزت عدد المحاولات. حاول بعد $remaining ثانية.'
+                          : 'Too many attempts. Try again in $remaining seconds.')
+                      : (_isAr
+                          ? 'رمز الدخول الحالي غير صحيح.'
+                          : 'The current PIN is incorrect.');
+                });
+                return;
+              }
+              setDialogState(() {
+                step = 1;
+                busy = false;
+              });
+              return;
+            }
+
+            if (step == 1) {
+              if (!FastLoginService.isValidPin(newPin.text)) {
+                setDialogState(() {
+                  busy = false;
+                  error = _isAr
+                      ? 'أدخل رمزاً جديداً صحيحاً من 6 أرقام.'
+                      : 'Enter a valid new six-digit PIN.';
+                });
+                return;
+              }
+              setDialogState(() {
+                step = 2;
+                busy = false;
+              });
+              return;
+            }
+
+            final value = FastLoginService.normalizeDigits(newPin.text);
+            final confirmation =
+                FastLoginService.normalizeDigits(confirmPin.text);
+            if (!FastLoginService.isValidPin(confirmation)) {
+              setDialogState(() {
+                busy = false;
+                error = _isAr
+                    ? 'أكمل خانات تأكيد الرمز الست.'
+                    : 'Complete all six confirmation digits.';
+              });
+              return;
+            }
+            if (value != confirmation) {
+              setDialogState(() {
+                busy = false;
+                error = t.pinMismatch;
+              });
+              return;
+            }
+            Navigator.of(dialogContext).pop(value);
+          }
+
+          final title = step == 0
+              ? (_isAr ? 'تحقق من الرمز الحالي' : 'Verify current PIN')
+              : step == 1
+                  ? (_isAr ? 'رمز دخول جديد' : 'New quick PIN')
+                  : (_isAr ? 'تأكيد رمز الدخول الجديد' : 'Confirm new PIN');
+          final instruction = step == 0
+              ? (_isAr
+                  ? 'أدخل رمز الدخول الحالي قبل تغييره.'
+                  : 'Enter your current PIN before changing it.')
+              : step == 1
+                  ? (_isAr
+                      ? 'اختر رمزاً جديداً من 6 أرقام.'
+                      : 'Choose a new six-digit PIN.')
+                  : (_isAr
+                      ? 'أعد إدخال الرمز الجديد للتأكد من مطابقته.'
+                      : 'Re-enter the new PIN to confirm it.');
+
+          return AlertDialog(
+            title: Text(title),
+            content: _keyboardAwareDialogBody(
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(instruction),
+                  const SizedBox(height: 14),
+                  if (step == 0)
+                    SixDigitPinFields(
+                      controller: currentPin,
+                      label: _isAr ? 'رمز الدخول الحالي' : 'Current PIN',
+                      enabled: !busy,
+                      autofocus: true,
+                    )
+                  else if (step == 1)
+                    SixDigitPinFields(
+                      controller: newPin,
+                      label: t.newPinLabel,
+                      enabled: !busy,
+                      autofocus: true,
+                    )
+                  else
+                    SixDigitPinFields(
+                      controller: confirmPin,
+                      label: t.confirmPinLabel,
+                      enabled: !busy,
+                      autofocus: true,
+                    ),
+                  if (error != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      error!,
+                      style: TextStyle(
+                        color: Theme.of(dialogContext).colorScheme.error,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: busy ? null : () => Navigator.of(dialogContext).pop(),
+                child: Text(_isAr ? 'إلغاء' : 'Cancel'),
+              ),
+              FilledButton(
+                onPressed: busy ? null : () => unawaited(advance()),
+                child: busy
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(step == 2
+                        ? (_isAr ? 'حفظ' : 'Save')
+                        : (_isAr ? 'التالي' : 'Next')),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    currentPin.dispose();
+    newPin.dispose();
+    confirmPin.dispose();
+    if (savedPin == null || !mounted) return;
+    final action = verifyCurrent ? 'change' : 'enable';
+    if (!await _confirmQuickPinActionOtp(action) || !mounted) return;
+
+    try {
+      await FastLoginService.setPin(savedPin);
       if (!mounted) return;
       setState(() => _pinEnabled = true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t.pinUpdated)),
+      _showPinNotice(
+        verifyCurrent
+            ? (_isAr
+                ? 'تم تحديث رمز الدخول السريع بنجاح'
+                : 'Quick login PIN updated successfully')
+            : (_isAr
+                ? 'تم تفعيل الدخول السريع بنجاح'
+                : 'Quick login activated successfully'),
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(t.changePasswordFailed)),
+      _showPinNotice(
+        _isAr
+            ? 'تم التحقق من الرمز، لكن تعذر حفظ رمز الدخول على هذا الجهاز.'
+            : 'The code was verified, but the PIN could not be saved on this device.',
+        success: false,
+      );
+    }
+  }
+
+  Future<void> _handleQuickPinToggle(bool enabled) async {
+    if (enabled) {
+      await _showChangePinDialog();
+      return;
+    }
+
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: _isAr ? 'إلغاء الدخول السريع؟' : 'Disable quick login?',
+      message: _isAr
+          ? 'سيُطلب منك تسجيل الدخول بالطريقة المعتادة على هذا الجهاز. هل تريد المتابعة؟'
+          : 'You will use the normal sign-in method on this device. Continue?',
+      confirmLabel: _isAr ? 'نعم، إلغاء' : 'Yes, disable',
+      cancelLabel: _isAr ? 'لا' : 'No',
+      isDanger: true,
+    );
+    if (!confirmed || !mounted) return;
+    if (!await _confirmQuickPinActionOtp('disable') || !mounted) return;
+
+    try {
+      await FastLoginService.setPinEnabled(false);
+      if (!mounted) return;
+      await _loadFastLogin();
+      _showPinNotice(
+        _isAr ? 'تم إلغاء الدخول السريع' : 'Quick login disabled',
+      );
+    } catch (_) {
+      if (!mounted) return;
+      _showPinNotice(
+        _isAr ? 'تعذر إلغاء الدخول السريع' : 'Could not disable quick login',
+        success: false,
       );
     }
   }
@@ -3000,15 +3280,7 @@ class _SettingsPageState extends State<SettingsPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-              child: Text(
-                _isAr ? 'الأمان وقفل الجلسة' : 'Security & session lock',
-                style:
-                    const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
               child: Text(
                 _isAr
                     ? 'فعّل رمز PIN لإعادة فتح الجلسة بعد انقضاء المهلة دون إعادة إدخال اسم المستخدم. البصمة متاحة على تطبيق الجوال فقط.'
@@ -3023,15 +3295,8 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             SwitchListTile(
               value: _pinEnabled,
-              onChanged: (v) async {
-                if (v) {
-                  await _showChangePinDialog();
-                } else {
-                  await FastLoginService.setPinEnabled(false);
-                }
-                if (!mounted) return;
-                await _loadFastLogin();
-              },
+              activeTrackColor: const Color(0xFF16834A),
+              onChanged: (v) => unawaited(_handleQuickPinToggle(v)),
               title: Text(_isAr ? 'رمز الدخول السريع (PIN)' : 'Quick PIN'),
             ),
             if (_pinEnabled)
@@ -3044,7 +3309,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                onTap: _showChangePinDialog,
+                onTap: () => _showChangePinDialog(verifyCurrent: true),
               ),
             const SizedBox(height: 8),
           ],
@@ -3055,13 +3320,6 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-            child: Text(
-              _isAr ? 'الأمان والدخول السريع' : 'Security & quick unlock',
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-            ),
-          ),
           SwitchListTile(
             title: Text(_isAr ? 'تفعيل التعرف على الوجه' : 'Face unlock'),
             subtitle: Text(
@@ -3104,12 +3362,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           SwitchListTile(
             value: _pinEnabled,
-            onChanged: (v) async {
-              await FastLoginService.setPinEnabled(v);
-              if (!mounted) return;
-              setState(() => _pinEnabled = v);
-              await _loadFastLogin();
-            },
+            activeTrackColor: const Color(0xFF16834A),
+            onChanged: (v) => unawaited(_handleQuickPinToggle(v)),
             title: Text(_isAr ? 'رمز الدخول السريع (PIN)' : 'Quick PIN'),
           ),
           if (_pinEnabled)
@@ -3119,7 +3373,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   style: TextStyle(
                       color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.w700)),
-              onTap: _showChangePinDialog,
+              onTap: () => _showChangePinDialog(verifyCurrent: true),
             ),
           const Divider(height: 1),
           Padding(
@@ -4655,42 +4909,12 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Widget _sectionPaneHeader(_SettingsSection s) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 0, 4, 14),
-      child: Row(
-        children: [
-          Icon(_settingsSectionIcon(s), color: cs.primary, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              _settingsSectionTitle(s),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-                color: cs.onSurface,
-              ),
-            ),
-          ),
-          if (_mobileDetail != null)
-            AppPageCloseButton(
-              onPressed: () => setState(() => _mobileDetail = null),
-            ),
-        ],
-      ),
-    );
-  }
-
   Widget _sectionPaneBody(_SettingsSection s) {
     final compact = _useCompactSettingsHub;
     final children = _settingsSectionContent(s);
     final list = ListView(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
       children: [
-        _sectionPaneHeader(s),
         ...children,
       ],
     );
@@ -4887,13 +5111,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           leading: AppPageCloseButton(
                             isArabic: _isAr,
-                            onPressed: () {
-                              if (inHubDetail) {
-                                setState(() => _mobileDetail = null);
-                                return;
-                              }
-                              SafeOverlayPop.pop(context);
-                            },
+                            onPressed: () => SafeOverlayPop.pop(context),
                           ),
                           automaticallyImplyLeading: false,
                         )
@@ -4947,6 +5165,427 @@ class _SettingsSectionLazyPaneState extends State<_SettingsSectionLazyPane>
     return KeyedSubtree(
       key: ValueKey<int>(widget.contentEpoch),
       child: widget.builder(),
+    );
+  }
+}
+
+class _FastPinOtpDialog extends StatefulWidget {
+  const _FastPinOtpDialog({
+    required this.username,
+    required this.action,
+    required this.accountName,
+    required this.isAr,
+  });
+
+  final String username;
+  final String action;
+  final String accountName;
+  final bool isAr;
+
+  @override
+  State<_FastPinOtpDialog> createState() => _FastPinOtpDialogState();
+}
+
+class _FastPinOtpDialogState extends State<_FastPinOtpDialog> {
+  static const int _otpLength = 6;
+
+  final TextEditingController _otpController = TextEditingController();
+  Timer? _timer;
+  String _challengeId = '';
+  String _expectedCode = '';
+  String? _error;
+  DateTime? _expiresAt;
+  int _secondsLeft = 0;
+  int _attemptsLeft = 5;
+  bool _sending = false;
+  bool _submitting = false;
+
+  String get _actionName {
+    switch (widget.action) {
+      case 'enable':
+        return widget.isAr ? 'تفعيل الدخول السريع' : 'Enable quick login';
+      case 'change':
+        return widget.isAr ? 'تعديل رمز الدخول السريع' : 'Change quick PIN';
+      default:
+        return widget.isAr ? 'إلغاء الدخول السريع' : 'Disable quick login';
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_requestCode());
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    if (_challengeId.isNotEmpty) unawaited(_clearPendingChallengeIfOwned());
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _clearPendingChallengeIfOwned() async {
+    final pending = await AuthChallengeService.readPending();
+    if (pending.challengeId == _challengeId) {
+      await AuthChallengeService.clearPending();
+    }
+  }
+
+  void _startTimer(DateTime expiresAt) {
+    _timer?.cancel();
+    _expiresAt = expiresAt.toUtc();
+    _tickTimer();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => _tickTimer());
+  }
+
+  void _tickTimer() {
+    if (!mounted || _expiresAt == null) return;
+    final remaining = _expiresAt!.difference(DateTime.now().toUtc()).inSeconds;
+    if (remaining <= 0) {
+      _timer?.cancel();
+      setState(() => _secondsLeft = 0);
+      return;
+    }
+    if (_secondsLeft != remaining) {
+      setState(() => _secondsLeft = remaining);
+    }
+  }
+
+  String _sendError(String? error) {
+    final value = (error ?? '').toLowerCase();
+    if (value.contains('rate') || value.contains('too many')) {
+      return widget.isAr
+          ? 'طلبات كثيرة. انتظر قليلاً ثم أعد المحاولة.'
+          : 'Too many requests. Wait briefly, then retry.';
+    }
+    if (value.contains('device_not_trusted')) {
+      return widget.isAr
+          ? 'هذا الجهاز غير موثّق. سجّل الدخول بالطريقة المعتادة أولاً.'
+          : 'This device is not trusted. Sign in normally first.';
+    }
+    if (value.contains('not_authenticated')) {
+      return widget.isAr
+          ? 'انتهت الجلسة. سجّل الدخول مجدداً.'
+          : 'Your session expired. Sign in again.';
+    }
+    return widget.isAr
+        ? 'تعذر إرسال رمز التحقق. تحقق من الاتصال وحاول مجدداً.'
+        : 'Could not send the verification code. Check your connection and retry.';
+  }
+
+  Future<void> _requestCode() async {
+    if (_sending) return;
+    setState(() {
+      _sending = true;
+      _error = null;
+      _challengeId = '';
+      _expectedCode = '';
+      _secondsLeft = 0;
+      _otpController.clear();
+    });
+
+    final requestedAt = DateTime.now().toUtc();
+    try {
+      final challenge = await AuthChallengeService.startFastPinSettingsChallenge(
+        username: widget.username,
+        action: widget.action,
+      ).timeout(const Duration(seconds: 22));
+      if (!mounted) return;
+      if (!challenge.ok ||
+          !challenge.needsOtp ||
+          (challenge.challengeId ?? '').isEmpty) {
+        setState(() => _error = _sendError(challenge.error));
+        return;
+      }
+
+      final id = challenge.challengeId!;
+      final expiry = challenge.expiresAt ??
+          DateTime.now().toUtc().add(const Duration(seconds: 90));
+      setState(() {
+        _challengeId = id;
+        _expectedCode = challenge.devCode ?? '';
+      });
+      _startTimer(expiry);
+
+      var code = InAppOtpHandoff.digitsFromAny(challenge.devCode);
+      code ??= await InAppOtpHandoff.pollLatestCode(
+        requestedAtUtc: requestedAt,
+        challengeId: id,
+      );
+      if (!mounted) return;
+      if (code != null && code.length >= _otpLength) {
+        setState(() => _expectedCode = code!.substring(0, _otpLength));
+      }
+    } on TimeoutException {
+      if (mounted) {
+        setState(() {
+          _error = widget.isAr
+              ? 'انتهت مهلة الاتصال. حاول إرسال الرمز مجدداً.'
+              : 'The request timed out. Try sending the code again.';
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _error = _sendError(null));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _pasteCode() async {
+    String code = _expectedCode;
+    if (code.length != _otpLength) {
+      final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+      code = FastLoginService.normalizeDigits(clipboard?.text ?? '')
+          .replaceAll(RegExp(r'\D'), '');
+    }
+    if (!mounted) return;
+    if (code.length != _otpLength) {
+      setState(() {
+        _error = widget.isAr
+            ? 'لا يوجد رمز صالح للصق. أدخله يدوياً أو انتظر وصوله.'
+            : 'No valid code to paste. Enter it manually or wait for delivery.';
+      });
+      return;
+    }
+    _otpController.value = TextEditingValue(
+      text: code,
+      selection: TextSelection.collapsed(offset: code.length),
+    );
+    setState(() => _error = null);
+    unawaited(_verifyCode());
+  }
+
+  Future<void> _verifyCode() async {
+    if (_sending || _submitting) return;
+    if (_secondsLeft <= 0 || _challengeId.isEmpty) {
+      setState(() {
+        _error = widget.isAr
+            ? 'انتهت صلاحية الرمز. أعد إرساله.'
+            : 'The code expired. Resend it.';
+      });
+      return;
+    }
+
+    final code = FastLoginService.normalizeDigits(_otpController.text)
+        .replaceAll(RegExp(r'\D'), '');
+    if (code.length != _otpLength) {
+      setState(() {
+        _error = widget.isAr
+            ? 'أدخل الرمز كاملاً في الخانات الست.'
+            : 'Enter all six verification digits.';
+      });
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final result = await AuthChallengeService.verifyFastPinSettingsChallenge(
+      code: code,
+      challengeId: _challengeId,
+      action: widget.action,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    if (result.ok) {
+      _timer?.cancel();
+      Navigator.of(context).pop(true);
+      return;
+    }
+
+    if (result.error == 'expired') {
+      _timer?.cancel();
+      setState(() => _secondsLeft = 0);
+    } else if (result.locked) {
+      _timer?.cancel();
+      setState(() {
+        _secondsLeft = 0;
+        _attemptsLeft = 0;
+      });
+    } else if (result.remainingAttempts != null) {
+      setState(() => _attemptsLeft = result.remainingAttempts!);
+    } else {
+      setState(() => _attemptsLeft = (_attemptsLeft - 1).clamp(0, 5));
+    }
+    _otpController.clear();
+    setState(() {
+      _error = _attemptsLeft == 0
+          ? (widget.isAr
+              ? 'انتهت المحاولات. أعد إرسال رمز جديد بعد انتهاء العداد.'
+              : 'Attempts exhausted. Resend a code after the timer ends.')
+          : result.error == 'expired'
+              ? (widget.isAr
+                  ? 'انتهت صلاحية الرمز. أعد إرساله.'
+                  : 'The code expired. Resend it.')
+              : (widget.isAr
+                  ? 'الرمز غير صحيح. المحاولات المتبقية: $_attemptsLeft'
+                  : 'Incorrect code. Attempts left: $_attemptsLeft');
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isAr = widget.isAr;
+    final name = widget.accountName.trim();
+    final accountLabel = name.isNotEmpty
+        ? name
+        : FastLoginService.maskNationalId(widget.username);
+    final canResend = _secondsLeft <= 0 && !_sending && !_submitting;
+
+    return AlertDialog(
+      title: Text(
+        isAr ? 'رمز تحقق مؤقت' : 'Temporary verification code',
+      ),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 420,
+          maxHeight: (AppKeyboardInset.visibleHeightOf(context) - 48)
+              .clamp(180.0, 620.0)
+              .toDouble(),
+        ),
+        child: SingleChildScrollView(
+          child: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+              Text(_actionName, style: const TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text(
+                isAr ? 'الحساب: $accountLabel' : 'Account: $accountLabel',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                isAr
+                    ? 'أدخل رمز التحقق المرتبط بهذه العملية. لا نرسل الرمز عبر SMS في بيئة التطوير.'
+                    : 'Enter the code for this action. Development codes are delivered in-app, not by SMS.',
+              ),
+              const SizedBox(height: 14),
+              if (_expectedCode.length == _otpLength)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primaryContainer
+                        .withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          isAr
+                              ? 'رمز التطوير المؤقت: $_expectedCode'
+                              : 'Temporary development code: $_expectedCode',
+                          textDirection: TextDirection.ltr,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _sending || _submitting ? null : _pasteCode,
+                        icon: const Icon(Icons.content_paste_rounded),
+                        label: Text(isAr ? 'لصق' : 'Paste'),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_expectedCode.length == _otpLength)
+                const SizedBox(height: 14),
+              SixDigitPinFields(
+                controller: _otpController,
+                label: isAr ? 'رمز التحقق' : 'Verification code',
+                enabled: !_sending && !_submitting && _secondsLeft > 0,
+                autofocus: !_sending && _secondsLeft > 0,
+                onChanged: (value) {
+                  if (value.length == _otpLength &&
+                      !_sending &&
+                      !_submitting) {
+                    unawaited(_verifyCode());
+                  }
+                },
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.timer_outlined, size: 18),
+                  const SizedBox(width: 6),
+                  Text(
+                    _secondsLeft > 0
+                        ? (isAr
+                            ? 'المتبقي: $_secondsLeft ثانية'
+                            : 'Remaining: $_secondsLeft seconds')
+                        : (isAr ? 'انتهى الوقت' : 'Time expired'),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  TextButton.icon(
+                    onPressed: canResend ? _requestCode : null,
+                    icon: _sending
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                    label: Text(isAr ? 'إعادة إرسال' : 'Resend'),
+                  ),
+                ],
+              ),
+              Text(
+                isAr
+                    ? 'المحاولات المتبقية: $_attemptsLeft'
+                    : 'Attempts remaining: $_attemptsLeft',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _attemptsLeft == 0
+                      ? Theme.of(context).colorScheme.error
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _error!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _submitting ? null : () => Navigator.of(context).pop(false),
+          child: Text(isAr ? 'إلغاء' : 'Cancel'),
+        ),
+        FilledButton(
+          onPressed: _submitting || _sending ? null : _verifyCode,
+          child: _submitting
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(isAr ? 'تحقق' : 'Verify'),
+        ),
+      ],
     );
   }
 }

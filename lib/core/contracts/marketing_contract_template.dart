@@ -1,4 +1,5 @@
 import '../utils/date_helper.dart';
+import '../utils/app_money.dart';
 
 /// نص اتفاقية التسويق المعروض للمعلن قبل التوقيع الإلكتروني (مع التاريخ).
 class MarketingContractTemplate {
@@ -40,7 +41,7 @@ class MarketingContractTemplate {
     final marketer = (marketerName ?? '').trim();
     final marketerType = (marketerEntityType ?? '').trim();
     final license = (marketerLicenseNo ?? '').trim();
-    final fee = _formatNumber(marketingFee);
+    final fee = _formatMoney(marketingFee, isAr: isAr, currency: currency);
 
     final invoiceBlock = _buildInvoiceBlock(
       isAr: isAr,
@@ -61,7 +62,7 @@ ${cId.isNotEmpty ? 'رقم العقد: $cId\n' : ''}تاريخ العقد: $date
 رقم الطلب: $requestId
 عنوان الإعلان: $listingTitle
 المدينة: $city
-أتعاب التسويق المتفق عليها: $fee $currency
+أتعاب التسويق المتفق عليها: $fee
 ${invoiceBlock.isNotEmpty ? '\n$invoiceBlock\n' : ''}
 أولاً: أطراف العقد
 الطرف الأول: مالك / معلن العقار${owner.isNotEmpty ? ' ($owner)' : ''}، ويُعرَف بهوية حسابه وسجلاته في المنصة.
@@ -93,7 +94,7 @@ ${cId.isNotEmpty ? 'Contract no.: $cId\n' : ''}Contract date: $date
 Request ID: $requestId
 Listing title: $listingTitle
 City: $city
-Agreed marketing fee: $fee $currency
+Agreed marketing fee: $fee
 ${invoiceBlock.isNotEmpty ? '\n$invoiceBlock\n' : ''}
 1. Parties
 Party A: Property owner/advertiser${owner.isNotEmpty ? ' ($owner)' : ''}, identified by the platform account and records.
@@ -123,6 +124,19 @@ Party B (marketer/entity): completed inside the app.
       (_) => ',',
     );
     return parts.length == 1 ? whole : '$whole.${parts.last}';
+  }
+
+  static String _formatMoney(
+    double value, {
+    required bool isAr,
+    required String currency,
+  }) {
+    final number = _formatNumber(value);
+    final code =
+        currency.trim().isEmpty ? 'SAR' : currency.trim().toUpperCase();
+    return code == 'SAR'
+        ? AppMoney.sarPhrase(number, isAr: isAr)
+        : '$number $code';
   }
 
   /// يبني قسم «قيمة العقار والفوترة» داخل نص العقد.
@@ -170,37 +184,35 @@ Party B (marketer/entity): completed inside the app.
         ? commPct.toInt().toString()
         : commPct.toStringAsFixed(1);
 
-    final cur = currency.trim().isEmpty ? 'SAR' : currency.trim();
-
     if (isAr) {
       final buf = StringBuffer();
       buf.writeln('ثانياً: قيمة العقار والفوترة (مطابقة لـ ZATCA و REGA)');
       buf.writeln(
-          '• السعر الذي أدخله المعلن: ${_formatNumber(enteredPrice)} $cur '
+          '• السعر الذي أدخله المعلن: ${_formatMoney(enteredPrice, isAr: isAr, currency: currency)} '
           '(${inclVat ? 'شامل ضريبة القيمة المضافة' : 'غير شامل الضريبة'}).');
       buf.writeln(
-          '• السعر الأساسي قبل الضريبة: ${_formatNumber(basePrice)} $cur.');
+          '• السعر الأساسي قبل الضريبة: ${_formatMoney(basePrice, isAr: isAr, currency: currency)}.');
       buf.writeln(
-          '• ضريبة القيمة المضافة ($vatPctStr%): ${_formatNumber(vatAmount)} $cur '
+          '• ضريبة القيمة المضافة ($vatPctStr%): ${_formatMoney(vatAmount, isAr: isAr, currency: currency)} '
           '— ${inclVat ? 'محتسبة من السعر الإجمالي' : 'تُضاف على السعر الأساسي'}.');
       buf.writeln(
-          '• الإجمالي مع الضريبة: ${_formatNumber(totalWithVat)} $cur.');
+          '• الإجمالي مع الضريبة: ${_formatMoney(totalWithVat, isAr: isAr, currency: currency)}.');
       switch (kind) {
         case 'percent':
           buf.writeln(
               '• عمولة التسويق العقاري: نسبة $commPctStr% من السعر الأساسي '
-              '= ${_formatNumber(commVal)} $cur.');
+              '= ${_formatMoney(commVal, isAr: isAr, currency: currency)}.');
           break;
         case 'fixed':
-          buf.writeln(
-              '• عمولة التسويق العقاري: مبلغ مقطوع متفق عليه = '
-              '${_formatNumber(commVal)} $cur.');
+          buf.writeln('• عمولة التسويق العقاري: مبلغ مقطوع متفق عليه = '
+              '${_formatMoney(commVal, isAr: isAr, currency: currency)}.');
           break;
         default:
-          buf.writeln('• عمولة التسويق العقاري: لا توجد عمولة على هذا الإعلان.');
+          buf.writeln(
+              '• عمولة التسويق العقاري: لا توجد عمولة على هذا الإعلان.');
       }
       buf.write(
-          '• المجموع النهائي للفاتورة: ${_formatNumber(finalTotal)} $cur '
+          '• المجموع النهائي للفاتورة: ${_formatMoney(finalTotal, isAr: isAr, currency: currency)} '
           '(الأساسي + الضريبة + العمولة).');
       return buf.toString();
     }
@@ -208,30 +220,29 @@ Party B (marketer/entity): completed inside the app.
     final buf = StringBuffer();
     buf.writeln('2. Property value & invoice (ZATCA & REGA aligned)');
     buf.writeln(
-        '- Advertiser-entered total: ${_formatNumber(enteredPrice)} $cur '
+        '- Advertiser-entered total: ${_formatMoney(enteredPrice, isAr: isAr, currency: currency)} '
         '(${inclVat ? 'VAT included' : 'VAT excluded'}).');
     buf.writeln(
-        '- Base price before VAT: ${_formatNumber(basePrice)} $cur.');
+        '- Base price before VAT: ${_formatMoney(basePrice, isAr: isAr, currency: currency)}.');
     buf.writeln(
-        '- VAT ($vatPctStr%): ${_formatNumber(vatAmount)} $cur — '
+        '- VAT ($vatPctStr%): ${_formatMoney(vatAmount, isAr: isAr, currency: currency)} — '
         '${inclVat ? 'included in entered total' : 'added on top of base price'}.');
-    buf.writeln('- Total with VAT: ${_formatNumber(totalWithVat)} $cur.');
+    buf.writeln(
+        '- Total with VAT: ${_formatMoney(totalWithVat, isAr: isAr, currency: currency)}.');
     switch (kind) {
       case 'percent':
-        buf.writeln(
-            '- Marketing commission: $commPctStr% of base price '
-            '= ${_formatNumber(commVal)} $cur.');
+        buf.writeln('- Marketing commission: $commPctStr% of base price '
+            '= ${_formatMoney(commVal, isAr: isAr, currency: currency)}.');
         break;
       case 'fixed':
-        buf.writeln(
-            '- Marketing commission: agreed fixed amount '
-            '= ${_formatNumber(commVal)} $cur.');
+        buf.writeln('- Marketing commission: agreed fixed amount '
+            '= ${_formatMoney(commVal, isAr: isAr, currency: currency)}.');
         break;
       default:
         buf.writeln('- Marketing commission: none on this listing.');
     }
     buf.write(
-        '- Final invoice total: ${_formatNumber(finalTotal)} $cur '
+        '- Final invoice total: ${_formatMoney(finalTotal, isAr: isAr, currency: currency)} '
         '(base + VAT + commission).');
     return buf.toString();
   }

@@ -2894,7 +2894,7 @@ class AppLocalizationsAr extends AppLocalizations {
   String get subscriptionsBadgeExpired => 'الاشتراك منتهٍ أو يقترب من الانتهاء';
 
   @override
-  String get subscriptionsSar => 'ريال';
+  String get subscriptionsSar => '﷼';
 
   @override
   String get subscriptionsMonthly => 'شهرياً';
@@ -3966,7 +3966,7 @@ class AppLocalizationsAr extends AppLocalizations {
 
   @override
   String get opsDeskPromoValueHint =>
-      'نسبة 1–100 أو مبلغ بالريال للخصم الثابت. القيمة تُحفظ وتُنسَّق كمال — لا تُثبَّت في النص.';
+      'نسبة 1–100 أو مبلغ برمز ﷼ للخصم الثابت. القيمة تُحفظ وتُنسَّق كمال — لا تُثبَّت في النص.';
 
   @override
   String get opsDeskPromoWindowHint =>

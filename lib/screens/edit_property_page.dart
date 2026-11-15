@@ -33,6 +33,7 @@ import '../widgets/app_page_close_button.dart';
 import '../widgets/deed_civil_hijri_date_text.dart';
 import '../widgets/deed_date_calendar_dialog.dart';
 import '../widgets/listing_pricing_breakdown.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../widgets/year_built_picker_field.dart';
 import '../widgets/in_app_tour_builder_sheet.dart';
 import '../widgets/property_type_hierarchy_picker.dart';
@@ -1945,16 +1946,24 @@ class _EditPropertyPageState extends State<EditPropertyPage> {
                                 width: 140,
                                 child: DropdownButtonFormField<String>(
                                   initialValue: _currency,
-                                  items: const [
+                                  items: [
                                     DropdownMenuItem(
                                       value: 'SAR',
-                                      child: Text('SAR'),
+                                      child: _isAr
+                                          ? AqarCurrencyMark(
+                                              isAr: true,
+                                              size: 14,
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .onSurface,
+                                            )
+                                          : const Text('SAR'),
                                     ),
-                                    DropdownMenuItem(
+                                    const DropdownMenuItem(
                                       value: 'USD',
                                       child: Text('USD'),
                                     ),
-                                    DropdownMenuItem(
+                                    const DropdownMenuItem(
                                       value: 'EUR',
                                       child: Text('EUR'),
                                     ),
@@ -2970,8 +2979,15 @@ class _EditCommissionQuestion extends StatelessWidget {
               inputFormatters: latinDecimalNumberFormatters(),
               decoration: InputDecoration(
                 labelText: isAr
-                    ? 'مبلغ العمولة المقطوع ($currencyCode)'
-                    : 'Fixed commission amount ($currencyCode)',
+                    ? 'مبلغ العمولة المقطوع${currencyCode.trim().toUpperCase() == 'SAR' ? '' : ' ($currencyCode)'}'
+                    : 'Fixed commission amount${currencyCode.trim().toUpperCase() == 'SAR' ? '' : ' ($currencyCode)'}',
+                suffixIcon: currencyCode.trim().toUpperCase() == 'SAR'
+                    ? AqarCurrencyMark(
+                        isAr: isAr,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      )
+                    : null,
                 isDense: true,
                 border: const OutlineInputBorder(),
               ),

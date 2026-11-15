@@ -1349,16 +1349,11 @@ class _LoginScreenState extends State<LoginScreen>
     ConnectivityGuard.showOfflineSnackIfNeeded(context, okNet);
     if (!okNet) return;
 
-    final username = (_getRealUsername() ?? '').trim();
-    final nationalId =
-        _normalizeNumbers(username).replaceAll(RegExp(r'\D'), '');
-
     setState(() => _nafathBusy = true);
     try {
       await NafathLoginSheet.show(
         context,
         isAr: _isAr,
-        initialNationalId: nationalId,
         rememberMe: rememberMe,
       );
     } finally {

@@ -1,6 +1,5 @@
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
@@ -102,7 +101,7 @@ class SaudiRiyalSymbolIcon extends StatelessWidget {
             placeholderBuilder: (_) => FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
-                kIsWeb ? '\u{FDFC}' : 'SAR',
+                '\u{FDFC}',
                 style: TextStyle(
                   fontSize: h * 0.82,
                   fontWeight: FontWeight.w800,
@@ -112,6 +111,47 @@ class SaudiRiyalSymbolIcon extends StatelessWidget {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// رمز عملة متوافق مع لغة الواجهة ومقياس النص؛ SAR للإنجليزية والرمز الرسمي للعربية.
+class AqarCurrencyMark extends StatelessWidget {
+  const AqarCurrencyMark({
+    super.key,
+    required this.isAr,
+    required this.size,
+    required this.color,
+    this.textStyle,
+  });
+
+  final bool isAr;
+  final double size;
+  final Color color;
+  final TextStyle? textStyle;
+
+  @override
+  Widget build(BuildContext context) {
+    final scaledSize =
+        MediaQuery.textScalerOf(context).scale(size).clamp(10.0, 48.0);
+    if (isAr) {
+      return SaudiRiyalSymbolIcon(size: scaledSize, color: color);
+    }
+
+    final baseStyle = textStyle ??
+        Theme.of(context).textTheme.labelLarge ??
+        const TextStyle();
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Text(
+        'SAR',
+        style: baseStyle.copyWith(
+          fontWeight: FontWeight.w900,
+          fontSize: (scaledSize * 0.72).clamp(10.0, 32.0),
+          color: color,
+          height: 1.0,
         ),
       ),
     );

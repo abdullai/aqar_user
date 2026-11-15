@@ -92,7 +92,7 @@ class _CompanyProfilePageExampleState extends State<CompanyProfilePageExample> {
               ),
               _InfoCard(
                 title: 'رأس المال',
-                value: '${data['capital'] ?? 0} ريال',
+                value: '${data['capital'] ?? 0} \u{FDFC}',
               ),
               _InfoCard(
                 title: 'المدينة الرئيسية',
@@ -175,7 +175,7 @@ class _EmployeeProfilePageExampleState
               ),
               _InfoCard(
                 title: 'الراتب',
-                value: '${data['salary'] ?? 0} ريال',
+                value: '${data['salary'] ?? 0} \u{FDFC}',
               ),
               _InfoCard(
                 title: 'مكان العمل',

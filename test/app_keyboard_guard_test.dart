@@ -18,6 +18,29 @@ void main() {
     expect(next.text, 'SAVE153');
   });
 
+  test('numeric formatters preserve active IME composing text', () {
+    const value = TextEditingValue(
+      text: '١٢٫٥',
+      selection: TextSelection.collapsed(offset: 4),
+      composing: TextRange(start: 0, end: 4),
+    );
+
+    expect(
+      const ArabicDigitsToLatinFormatter().formatEditUpdate(
+        TextEditingValue.empty,
+        value,
+      ),
+      value,
+    );
+    expect(
+      const LatinDecimalNumberFormatter().formatEditUpdate(
+        TextEditingValue.empty,
+        value,
+      ),
+      value,
+    );
+  });
+
   testWidgets(
       'layoutPadBottomOf is zero when layout height is the visible lane',
       (tester) async {
@@ -37,6 +60,29 @@ void main() {
       ),
     );
     expect(pad, 0);
+  });
+
+  testWidgets('keyboard scope reports open when MediaQuery insets are zero',
+      (tester) async {
+    late bool keyboardOpen;
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(
+          size: Size(390, 800),
+          viewInsets: EdgeInsets.zero,
+        ),
+        child: AppKeyboardScope(
+          inset: 320,
+          child: Builder(
+            builder: (context) {
+              keyboardOpen = AppKeyboardInset.isOpen(context);
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      ),
+    );
+    expect(keyboardOpen, isTrue);
   });
 
   testWidgets('scrollContentBottomOf adds slack while keyboard is open',

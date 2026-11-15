@@ -62,6 +62,7 @@ class ArabicDigitsToLatinFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
+    if (!newValue.composing.isCollapsed) return newValue;
     final t = arabicAndPersianDigitsToLatin(newValue.text);
     if (t == newValue.text) return newValue;
     final removed = newValue.text.length - t.length;
@@ -91,6 +92,7 @@ class LatinDecimalNumberFormatter extends TextInputFormatter {
     TextEditingValue oldValue,
     TextEditingValue newValue,
   ) {
+    if (!newValue.composing.isCollapsed) return newValue;
     var t = arabicAndPersianDigitsToLatin(newValue.text)
         .replaceAll('٫', '.')
         .replaceAll(',', '.')

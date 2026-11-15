@@ -1,8 +1,30 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:aqar_user/core/branding/app_branding.dart';
 import 'package:aqar_user/core/utils/app_money.dart';
 
 void main() {
+  test('user-facing currency markers follow the selected language', () {
+    for (final marker in ['ر.س', 'ر/س', 'س.ر', 'س/ر', 'ريال', 'SAR']) {
+      expect(
+        AppBranding.normalizeUserFacing('المبلغ 45 $marker', isAr: true),
+        'المبلغ 45 ﷼',
+      );
+    }
+    expect(
+      AppBranding.normalizeUserFacing('Amount ﷼45', isAr: false),
+      'Amount 45 SAR',
+    );
+    expect(
+      AppBranding.normalizeUserFacing('Amount 45 ر.س', isAr: false),
+      'Amount 45 SAR',
+    );
+    expect(
+      AppBranding.normalizeUserFacing('SAR 45', isAr: true),
+      '45 ﷼',
+    );
+  });
+
   test('Arabic money text places the riyal mark after the number', () {
     final s = AppMoney.sarPhrase('3,876', isAr: true);
     expect(s.contains('3,876'), isTrue);
@@ -16,6 +38,13 @@ void main() {
     expect(
       AppMoney.formatWithCurrencyCode(3876, isAr: false, maxFractionDigits: 0),
       '3,876 SAR',
+    );
+  });
+
+  test('Arabic PDF money text places the riyal mark after the amount', () {
+    expect(
+      AppMoney.formatForPdf(3876, isAr: true, maxFractionDigits: 0),
+      '3,876 ${AppMoney.saudiRiyalSignCompat}',
     );
   });
 
