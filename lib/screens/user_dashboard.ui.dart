@@ -6355,7 +6355,8 @@ class _UserDashboardState extends State<UserDashboard>
     final guestBlocked = _isGuest &&
         slot != DashboardBottomSlot.home &&
         slot != DashboardBottomSlot.support &&
-        slot != DashboardBottomSlot.shorts;
+        slot != DashboardBottomSlot.shorts &&
+        slot != DashboardBottomSlot.addListing;
     if (!guestBlocked && instantTab != null && _tabIndex != instantTab) {
       setState(() {
         _tabIndex = instantTab;
@@ -6393,7 +6394,8 @@ class _UserDashboardState extends State<UserDashboard>
       final slot = slots[i];
       if (slot != DashboardBottomSlot.home &&
           slot != DashboardBottomSlot.support &&
-          slot != DashboardBottomSlot.shorts) {
+          slot != DashboardBottomSlot.shorts &&
+          slot != DashboardBottomSlot.addListing) {
         unawaited(() async {
           final res = await showGuestAuthRequiredSheet(
             context: context,

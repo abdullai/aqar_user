@@ -1,4 +1,4 @@
-﻿// ignore_for_file: unused_element, unused_element_parameter
+// ignore_for_file: unused_element, unused_element_parameter
 
 part of 'user_dashboard.dart';
 
@@ -381,7 +381,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
           requests: const <MarketPropertyRequestRow>[],
           onAfterOpenExternal: _returnFromExactMapLocation,
           onOpenProperty: (p) {
-            _dashboardBodyNavKey.currentState?.pop();
             unawaited(_openDetails(p));
           },
         ),
@@ -526,11 +525,9 @@ extension _UserDashboardStateActions on _UserDashboardState {
               ListingMediaUrls.marketRequestCoverNetworkUrl(r, _sb),
           onAfterOpenExternal: _returnFromExactMapLocation,
           onOpenProperty: (p) {
-            _dashboardBodyNavKey.currentState?.pop();
             unawaited(_openDetails(p));
           },
           onOpenRequest: (r) {
-            _dashboardBodyNavKey.currentState?.pop();
             _openMarketRequestDetail(r);
           },
         ),
@@ -990,7 +987,8 @@ extension _UserDashboardStateActions on _UserDashboardState {
       }
 
       if (!mounted || _isGuest) return;
-      _ss(() => _plusComposerPhotographerRequestCount = photographerRequestCount);
+      _ss(() =>
+          _plusComposerPhotographerRequestCount = photographerRequestCount);
     } catch (_) {
       if (mounted && !_isGuest) {
         _ss(() => _plusComposerPhotographerRequestCount = 0);
@@ -1046,14 +1044,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
     }
 
     if (selected == 'request') {
-      if (!await _ensureSubscriptionGate(
-        SubscriptionGateAction.addMarketPropertyRequest,
-        resume: const MarketingSubscriptionResumeIntent(
-          kind: MarketingSubscriptionResumeKind.createMarketRequest,
-        ),
-      )) {
-        return;
-      }
       final res = await _pushPlusForm<Object?>(
         (_) => CreateMarketPropertyRequestPage(
           userId: _uid,
@@ -1074,17 +1064,6 @@ extension _UserDashboardStateActions on _UserDashboardState {
 
     if (selected != 'listing') {
       return;
-    }
-
-    if (_isMarketerRole && AppRoleHelper.isMarketingAccountType(_accountType)) {
-      if (!await _ensureSubscriptionGate(
-        SubscriptionGateAction.addPropertyListing,
-        resume: const MarketingSubscriptionResumeIntent(
-          kind: MarketingSubscriptionResumeKind.addPropertyListing,
-        ),
-      )) {
-        return;
-      }
     }
 
     await _runAddPropertyListingFlow();
@@ -1991,9 +1970,7 @@ extension _UserDashboardStateActions on _UserDashboardState {
                         const TextInputType.numberWithOptions(decimal: true),
                     inputFormatters: latinDecimalNumberFormatters(),
                     decoration: InputDecoration(
-                      labelText: widget.isAr
-                          ? 'سعر مقترح'
-                          : 'Suggested price',
+                      labelText: widget.isAr ? 'سعر مقترح' : 'Suggested price',
                       suffixIcon: AqarCurrencyMark(
                         isAr: widget.isAr,
                         size: 16,

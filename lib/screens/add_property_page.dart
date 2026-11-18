@@ -43,8 +43,6 @@ import '../core/permissions/runtime_permission_helper.dart';
 import '../core/profile/publisher_identity_prefs.dart';
 import '../core/session/account_role_cache.dart';
 import '../core/session/app_session.dart';
-import '../core/subscription/app_subscription_gate.dart';
-import '../core/subscription/subscription_gate_helper.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/date_helper.dart';
 import '../core/utils/display_ids.dart';
@@ -89,7 +87,6 @@ import 'national_address_picker_screen.dart';
 import 'photo_shoot_book_page.dart';
 import 'platform_policies_screen.dart';
 import 'rega_ad_license_import_page.dart';
-import 'subscriptions/subscriptions_root_screen.dart';
 
 /// مصدر رخصة الإعلان (الخطوة الأولى من المعالج).
 enum _AdLicenseSource { unset, inApp, external, none }
@@ -689,11 +686,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
     _regaFalLicenseNo.addListener(_scheduleRegaLicenseVerify);
     _applyInitialRegaPayload();
     _applyMarketingFlowBootstrap();
-    if (_marketingFlowActive) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_ensureMarketingSubscriptionForAddProperty());
-      });
-    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _syncAdvertiserRoleFromAccount();
       _appSession = context.read<AppSession>();
@@ -1137,33 +1129,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
               : 'All entered data was cleared. Nothing was saved as a draft.'),
     );
     SafeOverlayPop.pop(context, 'closed');
-  }
-
-  Future<void> _ensureMarketingSubscriptionForAddProperty() async {
-    if (!mounted) return;
-    final ok = await SubscriptionGateHelper.ensure(
-      context,
-      isAr: _isAr,
-      action: SubscriptionGateAction.addPropertyListing,
-      onGoSubscribe: () async {
-        if (!mounted) return;
-        await Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => SubscriptionsRootScreen(
-              lang: widget.lang,
-              accountType: widget.marketingFlow?.accountType ?? '',
-              embedAppBar: false,
-            ),
-          ),
-        );
-        if (mounted) {
-          await SubscriptionGateHelper.refresh(context, force: true);
-        }
-      },
-    );
-    if (!ok && mounted) {
-      Navigator.pop(context, 'closed');
-    }
   }
 
   void _applyMarketingFlowBootstrap() {
@@ -2718,15 +2683,6 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
       _error = null;
     });
     if (_lat != null && _lng != null) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(
-        'coords_temp_${widget.userId}',
-        jsonEncode({
-          'lat': _lat,
-          'lng': _lng,
-          'approximate': _locationIsApproximate,
-        }),
-      );
       if (metaCity.isNotEmpty || metaRegion.isNotEmpty) {
         await _applyResolvedLocation(
           region: metaRegion,
@@ -2738,6 +2694,16 @@ class _AddPropertyPageState extends State<AddPropertyPage> {
         await _fillLocationFromNearest();
       }
       _maybeSuggestSmartTitle();
+      if (!mounted) return;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        'coords_temp_${widget.userId}',
+        jsonEncode({
+          'lat': _lat,
+          'lng': _lng,
+          'approximate': _locationIsApproximate,
+        }),
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

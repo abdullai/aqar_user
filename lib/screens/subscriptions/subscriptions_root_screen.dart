@@ -26,6 +26,7 @@ class SubscriptionsRootScreen extends StatefulWidget {
     this.organizationId,
     this.initialIndex = 0,
     this.embedAppBar = false,
+    this.onClose,
     this.resumeAfterPurchase,
     this.marketOfferPlansOnly = false,
   });
@@ -37,6 +38,9 @@ class SubscriptionsRootScreen extends StatefulWidget {
 
   /// عند `true`: بدون [AppBar] علوي (للدمج مع شريط لوحة التحكم الخارجية).
   final bool embedAppBar;
+
+  /// عند الدمج داخل تبويب أب، يعيد المستخدم إلى تبويب الأب بدلاً من الخروج منه.
+  final VoidCallback? onClose;
 
   /// بعد إتمام دفع باقة من مسار إجراء مدفوع يُعاد [MarketingSubscriptionResumeIntent] للوحة الأم.
   final MarketingSubscriptionResumeIntent? resumeAfterPurchase;
@@ -254,6 +258,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
                 automaticallyImplyLeading: false,
                 leading: AppPageCloseButton(
                   isArabic: widget.lang.toLowerCase() != 'en',
+                  onPressed: widget.onClose,
                 ),
                 title: Text(t.subscriptionsTitle),
               ),
@@ -267,6 +272,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
           automaticallyImplyLeading: false,
           leading: AppPageCloseButton(
             isArabic: widget.lang.toLowerCase() != 'en',
+            onPressed: widget.onClose,
           ),
           title: Text(t.subscriptionsTitle),
         ),
@@ -300,6 +306,7 @@ class _SubscriptionsRootScreenState extends State<SubscriptionsRootScreen>
         automaticallyImplyLeading: false,
         leading: AppPageCloseButton(
           isArabic: widget.lang.toLowerCase() != 'en',
+          onPressed: widget.onClose,
         ),
         title: Text(t.subscriptionsTitle),
         bottom: PreferredSize(

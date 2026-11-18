@@ -19,8 +19,6 @@ import '../core/utils/app_money.dart';
 import '../widgets/app_page_close_button.dart';
 import 'market_insights_widgets.dart';
 
-enum _LeaderboardFilter { all, individuals, marketers }
-
 /// تحديث خلفي: إذا مرّت مدة [_staleAfter] منذ آخر نجاح، يُعاد الجلب تلقائياً.
 class MarketInsightsPage extends StatefulWidget {
   final String lang;
@@ -61,9 +59,6 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
 
   bool get _isAr => widget.lang.toLowerCase() != 'en';
 
-  bool get _isGuest =>
-      Supabase.instance.client.auth.currentUser == null;
-
   String _num(int n) =>
       NumberFormat.decimalPattern(_isAr ? 'ar' : 'en').format(n);
 
@@ -74,7 +69,7 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(_onTabControllerTick);
     WidgetsBinding.instance.addObserver(this);
     _load();
@@ -190,30 +185,16 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
       ),
     );
     b.writeln('');
-    b.writeln('${l10n.marketInsightsKpiTotal}: ${_num(s.listings.publishedTotal)}');
+    b.writeln(
+        '${l10n.marketInsightsKpiTotal}: ${_num(s.listings.publishedTotal)}');
     b.writeln('${l10n.marketInsightsNew7d}: ${_num(s.listings.newLast7d)}');
     b.writeln('${l10n.marketInsightsNew30d}: ${_num(s.listings.newLast30d)}');
-    b.writeln('${l10n.marketInsightsFeatured}: ${_num(s.listings.featuredTotal)}');
-    b.writeln('${l10n.marketInsightsListingRequests}: ${_num(s.listingRequests.total)}');
-    b.writeln('${l10n.marketInsightsOrgsRegistered}: ${_num(s.orgs.registered)}');
-    final ex = s.extras;
-    if (ex != null) {
-      b.writeln(
-        '${l10n.marketInsightsDistinctPublishers}: ${_num(ex.distinctListingPublishers)}',
-      );
-      b.writeln(
-        '${l10n.marketInsightsRegisteredProfiles}: ${_num(ex.registeredProfiles)}',
-      );
-    }
-    if (s.viewer != null) {
-      b.writeln('');
-      b.writeln(l10n.marketInsightsYourListings(s.viewer!.publishedListings));
-      if (s.viewer!.rankGlobal != null) {
-        b.writeln(
-          l10n.marketInsightsYourRankGlobal(_num(s.viewer!.rankGlobal!)),
-        );
-      }
-    }
+    b.writeln(
+        '${l10n.marketInsightsFeatured}: ${_num(s.listings.featuredTotal)}');
+    b.writeln(
+        '${l10n.marketInsightsListingRequests}: ${_num(s.listingRequests.total)}');
+    b.writeln(
+        '${l10n.marketInsightsOrgsRegistered}: ${_num(s.orgs.registered)}');
     return b.toString();
   }
 
@@ -234,10 +215,6 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(l10n.marketInsightsCopied)),
     );
-  }
-
-  void _goLogin() {
-    Navigator.of(context).pushNamed('/login');
   }
 
   Widget _tabPlaceholder(BuildContext context, ColorScheme cs) {
@@ -322,7 +299,6 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
       tabs: [
         Tab(text: l10n.marketInsightsTabOverview),
         Tab(text: l10n.marketInsightsTabAnalytics),
-        Tab(text: l10n.marketInsightsTabCommunity),
       ],
     );
     final bodyContent = _loading && _snap == null
@@ -338,14 +314,6 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
                       _materializedTabs.contains(1)
                           ? _buildAnalyticsTab(context, l10n, theme, cs)
                           : _tabPlaceholder(context, cs),
-                      _materializedTabs.contains(2)
-                          ? _MarketInsightsCommunityTab(
-                              snap: _snap!,
-                              formatNum: _num,
-                              accountLabel: (k) => _accountLabel(context, k),
-                              onReload: () => _load(),
-                            )
-                          : _tabPlaceholder(context, cs),
                     ],
                   );
 
@@ -358,8 +326,7 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
               color: cs.surface,
               elevation: 0.5,
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Row(
                   children: [
                     Expanded(child: titleRow),
@@ -456,79 +423,7 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
                 ),
               ],
               const SizedBox(height: 12),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(Icons.leaderboard_outlined, color: cs.primary),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          l10n.marketInsightsCompetitiveHint,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
               const _OfficialRegaInsightsCard(),
-              if (_isGuest) ...[
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          l10n.marketInsightsGuestHint,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 12),
-                        FilledButton.tonal(
-                          onPressed: _goLogin,
-                          child: Text(l10n.marketInsightsSignInToSeeRank),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-              if (!_isGuest && s.viewer != null) ...[
-                const SizedBox(height: 12),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          l10n.marketInsightsYourSnapshot,
-                          style: theme.textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          l10n.marketInsightsYourListings(
-                            s.viewer!.publishedListings,
-                          ),
-                        ),
-                        Text(
-                          s.viewer!.rankGlobal != null
-                              ? l10n.marketInsightsYourRankGlobal(
-                                  _num(s.viewer!.rankGlobal!),
-                                )
-                              : l10n.marketInsightsYourRankGlobal('—'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
               const SizedBox(height: 16),
               Text(
                 l10n.marketInsightsPublishedTotal,
@@ -565,31 +460,6 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
                   ),
                 ],
               ),
-              if (s.extras != null) ...[
-                const SizedBox(height: 16),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: MarketInsightsKpiTile(
-                        label: l10n.marketInsightsDistinctPublishers,
-                        value: _num(s.extras!.distinctListingPublishers),
-                        icon: Icons.groups_outlined,
-                        colorScheme: cs,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: MarketInsightsKpiTile(
-                        label: l10n.marketInsightsRegisteredProfiles,
-                        value: _num(s.extras!.registeredProfiles),
-                        icon: Icons.person_search_outlined,
-                        colorScheme: cs,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
             ],
           );
         },
@@ -604,8 +474,8 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
     ColorScheme cs,
   ) {
     final s = _snap!;
-    final chartH = (MediaQuery.sizeOf(context).shortestSide * 0.42)
-        .clamp(170.0, 240.0);
+    final chartH =
+        (MediaQuery.sizeOf(context).shortestSide * 0.42).clamp(170.0, 240.0);
 
     return RefreshIndicator(
       color: cs.primary,
@@ -679,208 +549,6 @@ class _MarketInsightsPageState extends State<MarketInsightsPage>
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-List<MarketLeaderboardEntry> _filterLeaderboard(
-  List<MarketLeaderboardEntry> rows,
-  _LeaderboardFilter filter,
-) {
-  switch (filter) {
-    case _LeaderboardFilter.all:
-      return rows;
-    case _LeaderboardFilter.individuals:
-      return rows.where((e) => e.isIndividualSegment).toList();
-    case _LeaderboardFilter.marketers:
-      return rows.where((e) => e.isMarketerSegment).toList();
-  }
-}
-
-class _MarketInsightsCommunityTab extends StatefulWidget {
-  final MarketInsightsSnapshot snap;
-  final String Function(int n) formatNum;
-  final String Function(String key) accountLabel;
-  final Future<void> Function() onReload;
-
-  const _MarketInsightsCommunityTab({
-    required this.snap,
-    required this.formatNum,
-    required this.accountLabel,
-    required this.onReload,
-  });
-
-  @override
-  State<_MarketInsightsCommunityTab> createState() =>
-      _MarketInsightsCommunityTabState();
-}
-
-class _MarketInsightsCommunityTabState
-    extends State<_MarketInsightsCommunityTab> {
-  _LeaderboardFilter _filter = _LeaderboardFilter.all;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    final s = widget.snap;
-    final filtered = _filterLeaderboard(s.topPublishers, _filter);
-
-    return RefreshIndicator(
-      color: cs.primary,
-      onRefresh: widget.onReload,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(
-          16,
-          8,
-          16,
-          16 + MediaQuery.paddingOf(context).bottom,
-        ),
-        children: [
-          Text(
-            l10n.marketInsightsOrgsRegistered,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 6),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: AlignmentDirectional.centerStart,
-            child: Text(
-              widget.formatNum(s.orgs.registered),
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: cs.primary,
-              ),
-            ),
-          ),
-          if (s.orgs.top.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              l10n.marketInsightsTopOrgs,
-              style: theme.textTheme.titleSmall,
-            ),
-            const SizedBox(height: 8),
-            ...s.orgs.top.map(
-              (o) => Card(
-                child: ListTile(
-                  dense: true,
-                  leading: CircleAvatar(
-                    backgroundColor: cs.primaryContainer,
-                    child: Text(
-                      widget.formatNum(o.listingCount),
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: cs.onPrimaryContainer,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    o.label,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    o.kind,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 20),
-          Text(
-            l10n.marketInsightsLeaderboard,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(end: 6),
-                  child: FilterChip(
-                    label: Text(l10n.marketInsightsFilterAll),
-                    selected: _filter == _LeaderboardFilter.all,
-                    onSelected: (v) {
-                      if (v) {
-                        setState(() => _filter = _LeaderboardFilter.all);
-                      }
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsetsDirectional.only(end: 6),
-                  child: FilterChip(
-                    label: Text(l10n.marketInsightsLeaderboardIndividuals),
-                    selected: _filter == _LeaderboardFilter.individuals,
-                    onSelected: (v) {
-                      if (v) {
-                        setState(
-                          () => _filter = _LeaderboardFilter.individuals,
-                        );
-                      }
-                    },
-                  ),
-                ),
-                FilterChip(
-                  label: Text(l10n.marketInsightsLeaderboardMarketers),
-                  selected: _filter == _LeaderboardFilter.marketers,
-                  onSelected: (v) {
-                    if (v) {
-                      setState(() => _filter = _LeaderboardFilter.marketers);
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (filtered.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Text(
-                l10n.marketInsightsEmpty,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: cs.onSurfaceVariant,
-                ),
-              ),
-            )
-          else
-            ...filtered.map(
-              (e) => Card(
-                child: ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: cs.primaryContainer,
-                    child: Text(
-                      '${e.rank}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: cs.onPrimaryContainer,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    e.displayName,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle: Text(
-                    '${widget.accountLabel(e.accountType)} · ${widget.formatNum(e.listingCount)} ${l10n.marketInsightsListingsShort}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );

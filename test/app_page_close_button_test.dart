@@ -66,6 +66,48 @@ void main() {
     expect(find.byType(AppPageCloseButton), findsNothing);
   });
 
+  testWidgets('default close pops the current nested route, not its parent',
+      (tester) async {
+    final nestedKey = GlobalKey<NavigatorState>();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              const Text('Dashboard shell'),
+              Expanded(
+                child: Navigator(
+                  key: nestedKey,
+                  onGenerateRoute: (_) => MaterialPageRoute<void>(
+                    builder: (_) => const Scaffold(
+                      body: Text('Nested base'),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    nestedKey.currentState!.push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(
+          body: AppPageCloseButton(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(AppPageCloseButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dashboard shell'), findsOneWidget);
+    expect(find.text('Nested base'), findsOneWidget);
+    expect(find.byType(AppPageCloseButton), findsNothing);
+  });
+
   testWidgets('leadingOf is hidden on the shell and shown on an overlay',
       (tester) async {
     await tester.pumpWidget(

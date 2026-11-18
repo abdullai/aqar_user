@@ -118,7 +118,7 @@ class _NationalAddressPickerScreenState
     _requestGeneration++;
     _service.cancelPending();
     _searching = false;
-    _loadingAddress = false;
+    _loadingAddress = true;
     final generation = _requestGeneration;
     _reverseDebounce = Timer(const Duration(milliseconds: 800), () {
       unawaited(_reverseGeocode(_center, generation));
@@ -151,7 +151,9 @@ class _NationalAddressPickerScreenState
         latitude: point.latitude,
         longitude: point.longitude,
       );
-      if (!mounted || generation != _requestGeneration || results == null) {
+      if (!mounted || generation != _requestGeneration) return;
+      if (results == null) {
+        setState(() => _loadingAddress = false);
         return;
       }
       setState(() {
@@ -331,6 +333,10 @@ class _NationalAddressPickerScreenState
     _reverseDebounce?.cancel();
     _requestGeneration++;
     _service.cancelPending();
+    setState(() {
+      _loadingAddress = true;
+      _error = null;
+    });
     final generation = _requestGeneration;
     _reverseDebounce = Timer(const Duration(milliseconds: 800), () {
       unawaited(_reverseGeocode(point, generation));
@@ -445,9 +451,7 @@ class _NationalAddressPickerScreenState
                   : (widget.kingdomOverview ? 5.2 : 12),
               onMapReady: () {
                 if (mounted) setState(() => _mapReady = true);
-                if (widget.initialLatitude != null) {
-                  _scheduleReverseGeocode(_center);
-                }
+                _scheduleReverseGeocode(_center);
               },
               onPositionChanged: _onPositionChanged,
             ),
@@ -667,7 +671,12 @@ class _NationalAddressPickerScreenState
                         ],
                         const SizedBox(height: 12),
                         FilledButton.icon(
-                          onPressed: _mapReady ? _confirmSelection : null,
+                          onPressed: _mapReady &&
+                                  !_loadingAddress &&
+                                  !_searching &&
+                                  !_locating
+                              ? _confirmSelection
+                              : null,
                           icon: const Icon(Icons.check),
                           label: Text(
                               _isAr ? 'اعتماد العنوان' : 'Use this address'),

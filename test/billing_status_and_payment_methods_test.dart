@@ -4,6 +4,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:aqar_user/core/payment/payment_platform_detector.dart';
 import 'package:aqar_user/services/billing_transaction_repository.dart';
 import 'package:aqar_user/services/payment_service.dart';
+import 'package:aqar_user/services/subscription_admin_report_service.dart';
 import 'package:aqar_user/services/subscription_service.dart';
 
 void main() {
@@ -49,6 +50,26 @@ void main() {
       expect(
         BillingTransactionRepository.normalizedStatus({'status': 'cancelled'}),
         'failed',
+      );
+    });
+  });
+
+  group('SubscriptionAdminReportService.billingStatusLabel', () {
+    test('localizes billing statuses and preserves terminal status meaning',
+        () {
+      expect(
+        SubscriptionAdminReportService.billingStatusLabel(
+          {'status': 'completed'},
+          isAr: true,
+        ),
+        'مدفوعة',
+      );
+      expect(
+        SubscriptionAdminReportService.billingStatusLabel(
+          {'status': 'expired'},
+          isAr: true,
+        ),
+        'منتهية',
       );
     });
   });

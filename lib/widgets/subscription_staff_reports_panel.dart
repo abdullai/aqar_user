@@ -74,8 +74,20 @@ class _SubscriptionStaffReportsPanelState
       id: 'staff_billing',
       title: isAr ? 'مدفوعات المنصة' : 'Platform billing',
       columns: isAr
-          ? const ['المبلغ', 'الطريقة', 'الحالة', 'الغرض', 'أُكمل']
-          : const ['Amount', 'Method', 'Status', 'Purpose', 'Completed'],
+          ? const [
+              'المبلغ',
+              'الطريقة',
+              'الحالة',
+              'الغرض',
+              'تاريخ العملية',
+            ]
+          : const [
+              'Amount',
+              'Method',
+              'Status',
+              'Purpose',
+              'Transaction date',
+            ],
       rows: _billing
           .take(80)
           .map(
@@ -85,7 +97,10 @@ class _SubscriptionStaffReportsPanelState
                 '${r['payment_method'] ?? ''}',
                 isAr: isAr,
               ),
-              '${r['status'] ?? ''}',
+              SubscriptionAdminReportService.billingStatusLabel(
+                r,
+                isAr: isAr,
+              ),
               InvoiceCopy.purposeLabel(
                 InvoiceCopy.purposeFromRow(r),
                 isAr: isAr,
@@ -217,7 +232,9 @@ class _SubscriptionStaffReportsPanelState
                           label: Text(widget.isAr ? 'الحالة' : 'Status'),
                         ),
                         DataColumn(
-                          label: Text(widget.isAr ? 'التاريخ' : 'Completed'),
+                          label: Text(
+                            widget.isAr ? 'تاريخ العملية' : 'Transaction date',
+                          ),
                         ),
                       ],
                       rows: _billing.take(40).map((r) {
@@ -232,7 +249,15 @@ class _SubscriptionStaffReportsPanelState
                                 ),
                               ),
                             ),
-                            DataCell(Text('${r['status'] ?? ''}')),
+                            DataCell(
+                              Text(
+                                SubscriptionAdminReportService
+                                    .billingStatusLabel(
+                                  r,
+                                  isAr: widget.isAr,
+                                ),
+                              ),
+                            ),
                             DataCell(
                               Text(
                                 DateHelper.fmtCivilDateTimeRaw(

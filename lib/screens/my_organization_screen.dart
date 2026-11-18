@@ -23,7 +23,6 @@ import 'org_team_inventory_desk_page.dart';
 import '../widgets/team_membership_gate.dart';
 import '../widgets/team_invite_member_dialog.dart';
 import 'reports_dashboard_screen.dart';
-import 'subscriptions/subscription_org_desk_tab.dart';
 
 /// يطابق ترتيب التبويبات عند فتح الشاشة من الخارج (عداد AppBar).
 enum MyOrganizationTabKey {
@@ -36,7 +35,6 @@ enum MyOrganizationTabKey {
   teamAnalytics,
   reportsExport,
   memberActivity,
-  subscriptionDesk,
   orgSettings,
 }
 
@@ -244,24 +242,6 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
         OrgMemberActivityDeskPage(lang: widget.lang),
       );
     }
-    final accountTypeForSub =
-        AccountRoleCache.snapshot?.accountType ?? 'office';
-    if (oid != null &&
-        oid.isNotEmpty &&
-        (owner || ps.manageSubscription)) {
-      add(
-        MyOrganizationTabKey.subscriptionDesk,
-        Tab(
-          icon: const Icon(Icons.subscriptions_outlined),
-          text: l10n.subscriptionsOrgManageTab,
-        ),
-        SubscriptionOrgDeskTab(
-          lang: widget.lang,
-          accountType: accountTypeForSub,
-          organizationId: oid,
-        ),
-      );
-    }
     if (ps.showDeskTabOrganizationSettings) {
       add(
         MyOrganizationTabKey.orgSettings,
@@ -368,8 +348,7 @@ class _MyOrganizationScreenState extends State<MyOrganizationScreen>
               tooltip: l10n.inviteMembersTitle,
               icon: const Icon(Icons.person_add_alt_1_outlined),
               onPressed: () async {
-                final ok =
-                    await TeamMembershipGate.ensureCanOpenTeamInviteFlow(
+                final ok = await TeamMembershipGate.ensureCanOpenTeamInviteFlow(
                   context,
                   lang: widget.lang,
                   accountType: _accountType,
@@ -520,8 +499,10 @@ class _TeamDashboardBodyState extends State<_TeamDashboardBody> {
     board.sort((a, b) {
       final ua = '${a['user_id']}';
       final ub = '${b['user_id']}';
-      final sa = (_contrib[ua]?['properties'] ?? 0) + (_contrib[ua]?['ads'] ?? 0);
-      final sb = (_contrib[ub]?['properties'] ?? 0) + (_contrib[ub]?['ads'] ?? 0);
+      final sa =
+          (_contrib[ua]?['properties'] ?? 0) + (_contrib[ua]?['ads'] ?? 0);
+      final sb =
+          (_contrib[ub]?['properties'] ?? 0) + (_contrib[ub]?['ads'] ?? 0);
       return sb.compareTo(sa);
     });
 
@@ -581,10 +562,10 @@ class _TeamDashboardBodyState extends State<_TeamDashboardBody> {
                     ),
                   ),
                   titlesData: FlTitlesData(
-                    topTitles:
-                        const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles:
-                        const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
@@ -610,7 +591,7 @@ class _TeamDashboardBodyState extends State<_TeamDashboardBody> {
                             barGroups[i].key.substring(8),
                             style: TextStyle(
                               fontSize: 9,
-                              color:  cs.onSurfaceVariant,
+                              color: cs.onSurfaceVariant,
                             ),
                           );
                         },
@@ -658,7 +639,8 @@ class _TeamDashboardBodyState extends State<_TeamDashboardBody> {
               if (i == 0) {
                 medal = Icon(Icons.emoji_events, color: Colors.amber.shade700);
               } else if (i == 1) {
-                medal = Icon(Icons.emoji_events, color: Colors.blueGrey.shade400);
+                medal =
+                    Icon(Icons.emoji_events, color: Colors.blueGrey.shade400);
               } else if (i == 2) {
                 medal = Icon(Icons.emoji_events, color: Colors.brown.shade400);
               }
@@ -766,9 +748,8 @@ class _OrganizationRolesTabState extends State<_OrganizationRolesTab> {
   Widget build(BuildContext context) {
     final t = AppLocalizations.of(context)!;
     if (_loading) return const Center(child: AppLogoLoading());
-    final rows = _members
-        .where((m) => '${m['member_role']}' != 'owner')
-        .toList();
+    final rows =
+        _members.where((m) => '${m['member_role']}' != 'owner').toList();
     if (rows.isEmpty) {
       return Center(child: Text(t.orgRolesPickMember));
     }
@@ -782,8 +763,7 @@ class _OrganizationRolesTabState extends State<_OrganizationRolesTab> {
           itemBuilder: (_, i) {
             final m = rows[i];
             final uid = '${m['user_id'] ?? ''}';
-            final prof =
-                (m['profile'] as Map?)?.cast<String, dynamic>() ?? {};
+            final prof = (m['profile'] as Map?)?.cast<String, dynamic>() ?? {};
             final name = _isAr
                 ? '${prof['full_name_ar'] ?? prof['username'] ?? uid}'
                 : '${prof['full_name_en'] ?? prof['username'] ?? uid}';

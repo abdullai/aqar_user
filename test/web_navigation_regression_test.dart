@@ -24,7 +24,8 @@ void main() {
   });
 
   test('browser history pops are not resynced as programmatic closes', () {
-    final src = File('lib/core/navigation/web_in_app_nav.dart').readAsStringSync();
+    final src =
+        File('lib/core/navigation/web_in_app_nav.dart').readAsStringSync();
     final notePopStart = src.indexOf('static void notePop(');
     final historyCheck = src.indexOf('if (_fromHistory)', notePopStart);
     final programmaticCheck =
@@ -54,6 +55,56 @@ void main() {
     expect(src.contains('onSubmitted: (_) => _submitSearch()'), isTrue);
   });
 
+  test('map close cancels while confirming copies coordinates and address', () {
+    final picker = File('lib/screens/national_address_picker_screen.dart')
+        .readAsStringSync();
+    final confirmStart = picker.indexOf('void _confirmSelection()');
+    final confirmEnd = picker.indexOf('@override', confirmStart);
+    final confirm = picker.substring(confirmStart, confirmEnd);
+    final listing =
+        File('lib/screens/add_property_page.dart').readAsStringSync();
+    final applyStart = listing.indexOf('Future<void> _openMapPicker(');
+    final applyEnd =
+        listing.indexOf('Future<void> _fillLocationFromNearest()', applyStart);
+    final apply = listing.substring(applyStart, applyEnd);
+
+    expect(picker.contains('leading: const AppPageCloseButton()'), isTrue);
+    expect(picker.contains('_scheduleReverseGeocode(_center);'), isTrue);
+    expect(picker.contains('!_loadingAddress'), isTrue);
+    expect(picker.contains('!_searching'), isTrue);
+    expect(confirm.contains('Navigator.of(context).pop('), isTrue);
+    expect(confirm.contains('address.copyWith('), isTrue);
+    expect(confirm.contains('latitude: _center.latitude'), isTrue);
+    expect(confirm.contains('longitude: _center.longitude'), isTrue);
+    expect(apply.contains('if (!mounted || res == null) return;'), isTrue);
+    expect(apply.contains('_latCtrl.text = lat.toStringAsFixed(6)'), isTrue);
+    expect(apply.contains('_lngCtrl.text = lng.toStringAsFixed(6)'), isTrue);
+    expect(apply.contains('_nationalAddressCode.text = res.shortAddress!'),
+        isTrue);
+    expect(apply.contains('_addressLine.text = res.street!'), isTrue);
+    expect(apply.contains('_applyResolvedLocation('), isTrue);
+  });
+
+  test('settings and embedded payments close to their parent section', () {
+    final settings = File('lib/screens/settings_page.dart').readAsStringSync();
+    final settingsCloseStart = settings.indexOf('void _closeSettingsPage()');
+    final settingsCloseEnd =
+        settings.indexOf('Widget _webSettingsTabs', settingsCloseStart);
+    final settingsClose =
+        settings.substring(settingsCloseStart, settingsCloseEnd);
+    final desk =
+        File('lib/screens/owner_individual_desk_page.dart').readAsStringSync();
+
+    expect(
+        settingsClose
+            .contains('_useCompactSettingsHub && _mobileDetail != null'),
+        isTrue);
+    expect(settingsClose.contains('_mobileDetail = null'), isTrue);
+    expect(settings.contains('onPressed: _closeSettingsPage'), isTrue);
+    expect(desk.contains('_tab.animateTo(_previousTabIndex)'), isTrue);
+    expect(desk.contains('onClose: _closePaymentsTab'), isTrue);
+  });
+
   test('dashboard close only pops an open route, not a different tab', () {
     final src = File('lib/screens/user_dashboard.ui.dart').readAsStringSync();
     final popRouteStart = src.indexOf('bool _popDashboardBodyRoute()');
@@ -65,6 +116,21 @@ void main() {
     final closeHandler = src.substring(popRouteStart, backHandlerStart);
     expect(closeHandler.contains('bodyNav.pop()'), isTrue);
     expect(closeHandler.contains('_tabIndex = 0'), isFalse);
+  });
+
+  test('map discovery keeps its route beneath opened property details', () {
+    final src =
+        File('lib/screens/user_dashboard.actions.dart').readAsStringSync();
+
+    expect(src.contains('_dashboardBodyNavKey.currentState?.pop();'), isFalse);
+    expect(
+        src.contains(
+            'onOpenProperty: (p) {\n            unawaited(_openDetails(p));'),
+        isTrue);
+    expect(
+        src.contains(
+            'onOpenRequest: (r) {\n            _openMarketRequestDetail(r);'),
+        isTrue);
   });
 
   test('mobile viewport restoration does not freeze stale pixel heights', () {

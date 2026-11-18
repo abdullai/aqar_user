@@ -41,7 +41,6 @@ import '../widgets/equal_option_tile_grid.dart';
 import '../widgets/rent_term_schedule_fields.dart';
 import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../core/utils/date_helper.dart';
-import '../core/subscription/app_subscription_gate.dart';
 import '../core/subscription/subscription_gate_helper.dart';
 import '../services/instant_market_request_payment_service.dart';
 import '../services/saudi_locations_service.dart';
@@ -360,7 +359,6 @@ class _CreateMarketPropertyRequestPageState
           leaveTitleEn: 'Leave this request?',
         ),
       );
-      unawaited(_ensureSubscriptionForCreatePage());
     });
     if (_requestPriority == MarketPropertyRequestPriority.flexible ||
         _requestPriority == MarketPropertyRequestPriority.priority ||
@@ -585,19 +583,6 @@ class _CreateMarketPropertyRequestPageState
               : 'All entered data was cleared. Nothing was saved as a draft.'),
     );
     SafeOverlayPop.pop(context, 'closed');
-  }
-
-  Future<void> _ensureSubscriptionForCreatePage() async {
-    if (!mounted) return;
-    await SubscriptionGateHelper.ensure(
-      context,
-      isAr: _isAr,
-      action: SubscriptionGateAction.addMarketPropertyRequest,
-      onGoSubscribe: () {
-        if (!mounted) return;
-        Navigator.of(context).pop('subscribe');
-      },
-    );
   }
 
   Future<void> _loadAvailableInstantCredit() async {

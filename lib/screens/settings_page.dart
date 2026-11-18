@@ -4991,6 +4991,14 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  void _closeSettingsPage() {
+    if (_useCompactSettingsHub && _mobileDetail != null) {
+      setState(() => _mobileDetail = null);
+      return;
+    }
+    SafeOverlayPop.pop(context);
+  }
+
   Widget _webSettingsTabs(List<_SettingsSection> sections) {
     var initialIndex = 0;
     if (widget.focusPresenceDisplay) {
@@ -5066,11 +5074,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 canPop: inHubDetail ? false : (!kIsWeb && canNavPop),
                 onPopInvokedWithResult: (didPop, _) {
                   if (didPop) return;
-                  if (inHubDetail && mounted) {
-                    setState(() => _mobileDetail = null);
-                    return;
-                  }
-                  SafeOverlayPop.pop(context);
+                  _closeSettingsPage();
                 },
                 child: Scaffold(
                   appBar: !widget.embedAppBar
@@ -5111,7 +5115,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                           leading: AppPageCloseButton(
                             isArabic: _isAr,
-                            onPressed: () => SafeOverlayPop.pop(context),
+                            onPressed: _closeSettingsPage,
                           ),
                           automaticallyImplyLeading: false,
                         )

@@ -65,18 +65,13 @@ class AppSubscriptionGate extends ChangeNotifier {
   /// نشر «طلب عقاري» — قواعده مستقلة عن حصة إتمام الصفقة.
   bool get canAddMarketPropertyRequest {
     if (AppConfig.devBypassSubscriptionGate) return true;
-    if (isGuest) return false;
-    final a = listingRequestsAllowance;
-    if (a == null) return false;
-    return a.canCreateNow;
+    return !isGuest;
   }
 
-  /// إضافة إعلان عقاري — مجاني للمالك/المستخدم العادي.
+  /// إضافة إعلان عقاري — متاحة لكل حساب مسجل دون اشتراك.
   bool get canAddPropertyListing {
     if (AppConfig.devBypassSubscriptionGate) return true;
-    if (isGuest) return false;
-    if (!isMarketingAccount) return true;
-    return marketingFeatureAccess;
+    return !isGuest;
   }
 
   /// مسار التسويق (عروض، تعاقد، تصاريح، سوق…).
@@ -91,9 +86,9 @@ class AppSubscriptionGate extends ChangeNotifier {
       case SubscriptionGateAction.completeMarketDeal:
         return 'يلزم اشتراك لإتمام الصفقة';
       case SubscriptionGateAction.addMarketPropertyRequest:
-        return 'يلزم اشتراك لنشر طلب عقاري';
+        return 'يلزم تسجيل الدخول لنشر طلب عقاري';
       case SubscriptionGateAction.addPropertyListing:
-        return 'يلزم اشتراك لإضافة إعلان';
+        return 'يلزم تسجيل الدخول لإضافة إعلان';
       case SubscriptionGateAction.marketingPaidWorkflow:
         return 'يلزم اشتراك تسويق';
     }
@@ -104,9 +99,9 @@ class AppSubscriptionGate extends ChangeNotifier {
       case SubscriptionGateAction.completeMarketDeal:
         return 'Subscription required to complete deal';
       case SubscriptionGateAction.addMarketPropertyRequest:
-        return 'Subscription required to post request';
+        return 'Sign in required to post a property request';
       case SubscriptionGateAction.addPropertyListing:
-        return 'Subscription required to add listing';
+        return 'Sign in required to add a property listing';
       case SubscriptionGateAction.marketingPaidWorkflow:
         return 'Marketing subscription required';
     }
@@ -118,15 +113,9 @@ class AppSubscriptionGate extends ChangeNotifier {
         return marketOfferAllowance?.shortStatusAr() ??
             'يلزم اشتراك مناسب لإتمام الصفقة.';
       case SubscriptionGateAction.addMarketPropertyRequest:
-        return isMarketingAccount
-            ? (listingRequestsAllowance?.shortStatusAr() ??
-                'اشترك في الباقة المناسبة لنشر طلباتك في الرئيسية.')
-            : 'نشر الطلب العقاري في الرئيسية يتطلب اشتراكاً فعالاً. إضافة الإعلان تبقى مجانية.';
+        return 'سجّل الدخول للمتابعة. نشر الطلب العادي متاح دون اشتراك، والطلب الفوري يتطلب رصيداً مخصصاً.';
       case SubscriptionGateAction.addPropertyListing:
-        if (isMarketingAccount) {
-          return 'اشترك في الباقة المناسبة لنوع حسابك (أساسية/احترافية/تميز) لنشر الإعلانات.';
-        }
-        return 'إضافة الإعلان العقاري مجانية — يُرسل للمسوقين في «صفحتي».';
+        return 'سجّل الدخول للمتابعة. إضافة الإعلان متاحة لكل أنواع الحسابات دون اشتراك.';
       case SubscriptionGateAction.marketingPaidWorkflow:
         return 'هذا الإجراء يتطلب اشتراكاً تسويقياً فعّالاً.';
     }
@@ -138,15 +127,9 @@ class AppSubscriptionGate extends ChangeNotifier {
         return marketOfferAllowance?.shortStatusEn() ??
             'A suitable subscription is required to complete deals.';
       case SubscriptionGateAction.addMarketPropertyRequest:
-        return isMarketingAccount
-            ? (listingRequestsAllowance?.shortStatusEn() ??
-                'Subscribe to post property requests on the home feed.')
-            : 'Posting a property request on the home feed requires an active subscription. Adding a listing remains free.';
+        return 'Sign in to continue. Standard requests are free; instant requests require a dedicated credit.';
       case SubscriptionGateAction.addPropertyListing:
-        if (isMarketingAccount) {
-          return 'Subscribe to the plan for your account type to publish listings.';
-        }
-        return 'Adding a property listing is free — it is sent to marketers in My page.';
+        return 'Sign in to continue. Property listings are available to every account type without a subscription.';
       case SubscriptionGateAction.marketingPaidWorkflow:
         return 'This action requires an active marketing subscription.';
     }

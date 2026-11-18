@@ -51,15 +51,31 @@ class OwnerIndividualDeskPage extends StatefulWidget {
 class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
     with SingleTickerProviderStateMixin {
   late final TabController _tab;
+  var _activeTabIndex = 0;
+  var _previousTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _tab = TabController(length: 3, vsync: this);
+    _tab.addListener(_rememberPreviousTab);
+  }
+
+  void _rememberPreviousTab() {
+    final nextIndex = _tab.index;
+    if (nextIndex == _activeTabIndex) return;
+    _previousTabIndex = _activeTabIndex;
+    _activeTabIndex = nextIndex;
+  }
+
+  void _closePaymentsTab() {
+    if (!mounted) return;
+    _tab.animateTo(_previousTabIndex);
   }
 
   @override
   void dispose() {
+    _tab.removeListener(_rememberPreviousTab);
     _tab.dispose();
     super.dispose();
   }
@@ -101,6 +117,7 @@ class _OwnerIndividualDeskPageState extends State<OwnerIndividualDeskPage>
             ? 'owner_individual'
             : widget.accountType!,
         embedAppBar: true,
+        onClose: _closePaymentsTab,
       ),
     ];
 

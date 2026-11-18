@@ -3,15 +3,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/input/saudi_input_formatters.dart';
 import '../core/listing/marketing_add_property_flow_config.dart';
-import '../core/subscription/app_subscription_gate.dart';
-import '../core/subscription/subscription_gate_helper.dart';
 import '../core/utils/users_profiles_safe_select.dart';
 import '../services/fal_license_service.dart';
 import '../widgets/aqar_text_field.dart';
 import '../widgets/app_logo_loading.dart';
 import '../widgets/app_page_close_button.dart';
 import 'add_property_page.dart';
-import 'subscriptions/subscriptions_root_screen.dart';
 
 /// بوابة «هل لديك ترخيص إعلان؟» قبل معالج إضافة الإعلان للمسوّقين والمنشآت.
 class MarketingListingEntryPage extends StatefulWidget {
@@ -187,29 +184,6 @@ class _MarketingListingEntryPageState extends State<MarketingListingEntryPage> {
       return;
     }
 
-    if (!mounted) return;
-    if (!await SubscriptionGateHelper.ensure(
-      context,
-      isAr: _isAr,
-      action: SubscriptionGateAction.addPropertyListing,
-      onGoSubscribe: () async {
-        if (!mounted) return;
-        await Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(
-            builder: (_) => SubscriptionsRootScreen(
-              lang: widget.lang,
-              accountType: widget.accountType,
-              embedAppBar: false,
-            ),
-          ),
-        );
-        if (mounted) {
-          await SubscriptionGateHelper.refresh(context, force: true);
-        }
-      },
-    )) {
-      return;
-    }
     if (!mounted) return;
 
     if (_hasLicense == true) {

@@ -15,6 +15,7 @@ import '../core/branding/branding_pdf.dart';
 import '../core/payment/invoice_copy.dart';
 import '../core/pdf/pdf_readable_qr.dart';
 import '../widgets/pdf_print_preview_overlay.dart';
+import '../widgets/saudi_riyal_symbol_icon.dart';
 import '../core/utils/app_money.dart';
 import '../core/utils/date_helper.dart';
 import 'billing_transaction_repository.dart';
@@ -41,6 +42,25 @@ class ReportService {
   ReportService(this._client);
 
   final SupabaseClient _client;
+
+  String _joinRequestStatusLabel(String raw, {required bool isAr}) {
+    switch (raw.trim().toLowerCase()) {
+      case 'pending':
+      case 'processing':
+        return isAr ? 'قيد الانتظار' : 'Pending';
+      case 'approved':
+      case 'accepted':
+        return isAr ? 'مقبول' : 'Approved';
+      case 'rejected':
+      case 'denied':
+        return isAr ? 'مرفوض' : 'Rejected';
+      case 'cancelled':
+      case 'canceled':
+        return isAr ? 'ملغي' : 'Cancelled';
+      default:
+        return isAr ? 'غير معروف' : raw.trim();
+    }
+  }
 
   /// تقارير من بيانات الحساب الحقيقية (منشأة + فوترة + جلسات).
   Future<List<ReportConfig>> loadLiveReports({bool isAr = false}) async {
@@ -117,7 +137,8 @@ class ReportService {
     for (final r in joins) {
       var st = '${r['status'] ?? ''}'.trim();
       if (st.isEmpty) st = 'pending';
-      joinByStatus[st] = (joinByStatus[st] ?? 0) + 1;
+      final label = _joinRequestStatusLabel(st, isAr: isAr);
+      joinByStatus[label] = (joinByStatus[label] ?? 0) + 1;
     }
     final joinRows =
         joinByStatus.entries.map((e) => [e.key, '${e.value}']).toList();
@@ -131,12 +152,13 @@ class ReportService {
       final dt = DateTime.tryParse('${r['completed_at'] ?? r['created_at']}');
       return [
         '${r['invoice_number'] ?? ''}'.trim(),
-        dt == null
-            ? ''
-            : DateHelper.fmtCivilDateTime(dt.toLocal(), isAr: false),
+        dt == null ? '' : InvoiceCopy.latinDateTime(dt),
         AppBranding.billingTitleFromRow(r, isAr: isAr),
-        AppMoney.formatForExport(v, isAr: isAr, maxFractionDigits: 2),
-        BillingTransactionRepository.normalizedStatus(r),
+        AppMoney.formatForPdf(v, isAr: isAr, maxFractionDigits: 2),
+        BillingTransactionRepository.localizedStatusLabel(
+          r,
+          isAr: isAr,
+        ),
         InvoiceCopy.methodLabel('${r['payment_method'] ?? ''}', isAr: isAr),
       ];
     }).toList();
@@ -154,11 +176,9 @@ class ReportService {
       }
     } catch (_) {}
     final sessionRows = sessions.map((s) {
-      final login = DateHelper.fmtCivilDateTimeRaw(
-        s['login_at'],
-        isAr: isAr,
-        fallback: '—',
-      );
+      final loginDate = DateHelper.tryParse(s['login_at']);
+      final login =
+          loginDate == null ? '—' : InvoiceCopy.latinDateTime(loginDate);
       final device = '${s['device_info'] ?? s['os_info'] ?? ''}'.trim();
       final loc = '${s['location'] ?? ''}'.trim();
       final active = s['is_active'] == true
@@ -207,10 +227,17 @@ class ReportService {
         id: 'payments',
         title: isAr ? 'المدفوعات والاشتراكات' : 'Payments & subscriptions',
         columns: isAr
-            ? const ['رقم', 'التاريخ', 'البيان', 'المبلغ', 'الحالة', 'الطريقة']
+            ? const [
+                'رقم',
+                'تاريخ العملية',
+                'البيان',
+                'المبلغ',
+                'الحالة',
+                'الطريقة',
+              ]
             : const [
                 'Ref',
-                'Date',
+                'Transaction date',
                 'Description',
                 'Amount',
                 'Status',
@@ -272,7 +299,24 @@ class ReportService {
     bool isAr = false,
   }) async {
     final wm = _exporterWatermarkLabel();
-    final now = DateHelper.fmtCivilDateTime(DateTime.now(), isAr: isAr);
+    final now = InvoiceCopy.latinDateTime(DateTime.now());
+    final title = InvoiceCopy.stripBidi(cfg.title);
+    final filters = InvoiceCopy.stripBidi(cfg.filtersDescription.trim());
+    final pdfColumns = cfg.columns.map(InvoiceCopy.stripBidi).toList();
+    final pdfRows =
+        cfg.rows.map((row) => row.map(InvoiceCopy.stripBidi).toList()).toList();
+    final hasArabicRiyalMarker = isAr &&
+        pdfRows.any(
+          (row) => row.any(
+            (cell) =>
+                cell.contains(AppMoney.saudiRiyalSignCompat) ||
+                cell.contains(AppMoney.saudiRiyalSignUnicode),
+          ),
+        );
+    final riyalSvg = hasArabicRiyalMarker
+        ? (await rootBundle.loadString(SaudiRiyalSymbolIcon.assetPath))
+            .replaceAll('currentColor', '#000000')
+        : null;
     pw.Font baseFont = pw.Font.helvetica();
     pw.Font fontBold = pw.Font.helveticaBold();
     try {
@@ -285,9 +329,8 @@ class ReportService {
         theme: pw.ThemeData.withFont(base: baseFont, bold: fontBold));
     final logo = await loadBrandingPdfLogo();
     final brandColor = tableHeaderColor ?? kDocumentBrandPdfColor;
-    final filtersMeta = cfg.filtersDescription.trim().isNotEmpty
-        ? _pdfFiltersLabel(isAr, cfg.filtersDescription)
-        : null;
+    final filtersMeta =
+        filters.isNotEmpty ? _pdfFiltersLabel(isAr, filters) : null;
     doc.addPage(
       pw.MultiPage(
         pageTheme: pw.PageTheme(
@@ -300,14 +343,14 @@ class ReportService {
             bold: fontBold,
             logo: logo,
             isAr: isAr,
-            docTitle: cfg.title,
+            docTitle: title,
             brandColor: brandColor,
             metaLine: _pdfGeneratedLabel(isAr, now),
             subtitle: filtersMeta,
           ),
           pw.TableHelper.fromTextArray(
-            headers: cfg.columns,
-            data: cfg.rows,
+            headers: pdfColumns,
+            data: pdfRows,
             headerStyle: pw.TextStyle(
               font: fontBold,
               fontSize: 10,
@@ -319,8 +362,36 @@ class ReportService {
             cellStyle: pw.TextStyle(font: baseFont, fontSize: 9),
             cellHeight: 22,
             cellAlignments: {
-              for (var i = 0; i < cfg.columns.length; i++)
-                i: isAr ? pw.Alignment.centerRight : pw.Alignment.centerLeft,
+              for (var i = 0; i < pdfColumns.length; i++)
+                i: pw.Alignment.center,
+            },
+            headerAlignments: {
+              for (var i = 0; i < pdfColumns.length; i++)
+                i: pw.Alignment.center,
+            },
+            headerDirection: isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
+            tableDirection: isAr ? pw.TextDirection.rtl : pw.TextDirection.ltr,
+            cellBuilder: (rowIndex, data, columnIndex) {
+              final cell = data.toString();
+              if (riyalSvg == null ||
+                  (!cell.contains(AppMoney.saudiRiyalSignCompat) &&
+                      !cell.contains(AppMoney.saudiRiyalSignUnicode))) {
+                return null;
+              }
+              return pw.Directionality(
+                textDirection: pw.TextDirection.ltr,
+                child: pw.Row(
+                  mainAxisSize: pw.MainAxisSize.min,
+                  children: [
+                    pw.Text(
+                      AppMoney.stripSarMarks(cell).trim(),
+                      style: pw.TextStyle(font: baseFont, fontSize: 9),
+                    ),
+                    pw.SizedBox(width: 3),
+                    pw.SvgImage(svg: riyalSvg, width: 10, height: 8),
+                  ],
+                ),
+              );
             },
             oddRowDecoration: pw.BoxDecoration(
               color: tableRowAltColor ?? PdfColors.grey200,
@@ -331,8 +402,8 @@ class ReportService {
             child: pdfReadableQrBlock(
               data: documentQrPlainText(
                 isAr: isAr,
-                kind: cfg.title,
-                description: cfg.filtersDescription,
+                kind: title,
+                description: filters,
                 paidAt: now,
                 rowCount: cfg.rows.length,
               ),

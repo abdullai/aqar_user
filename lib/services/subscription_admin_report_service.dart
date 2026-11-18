@@ -8,6 +8,7 @@ import '../core/branding/branding_pdf.dart';
 import '../core/utils/date_helper.dart';
 import '../core/payment/invoice_copy.dart';
 import '../core/utils/app_money.dart';
+import 'billing_transaction_repository.dart';
 
 /// تقارير اشتراكات ومدفوعات لموظفي المنصة (RLS: `*_staff_read`).
 class SubscriptionAdminReportService {
@@ -63,15 +64,21 @@ class SubscriptionAdminReportService {
     }
   }
 
-  String _fmt(dynamic v) {
+  String _fmt(dynamic v, {required bool isAr}) {
     if (v == null) return '';
     final s = v.toString();
     final d = DateTime.tryParse(s);
     if (d != null) {
-      return DateHelper.fmtCivilDateTime(d.toLocal(), isAr: false);
+      return DateHelper.fmtCivilDateTime(d.toLocal(), isAr: isAr);
     }
     return s;
   }
+
+  static String billingStatusLabel(
+    Map<String, dynamic> row, {
+    required bool isAr,
+  }) =>
+      BillingTransactionRepository.localizedStatusLabel(row, isAr: isAr);
 
   double _amount(Map<String, dynamic> r) {
     final raw = r['amount'];
@@ -102,7 +109,7 @@ class SubscriptionAdminReportService {
             'الغرض',
             'معرف البوابة',
             'اشتراك',
-            'أُكمل في',
+            'تاريخ العملية',
           ]
         : [
             'id',
@@ -114,7 +121,7 @@ class SubscriptionAdminReportService {
             'purpose',
             'gateway_transaction_id',
             'subscription_id',
-            'completed_at',
+            'transaction_date',
           ];
     sheet.appendRow(headers.map(TextCellValue.new).toList());
     for (final r in rows) {
@@ -132,11 +139,18 @@ class SubscriptionAdminReportService {
         TextCellValue(
           InvoiceCopy.methodLabel('${r['payment_method'] ?? ''}', isAr: isAr),
         ),
-        TextCellValue('${r['status'] ?? ''}'),
-        TextCellValue(InvoiceCopy.purposeFromRow(r)),
+        TextCellValue(billingStatusLabel(r, isAr: isAr)),
+        TextCellValue(
+          InvoiceCopy.purposeLabel(
+            InvoiceCopy.purposeFromRow(r),
+            isAr: isAr,
+          ),
+        ),
         TextCellValue('${r['gateway_transaction_id'] ?? ''}'),
         TextCellValue('${r['subscription_id'] ?? ''}'),
-        TextCellValue(_fmt(r['completed_at'] ?? r['created_at'])),
+        TextCellValue(
+          _fmt(r['completed_at'] ?? r['created_at'], isAr: isAr),
+        ),
       ]);
     }
     final bytes = Uint8List.fromList(excel.encode()!);
@@ -178,7 +192,7 @@ class SubscriptionAdminReportService {
         TextCellValue('${r['subscription_id'] ?? ''}'),
         TextCellValue('${r['event_type'] ?? ''}'),
         TextCellValue('${r['payload'] ?? ''}'),
-        TextCellValue(_fmt(r['created_at'])),
+        TextCellValue(_fmt(r['created_at'], isAr: isAr)),
       ]);
     }
     final bytes = Uint8List.fromList(excel.encode()!);

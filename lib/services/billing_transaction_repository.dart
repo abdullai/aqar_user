@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/payment/invoice_copy.dart';
+
 /// مستودع معاملات الفواتير — استعلامات، أرشفة، وتطبيع الحالة.
 /// Billing transaction repository — queries, archive, status normalization.
 class BillingTransactionRepository {
@@ -66,6 +68,22 @@ class BillingTransactionRepository {
       return 'pending';
     }
     return raw.isEmpty ? 'pending' : raw;
+  }
+
+  static String localizedStatusLabel(
+    Map<String, dynamic> row, {
+    required bool isAr,
+  }) {
+    final raw = '${row['status'] ?? ''}'.trim().toLowerCase();
+    const distinctStatuses = {
+      'authorized',
+      'canceled',
+      'cancelled',
+      'expired',
+      'voided',
+    };
+    final status = distinctStatuses.contains(raw) ? raw : normalizedStatus(row);
+    return InvoiceCopy.statusLabel(status, isAr: isAr);
   }
 
   static bool isArchived(Map<String, dynamic> row) {
