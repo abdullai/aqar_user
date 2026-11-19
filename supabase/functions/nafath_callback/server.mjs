@@ -40,6 +40,20 @@ function httpsUrl(value, name, allowedHostSuffix) {
   return url;
 }
 
+function missingConfigFields(env) {
+  return [
+    "NAFATH_SERVICE_PROVIDER_IP",
+    "NAFATH_GATEWAY_SECRET",
+    "NAFATH_BASE_URL",
+    "NAFATH_APP_ID",
+    "NAFATH_APP_KEY",
+    "NAFATH_AUDIENCE",
+    "NAFATH_ISSUER",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ].filter((name) => !env[name]?.trim());
+}
+
 function readConfig(env) {
   const serviceProviderIp = requiredEnv(env, "NAFATH_SERVICE_PROVIDER_IP");
   if (!isIP(serviceProviderIp)) {
@@ -445,6 +459,7 @@ export function createNafathCallbackHandler({ env = process.env, fetchImpl = fet
           ok: false,
           error: "configuration_invalid",
           reason: error instanceof Error ? error.message : "configuration_invalid",
+          configuration: missingConfigFields(safeEnv),
         });
       }
     }

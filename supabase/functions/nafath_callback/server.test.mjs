@@ -148,6 +148,17 @@ test("health reports configuration failures without exposing credentials", async
   assert.equal(res.body.ok, false);
   assert.equal(res.body.error, "configuration_invalid");
   assert.match(res.body.reason, /NAFATH_SERVICE_PROVIDER_IP/);
+  assert.deepEqual(res.body.configuration, [
+    "NAFATH_SERVICE_PROVIDER_IP",
+    "NAFATH_GATEWAY_SECRET",
+    "NAFATH_BASE_URL",
+    "NAFATH_APP_ID",
+    "NAFATH_APP_KEY",
+    "NAFATH_AUDIENCE",
+    "NAFATH_ISSUER",
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ]);
   assert.equal(JSON.stringify(res.body).includes("SUPABASE_SERVICE_ROLE_KEY="), false);
 });
 
