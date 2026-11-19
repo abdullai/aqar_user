@@ -128,6 +128,29 @@ function createHarness({
   };
 }
 
+test("health reports configuration failures without exposing credentials", async () => {
+  const handler = createNafathCallbackHandler({ env: {} });
+  const res = {
+    headersSent: false,
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(value) {
+      this.body = JSON.parse(value);
+    },
+  };
+  await handler({
+    method: "GET",
+    url: "/healthz",
+    headers: {},
+  }, res);
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.error, "configuration_invalid");
+  assert.match(res.body.reason, /NAFATH_SERVICE_PROVIDER_IP/);
+  assert.equal(JSON.stringify(res.body).includes("SUPABASE_SERVICE_ROLE_KEY="), false);
+});
+
 test("authenticated Saudi gateway starts Nafath with the provider-required IP header", async () => {
   const h = createHarness();
   const result = await h.invoke({

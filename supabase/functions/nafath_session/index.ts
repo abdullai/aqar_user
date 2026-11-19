@@ -51,7 +51,8 @@ function configuration() {
   const supabaseUrl = clean(Deno.env.get("SUPABASE_URL"));
   const serviceRole = clean(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
   const anonKey = clean(Deno.env.get("SUPABASE_ANON_KEY"));
-  const gatewayUrl = clean(Deno.env.get("NAFATH_GATEWAY_URL"));
+  const gatewayUrl = clean(Deno.env.get("NAFATH_GATEWAY_URL")) ||
+    "https://nafath-callback.onrender.com";
   const gatewaySecret = clean(Deno.env.get("NAFATH_GATEWAY_SECRET"));
   if (!supabaseUrl || !serviceRole || !anonKey || !gatewayUrl ||
     gatewaySecret.length < 32) return null;
@@ -68,13 +69,42 @@ function configuration() {
   }
 }
 
-function notConfigured(action: string) {
+function configurationIssues() {
+  const required = [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_ANON_KEY",
+    "NAFATH_GATEWAY_SECRET",
+  ];
+  const issues = required.filter((name) => !clean(Deno.env.get(name)));
+  const secret = clean(Deno.env.get("NAFATH_GATEWAY_SECRET"));
+  if (secret && secret.length < 32) issues.push("NAFATH_GATEWAY_SECRET_TOO_SHORT");
+
+  for (const [name, value] of [
+    ["SUPABASE_URL", clean(Deno.env.get("SUPABASE_URL"))],
+    [
+      "NAFATH_GATEWAY_URL",
+      clean(Deno.env.get("NAFATH_GATEWAY_URL")) ||
+      "https://nafath-callback.onrender.com",
+    ],
+  ]) {
+    try {
+      if (new URL(value).protocol !== "https:") issues.push(`${name}_INVALID`);
+    } catch {
+      issues.push(`${name}_INVALID`);
+    }
+  }
+  return issues;
+}
+
+function notConfigured(action: string, configuration: string[]) {
   return json({
     mode: "not_configured",
     error: "nafath_not_configured",
     message_ar: "خدمة نفاذ غير مهيأة بالكامل على الخادم.",
     message_en: "Nafath is not fully configured on the server.",
     action,
+    configuration,
   }, 503);
 }
 
@@ -523,7 +553,7 @@ serve(async (req) => {
     }
 
     const config = configuration();
-    if (!config) return notConfigured("request");
+    if (!config) return notConfigured("request", configurationIssues());
 
     let body: JsonMap;
     try {

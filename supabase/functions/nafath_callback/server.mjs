@@ -440,8 +440,12 @@ export function createNafathCallbackHandler({ env = process.env, fetchImpl = fet
       try {
         getConfig();
         return json(res, 200, { ok: true });
-      } catch {
-        return json(res, 503, { ok: false });
+      } catch (error) {
+        return json(res, 503, {
+          ok: false,
+          error: "configuration_invalid",
+          reason: error instanceof Error ? error.message : "configuration_invalid",
+        });
       }
     }
     if (

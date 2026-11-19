@@ -16,6 +16,7 @@ function createHarness({
   failSave = false,
   ageMs = 0,
   profileRows = [{ user_id: userId }],
+  missingSecrets = [],
 } = {}) {
   const projectUrl = "https://project.example.test";
   const gatewayUrl = "https://nafath-gateway.example.test";
@@ -26,6 +27,7 @@ function createHarness({
     NAFATH_GATEWAY_URL: gatewayUrl,
     NAFATH_GATEWAY_SECRET: "test-gateway-secret-123456789012345678901234",
   };
+  for (const name of missingSecrets) delete values[name];
   const calls = [];
   let handler;
   let row;
@@ -127,6 +129,17 @@ function createHarness({
     },
   };
 }
+
+test("missing Nafath gateway configuration reports safe field names", async () => {
+  const h = createHarness({
+    missingSecrets: ["NAFATH_GATEWAY_URL", "NAFATH_GATEWAY_SECRET"],
+  });
+  const result = await h.invoke({ action: "start", national_id: "1234567890" });
+  assert.equal(result.status, 503);
+  assert.equal(result.data.mode, "not_configured");
+  assert.deepEqual(result.data.configuration, ["NAFATH_GATEWAY_SECRET"]);
+  assert.equal(h.calls.length, 0);
+});
 
 test("start relays the request through the Saudi gateway and persists it", async () => {
   const h = createHarness();
