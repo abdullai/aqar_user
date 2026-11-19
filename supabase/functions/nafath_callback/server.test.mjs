@@ -32,6 +32,7 @@ function createHarness({
   status = "WAITING",
   callbackToken = token(),
   nafathStartStatus = 200,
+  fetchError,
 } = {}) {
   const calls = [];
   let currentStatus = status;
@@ -47,6 +48,7 @@ function createHarness({
     SUPABASE_SERVICE_ROLE_KEY: "test-service-role",
   };
   const fetchImpl = async (input, init = {}) => {
+    if (fetchError) throw fetchError;
     const url = new URL(input);
     calls.push({ url, init });
     if (url.pathname.endsWith("/api/v1/mfa/jwk")) {
@@ -128,6 +130,13 @@ function createHarness({
   };
 }
 
+test("handler creation accepts missing, null, and empty options", async () => {
+  for (const options of [undefined, null, {}, { env: undefined }, { env: null }]) {
+    const handler = createNafathCallbackHandler(options);
+    assert.equal(typeof handler, "function");
+  }
+});
+
 test("health reports configuration failures without exposing credentials", async () => {
   const handler = createNafathCallbackHandler({ env: {} });
   const res = {
@@ -160,6 +169,49 @@ test("health reports configuration failures without exposing credentials", async
     "SUPABASE_SERVICE_ROLE_KEY",
   ]);
   assert.equal(JSON.stringify(res.body).includes("SUPABASE_SERVICE_ROLE_KEY="), false);
+});
+
+test("all supported routes handle requests without TypeErrors", async () => {
+  const h = createHarness();
+  for (const path of ["/nafath/start", "/nafath/status"]) {
+    const result = await h.invoke({}, {
+      path,
+      authorization: `Bearer ${h.env.NAFATH_GATEWAY_SECRET}`,
+    });
+    assert.equal(result.status, 400);
+  }
+  const callback = await h.invoke({});
+  assert.equal(callback.status, 400);
+
+  const healthHandler = createNafathCallbackHandler({ env: h.env });
+  const response = {
+    writeHead(statusCode) {
+      this.statusCode = statusCode;
+    },
+    end(value) {
+      this.body = JSON.parse(value);
+    },
+  };
+  await healthHandler({ method: "GET", url: "/healthz", headers: {} }, response);
+  assert.equal(response.statusCode, 200);
+});
+
+test("upstream timeouts return a clear gateway timeout response", async () => {
+  const timeout = new Error("request timed out");
+  timeout.name = "TimeoutError";
+  const h = createHarness({ fetchError: timeout });
+  const result = await h.invoke({
+    requestId,
+    clientIp: "203.0.113.25",
+    nationalId: "1234567890",
+    service: "Login",
+    locale: "ar",
+  }, {
+    path: "/nafath/start",
+    authorization: `Bearer ${h.env.NAFATH_GATEWAY_SECRET}`,
+  });
+  assert.equal(result.status, 504);
+  assert.deepEqual(result.body, { error: "nafath_gateway_timeout" });
 });
 
 test("authenticated Saudi gateway starts Nafath with the provider-required IP header", async () => {

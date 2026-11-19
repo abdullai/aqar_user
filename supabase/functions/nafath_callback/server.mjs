@@ -182,11 +182,22 @@ async function readBody(req) {
 }
 
 async function fetchJson(fetchImpl, url, init) {
-  const response = await fetchImpl(url, {
-    ...init,
-    redirect: "error",
-    signal: AbortSignal.timeout(10_000),
-  });
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      ...init,
+      redirect: "error",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    const errorName = error && typeof error === "object"
+      ? error.name
+      : "";
+    if (errorName === "TimeoutError" || errorName === "AbortError") {
+      throw new Error("upstream_timeout");
+    }
+    throw error;
+  }
   const text = await response.text();
   if (!response.ok) {
     const errorCode = (() => {
@@ -209,8 +220,21 @@ async function fetchJson(fetchImpl, url, init) {
   }
 }
 
-export function createNafathCallbackHandler({ env = process.env, fetchImpl = fetch, now = () => Date.now() } = {}) {
-  const safeEnv = env ?? process.env;
+export function createNafathCallbackHandler(options) {
+  const safeOptions = options !== null &&
+      typeof options === "object"
+    ? options
+    : {};
+  const safeEnv = safeOptions.env !== null &&
+      typeof safeOptions.env === "object"
+    ? safeOptions.env
+    : process.env;
+  const fetchImpl = typeof safeOptions.fetchImpl === "function"
+    ? safeOptions.fetchImpl
+    : fetch;
+  const now = typeof safeOptions.now === "function"
+    ? safeOptions.now
+    : () => Date.now();
   let config;
   let jwksCache;
   let jwksCacheUntil = 0;
@@ -493,6 +517,10 @@ export function createNafathCallbackHandler({ env = process.env, fetchImpl = fet
             error_code: "400-034-050",
           });
         }
+        if (code === "upstream_timeout") {
+          console.error("Nafath gateway upstream timed out");
+          return json(res, 504, { error: "nafath_gateway_timeout" });
+        }
         console.error("Nafath gateway request failed:", code);
         return json(res, 502, { error: "nafath_gateway_unavailable" });
       }
@@ -515,6 +543,10 @@ export function createNafathCallbackHandler({ env = process.env, fetchImpl = fet
       }
       if (error instanceof SyntaxError) {
         return json(res, 400, { error: "invalid_json" });
+      }
+      if (code === "upstream_timeout") {
+        console.error("Nafath callback upstream timed out");
+        return json(res, 504, { error: "callback_timeout" });
       }
       console.error("Nafath callback processing failed:", code);
       return json(res, 503, { error: "callback_unavailable" });
