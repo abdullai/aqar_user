@@ -189,16 +189,13 @@ async function fetchJson(fetchImpl, url, init) {
   }
 }
 
-export function createNafathCallbackHandler({
-  env = process.env,
-  fetchImpl = fetch,
-  now = () => Date.now(),
-}) {
+export function createNafathCallbackHandler({ env = process.env, fetchImpl = fetch, now = () => Date.now() } = {}) {
+  const safeEnv = env ?? process.env;
   let config;
   let jwksCache;
   let jwksCacheUntil = 0;
 
-  const getConfig = () => config ??= readConfig(env);
+  const getConfig = () => config ??= readConfig(safeEnv);
 
   async function getJwks(clientIp, forceRefresh = false) {
     const currentConfig = getConfig();
@@ -507,7 +504,15 @@ if (
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("PORT must be a valid TCP port");
   }
-  const server = createServer(createNafathCallbackHandler());
+  const nafathHandler = createNafathCallbackHandler({ env: process.env });
+  const server = createServer((req, res) => {
+    void nafathHandler(req, res).catch((err) => {
+      console.error("Unhandled HTTP request error:", err);
+      if (!res.headersSent) {
+        json(res, 500, { error: "internal_server_error" });
+      }
+    });
+  });
   server.listen(port, "0.0.0.0", () => {
     console.log(`Nafath callback server listening on port ${port}`);
   });
