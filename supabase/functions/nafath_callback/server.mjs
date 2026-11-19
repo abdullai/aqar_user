@@ -15,6 +15,11 @@ const TRANS_ID_PATTERN =
   /^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$/i;
 const FINAL_STATUSES = new Set(["COMPLETED", "REJECTED"]);
 
+function envValue(env, name) {
+  const value = env?.[name];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function json(res, status, body) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -24,7 +29,7 @@ function json(res, status, body) {
 }
 
 function requiredEnv(env, name) {
-  const value = env[name]?.trim();
+  const value = envValue(env, name);
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
 }
@@ -51,7 +56,7 @@ function missingConfigFields(env) {
     "NAFATH_ISSUER",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
-  ].filter((name) => !env[name]?.trim());
+  ].filter((name) => !envValue(env, name));
 }
 
 function readConfig(env) {
@@ -69,13 +74,13 @@ function readConfig(env) {
     ".elm.sa",
   );
   const jwkUrl = httpsUrl(
-    env.NAFATH_JWK_URL?.trim() ||
+    envValue(env, "NAFATH_JWK_URL") ||
       new URL("api/v1/mfa/jwk", `${baseUrl.href.replace(/\/+$/, "")}/`).href,
     "NAFATH_JWK_URL",
     ".elm.sa",
   );
   const callbackUrl = httpsUrl(
-    env.NAFATH_CALLBACK_URL?.trim() ||
+    envValue(env, "NAFATH_CALLBACK_URL") ||
       "https://nafath-callback.onrender.com/callback",
     "NAFATH_CALLBACK_URL",
   );

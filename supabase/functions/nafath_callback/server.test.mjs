@@ -131,7 +131,14 @@ function createHarness({
 }
 
 test("handler creation accepts missing, null, and empty options", async () => {
-  for (const options of [undefined, null, {}, { env: undefined }, { env: null }]) {
+  for (const options of [
+    undefined,
+    null,
+    {},
+    { env: undefined },
+    { env: null },
+    { env: { NAFATH_APP_ID: 123 } },
+  ]) {
     const handler = createNafathCallbackHandler(options);
     assert.equal(typeof handler, "function");
   }
