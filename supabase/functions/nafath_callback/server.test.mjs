@@ -147,6 +147,10 @@ test("authenticated Saudi gateway starts Nafath with the provider-required IP he
   assert.equal(request.init.headers["APP-ID"], "test-app-id");
   assert.equal(request.init.headers["APP-KEY"], "test-app-key");
   assert.equal(request.url.searchParams.get("requestId"), requestId);
+  assert.equal(
+    JSON.parse(request.init.body).callbackUrl,
+    "https://nafath-callback.onrender.com/callback",
+  );
 });
 
 test("active Nafath requests return the provider's 400-034-050 code", async () => {

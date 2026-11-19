@@ -60,6 +60,11 @@ function readConfig(env) {
     "NAFATH_JWK_URL",
     ".elm.sa",
   );
+  const callbackUrl = httpsUrl(
+    env.NAFATH_CALLBACK_URL?.trim() ||
+      "https://nafath-callback.onrender.com/callback",
+    "NAFATH_CALLBACK_URL",
+  );
   const supabaseUrl = httpsUrl(
     requiredEnv(env, "SUPABASE_URL"),
     "SUPABASE_URL",
@@ -73,6 +78,7 @@ function readConfig(env) {
     serviceProviderIp,
     gatewaySecret,
     jwkUrl,
+    callbackUrl,
     supabaseUrl,
     serviceRoleKey: requiredEnv(env, "SUPABASE_SERVICE_ROLE_KEY"),
   };
@@ -379,6 +385,7 @@ export function createNafathCallbackHandler({ env = process.env, fetchImpl = fet
       body: JSON.stringify({
         nationalId: body.nationalId,
         service: body.service,
+        callbackUrl: currentConfig.callbackUrl.href,
       }),
     });
     const transId = typeof response?.transId === "string"
